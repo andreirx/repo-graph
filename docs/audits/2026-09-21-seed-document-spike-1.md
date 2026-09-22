@@ -240,3 +240,17 @@ for variant in sys.argv[5].split(','):
     for w in watch:
         if w in rank: print(f'   watch {w}: rank {rank[w][0]} score {rank[w][1]:.3f}')
 ```
+
+## Addendum 2026-09-23 — scope of the enclosing sentence: every child kind vs METHOD chunks only
+
+Raised by the SEED-DOCUMENT-1 document review (SD-DEC-01): RG-REQ-010-L10 says "a method chunk's document"; the spike's first-sentence variant (VS) had given the sentence to every chunk with a documented parent (properties, constructors, getters too). Re-measured with the same script (`sd1-spike.py`, variants `VSM` = subtype `METHOD` only, `VK` = METHOD/CONSTRUCTOR/FUNCTION) on the same isolated FRAKTAG root:
+
+| Variant | createSession :71 | logTurn :133 | owning class :61 (raw rank; the product's field tier is not modelled) | ConversationManager.constructor :62 |
+|---|---|---|---|---|
+| VS every child kind | 0.333, rank 9 | 0.192 | rank 3 | 0.341, rank 8 (an echo row: a 5-line DI constructor carrying the class sentence) |
+| VSM METHOD only | 0.333, rank 9 | 0.192 | rank 4 raw — rank 3 once `Fraktag.conversationManager` (index.ts:79, a one-line undocumented property the product field-tiers) sinks | 0.199, rank 54 (unchanged from today) |
+| VK METHOD + CONSTRUCTOR + FUNCTION | 0.333, rank 10 | 0.192 | rank 4 raw (same note) | 0.341, rank 9 |
+
+Controls under VSM: `how are content atoms hashed` → `ContentStore.findByHash` first (0.690); `where are tree nodes saved to disk` → `TreeStore.saveNode` first (0.623). FRAKTAG's chunks with an enclosing name by subtype: PROPERTY 611, METHOD 299, VARIABLE 45, CONSTRUCTOR 25, GETTER 9.
+
+Reading: the target outcome is identical under METHOD-only; the every-child variant's only extra effect is the constructor echo row entering the top ten. METHOD-only is the ratified wording read literally and the smaller change (D-SD1-002 revised accordingly, 2026-09-23).
