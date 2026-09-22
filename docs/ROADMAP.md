@@ -1214,8 +1214,32 @@ identifier summary RG-REQ-010-L10 also names has no measurable benefit and a sma
 doc dilutes precise matches on grpc-java (`AbstractStub.withDeadline` rank 2 → 9) and turns short members into class-doc echoes
 (a logger field at rank 1), the first sentence alone does not. The requirement's wording and the composition bound are the
 human's decision — put to the human 2026-09-21; SEED-DOCUMENT-1 is packeted after the answer.
-NEXT: Q8 DOCS-DISCOVERY-1 (RG-REQ-008-L01/L02/L06/L07, RG-REQ-003-L09); then SEED-DOCUMENT-1 on the human's answer; then the
-release cut (`scripts/cut_release_minor.sh` → v0.19.0).
+## DOCS-DISCOVERY-1 — documentation is found where the authors put it (Q8; SHIPPED 1e57eb48, 2026-09-22)
+
+RG-REQ-008-L01/L02/L06/L07, RG-REQ-003-L09 implemented (spec `docs/slices/docs-discovery-1.md`; baselines INPUT-1..3, approvals 1..3; records
+`docs/assurance/DOCS-DISCOVERY-1/`). The discovery rule is spelled ONCE in `doc-facts/src/discovery.rs` — `DOC_NAME_STEMS` (readme, contributing,
+changelog, architecture, design, overview, install, building, authors, news; case-insensitive stem and extension, D-DD1-003 human), `DOC_EXTENSIONS`
+(+ `.markdown`, `.adoc`), the doc-tree rule with the `src/site/**` convention — and consumed by classification (`readme` by stem, bare stems `doc`)
+and by the recommendation (`ORIENTATION_STEMS`). The walk counts the markup it refused (`.md/.markdown/.rst/.adoc` outside a docs tree — never
+`.txt`, D-DD1-002); `docs list` prints `+N markdown/prose files outside a docs tree not scanned (--json for the rule)` and `--json` carries the count
+with a typed `discovery_rule`, decoded as ONE fact before either rendering path (the review's L06 amendment). Code under analysis: hadoop
+`hadoop-common-project/hadoop-auth/src/site/markdown/Configuration.md:15` (`Hadoop Auth, Java HTTP SPNEGO - Server Side Configuration`) and root
+`README.txt:1` were invisible — `docs list` 22 → 556 documents, `modules list`/`orient --budget medium` `No README or architecture doc found —
+the tree is the best orientation.` → `read: README.txt — or the tree.`; django `README.rst:1-2` (`======`/`Django`) and `CONTRIBUTING.rst:2`
+(`Contributing to Django`) → 616 → 622 and `read: docs/` → `read: CONTRIBUTING.rst, README.rst, docs/`; buildroot `docs/manual/manual.adoc` and
+225 `board/**/readme.txt` → 4 → 310; leveldb 7 → 9 (`AUTHORS`, `NEWS`); grpc-java 49 → 50 with `CODE-OF-CONDUCT.md` among `+12` refused;
+FRAKTAG 14 with `+5 → +11 vendored docs`; kafka byte-identical but for `+1 markdown/prose file …`; repo-graph +1 (`agent_docs/architecture.md`).
+Three implementation admissions: the product reproduced every measured headline at the FIRST (builder claude-opus-5-5 — human trial directive
+2026-09-22 — STOPPED correctly on two drifted predictions); every block was a manager oracle defect (OC-1: a cargo filter selecting zero tests,
+the small-budget `orient`, `src/site` 520 vs 519, kind totals predicted from added files only, a case-sensitive predicate, a heredoc mid-chain and
+live-checkout literals; OC-2: a word-grep matching two passing test NAMES) or the one honesty finding F-DD1-001 (silent `null` → infallible
+construction). Decisions: D-DD1-001 (one constant + tested orientation subset), D-DD1-002 (unscanned = markup only; JSON gated together),
+D-DD1-003 (human: case-insensitive), D-DD1-004 (orient proof at medium — RG-REQ-003-L07's small headline set vs the recommendation is a catalog
+question). Residuals stated: `debian/install` (human: keep as is); `.gitignore` not honored (repo-graph's `.agent-manager/**.md` counted
+unscanned); follow-ups DOC-RELEVANCE-STEMS-1 (agent's fifth root-doc list; needs a crate edge), DOCS-GITIGNORE-1, the stale
+`agent/src/storage_port.rs:1027` comment; docs.rs (575) and discovery.rs (629 incl. ~330 test lines) now exceed the 500-line guardrail. CC-9 filed.
+GATES: ALL-GATES-GREEN (`/private/tmp/DOCS-DISCOVERY-1-gates.out`). Committed bytes = accepted candidate checkpoint (10/10 paths).
+NEXT: SEED-DOCUMENT-1 (RG-REQ-010-L10 as revised by D-SD1-001); then the v0.19.0 release cut.
 
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a
