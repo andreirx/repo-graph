@@ -1239,7 +1239,31 @@ question). Residuals stated: `debian/install` (human: keep as is); `.gitignore` 
 unscanned); follow-ups DOC-RELEVANCE-STEMS-1 (agent's fifth root-doc list; needs a crate edge), DOCS-GITIGNORE-1, the stale
 `agent/src/storage_port.rs:1027` comment; docs.rs (575) and discovery.rs (629 incl. ~330 test lines) now exceed the 500-line guardrail. CC-9 filed.
 GATES: ALL-GATES-GREEN (`/private/tmp/DOCS-DISCOVERY-1-gates.out`). Committed bytes = accepted candidate checkpoint (10/10 paths).
-NEXT: SEED-DOCUMENT-1 (RG-REQ-010-L10 as revised by D-SD1-001); then the v0.19.0 release cut.
+## SEED-DOCUMENT-1 — a method's embedded document carries its class's first sentence (SHIPPED 1f93dc37, 2026-09-23)
+
+RG-REQ-010-L10 implemented as revised by the human (D-SD1-001, 2026-09-21: first sentence only, no identifier summary — the pre-packet spike
+`docs/audits/2026-09-21-seed-document-spike-1.md` measured the summary harmful and the whole class doc diluting). Spec
+`docs/slices/seed-document-1.md` (baseline INPUT-1, approval 1; records `docs/assurance/SEED-DOCUMENT-1/`). `repo-graph-seed/src/document.rs`:
+`MAX_ENCLOSING_SENTENCE_CHARS = 160`, `enclosing_doc_sentence` (comment markers stripped, first paragraph, first sentence, char-bounded),
+`parent_qualified_name`; `build_chunk_document(qualified_name, enclosing_sentence, doc_comment, span)` — order qualified name, class sentence,
+own doc, first 60 body lines; `pass.rs`: only `METHOD` chunks receive it (D-SD1-002 as revised by the document review's SD-DEC-01 — L10 says
+"a method chunk"; re-measured: same target outcome, the constructor echo row gone), the parent must be a documented canonical TYPE subtype
+(CLASS/INTERFACE/STRUCT/ENUM, never a forward declaration — SD-F02, SD-R-001), same file first else a UNIQUE corpus-wide parent, both indexes
+built over the complete corpus before the cap (SD-F03, F-SD-001); the document hash (copy-forward reuse key) now covers the sentence — every
+METHOD chunk with a documented enclosing type re-embeds once on the next seed pass (FRAKTAG 152; silent — SEED-REEMBED-VISIBILITY-1 filed).
+Code under analysis: FRAKTAG `packages/engine/src/core/ConversationManager.ts:48-60` class doc → sentence `ConversationManager handles
+conversation persistence.`; `:71 async createSession(` — `rmap find "where are conversations persisted to disk"` BEFORE 0.274 at rank 14
+(absent from the ten shown), AFTER 0.333 at rank 8 above the unchanged 0.30 floor; `ConversationManager` (:61) stays rank 3; 0 `[field]`
+rows; controls unchanged (`ContentStore.findByHash` ContentStore.ts:90 first at 0.690; `TreeStore.saveNode` TreeStore.ts:316 first at 0.622);
+`:133 logTurn` stays under the floor (0.192 — SEED-LOGTURN-1); leveldb `crash recovery` byte-identical (0 documented types in the store —
+SEED-CPP-CLASS-DOC-1). Assurance: three document items (PREP blocked on SD-DEC-01; PREP-2 two cycles: SD-F02 type gate + the author fixed two
+manager check defects — a subshell PID captured instead of rmapd's, an EXIT trap; PREP-3 two cycles: SD-F03, F-SD-001), one implementation
+admission accepted at cycle 2. Builder claude-opus-5-5 (human trial), reviewer codex gpt-5.6-terra. Residuals: pass_tests.rs 683 → 1105 lines
+(guardrail; the file's single responsibility is build_store), `enclosing_doc_sentence` also strips a trailing `*/` (pinned by a test), stale
+doc comments at ports.rs:151 and migration_037.rs:5 (SEED-DOC-COMMENTS-1). GATES: ALL-GATES-GREEN (`/private/tmp/SEED-DOCUMENT-1-gates.out`).
+Committed bytes = accepted candidate checkpoint (4/4 paths). THE RATIFIED ORDER Q1 → Q3 → Q4 → Q5 → Q6 → Q7 → Q8 → Q9 → ALIAS-SUSPICION-1 →
+SEED-DOCUMENT-1 IS COMPLETE.
+NEXT: the v0.19.0 release cut (`scripts/cut_release_minor.sh`), push, local install, audit round seven.
 
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a
