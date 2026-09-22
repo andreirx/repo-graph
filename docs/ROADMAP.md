@@ -1263,7 +1263,37 @@ admission accepted at cycle 2. Builder claude-opus-5-5 (human trial), reviewer c
 doc comments at ports.rs:151 and migration_037.rs:5 (SEED-DOC-COMMENTS-1). GATES: ALL-GATES-GREEN (`/private/tmp/SEED-DOCUMENT-1-gates.out`).
 Committed bytes = accepted candidate checkpoint (4/4 paths). THE RATIFIED ORDER Q1 → Q3 → Q4 → Q5 → Q6 → Q7 → Q8 → Q9 → ALIAS-SUSPICION-1 →
 SEED-DOCUMENT-1 IS COMPLETE.
-NEXT: the v0.19.0 release cut (`scripts/cut_release_minor.sh`), push, local install, audit round seven.
+v0.19.0 RELEASED 2026-09-23 (`05a68eb`, tag `v0.19.0` pushed to origin; installed locally via `scripts/dev-install-local.sh`, daemon on 0.19.0).
+
+## AUDIT ROUND SEVEN — rmap v0.19.0 per-command usefulness (2026-09-23)
+
+Artifact (house grade-matrix format): https://claude.ai/artifact/TJjManN6oFnEtV2rX8hXH5 · local `~/Downloads/audit-v0190.html` · durable
+`docs/audits/2026-09-23-per-command-usefulness-v0.19.0.md` + `docs/audits/2026-09-23-root-causes-v0.19.0.md` (RC-1 … RC-9). Method: smoke
+`smoke-runs/2026-09-22T22-39-58Z` (26 passed / 3 failed / linux skipped; the retained root at `~/repo-graph-retained/audit-v0.19.0`), 61
+supplemental probes (`agent-manager/scripts/audit19-supplemental.sh`), matrix grader + judge + Codex gpt-5.6-terra adjudication.
+DIMENSIONS: HIT B → B+ · EVIDENCE B+ → A- · HONESTY B- → B · ECONOMY B- → B- (flat). SHIPPED: all eleven recorded outcomes hold in the
+field (11 FIXED; one side-effect regression). ROUND-SIX CLASS: the symbol-layer fabrications are dead where they were found, disproved as
+a universal invariant by two remnants — Python `obj.method()` bound by unique method name with the receiver ignored (RC-2, VERIFIED:
+`indexer/src/resolver.rs:1012-1050` dotted fallback; django `callers ListMixin.extend` = 271 callers, `autodetector.py:1737
+dependencies.extend(` on a plain list) and a C++ field's trailing attribute macro extracted as a METHOD (RC-4: `db/db_impl.h:189
+SnapshotList snapshots_ GUARDED_BY(mutex_);` → `leveldb::DBImpl::GUARDED_BY [METHOD] (decl)`). NEW DOMINANT CLASS: SCOPE MISATTRIBUTION —
+true facts from test / build-script / vendored / first-party scope labeled as the production story (poco `Foundation → CppUnit (415)` from
+`Foundation/testsuite/` only; leveldb's `table -> db` cycle via `table/table_test.cc`; kafka's root buildscript classpath on all 61 modules;
+FRAKTAG's `@fraktag/engine` workspace import seen by `deps`, `packages/engine` "isolated" on `trust`). ONE CRASH: poco `docs list` exits 2
+in both modes (RC-1, VERIFIED: `packaging/README.txt` is Windows-1252 → `read_to_string` fails → `content_hash` omitted on the wire →
+`rgr/src/presentation/docs.rs:192 DocEntry.content_hash: String` required — never worked; exposed by DOCS-DISCOVERY-1's stem rule;
+violates RG-REQ-008-L05/L08).
+FIX QUEUE (adjudicator's order, cut along root causes; the human may reorder): (1) certainty gate — PYTHON-RECEIVER-BINDING-1 (RC-2) →
+CPP-ATTRIBUTE-MACRO-1 (RC-4); (2) TEST-EDGE-SCOPE-1 + IS-TEST-CPPUNIT-1 (RC-3); (3) per-language import resolution — CPP-INCLUDE-BASENAME-1
+(RC-5, nginx; HUMAN DECISION: a unique-basename rule is the guessing RG-REQ-006-L03 forbids unless bound to a uniqueness proof),
+TS-WORKSPACE-RESOLUTION-1 (RC-6), PYTHON-SUBMODULE-IMPORT-1 (RC-7); (4) DOCS-UNREADABLE-DECODE-1 (RC-1 — executed FIRST in practice: a
+crash, one DTO field, no decision); (5) DEPS-GRADLE-CATALOG-1 (RC-8); (6) document scope (django root LICENSE absent BY the human's
+ruling — recorded; N7/N12 only if shown to mislead); (7) N10 identity spaces, N8 resource-list vendored predicate, N9 smoke accounting,
+N11 vscode orient wall time. Carried: CYCLES-WALK-DETERMINISM-1, EXPLAIN-BASES-1, DOWNGRADE-LABELS-1, TRUST-CEILING-WORDING-1,
+CALLERS-ANCHOR-1, SEED-LOGTURN-1, SEED-CPP-CLASS-DOC-1, DOC-RELEVANCE-STEMS-1, CLAIM-INVARIANT-1; CONCERN-HINTS-1 shows no evidence in
+any capture. Builder trial: claude-opus-5-5 built the last two slices (strong on honesty STOPs and file-level reasons; one silent-null
+miss, one Markdown-instead-of-JSON evidence slip; as document author it over-scoped once and fixed two manager check defects).
+NEXT: DOCS-UNREADABLE-DECODE-1 (RC-1), then the queue above in order; CPP-INCLUDE-BASENAME-1 waits for the human's decision.
 
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a
