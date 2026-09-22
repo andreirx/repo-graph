@@ -3,6 +3,7 @@
 //! Classifies documentation files by kind and detects whether
 //! content is authored or generated.
 
+use crate::discovery::{doc_name_stem, DOC_EXTENSIONS};
 use crate::types::DocKind;
 
 /// AUDIT5-MINORS-1 F1 (operator ruling 2026-09-08, iteration 3): is this doc a LICENSE DOCUMENT?
@@ -35,19 +36,19 @@ pub(crate) fn is_license_document(relative_path: &str) -> bool {
 /// Classify a document by its relative path.
 pub fn classify_doc_kind(relative_path: &str) -> DocKind {
     let lower = relative_path.to_lowercase();
-    let file_name = relative_path
-        .rsplit('/')
-        .next()
-        .unwrap_or(relative_path)
-        .to_lowercase();
+    let base_name = relative_path.rsplit('/').next().unwrap_or(relative_path);
+    let file_name = base_name.to_lowercase();
+    // DOCS-DISCOVERY-1 (RG-REQ-008-L01/L02): the ONE documentation-stem rule, shared with discovery.
+    let name_stem = doc_name_stem(base_name);
 
     // MAP.md files
     if file_name == "map.md" {
         return DocKind::Map;
     }
 
-    // README variants
-    if file_name == "readme.md" || file_name == "readme" {
+    // README by STEM (RG-REQ-008-L02): `README`, `README.md`, `README.rst`, `README.txt`,
+    // `README.TXT` … — case-insensitive stem and documentation extension (D-DD1-003).
+    if name_stem == Some("readme") {
         return DocKind::Readme;
     }
 
@@ -125,8 +126,15 @@ pub fn classify_doc_kind(relative_path: &str) -> DocKind {
     // plain-text. AUDIT5-MINORS-1 F1: a NEUTRAL `Doc` kind, NOT the `architecture` default bucket
     // (which the audit found inflated `architecture` to a catch-all — repo-graph "architecture
     // 577"). Every `.md`/`.rst`/`.txt` with no explicit-name or directory architecture signal
-    // lands here honestly.
-    if file_name.ends_with(".md") || file_name.ends_with(".rst") || file_name.ends_with(".txt") {
+    // lands here honestly. The extension list is discovery's `DOC_EXTENSIONS` (one spelling), so
+    // `.markdown`/`.adoc` prose is `Doc` too.
+    if DOC_EXTENSIONS.iter().any(|e| file_name.ends_with(e)) {
+        return DocKind::Doc;
+    }
+
+    // DOCS-DISCOVERY-1: an extensionless documentation-stem file (`INSTALL`, `AUTHORS`, `NEWS`,
+    // `ChangeLog`) is prose — the neutral `Doc`, never the `Config` default below.
+    if name_stem.is_some() {
         return DocKind::Doc;
     }
 
@@ -465,6 +473,62 @@ mod tests {
         // whose upgrade arm accepts `Doc` as well as `Architecture`/`Config`.
         assert_eq!(classify_doc_kind("docs/releases/1.4.x.txt"), DocKind::Doc);
         assert_eq!(classify_doc_kind("docs/design.md"), DocKind::Architecture);
+    }
+
+    // DOCS-DISCOVERY-1 (RG-REQ-008-L02): the `readme` kind is decided by STEM, case-insensitive
+    // (D-DD1-003), so reStructuredText / plain-text / bare READMEs classify `readme`.
+    #[test]
+    fn readme_kind_by_stem_for_rst_txt_and_bare() {
+        for p in [
+            "README.rst",
+            "README.txt",
+            "readme.txt",
+            "README",
+            "README.TXT",
+            "extras/README.TXT",
+            "board/arm/foundation-v8/readme.txt",
+            "README.adoc",
+            "README.markdown",
+        ] {
+            assert_eq!(classify_doc_kind(p), DocKind::Readme, "{p}");
+        }
+        // Not a documentation extension → not a readme stem.
+        assert_ne!(classify_doc_kind("README.html"), DocKind::Readme);
+    }
+
+    // DOCS-DISCOVERY-1: a stem-admitted file with NO extension is the neutral `doc`, never the
+    // `Config` default (hadoop `ChangeLog`, leveldb `AUTHORS`/`NEWS`, django `INSTALL`).
+    #[test]
+    fn bare_stem_documents_classify_doc_not_config() {
+        for p in [
+            "INSTALL",
+            "AUTHORS",
+            "NEWS",
+            "CHANGELOG",
+            "ChangeLog",
+            "BUILDING",
+            "CONTRIBUTING",
+            "src/main/native/AUTHORS",
+        ] {
+            assert_eq!(classify_doc_kind(p), DocKind::Doc, "{p}");
+        }
+        // The bare architecture stems keep their explicit-name kind.
+        assert_eq!(classify_doc_kind("DESIGN"), DocKind::Architecture);
+        assert_eq!(classify_doc_kind("OVERVIEW"), DocKind::Architecture);
+        // A non-stem extensionless name keeps the Config default (the extractor contract).
+        assert_eq!(classify_doc_kind("Makefile"), DocKind::Config);
+    }
+
+    #[test]
+    fn markdown_and_adoc_in_a_docs_tree_classify_doc() {
+        assert_eq!(classify_doc_kind("docs/a.markdown"), DocKind::Doc);
+        assert_eq!(classify_doc_kind("docs/b.adoc"), DocKind::Doc);
+        assert_eq!(classify_doc_kind("docs/manual/manual.adoc"), DocKind::Doc);
+        assert_eq!(classify_doc_kind("docs/NOTES.MD"), DocKind::Doc);
+        assert_eq!(
+            classify_doc_kind("x/src/site/markdown/Configuration.md"),
+            DocKind::Doc
+        );
     }
 
     #[test]

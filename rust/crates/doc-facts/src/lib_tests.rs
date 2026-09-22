@@ -523,3 +523,42 @@ fn nested_env_file_has_module_scope() {
     assert_eq!(result.facts.len(), 1);
     assert_eq!(result.facts[0].subject_ref, "frontend/web");
 }
+
+// DOCS-DISCOVERY-1 (RG-REQ-008-L06): the inventory states how many MARKUP files the discovery rule
+// refused, and carries the rule itself, so a widened scope counts its own refusals. `.txt` outside a
+// docs tree is never counted (D-DD1-002 — `CMakeLists.txt` is not known to be prose).
+#[test]
+fn inventory_reports_unscanned_markup_outside_docs_tree() {
+    let dir = tempdir().unwrap();
+    create_file(dir.path(), "README.md", "# Root");
+    create_file(
+        dir.path(),
+        "notes.md",
+        "# refused: markup outside a docs tree",
+    );
+    create_file(
+        dir.path(),
+        "CMakeLists.txt",
+        "cmake_minimum_required(VERSION 3.9)",
+    );
+    create_file(dir.path(), "docs/a.md", "# A");
+
+    let result = discover_doc_inventory(dir.path(), true).unwrap();
+    assert_eq!(result.unscanned_markup_outside_docs_tree, 1);
+    let mut paths: Vec<&str> = result.entries.iter().map(|e| e.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(paths, vec!["README.md", "docs/a.md"]);
+
+    let rule = discovery_rule();
+    assert_eq!(rule.stems, discovery::DOC_NAME_STEMS);
+    assert_eq!(
+        rule.extensions,
+        &[".md", ".markdown", ".txt", ".rst", ".adoc"]
+    );
+    assert_eq!(rule.doc_tree_dirs, &["docs", "doc", "design"]);
+    assert_eq!(rule.doc_tree_conventions, &["src/site"]);
+    assert_eq!(
+        rule.unscanned_extensions,
+        &[".md", ".markdown", ".rst", ".adoc"]
+    );
+}

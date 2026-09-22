@@ -1,0 +1,703 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-DOCS-DISCOVERY-1-0",
+  "workItemId": "DOCS-DISCOVERY-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/DOCS-DISCOVERY-1-INPUT-3.json",
+    "sha256": "sha256:91c2e764743e2d84ccb156a03c87c52745f2a9ab587c820d0ca2862cf8d5e27c"
+  },
+  "allocation": {
+    "path": "docs/slices/docs-discovery-1.md",
+    "sha256": "sha256:d44c43db5d1d3fe116d0b943d8300a4997d4addd6b03ebdf29079e7275864dfc"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "74969de6cd79d5e10edc5e36d237685bb1194ab3",
+    "entries": [
+      {
+        "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:8bf97c68b2f288e0a73c35ee7834f04623d3fcfdc9bd360617b3dbb569c69de1",
+          "byteLength": 486145
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:6e647ed1052d801ad2ced31e79bf80febadecf14b5f0f58e81a0ca4d9a793ac2",
+          "byteLength": 487024
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/modules_method.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:5b54445a3c7e4baa206104ad99463d91f71a6b7f64065c5b90919afe35c35f1b",
+          "byteLength": 51989
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:a3ab8df0d0153c9697417394a29551fb05fa0dcb6de71e1611d1478ea6c746ec",
+          "byteLength": 54107
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_additive_fields.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d8cfc768cb291f68f42ae1e95a683ee6e3f87c5616dda786647e422f6cc7b360",
+          "byteLength": 23170
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:8f008784125976dc05717502b6328f071d54d35a0dd0e6536bb844e3abf0246d",
+          "byteLength": 23169
+        }
+      },
+      {
+        "path": "rust/crates/doc-facts/src/classification.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:01db1fd20913ebec89b254dc006888b6c9f65f10807f81f8e06d350d9d7ef62f",
+          "byteLength": 26144
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b1dc1728b843d9cd4307c596f96354435c26ccfd16420c2a83625d843409492d",
+          "byteLength": 29021
+        }
+      },
+      {
+        "path": "rust/crates/doc-facts/src/discovery.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:cd0ab7f0c60be41624cacac6cfa3629e8d89f0e1af050db4337b7f2a9d907290",
+          "byteLength": 10159
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:4a5d09f9fe5ff37b28f0f3dce06403a3ba3814ae5dab1597493af1cd0886e191",
+          "byteLength": 24036
+        }
+      },
+      {
+        "path": "rust/crates/doc-facts/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:1334ab11af9428aa394a3b1095c827939e903042950d4072034b02b490e24afc",
+          "byteLength": 23668
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:fda2e1b9a6f2b4decaf666aac8f3dcc9d6698b69087de535374fdcb22885ba89",
+          "byteLength": 24327
+        }
+      },
+      {
+        "path": "rust/crates/doc-facts/src/lib_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:bc71a7153b304914a8e523cdafb0761fbd0ddaee55c889ecb91e80a3243a0bfe",
+          "byteLength": 19883
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:297c53b35b695af1d6e7ee740b900d7552ee180dc45661833ecf2e119b5f3f64",
+          "byteLength": 21322
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/docs.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:83283209007eb622822e1dbcf1afb31d602754a8e6d69628471c7577255f66a7",
+          "byteLength": 20371
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:23d43f1ae820c7c02151b1084251214818b5584044e4eea116171c8b20b30946",
+          "byteLength": 27393
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/docs_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:92325fd9301393439e698a7e5a829bff20433e9a221fb205abea421443c83b40",
+          "byteLength": 24387
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:1d26926144a4ca8b7072228dd76082268a43d17a85ec86c89a82ad9b1e7ffc7c",
+          "byteLength": 32563
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/orient_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:db47afb5c143a9c8bced8fcf7195bcac620b626bfbe83189e389e5b504555046",
+          "byteLength": 108676
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:8add4de299ef11c8b8998a00efb47651e8756b204a468797da1267a246ddbf7b",
+          "byteLength": 109442
+        }
+      }
+    ],
+    "sha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-DOCS-DISCOVERY-1-0"
+  },
+  "checks": [
+    {
+      "checkId": "DD-C01",
+      "obligationIds": [
+        "RG-REQ-008-L01",
+        "RG-REQ-011-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-doc-facts --lib discovery 2>&1 | tee /tmp/dd-c01.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/dd-c01.txt && for t in stem_rule_admits_documentation_stems_with_or_without_a_doc_extension stem_with_a_non_doc_extension_is_refused stem_and_extension_match_case_insensitively adoc_and_markdown_admitted_inside_a_docs_tree src_site_convention_opens_a_docs_tree unscanned_counts_markup_outside_a_docs_tree_never_txt unscanned_count_skips_the_rmap_tool_state_dir orientation_stems_are_doc_name_stems compose_files_still_admitted_by_exact_name discovers_readme_at_root discovers_docker_compose env_files_still_candidates_for_extraction admits_txt_and_rst_under_docs_tree discovers_map_md_in_subdirectory skips_node_modules discovers_docs_directory_markdown; do grep -qE \"^test .*$t .* ok$\" /tmp/dd-c01.txt || { echo \"MISSING $t\"; exit 1; }; done && grep -qE '^pub const DOC_NAME_STEMS' crates/doc-facts/src/discovery.rs && grep -qE '^pub const ORIENTATION_STEMS' crates/doc-facts/src/discovery.rs && grep -qE '^pub const DOC_EXTENSIONS' crates/doc-facts/src/discovery.rs && ! grep -qE '\"ARCHITECTURE\\.md\",|\"CONTRIBUTING\\.md\",|\"CHANGELOG\\.md\",' crates/doc-facts/src/discovery.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/doc-facts/src/discovery.rs: ONE shared stem constant `pub const DOC_NAME_STEMS: &[&str] = &[\"readme\", \"contributing\", \"changelog\", \"architecture\", \"design\", \"overview\", \"install\", \"building\", \"authors\", \"news\"]` (the ratified set, RG-REQ-008-L01), `pub const ORIENTATION_STEMS: &[&str] = &[\"architecture\", \"design\", \"overview\", \"contributing\"]` (the L07 subset; the test `orientation_stems_are_doc_name_stems` asserts every orientation stem is a doc-name stem), `DOC_EXTENSIONS` made `pub` and extended to `[\".md\", \".markdown\", \".txt\", \".rst\", \".adoc\"]` (:102 today `[\".md\", \".txt\", \".rst\"]`); `pub fn doc_name_stem(file_name: &str) -> Option<&'static str>`: lowercase the name, strip ONE doc extension if the lowercased name ends with it (D-DD1-003: case-insensitive on both — `README.TXT`, `README.MD`, `Readme.md` are documents), return the `DOC_NAME_STEMS` entry the remainder equals (so `README`, `readme.txt`, `README.TXT`, `INSTALL`, `BUILDING.txt`, `ChangeLog` match; `README.html`, `install.sh`, `readme.txt.bak` do not — their remainder is the whole lowercased name); the docs-tree branch recognises `DOC_EXTENSIONS` case-insensitively the same way; `in_docs_tree` (:113-117) additionally opens on the `src/site/**` convention — a component `site` whose IMMEDIATE parent component is `src`, ancestors only (`x/src/site/markdown/a.md` yes; `site/a.md`, `src/a.md`, `srcx/site/a.md` no); `is_doc_candidate` (:126-162) becomes: `.env*` (unchanged) → the four compose names (`docker-compose.yml`, `docker-compose.yaml`, `compose.yml`, `compose.yaml` — the five exact doc names `README.md`, `README`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `CHANGELOG.md` are DELETED from the inline `known_docs` array (:134-144), subsumed by the stem rule — the negated grep) → MAP sidecar (unchanged) → `doc_name_stem(file_name).is_some()` → a `DOC_EXTENSIONS` name inside a docs tree. The walk (`discover_recursive` :43-97) additionally COUNTS every file it visits whose lowercased name ends with a MARKUP extension `.md`, `.markdown`, `.rst`, `.adoc` and that `is_doc_candidate` refused — EXCEPT a file under the repository-root `.rgr/` tool-state directory, decided by the existing `crate::self_generated::is_tool_state_path` (the ONE exhaust predicate, never a second definition — RG-REQ-011-L07: rmap's own state is never reported as the authors' refused prose; no corpus carries a `.rgr/` today, so no field number moves) (`.txt` is deliberately NOT counted — D-DD1-002: a `.txt` outside a docs tree is not known to be prose: `CMakeLists.txt`, `requirements.txt`, `robots.txt`); `discover_doc_files` returns `pub struct DocDiscovery { pub files: Vec<DocFile>, pub unscanned_markup_outside_docs_tree: usize }` (its two callers lib.rs:151 and :331 read `.files`). SKIP_DIRS, MAX_DEPTH, symlink handling, hidden-directory handling, `.gitignore` (not honored — pre-existing, unchanged) untouched. Nine NEW tests (names in the command; `unscanned_count_skips_the_rmap_tool_state_dir`: root `notes.md` and `.rgr/notes.md` → count 1) beside the SEVEN existing ones (all kept verbatim; their `discover_doc_files(..)` calls read `.files` — compiler-forced)"
+      },
+      "expected": "exit 0: the discovery rule is the ratified one — one stem list, one extension list, one doc-tree rule with the `src/site` convention — expressed once, with its refusals counted; the compose, MAP-sidecar, `.env` and skip behaviours remain exactly as before (no behavior change to RG-REQ-011-L07's exhaust exclusion)",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "doc-facts `--lib discovery`: 16 passed, all 16 named tests ok. Constant greps ok; the five exact doc names are gone from `known_docs`.",
+        "supportingEvidence": [
+          "/tmp/dd-c01.txt",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C02",
+      "obligationIds": [
+        "RG-REQ-008-L02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-doc-facts --lib classification 2>&1 | tee /tmp/dd-c02.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/dd-c02.txt && for t in readme_kind_by_stem_for_rst_txt_and_bare bare_stem_documents_classify_doc_not_config markdown_and_adoc_in_a_docs_tree_classify_doc config_extension_beats_docs_directory plain_prose_outside_docs_tree_is_neutral_doc_not_architecture is_license_document_by_name_only classify_readme classify_architecture architecture_dir_rule_matches_path_components_not_substrings classify_txt_and_rst_as_docs; do grep -qE \"^test .*$t .* ok$\" /tmp/dd-c02.txt || { echo \"MISSING $t\"; exit 1; }; done && ! grep -qE 'file_name == \"readme\\.md\" \\|\\| file_name == \"readme\"' crates/doc-facts/src/classification.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/doc-facts/src/classification.rs `classify_doc_kind` (:36-135): the `readme` rule (:49-52, `file_name == \"readme.md\" || file_name == \"readme\"` — the negated grep proves it is gone) becomes `doc_name_stem(<the ORIGINAL basename, before the lowercasing at :37>) == Some(\"readme\")` so `README.rst`, `README.txt`, `readme.txt`, `README` classify `readme`; the neutral-doc rule (:129, `ends_with(\".md\") || ends_with(\".rst\") || ends_with(\".txt\")` — the third independent extension spelling) reads the shared `DOC_EXTENSIONS` so `.markdown`/`.adoc` prose classifies `doc`; a stem-admitted file with NO extension (`INSTALL`, `AUTHORS`, `NEWS`, `CHANGELOG`, `ChangeLog`) classifies `doc`, not the `Config` default (:133-134) — inserted after the neutral-doc rule, before the default; the architecture name rule (:65-70), the config rules (:86-92), the architecture directory rule (:112-122), `is_license_document` (:24-33) and the release-notes path (lib.rs:234-254) are UNTOUCHED. Three NEW tests beside the existing ones named in the command (kept verbatim)"
+      },
+      "expected": "exit 0: kinds are decided by the ratified name and directory rules — readme by stem, bare documentation stems as `doc` — with the config-precedence, architecture, license and release-notes bases exactly as before (no behavior change to them)",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "doc-facts `--lib classification`: 29 passed. The old `readme.md || readme` rule is gone.",
+        "supportingEvidence": [
+          "/tmp/dd-c02.txt",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C03",
+      "obligationIds": [
+        "RG-REQ-008-L06",
+        "RG-REQ-008-L03",
+        "RG-REQ-008-L04",
+        "RG-REQ-008-L05",
+        "RG-REQ-008-L09",
+        "RG-REQ-011-L07",
+        "P-DD-01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-doc-facts  2>&1 | tee /tmp/dd-c03.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/dd-c03.txt && for t in inventory_reports_unscanned_markup_outside_docs_tree env_files_excluded_from_inventory inventory_flags_generated_only_with_marker inventory_unreadable_sidecar_is_admitted_and_counted_never_asserted_generated inventory_license_is_name_only_content_body_is_not_upgraded inventory_release_notes_need_an_inspected_toctree_manifest_not_just_the_dir_name extract_from_repo_with_readme extract_handles_unreadable_files marker_confirms_generated markerless_user_map_is_not_self_generated; do grep -qE \"^test .*$t .* ok$\" /tmp/dd-c03.txt || { echo \"MISSING $t\"; exit 1; }; done && git diff --quiet HEAD -- crates/doc-facts/src/self_generated.rs crates/doc-facts/src/release_notes.rs crates/doc-facts/src/types.rs && grep -qE '^pub struct DiscoveryRule' crates/doc-facts/src/discovery.rs && grep -qE '^pub fn discovery_rule\\(' crates/doc-facts/src/discovery.rs && ! grep -qE '^pub struct DiscoveryRule|^pub fn discovery_rule\\(' crates/doc-facts/src/lib.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the WHOLE repo-graph-doc-facts crate (discovery, classification, lib_tests, self_generated, release_notes). rust/crates/doc-facts/src/lib.rs: `discover_doc_inventory` (:137) reads `discovery::discover_doc_files(repo_path)` as `DocDiscovery` (`.files` at :151, the `.env` filter unchanged) and `DocInventoryResult` (:82-107) gains `pub unscanned_markup_outside_docs_tree: usize` (the `unreadable_count` precedent at :106; the ONE literal at :305-310 gains the field; `extract_semantic_facts` (:331) reads `.files`). rust/crates/doc-facts/src/discovery.rs (NOT lib.rs: lib.rs is 504 lines on HEAD and CLAUDE.md's structural guardrail forbids appending a new responsibility to a file over 500 lines — lib.rs gains only the field, the two `.files` reads and one `pub use discovery::{…}` re-export of the constants, `doc_name_stem`, `DiscoveryRule` and `discovery_rule`; the positive and negated greps): `pub struct DiscoveryRule` (serde::Serialize; fields `stems`, `extensions`, `doc_tree_dirs`, `doc_tree_conventions` = `[\"src/site\"]`, `unscanned_extensions` = `[\".md\", \".markdown\", \".rst\", \".adoc\"]` — all `&'static [&'static str]`, and every field IS the constant the walk applies (`DOC_NAME_STEMS`, `DOC_EXTENSIONS`, `DOC_TREE_DIRS`, a `DOC_TREE_CONVENTIONS` that `in_docs_tree` reads, the unscanned-markup extension constant that the count reads — the first admission's candidate names them `DOC_TREE_CONVENTIONS` and `UNSCANNED_MARKUP_EXTENSIONS`, already in this shape) — the rule the JSON states is the rule that ran, never a re-typed copy) and `pub fn discovery_rule() -> DiscoveryRule` state the rule the JSON carries (RG-REQ-008-L06 `(--json for the rule)`). NEW test `inventory_reports_unscanned_markup_outside_docs_tree` in lib_tests.rs: a temp repo with `README.md`, `notes.md` (root, refused), `CMakeLists.txt` (root, not counted), `docs/a.md` → count 1 and `entries` = README.md + docs/a.md. Byte-identity of self_generated.rs, release_notes.rs, types.rs (the diff --quiet)"
+      },
+      "expected": "exit 0: the inventory carries how many markup files the rule refused and the rule itself, while generated/vendored/unreadable handling, the `.env` exclusion, the exhaust predicate, the license and release-notes bases and every existing doc-facts test remain exactly as before (no behavior change outside the discovery rule and the new count)",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Whole doc-facts crate: 121 passed (doctests: 1 ignored). `self_generated.rs`, `release_notes.rs` and `types.rs` are byte-identical. `DiscoveryRule` and `discovery_rule()` are defined in `discovery.rs`, not `lib.rs`.",
+        "supportingEvidence": [
+          "/tmp/dd-c03.txt",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C04",
+      "obligationIds": [
+        "RG-REQ-008-L07",
+        "RG-REQ-003-L09"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib modules_method 2>&1 | tee /tmp/dd-c04.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/dd-c04.txt && for t in orientation_named_files_match_by_stem_with_any_doc_extension orientation_named_files_root_and_docs_level orientation_root_readme_included orientation_nested_readme_excluded orientation_multiple_docs_capped_at_four orientation_root_first_ranking orientation_never_recommends_arbitrary_docs_files orientation_singular_doc_dir_not_a_target orientation_vendored_under_docs_excluded orientation_recommendation_lines_differ_across_repos; do grep -qE \"^test .*$t .* ok$\" /tmp/dd-c04.txt || { echo \"MISSING $t\"; exit 1; }; done && ! grep -qE '\"architecture\" \\| \"design\" \\| \"overview\" \\| \"contributing\"' crates/daemon-runtime/src/modules_method.rs && grep -q 'ORIENTATION_STEMS' crates/daemon-runtime/src/modules_method.rs && ! grep -q 'discover_doc_inventory(..., false)' crates/daemon-runtime/src/orient_additive_fields.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/daemon-runtime/src/modules_method.rs `is_named_orientation_file` (:439-456): the re-spelled inline stem list `\"architecture\" | \"design\" | \"overview\" | \"contributing\"` (:445-448 — the negated grep proves it is gone) becomes `repo_graph_doc_facts::doc_name_stem(<basename>).is_some_and(|s| repo_graph_doc_facts::ORIENTATION_STEMS.contains(&s))` (daemon-runtime already depends on repo-graph-doc-facts, Cargo.toml:47 — no new edge); the depth rule (:450-455: root, or exactly one level under `docs/`/`design/`) and `select_orientation_docs` (:381-430: root README by kind, root-first then path-ASC ranking, cap 4, vendored/generated excluded, `docs/`/`design/` directory targets) are UNTOUCHED. NEW test `orientation_named_files_match_by_stem_with_any_doc_extension`: root `CONTRIBUTING.rst`, `docs/ARCHITECTURE.adoc`, `design/overview.txt` are named targets; root `INSTALL` and `AUTHORS` (doc-name stems, not orientation stems) are not; `docs/deep/ARCHITECTURE.md` is not (depth). The stale comment at orient_additive_fields.rs:165 (`get_doc_inventory` uses `discover_doc_inventory(..., false)` — the real call storage/src/agent_orient_reads.rs:90 passes `true`) is corrected to `true` (comment-only; the negated grep). Existing orientation tests named in the command kept verbatim"
+      },
+      "expected": "exit 0: the recommendation's named-file rule reads the same stem constant as discovery and classification (one spelling), so a root `README.rst`/`CONTRIBUTING.rst` or a `docs/ARCHITECTURE.adoc` is recommended; ranking, cap and directory targets remain exactly as before (no behavior change to them)",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "daemon-runtime `--lib modules_method`: 37 passed. The inline stem list is gone; `ORIENTATION_STEMS` is used; the `false` comment is corrected.",
+        "supportingEvidence": [
+          "/tmp/dd-c04.txt",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C05",
+      "obligationIds": [
+        "RG-REQ-008-L06",
+        "RG-REQ-008-L08",
+        "RG-REQ-008-L07",
+        "RG-REQ-003-L09",
+        "P-DD-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib presentation::docs 2>&1 | tee /tmp/dd-c05.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/dd-c05.txt && for t in list_render_states_unscanned_markup_outside_docs_tree list_render_omits_the_unscanned_line_when_nothing_was_refused json_filtered_view_surfaces_unscanned_and_rule_when_present malformed_unscanned_payload_is_rejected_never_rendered raw_json_path_prints_only_payloads_whose_count_carries_the_rule list_default_excludes_generated_maps_and_states_the_count vendored_demoted_from_headline_and_listing_but_stated list_render_surfaces_unreadable_count entry_list_budgeted_with_remainder family_lines_and_entries_share_one_budget json_no_generated_maps_is_raw_passthrough json_filtered_view_surfaces_unreadable_when_present; do grep -qE \"^test .*$t .* ok$\" /tmp/dd-c05.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-rgr --lib presentation::orient::tests 2>&1 | tee /tmp/dd-c05b.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/dd-c05b.txt && for t in orient_renders_the_docs_recommendation_line orient_method_not_recorded_renders_canonical_sentence; do grep -qE \"^test .*$t .* ok$\" /tmp/dd-c05b.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-rgr --lib presentation::modules_list 2>&1 | tee /tmp/dd-c05c.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/dd-c05c.txt && for t in orientation_recommendation_renders orientation_no_docs_recommendation_renders unavailable_orientation_docs_renders_reason inequality_across_fixtures; do grep -qE \"^test .*$t .* ok$\" /tmp/dd-c05c.txt || { echo \"MISSING $t\"; exit 1; }; done && awk '/fn handle_docs_list\\(/,/^    }$/' crates/daemon-runtime/src/dispatch.rs > /tmp/dd-c05-handler.txt && grep -q 'payload\\[\"discovery_rule\"\\]' /tmp/dd-c05-handler.txt && grep -q 'payload\\[\"unscanned_markup_outside_docs_tree\"\\]' /tmp/dd-c05-handler.txt && ! grep -qE 'unwrap_or\\(|unwrap_or_default|\\.ok\\(\\)' /tmp/dd-c05-handler.txt",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rust/crates/rgr/src/presentation/docs.rs: `DocsListResponse` (:39-55) gains `pub unscanned_markup_outside_docs_tree: usize` and `pub discovery_rule: Option<DiscoveryRuleView>` — a TYPED view (Serialize + Deserialize; the five fields `stems`, `extensions`, `doc_tree_dirs`, `doc_tree_conventions`, `unscanned_extensions` as `Vec<String>`), never an untyped `serde_json::Value` (the seven test literals in docs_tests.rs :12/:51/:146/:166/:190/:277/:335 gain them — compiler-forced). THE COUNT AND THE RULE ARE ONE FACT, validated at the ONE decode both modes pass through (review of this document, F-RG-REQ-008-L06-RAW-JSON-RULE): `rgr/src/commands/docs.rs:163` runs `serde_json::from_value::<DocsListResponse>` BEFORE branching into `--json` or human mode, and on `Err` prints `error: failed to parse response: …` and exits `EXIT_RUNTIME_ERROR` (:184-186) — so the invariant lives in the decode itself (e.g. `#[serde(try_from = …)]` from a private wire struct whose count is `Option<usize>` and rule `Option<DiscoveryRuleView>`): a payload decodes only when BOTH keys are absent (count 0, rule `None` — every pre-slice and nothing-refused payload) or BOTH are present with the count > 0 and the rule a well-formed object; a positive count with the rule missing, `null` or ill-shaped, a rule without a count, or an explicit count of 0 fails with a named malformed-payload error. Neither the human line nor the raw `--json` passthrough (`filtered_json_view` → `None` → `unwrap_or(result)`, :166-168) can then ever show a count without its rule; commands/docs.rs stays byte-identical (DD-C06) — it already fails closed on a decode error; `render_human` (:172) prints, AFTER the unreadable line (:230-235) and BEFORE the empty-headline early return (:237), the ratified line `+N markdown/prose files outside a docs tree not scanned (--json for the rule)` when the count is > 0 (`file`/`files` by count, the vendored line's convention; absent when 0); `filtered_json_view` (:116-152) re-emits `unscanned_markup_outside_docs_tree` and `discovery_rule` when the count is > 0 (the `unreadable` precedent at :148-150) so the filtered `--json` never drops them — the decoded `discovery_rule` re-serialized, present whenever the count is (the decode guarantees it; there is no `null` case). hadoop's 6,813 generated MAP sidecars (the docs list line at the second admission; OC-2 corrected the figure) make its `--json` the FILTERED view, so DD-C08 exercises this path on a real corpus. rust/crates/daemon-runtime/src/dispatch.rs `handle_docs_list` payload (:5707-5723): when `inventory.unscanned_markup_outside_docs_tree > 0`, `payload[\"unscanned_markup_outside_docs_tree\"]` and `payload[\"discovery_rule\"]` (= `serde_json::to_value(repo_graph_doc_facts::discovery_rule())`) are added — gated together like `unreadable` (:5721-5723) so a repo with nothing refused keeps its byte-identical payload (D-DD1-002); the rule value is built INFALLIBLY (F-DD1-001, first admission: `serde_json::to_value(discovery_rule()).unwrap_or(Value::Null)` silently emitted `null` on a serialization error — a `DiscoveryRule` of static string slices cannot fail to serialize, so the construction is either `serde_json::json!({...})` over the constants or `to_value(..).expect(\"DiscoveryRule serializes: static string slices only\")` — NEVER a silent fallback (STANDING HONESTY RULE). The check closes the CLASS, not the reported line: it extracts `handle_docs_list` (:5626 to its closing brace :5725, awk) and requires both payload keys present and NO silent-fallback form (`unwrap_or(`, `unwrap_or_default`, `.ok()`) anywhere in the handler — HEAD's handler has none (its one `unwrap_or_else` is the pre-existing root-path join); a draft `grep -A3` after the assignment passed vacuously when the key was built elsewhere or the fallback sat on an earlier line. The three pre-existing `unwrap_or(serde_json::Value::Null)` at dispatch.rs:4164/:5599/:9066 lie outside the handler and are out of scope). rgr/src/presentation/orient_tests.rs is mounted as `presentation::orient::tests` (orient.rs:569-570 `#[path]`), hence the cargo filter (OC-1 — the first admission's filter `presentation::orient_tests` selected zero tests). NEW tests: `list_render_states_unscanned_markup_outside_docs_tree` (count 3 → the literal plural line; count 1 → `+1 markdown/prose file outside a docs tree not scanned (--json for the rule)`), `list_render_omits_the_unscanned_line_when_nothing_was_refused`, `json_filtered_view_surfaces_unscanned_and_rule_when_present`; `malformed_unscanned_payload_is_rejected_never_rendered` (`serde_json::from_value::<DocsListResponse>` is `Err` for: count 3 with no rule, count 3 with `discovery_rule: null`, count 3 with a rule missing `stems`, a rule with no count, an explicit count 0 — and `Ok` with count 0/rule `None` when both keys are absent); `raw_json_path_prints_only_payloads_whose_count_carries_the_rule` (a payload with count 2, a well-formed rule and NO generated maps decodes, `filtered_json_view` returns `None` — the raw passthrough the command prints — and that payload carries the rule object beside the count; the same payload with the rule removed does not decode, so the command prints the error, never the payload); rust/crates/rgr/src/presentation/orient_tests.rs NEW `orient_renders_the_docs_recommendation_line` (`nginx_like()` with `orientation_docs = Some(json!({\"paths\": [\"README.md\", \"docs/\"], \"recommendation\": \"For module boundaries as the authors describe them, read: README.md, docs/ — or the tree.\"}))` → `render_human(OrientDepth::Full)` contains the line — the orient-side assertion RG-REQ-003-L09's criterion names as missing). Existing tests named in the command kept verbatim; the modules_list orientation tests untouched"
+      },
+      "expected": "exit 0: `docs list` states what the rule refused and `--json` carries the count and the rule — on the filtered AND the raw-passthrough path, because a payload whose count and rule are not present together does not decode and is never rendered in either mode; `orient` is proven to render the recommendation; budget, JSON completeness, generated/vendored/unreadable lines and the modules-list rendering remain exactly as before (no behavior change to them)",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "rgr `presentation::docs` 38, `presentation::orient::tests` 70, `presentation::modules_list` 57, all passed. The extracted `handle_docs_list` (112 lines) carries both payload keys and no `unwrap_or(`, `unwrap_or_default` or `.ok()`; the rule is built with `.expect(..)`.",
+        "supportingEvidence": [
+          "/tmp/dd-c05.txt",
+          "/tmp/dd-c05b.txt",
+          "/tmp/dd-c05c.txt",
+          "/tmp/dd-c05-handler.txt",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C06",
+      "obligationIds": [
+        "P-DD-01",
+        "P-DD-02",
+        "P-DD-03",
+        "RG-REQ-008-L08",
+        "RG-REQ-008-L09"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib 2>&1 | tee /tmp/dd-c06.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/dd-c06.txt && cargo test -p repo-graph-daemon-runtime --lib 2>&1 | tee /tmp/dd-c06b.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/dd-c06b.txt && for t in vendored_override_clears_release_family; do grep -qE \"^test .*$t .* ok$\" /tmp/dd-c06b.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-rgr --test docs_command 2>&1 | tee /tmp/dd-c06d.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/dd-c06d.txt && for t in docs_list_daemon_required; do grep -qE \"^test .*$t .* ok$\" /tmp/dd-c06d.txt || { echo \"MISSING $t\"; exit 1; }; done && git diff --quiet HEAD -- crates/agent crates/storage crates/classification crates/indexer crates/daemon-runtime/src/docs_list_overlay.rs crates/daemon-runtime/src/handlers crates/rgr/src/commands crates/rgr/src/presentation/modules_list.rs crates/rgr/src/presentation/orient_sections.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the acceptance boundary: the whole rgr lib; daemon-runtime's WHOLE `--lib` suite (CLAUDE.md relay gate — the whole `--lib` unit suite of every daemon crate the change touches: modules_method.rs, orient_additive_fields.rs and dispatch.rs are daemon-runtime; the first admission ran it outside the packet, `785 passed; 1 ignored`), which carries `vendored_override_clears_release_family`; rgr's `docs_command` CLI tests (`rgr/tests/cli_out_5_inventory.rs`'s `docs_list_*`/`docs_extract_*` are `#[ignore]` — daemon-backed; verified by the manager on HEAD: `0 passed; 10 ignored` — they are the OPERATOR's dogfood gate, not a builder check); and the CODE byte-identity of every path the slice must NOT touch (byte-identity of code, not of output: each of these surfaces reads the widened inventory — see expected) — the agent crate (`agent/src/doc_relevance.rs:273-279` keeps its own root-doc name list: a FIFTH spelling, out of scope — DOC-RELEVANCE-STEMS-1, §8 — because agent has no doc-facts dependency and a new crate edge is not this slice's), storage (`agent_orient_reads.rs` — it calls `discover_doc_inventory` unchanged), classification, indexer, the vendored overlay, the quality handlers, rgr commands, the modules_list and orient_sections renderers"
+      },
+      "expected": "exit 0: every existing test in the touched crates stays green, and the code of every inheriting surface (`docs extract`, the vendored overlay, storage's inventory read, orient's doc relevance, the modules-list and orient renderers) remains byte-identical with its rendering contract unchanged (no behavior change to their code or rendering form) — their OUTPUTS move only through the widened inventory they read (`docs extract` scans the newly admitted files on its next explicit run; orient's Docs ranking on every focus sees the larger set), the intended consequence of RG-REQ-008-L01 reported in §0, not a regression",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "rgr `--lib` 1268 passed; daemon-runtime whole `--lib` 785 passed, 1 ignored (36 s); `docs_command` 6 passed. Every out-of-scope path is byte-identical.",
+        "supportingEvidence": [
+          "/tmp/dd-c06.txt",
+          "/tmp/dd-c06b.txt",
+          "/tmp/dd-c06d.txt",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C07",
+      "obligationIds": [
+        "P-DD-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo fmt --check -p repo-graph-doc-facts -p repo-graph-daemon-runtime -p repo-graph-rgr && cargo clippy -p repo-graph-doc-facts -p repo-graph-daemon-runtime -p repo-graph-rgr --all-targets -- -D warnings > /tmp/dd-c07.txt 2>&1; rc=$?; tail -3 /tmp/dd-c07.txt; test $rc -eq 0",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rustfmt and clippy (deny warnings, all targets) over the three touched crates"
+      },
+      "expected": "exit 0: no formatting or lint debt enters with the candidate",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "`cargo fmt --check` and clippy `-D warnings --all-targets` are clean on the three touched crates.",
+        "supportingEvidence": [
+          "/tmp/dd-c07.txt",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C08",
+      "obligationIds": [
+        "RG-REQ-008-L01",
+        "RG-REQ-008-L02",
+        "RG-REQ-008-L06",
+        "RG-REQ-008-L07",
+        "RG-REQ-008-L03",
+        "RG-REQ-003-L09"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/hadoop' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-hadoop-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-hadoop-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" docs list > /tmp/dd-hadoop-docs-before.txt 2> /tmp/dd-hadoop-docs-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-hadoop-docs-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/hadoop' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-hadoop-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-hadoop-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list > /tmp/dd-hadoop-docs-after.txt 2> /tmp/dd-hadoop-docs-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-hadoop-docs-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/hadoop' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-hadoop-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-hadoop-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list --json > /tmp/dd-hadoop-docs-after.json 2> /tmp/dd-hadoop-docs-after.json.err ) || { echo \"RUN-FAILED /tmp/dd-hadoop-docs-after.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/hadoop' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-hadoop-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-hadoop-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" modules list > /tmp/dd-hadoop-modules-before.txt 2> /tmp/dd-hadoop-modules-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-hadoop-modules-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/hadoop' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-hadoop-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-hadoop-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" modules list > /tmp/dd-hadoop-modules-after.txt 2> /tmp/dd-hadoop-modules-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-hadoop-modules-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/hadoop' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-hadoop-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-hadoop-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget medium > /tmp/dd-hadoop-orient-after.txt 2> /tmp/dd-hadoop-orient-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-hadoop-orient-after.txt\"; exit 1; } && grep -qE '^22 documents$' /tmp/dd-hadoop-docs-before.txt && grep -E '^[0-9]+ generated maps? excluded \\(tool-generated map summaries; use --include-generated to show\\)$' /tmp/dd-hadoop-docs-before.txt > /tmp/dd-hadoop-gen-before.txt && grep -E '^[0-9]+ generated maps? excluded \\(tool-generated map summaries; use --include-generated to show\\)$' /tmp/dd-hadoop-docs-after.txt > /tmp/dd-hadoop-gen-after.txt && diff /tmp/dd-hadoop-gen-before.txt /tmp/dd-hadoop-gen-after.txt && grep -qE '^556 documents$' /tmp/dd-hadoop-docs-after.txt && grep -qE '^\\+3 vendored docs \\(excluded; third-party/dependency directories — see --json for the full set\\)$' /tmp/dd-hadoop-docs-after.txt && grep -qE '^\\+3 markdown/prose files outside a docs tree not scanned \\(--json for the rule\\)$' /tmp/dd-hadoop-docs-after.txt && ! grep -qE 'markdown/prose files outside a docs tree not scanned \\(--json for the rule\\)' /tmp/dd-hadoop-docs-before.txt && grep -qE '^  doc  527$' /tmp/dd-hadoop-docs-after.txt && grep -qE '^  readme  26$' /tmp/dd-hadoop-docs-after.txt && grep -qE '^  architecture  2$' /tmp/dd-hadoop-docs-after.txt && grep -qE '^  config  1$' /tmp/dd-hadoop-docs-after.txt && grep -qE '^  readme  17$' /tmp/dd-hadoop-docs-before.txt && grep -qE 'read: README\\.txt — or the tree\\.$' /tmp/dd-hadoop-modules-after.txt && grep -qE '^No README or architecture doc found — the tree is the best orientation\\.$' /tmp/dd-hadoop-modules-before.txt && ! grep -qE 'No README or architecture doc found' /tmp/dd-hadoop-modules-after.txt && grep -qE 'read: README\\.txt — or the tree\\.$' /tmp/dd-hadoop-orient-after.txt && python3 - /tmp/dd-hadoop-docs-after.json <<'PY'\nimport json, sys\nd = json.load(open(sys.argv[1])); v = d.get('value', d)\nassert v['count'] == 559, v['count']\nassert v['unscanned_markup_outside_docs_tree'] == 3, v.get('unscanned_markup_outside_docs_tree')\nr = v['discovery_rule']\nassert r['stems'] == ['readme', 'contributing', 'changelog', 'architecture', 'design', 'overview', 'install', 'building', 'authors', 'news'], r\nassert r['extensions'] == ['.md', '.markdown', '.txt', '.rst', '.adoc'] and r['doc_tree_dirs'] == ['docs', 'doc', 'design'] and r['doc_tree_conventions'] == ['src/site'] and r['unscanned_extensions'] == ['.md', '.markdown', '.rst', '.adoc'], r\npaths = {e['path']: e['kind'] for e in v['entries']}\nassert paths['README.txt'] == 'readme' and paths['BUILDING.txt'] == 'doc', (paths.get('README.txt'), paths.get('BUILDING.txt'))\nassert paths['hadoop-common-project/hadoop-common/src/main/native/ChangeLog'] == 'doc'\nassert paths['hadoop-hdfs-project/hadoop-hdfs-native-client/src/main/native/libhdfspp/third_party/uriparser2/uriparser2/uriparser/AUTHORS'] == 'vendored'\nsite = [p for p in paths if '/src/site/' in p]\nassert len(site) == 520 and sum(1 for p in site if paths[p] == 'doc') == 519 and paths['hadoop-yarn-project/hadoop-yarn/hadoop-yarn-site/src/site/markdown/yarn-service/Overview.md'] == 'architecture', (len(site), sum(1 for p in site if paths[p] == 'doc'))\nassert paths['hadoop-common-project/hadoop-auth/src/site/markdown/Configuration.md'] == 'doc'\nprint('hadoop seam ok', v['count'], len(site))\nPY",
+        "cwd": ".",
+        "environment": "pre-provisioned isolated root /private/tmp/DOCS-DISCOVERY-1-hadoop-before (fresh index of /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/hadoop by the base-revision binary on 2026-09-21, 185 s; docs surfaces are query-time filesystem walks that read the store only for the repo's root path — dispatch.rs:5641/:5678 — so the SAME root is served by the before binary /private/tmp/DOCS-DISCOVERY-1-before-bin/rmap (copied from rust/target/release on the CLEAN tree at step 0) and by the candidate; under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; the root STAYS)",
+        "inputs": "hadoop (Java; 24 entries today: 17 readme, 3 doc, 1 architecture, 1 config, 2 vendored; header `22 documents`). AFTER (measured 2026-09-21/22 by the manager's walk of the checkout under the ratified rule incl. D-DD1-003, CC-8): `556 documents`, `+3 vendored docs` (the `third_party/uriparser2/.../AUTHORS` joins the two), `+3 markdown/prose files outside a docs tree not scanned (--json for the rule)` (`.github/pull_request_template.md`, `.github/workflow-security.md`, `hadoop-yarn-project/.../src/main/resources/definition/YARN-Services-Examples.md`), By kind `doc 527` (519 `src/site/markdown` guides as `doc` — 520 entries under `src/site` incl. `hadoop-yarn-site/src/site/markdown/yarn-service/Overview.md` as `architecture` — such as `hadoop-common-project/hadoop-auth/src/site/markdown/Configuration.md`, plus the root `BUILDING.txt` and `hadoop-common-project/hadoop-auth/BUILDING.txt` and `hadoop-common-project/hadoop-common/src/main/native/{AUTHORS,ChangeLog,NEWS}`, beside the 3 docs listed today: 3 + 519 + 2 + 3 = 527), `readme 26` (17 today + the root `README.txt` + 8 module `README.txt` — `hadoop-auth`, `hadoop-nfs`, `hadoop-hdfs-httpfs`, `hadoop-hdfs-nfs`, `hadoop-project-dist`, the pipes examples and the two `proto2-generated/.../protobuf/README.txt`; decomposition re-derived by this document item's walk of the checkout, which reproduces 527/26/2/1 and +3 vendored), `architecture 2` (+ an `overview.md` under `src/site`), `config 1`; `modules list` and `orient --budget medium` both print `For module boundaries as the authors describe them, read: README.txt — or the tree.` (D-DD1-004: the default small orient budget omits the modules section — frozen orient budgeting, not this slice) (before: the root `README.txt` was invisible and the line read `No README or architecture doc found — the tree is the best orientation.` — a false statement about a repository whose README is at its root); JSON `count` 559, the count and the rule object present; the `N generated maps excluded (…)` line (17,114 `rmap map` sidecars carry the marker in this checkout) is byte-identical before and after — the field proof that the generated-marker exclusion is untouched"
+      },
+      "expected": "exit 0: a reader of hadoop's docs surfaces now sees the authors' 519 site guides, the root README and what the rule still refuses; the recommendation names the real README; the generated-map exclusion line remains identical (no behavior change to RG-REQ-008-L03)",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "hadoop: `22 documents` → `556 documents` (`doc 527`, `readme 26`, `architecture 2`, `config 1`), `+3 vendored docs`, `+3 markdown/prose files … not scanned`. The line `6813 generated maps excluded (…)` is identical before and after. `modules list` and `orient --budget medium` both print `read: README.txt — or the tree.` JSON: count 559, 520 entries under `src/site` (519 `doc`), and the rule object.",
+        "supportingEvidence": [
+          "/tmp/dd-hadoop-docs-before.txt",
+          "/tmp/dd-hadoop-docs-after.txt",
+          "/tmp/dd-hadoop-docs-after.json",
+          "/tmp/dd-hadoop-modules-after.txt",
+          "/tmp/dd-hadoop-orient-after.txt",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C09",
+      "obligationIds": [
+        "RG-REQ-008-L01",
+        "RG-REQ-008-L02",
+        "RG-REQ-008-L07",
+        "RG-REQ-003-L09",
+        "RG-REQ-008-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-django-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-django-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" docs list > /tmp/dd-django-docs-before.txt 2> /tmp/dd-django-docs-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-django-docs-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-django-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-django-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list > /tmp/dd-django-docs-after.txt 2> /tmp/dd-django-docs-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-django-docs-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-django-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-django-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list --json > /tmp/dd-django-docs-after.json 2> /tmp/dd-django-docs-after.json.err ) || { echo \"RUN-FAILED /tmp/dd-django-docs-after.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-django-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-django-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" modules list > /tmp/dd-django-modules-before.txt 2> /tmp/dd-django-modules-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-django-modules-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-django-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-django-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" modules list > /tmp/dd-django-modules-after.txt 2> /tmp/dd-django-modules-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-django-modules-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-django-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-django-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget medium > /tmp/dd-django-orient-after.txt 2> /tmp/dd-django-orient-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-django-orient-after.txt\"; exit 1; } && grep -qE '^616 documents$' /tmp/dd-django-docs-before.txt && grep -qE '^622 documents$' /tmp/dd-django-docs-after.txt && grep -qE '^\\+54 vendored docs' /tmp/dd-django-docs-after.txt && grep -qE '^\\+4 markdown/prose files outside a docs tree not scanned \\(--json for the rule\\)$' /tmp/dd-django-docs-after.txt && grep -qE '^  release-notes  386$' /tmp/dd-django-docs-after.txt && grep -qE '^  doc  225$' /tmp/dd-django-docs-after.txt && grep -qE '^  readme  7$' /tmp/dd-django-docs-after.txt && grep -qE '^  architecture  3$' /tmp/dd-django-docs-after.txt && grep -qE '^  license  1$' /tmp/dd-django-docs-after.txt && grep -qE 'read: docs/ — or the tree\\.$' /tmp/dd-django-modules-before.txt && grep -qE 'read: CONTRIBUTING\\.rst, README\\.rst, docs/ — or the tree\\.$' /tmp/dd-django-modules-after.txt && grep -qE 'read: CONTRIBUTING\\.rst, README\\.rst, docs/ — or the tree\\.$' /tmp/dd-django-orient-after.txt && python3 - /tmp/dd-django-docs-after.json <<'PY'\nimport json, sys\nd = json.load(open(sys.argv[1])); v = d.get('value', d)\nassert v['count'] == 676, v['count']\npaths = {e['path']: e['kind'] for e in v['entries']}\nfor p, k in [('README.rst', 'readme'), ('tests/README.rst', 'readme'), ('extras/README.TXT', 'readme'), ('docs/README.rst', 'readme'), ('CONTRIBUTING.rst', 'doc'), ('AUTHORS', 'doc'), ('INSTALL', 'doc')]:\n    assert paths.get(p) == k, (p, paths.get(p))\nassert v['unscanned_markup_outside_docs_tree'] == 4\nprint('django seam ok')\nPY",
+        "cwd": ".",
+        "environment": "pre-provisioned /private/tmp/DOCS-DISCOVERY-1-django-before (fresh index by the base binary, 18 s); served by both binaries; under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; STAYS",
+        "inputs": "django (Python; 670 entries today, 54 vendored; header `616 documents`; `modules list` reads `read: docs/ — or the tree.` because `README.rst` and `CONTRIBUTING.rst` were invisible). AFTER: `622 documents` (+ `README.rst`, `tests/README.rst`, `extras/README.TXT` → readme, and the already-listed `docs/README.rst` reclassifies from `doc` to `readme` by the stem rule (RG-REQ-008-L02) → readme 3 → 7; `CONTRIBUTING.rst`, `AUTHORS`, `INSTALL` → doc 223 → 225 net of the reclassification — OC-1: the first admission predicted 6/226 by classifying only the ADDED files), `+54 vendored docs` unchanged, `+4 markdown/prose files outside a docs tree not scanned (--json for the rule)` (`.github/CODE_OF_CONDUCT.md`, `.github/SECURITY.md`, `.github/copilot-instructions.md`, `.github/pull_request_template.md`), release-notes 386 / architecture 3 / license 1 unchanged; `extras/README.TXT` is admitted by the case-insensitive stem rule (D-DD1-003); the recommendation on `modules list` AND `orient --budget medium` becomes `read: CONTRIBUTING.rst, README.rst, docs/ — or the tree.` — the frozen ranking is root-first then path-ASC (MODULES-METHOD-1 `orientation_root_first_ranking`), so `CONTRIBUTING.rst` precedes `README.rst`; RG-REQ-008-L07's field example writes them in the other order — CC-9 (text-only, next bootstrap revision); JSON `count` 676"
+      },
+      "expected": "exit 0: django's README and contribution guide are found and recommended where the authors put them (reStructuredText, root), and the rule's refusals are stated",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "django: 616 → 622 (`readme 7`, `doc 225`, `release-notes 386`, `architecture 3`, `license 1`), `+54 vendored`, `+4` not scanned. The recommendation changes from `read: docs/` to `read: CONTRIBUTING.rst, README.rst, docs/ — or the tree.` JSON count 676.",
+        "supportingEvidence": [
+          "/tmp/dd-django-docs-before.txt",
+          "/tmp/dd-django-docs-after.txt",
+          "/tmp/dd-django-docs-after.json",
+          "/tmp/dd-django-modules-after.txt",
+          "/tmp/dd-django-orient-after.txt",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C10",
+      "obligationIds": [
+        "RG-REQ-008-L01",
+        "RG-REQ-008-L02",
+        "RG-REQ-008-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/buildroot' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-buildroot-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-buildroot-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" docs list > /tmp/dd-buildroot-docs-before.txt 2> /tmp/dd-buildroot-docs-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-buildroot-docs-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/buildroot' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-buildroot-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-buildroot-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list > /tmp/dd-buildroot-docs-after.txt 2> /tmp/dd-buildroot-docs-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-buildroot-docs-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/buildroot' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-buildroot-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-buildroot-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list --json > /tmp/dd-buildroot-docs-after.json 2> /tmp/dd-buildroot-docs-after.json.err ) || { echo \"RUN-FAILED /tmp/dd-buildroot-docs-after.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/buildroot' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-buildroot-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-buildroot-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" modules list > /tmp/dd-buildroot-modules-before.txt 2> /tmp/dd-buildroot-modules-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-buildroot-modules-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/buildroot' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-buildroot-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-buildroot-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" modules list > /tmp/dd-buildroot-modules-after.txt 2> /tmp/dd-buildroot-modules-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-buildroot-modules-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/buildroot' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-buildroot-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-buildroot-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget medium > /tmp/dd-buildroot-orient-after.txt 2> /tmp/dd-buildroot-orient-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-buildroot-orient-after.txt\"; exit 1; } && grep -qE '^4 documents$' /tmp/dd-buildroot-docs-before.txt && grep -qE '^310 documents$' /tmp/dd-buildroot-docs-after.txt && grep -qE '^\\+3 markdown/prose files outside a docs tree not scanned \\(--json for the rule\\)$' /tmp/dd-buildroot-docs-after.txt && grep -qE '^  readme  234$' /tmp/dd-buildroot-docs-after.txt && grep -qE '^  doc  75$' /tmp/dd-buildroot-docs-after.txt && grep -qE '^  config  1$' /tmp/dd-buildroot-docs-after.txt && grep -qE 'read: README, docs/ — or the tree\\.$' /tmp/dd-buildroot-modules-after.txt && grep -qE 'read: README, docs/ — or the tree\\.$' /tmp/dd-buildroot-modules-before.txt && python3 - /tmp/dd-buildroot-docs-after.json <<'PY'\nimport json, sys\nd = json.load(open(sys.argv[1])); v = d.get('value', d)\nassert v['count'] == 310, v['count']\npaths = {e['path']: e['kind'] for e in v['entries']}\nadoc = [p for p in paths if p.endswith('.adoc')]\nassert len(adoc) == 73 and all(p.startswith('docs/') for p in adoc) and all(paths[p] == 'doc' for p in adoc), (len(adoc), adoc[:3])\nboard = [p for p in paths if p.startswith('board/') and p.lower().endswith('/readme.txt')]\nassert len(board) == 225 and all(paths[p] == 'readme' for p in board), len(board)\nassert sum(1 for p in paths if paths[p] == 'readme') == 234\nassert paths['docs/manual/manual.adoc'] == 'doc'\nassert v['unscanned_markup_outside_docs_tree'] == 3\nprint('buildroot seam ok', len(adoc), len(board))\nPY",
+        "cwd": ".",
+        "environment": "pre-provisioned /private/tmp/DOCS-DISCOVERY-1-buildroot-before (2 s); served by both binaries; under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; STAYS",
+        "inputs": "buildroot (4 entries today: `README`, `docs/website/copyright.txt`, `docs/website/robots.txt`, one config). AFTER: `310 documents` — the 73 AsciiDoc manual files under `docs/manual/` (`docs/manual/manual.adoc`, `docs/manual/adding-packages.adoc` …) as `doc` (73 + 2 = 75) and the readmes by stem: 225 under `board/**` (223 `readme.txt` + 2 `README.txt`, admitted case-insensitively under D-DD1-003 — `board/arm/foundation-v8/readme.txt` …), 8 elsewhere, plus the root `README` = 234 (OC-1: the first admission wrote 233 `board/**/readme.txt` case-sensitively) — the stem rule admits a readme anywhere, exactly as `README.md` was admitted anywhere before (RC-8 estimated ~77 because it counted only the `.adoc` files; CC-8); `+3 markdown/prose files outside a docs tree not scanned (--json for the rule)` (`.github/pull_request_template.md`, `.gitlab/issue_templates/default.md`, `SECURITY.md`); `config 1`; the recommendation `read: README, docs/ — or the tree.` unchanged (the root README was already found by exact name)"
+      },
+      "expected": "exit 0: buildroot's manual and board documentation are found; a reader is told three markdown files at the top level were not scanned",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "buildroot: 4 → 310 (`readme 234`, `doc 75`, `config 1`), `+3` not scanned. JSON: 73 `.adoc` files under `docs/` (all `doc`), 225 `board/**` readmes.",
+        "supportingEvidence": [
+          "/tmp/dd-buildroot-docs-before.txt",
+          "/tmp/dd-buildroot-docs-after.txt",
+          "/tmp/dd-buildroot-docs-after.json",
+          "/tmp/dd-buildroot-modules-after.txt",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C11",
+      "obligationIds": [
+        "RG-REQ-008-L01",
+        "RG-REQ-008-L06",
+        "RG-REQ-008-L07",
+        "P-DD-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-kafka-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-kafka-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" docs list > /tmp/dd-kafka-docs-before.txt 2> /tmp/dd-kafka-docs-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-kafka-docs-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-kafka-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-kafka-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list > /tmp/dd-kafka-docs-after.txt 2> /tmp/dd-kafka-docs-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-kafka-docs-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-kafka-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-kafka-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list --json > /tmp/dd-kafka-docs-after.json 2> /tmp/dd-kafka-docs-after.json.err ) || { echo \"RUN-FAILED /tmp/dd-kafka-docs-after.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-kafka-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-kafka-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" modules list > /tmp/dd-kafka-modules-before.txt 2> /tmp/dd-kafka-modules-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-kafka-modules-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-kafka-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-kafka-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" modules list > /tmp/dd-kafka-modules-after.txt 2> /tmp/dd-kafka-modules-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-kafka-modules-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-kafka-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-kafka-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget medium > /tmp/dd-kafka-orient-after.txt 2> /tmp/dd-kafka-orient-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-kafka-orient-after.txt\"; exit 1; } && grep -qE '^133 documents$' /tmp/dd-kafka-docs-before.txt && grep -qE '^133 documents$' /tmp/dd-kafka-docs-after.txt && grep -qE '^\\+1 markdown/prose file outside a docs tree not scanned \\(--json for the rule\\)$' /tmp/dd-kafka-docs-after.txt && grep -v '^+1 markdown/prose file ' /tmp/dd-kafka-docs-after.txt > /tmp/dd-kafka-docs-after-stripped.txt && diff /tmp/dd-kafka-docs-before.txt /tmp/dd-kafka-docs-after-stripped.txt && diff /tmp/dd-kafka-modules-before.txt /tmp/dd-kafka-modules-after.txt && grep -qE 'read: CONTRIBUTING\\.md, README\\.md, docs/ — or the tree\\.$' /tmp/dd-kafka-modules-after.txt && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" docs list > /tmp/dd-leveldb-docs-before.txt 2> /tmp/dd-leveldb-docs-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-leveldb-docs-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list > /tmp/dd-leveldb-docs-after.txt 2> /tmp/dd-leveldb-docs-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-leveldb-docs-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list --json > /tmp/dd-leveldb-docs-after.json 2> /tmp/dd-leveldb-docs-after.json.err ) || { echo \"RUN-FAILED /tmp/dd-leveldb-docs-after.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" modules list > /tmp/dd-leveldb-modules-before.txt 2> /tmp/dd-leveldb-modules-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-leveldb-modules-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" modules list > /tmp/dd-leveldb-modules-after.txt 2> /tmp/dd-leveldb-modules-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-leveldb-modules-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-leveldb-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-leveldb-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget medium > /tmp/dd-leveldb-orient-after.txt 2> /tmp/dd-leveldb-orient-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-leveldb-orient-after.txt\"; exit 1; } && grep -qE '^7 documents$' /tmp/dd-leveldb-docs-before.txt && grep -qE '^9 documents$' /tmp/dd-leveldb-docs-after.txt && ! grep -qE 'markdown/prose file' /tmp/dd-leveldb-docs-after.txt && grep -qE '^  AUTHORS  doc$' /tmp/dd-leveldb-docs-after.txt && grep -qE '^  NEWS  doc$' /tmp/dd-leveldb-docs-after.txt && diff /tmp/dd-leveldb-modules-before.txt /tmp/dd-leveldb-modules-after.txt && python3 - /tmp/dd-leveldb-docs-after.json <<'PY'\nimport json, sys\nd = json.load(open(sys.argv[1])); v = d.get('value', d)\nassert v['count'] == 9 and 'unscanned_markup_outside_docs_tree' not in v and 'discovery_rule' not in v, sorted(v)\nprint('leveldb seam ok: gated keys absent when nothing was refused')\nPY",
+        "cwd": ".",
+        "environment": "pre-provisioned /private/tmp/DOCS-DISCOVERY-1-{kafka,leveldb}-before (fresh indexes by the base binary: kafka 99 s, leveldb 1 s); served by both binaries; under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; the roots STAY",
+        "inputs": "the control corpora, measured 2026-09-21 (CC-8) and reproduced by the first admission: kafka — `133 documents` before and after, every entry and the `By kind` block identical, the header gains exactly `+1 markdown/prose file outside a docs tree not scanned (--json for the rule)` (`.github/pull_request_template.md`; singular), `modules list` byte-identical (`read: CONTRIBUTING.md, README.md, docs/ — or the tree.`); leveldb — `7 documents` → `9 documents` (root `AUTHORS` and `NEWS` as `doc`), NO unscanned line and NO `unscanned_markup_outside_docs_tree`/`discovery_rule` keys in `--json` (nothing refused: `CMakeLists.txt` is `.txt`, not counted — D-DD1-002), `modules list` byte-identical. The heredoc is the LAST element of the chain (OC-1: the first admission's single DD-C11 had a heredoc terminator glued to `&&`, so the command could not execute)"
+      },
+      "expected": "exit 0: where the ratified rule admits nothing new, the surfaces remain byte-identical apart from the new honesty line, and where it admits a root AUTHORS/NEWS the reader sees them (no behavior change to any count the rule does not touch)",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "kafka: 133 both sides, byte-identical except the added line `+1 markdown/prose file … not scanned`; `modules list` identical. leveldb: 7 → 9 (`AUTHORS`, `NEWS`), no unscanned line, and neither gated JSON key present.",
+        "supportingEvidence": [
+          "/tmp/dd-kafka-docs-before.txt",
+          "/tmp/dd-kafka-docs-after.txt",
+          "/tmp/dd-leveldb-docs-before.txt",
+          "/tmp/dd-leveldb-docs-after.txt",
+          "/tmp/dd-leveldb-docs-after.json",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C12",
+      "obligationIds": [
+        "RG-REQ-008-L01",
+        "RG-REQ-008-L04",
+        "RG-REQ-008-L06",
+        "P-DD-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/grpc-java' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-grpc-java-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-grpc-java-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" docs list > /tmp/dd-grpc-java-docs-before.txt 2> /tmp/dd-grpc-java-docs-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-grpc-java-docs-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/grpc-java' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-grpc-java-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-grpc-java-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list > /tmp/dd-grpc-java-docs-after.txt 2> /tmp/dd-grpc-java-docs-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-grpc-java-docs-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/grpc-java' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-grpc-java-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-grpc-java-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list --json > /tmp/dd-grpc-java-docs-after.json 2> /tmp/dd-grpc-java-docs-after.json.err ) || { echo \"RUN-FAILED /tmp/dd-grpc-java-docs-after.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/grpc-java' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-grpc-java-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-grpc-java-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" modules list > /tmp/dd-grpc-java-modules-before.txt 2> /tmp/dd-grpc-java-modules-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-grpc-java-modules-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/grpc-java' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-grpc-java-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-grpc-java-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" modules list > /tmp/dd-grpc-java-modules-after.txt 2> /tmp/dd-grpc-java-modules-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-grpc-java-modules-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/grpc-java' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-grpc-java-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-grpc-java-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget medium > /tmp/dd-grpc-java-orient-after.txt 2> /tmp/dd-grpc-java-orient-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-grpc-java-orient-after.txt\"; exit 1; } && grep -qE '^49 documents$' /tmp/dd-grpc-java-docs-before.txt && grep -qE '^50 documents$' /tmp/dd-grpc-java-docs-after.txt && grep -qE '^\\+12 markdown/prose files outside a docs tree not scanned \\(--json for the rule\\)$' /tmp/dd-grpc-java-docs-after.txt && grep -qE '^  AUTHORS  doc$' /tmp/dd-grpc-java-docs-after.txt && diff /tmp/dd-grpc-java-modules-before.txt /tmp/dd-grpc-java-modules-after.txt && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-fraktag-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-fraktag-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" docs list > /tmp/dd-fraktag-docs-before.txt 2> /tmp/dd-fraktag-docs-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-fraktag-docs-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-fraktag-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-fraktag-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list > /tmp/dd-fraktag-docs-after.txt 2> /tmp/dd-fraktag-docs-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-fraktag-docs-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-fraktag-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-fraktag-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list --json > /tmp/dd-fraktag-docs-after.json 2> /tmp/dd-fraktag-docs-after.json.err ) || { echo \"RUN-FAILED /tmp/dd-fraktag-docs-after.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-fraktag-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-fraktag-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" modules list > /tmp/dd-fraktag-modules-before.txt 2> /tmp/dd-fraktag-modules-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-fraktag-modules-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-fraktag-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-fraktag-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" modules list > /tmp/dd-fraktag-modules-after.txt 2> /tmp/dd-fraktag-modules-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-fraktag-modules-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-fraktag-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-fraktag-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget medium > /tmp/dd-fraktag-orient-after.txt 2> /tmp/dd-fraktag-orient-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-fraktag-orient-after.txt\"; exit 1; } && grep -qE '^14 documents$' /tmp/dd-fraktag-docs-before.txt && grep -qE '^14 documents$' /tmp/dd-fraktag-docs-after.txt && grep -qE '^\\+5 vendored docs' /tmp/dd-fraktag-docs-before.txt && grep -qE '^\\+11 vendored docs' /tmp/dd-fraktag-docs-after.txt && grep -qE '^\\+[0-9]+ markdown/prose files outside a docs tree not scanned \\(--json for the rule\\)$' /tmp/dd-fraktag-docs-after.txt && diff /tmp/dd-fraktag-modules-before.txt /tmp/dd-fraktag-modules-after.txt",
+        "cwd": ".",
+        "environment": "pre-provisioned /private/tmp/DOCS-DISCOVERY-1-{grpc-java,fraktag}-before (18 s, 1 s); served by both binaries; under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; STAY",
+        "inputs": "grpc-java — `49` → `50 documents` (root `AUTHORS` as `doc`), `+12 markdown/prose files …` (`CODE-OF-CONDUCT.md`, `COMPILING.md`, `GOVERNANCE.md`, `SECURITY.md`, `.github/ISSUE_TEMPLATE/*.md` …), `modules list` byte-identical; FRAKTAG — headline `14 documents` unchanged, `+5` → `+11 vendored docs` (six `AUTHORS`/`readme.*` files under `packages/engine/fraktag-env/lib/python3.11/site-packages/...` — RG-REQ-008-L04's one vendored predicate), an unscanned line (165 at measurement — `AGENTS.md`, `CLAUDE.md`, the knowledge-base content under `packages/engine/data/new-kb/**.md`; asserted by pattern because the checkout is live), `modules list` byte-identical"
+      },
+      "expected": "exit 0: a root AUTHORS is found, vendored documentation stays excluded and counted, and the refused markup is stated (no behavior change to the vendored or recommendation surfaces)",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "grpc-java: 49 → 50, `+12 markdown/prose files … not scanned`, `AUTHORS  doc`. FRAKTAG: 14 both sides, `+5` → `+11 vendored docs`, `+165` not scanned. `modules list` identical on both.",
+        "supportingEvidence": [
+          "/tmp/dd-grpc-java-docs-after.txt",
+          "/tmp/dd-fraktag-docs-after.txt",
+          "/tmp/dd-grpc-java-modules-after.txt",
+          "/tmp/dd-fraktag-modules-after.txt",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C13",
+      "obligationIds": [
+        "RG-REQ-008-L01",
+        "RG-REQ-008-L02",
+        "RG-REQ-008-L03",
+        "RG-REQ-008-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-repo-graph-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-repo-graph-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" docs list > /tmp/dd-repo-graph-docs-before.txt 2> /tmp/dd-repo-graph-docs-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-repo-graph-docs-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-repo-graph-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-repo-graph-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list > /tmp/dd-repo-graph-docs-after.txt 2> /tmp/dd-repo-graph-docs-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-repo-graph-docs-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-repo-graph-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-repo-graph-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" docs list --json > /tmp/dd-repo-graph-docs-after.json 2> /tmp/dd-repo-graph-docs-after.json.err ) || { echo \"RUN-FAILED /tmp/dd-repo-graph-docs-after.json\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-repo-graph-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-repo-graph-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/private/tmp/DOCS-DISCOVERY-1-before-bin:$PATH\" \"/private/tmp/DOCS-DISCOVERY-1-before-bin/rmap\" modules list > /tmp/dd-repo-graph-modules-before.txt 2> /tmp/dd-repo-graph-modules-before.txt.err ) || { echo \"RUN-FAILED /tmp/dd-repo-graph-modules-before.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-repo-graph-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-repo-graph-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" modules list > /tmp/dd-repo-graph-modules-after.txt 2> /tmp/dd-repo-graph-modules-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-repo-graph-modules-after.txt\"; exit 1; } && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph' && export RMAP_STATE_ROOT=/private/tmp/DOCS-DISCOVERY-1-repo-graph-before RMAP_SOCKET_PATH=/private/tmp/DOCS-DISCOVERY-1-repo-graph-before/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient --budget medium > /tmp/dd-repo-graph-orient-after.txt 2> /tmp/dd-repo-graph-orient-after.txt.err ) || { echo \"RUN-FAILED /tmp/dd-repo-graph-orient-after.txt\"; exit 1; } && grep -qE '^\\+[0-9]+ markdown/prose files outside a docs tree not scanned \\(--json for the rule\\)$' /tmp/dd-repo-graph-docs-after.txt && grep -E '^[0-9]+ generated maps? excluded \\(tool-generated map summaries; use --include-generated to show\\)$' /tmp/dd-repo-graph-docs-before.txt > /tmp/dd-repo-graph-gen-before.txt && grep -E '^[0-9]+ generated maps? excluded \\(tool-generated map summaries; use --include-generated to show\\)$' /tmp/dd-repo-graph-docs-after.txt > /tmp/dd-repo-graph-gen-after.txt && diff /tmp/dd-repo-graph-gen-before.txt /tmp/dd-repo-graph-gen-after.txt && python3 - /tmp/dd-repo-graph-docs-before.txt /tmp/dd-repo-graph-docs-after.txt /tmp/dd-repo-graph-docs-after.json <<'PY'\nimport json, sys, re\ndef header(p):\n    t = open(p).read(); total = int(re.search(r'^(\\d+) documents$', t, re.M).group(1))\n    kinds = {m.group(1): int(m.group(2)) for m in re.finditer(r'^  ([a-z-]+)  (\\d+)$', t, re.M)}\n    return total, kinds\nbt, bk = header(sys.argv[1]); at, ak = header(sys.argv[2])\nprint('before', bt, bk, '| after', at, ak)\nassert at == bt + 1, (bt, at)\nassert ak['architecture'] == bk['architecture'] + 1 and ak['readme'] == bk['readme'] + 1 and ak['doc'] == bk['doc'] - 1, (bk, ak)\nd = json.load(open(sys.argv[3])); v = d.get('value', d)\npaths = {e['path']: e['kind'] for e in v['entries']}\nassert paths.get('agent_docs/architecture.md') == 'architecture', paths.get('agent_docs/architecture.md')\nassert v['unscanned_markup_outside_docs_tree'] >= 1000, v['unscanned_markup_outside_docs_tree']\nprint('repo-graph seam ok: +1 architecture (agent_docs/architecture.md), one doc-tree README.* reclassified readme, unscanned', v['unscanned_markup_outside_docs_tree'])\nPY",
+        "cwd": ".",
+        "environment": "pre-provisioned /private/tmp/DOCS-DISCOVERY-1-repo-graph-before (9 s); served by both binaries against the LIVE checkout of this repository; under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_RETENTION=off; STAYS",
+        "inputs": "repo-graph itself — asserted RELATIVELY because the checkout moves with every commit (OC-1: the first admission read 657/658 from the 100f2ae measurement; two decision records committed since made it 659/660): after headline = before + 1 (`agent_docs/architecture.md`, architecture + 1), one README.rst/.txt already inside a docs tree (`docs/skills/README.txt`) reclassifies from `doc` to `readme` by the stem rule (readme + 1, doc − 1), the unscanned line ≥ 1000 (dominated by `.agent-manager/**.md`, local relay state the walk does not gitignore — pre-existing, stated); the before values are read from the before capture of THIS run; the `N generated maps excluded (…)` line (the checkout's gitignored `rmap map` sidecars, e.g. the root `MAP.md`) identical before and after. This document item's walk of the checkout under the ratified rule finds exactly ONE newly admitted file (`agent_docs/architecture.md`)"
+      },
+      "expected": "exit 0: the repository's own inventory gains exactly the architecture note the rule now admits and reclassifies its doc-tree readme, stated against a live baseline; the generated-map exclusion line remains identical (no behavior change to RG-REQ-008-L03)",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "repo-graph, checked relative to its before capture: 660 {doc 623, architecture 28, readme 9} → 661 {doc 622, architecture 29, readme 10}. `agent_docs/architecture.md` is `architecture`; 1257 not scanned; the generated-maps line is identical.",
+        "supportingEvidence": [
+          "/tmp/dd-repo-graph-docs-before.txt",
+          "/tmp/dd-repo-graph-docs-after.txt",
+          "/tmp/dd-repo-graph-docs-after.json",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    },
+    {
+      "checkId": "DD-C14",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "P-DD-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "test \"$(grep -E '^registry-before [0-9a-f]{64}$' .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md | tail -1 | cut -d' ' -f2)\" = \"$(shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -d' ' -f1)\" && PIDS=$(pgrep -x rmapd | paste -sd, -); { [ -z \"$PIDS\" ] || ! ps -o command= -p \"$PIDS\" | grep -v '/\\.local/bin/rmapd' | grep -q .; } && ! test -d /private/tmp/DOCS-DISCOVERY-1-before-bin && ls -d /private/tmp/DOCS-DISCOVERY-1-hadoop-before /private/tmp/DOCS-DISCOVERY-1-django-before /private/tmp/DOCS-DISCOVERY-1-buildroot-before /private/tmp/DOCS-DISCOVERY-1-kafka-before /private/tmp/DOCS-DISCOVERY-1-leveldb-before /private/tmp/DOCS-DISCOVERY-1-grpc-java-before /private/tmp/DOCS-DISCOVERY-1-fraktag-before /private/tmp/DOCS-DISCOVERY-1-repo-graph-before >/dev/null && ! git status --short | grep -vE '^[ MA?][ MA?] (rust/crates/doc\\-facts/src/discovery\\.rs|rust/crates/doc\\-facts/src/classification\\.rs|rust/crates/doc\\-facts/src/lib\\.rs|rust/crates/doc\\-facts/src/lib_tests\\.rs|rust/crates/daemon\\-runtime/src/modules_method\\.rs|rust/crates/daemon\\-runtime/src/orient_additive_fields\\.rs|rust/crates/daemon\\-runtime/src/dispatch\\.rs|rust/crates/rgr/src/presentation/docs\\.rs|rust/crates/rgr/src/presentation/docs_tests\\.rs|rust/crates/rgr/src/presentation/orient_tests\\.rs)$' | grep -q . && git diff --check",
+        "cwd": ".",
+        "environment": "candidate tree, after every other check",
+        "inputs": "PRECONDITION: the document item (this SLICE_DOC, the INPUT-2 manifest and docs/assurance/DOCS-DISCOVERY-1/oracle-corrections.md) is committed before the admission — as INPUT-1's was (b44a7c4) — otherwise the `git status` clause fails on files this slice does not own; the relay writes the post-review records after this check. the full sha256 of the operator registry recorded as `registry-before <digest>` in build-progress.md at step 0 equals the current one; no stray isolated daemon; the before-binary directory removed; the eight `-before` roots kept for the manager's gate; `git status --short` names only the ten candidate paths (no new files in this slice); no trailing whitespace"
+      },
+      "expected": "exit 0: every proof was isolated (the operator's registry byte-identical — no behavior change outside the isolated roots), the tree holds only the allocated paths",
+      "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Registry digest unchanged. The only running `rmapd` is the operator's `/Users/apple/.local/bin/rmapd`. The before-binary directory is removed and the eight `-before` roots are kept. `git status` lists only the ten paths; `git diff --check` is clean.",
+        "supportingEvidence": [
+          ".agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md",
+          "exit 0 (builder-executed, the exact allocated command from its cwd; .agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md)"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/doc-facts/src/discovery.rs",
+      "obligationIds": [
+        "RG-REQ-008-L01",
+        "RG-REQ-008-L06",
+        "RG-REQ-008-L07",
+        "RG-REQ-011-L07"
+      ],
+      "summary": "One stem, extension and doc-tree rule, including `src/site`. `doc_name_stem`, the refused-markup count (skips `.rgr/` via `is_tool_state_path`), `DocDiscovery`, `DiscoveryRule` and `discovery_rule()`."
+    },
+    {
+      "path": "rust/crates/doc-facts/src/classification.rs",
+      "obligationIds": [
+        "RG-REQ-008-L02"
+      ],
+      "summary": "`readme` by stem; neutral-doc rule reads `DOC_EXTENSIONS`; bare stems → `doc`."
+    },
+    {
+      "path": "rust/crates/doc-facts/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-008-L06",
+        "P-DD-01"
+      ],
+      "summary": "New `unscanned_markup_outside_docs_tree` field, `.files` reads, one re-export."
+    },
+    {
+      "path": "rust/crates/doc-facts/src/lib_tests.rs",
+      "obligationIds": [
+        "RG-REQ-008-L06"
+      ],
+      "summary": "Inventory test for the unscanned count."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/modules_method.rs",
+      "obligationIds": [
+        "RG-REQ-008-L07",
+        "RG-REQ-003-L09"
+      ],
+      "summary": "Orientation file names come from `doc_name_stem` + `ORIENTATION_STEMS`; new test."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_additive_fields.rs",
+      "obligationIds": [
+        "RG-REQ-003-L09"
+      ],
+      "summary": "Comment only (`true`)."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+      "obligationIds": [
+        "RG-REQ-008-L06",
+        "P-DD-02"
+      ],
+      "summary": "Payload keys added together when count > 0; rule built without a silent fallback."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/docs.rs",
+      "obligationIds": [
+        "RG-REQ-008-L06",
+        "RG-REQ-008-L08"
+      ],
+      "summary": "Typed `DiscoveryRuleView`; count and rule decode as one fact; header line; filtered JSON re-emits both."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/docs_tests.rs",
+      "obligationIds": [
+        "RG-REQ-008-L06",
+        "RG-REQ-008-L08"
+      ],
+      "summary": "New tests and updated literals."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/orient_tests.rs",
+      "obligationIds": [
+        "RG-REQ-003-L09"
+      ],
+      "summary": "Orient-side recommendation test."
+    }
+  ],
+  "completedAt": "2026-09-22T19:34:33.779Z",
+  "limitations": [
+    "**No code change this admission, so no fail-first run.** I did not re-run the failing-tests-first step. Fail-first was done in the earlier admissions; this cycle is re-verification only.",
+    "**repo-graph figures differ from the packet, as expected.** The packet's note says \"repo-graph 658 / architecture 29\"; the live checkout reads 660 → 661 (architecture 28 → 29). DD-C13 is relative by design (OC-1), so this is not a stop condition.",
+    "**Extra witness probes.** The BEFORE kinds in the examples come from additional before-binary `docs list --json` runs on the same isolated roots, outside the allocated commands. They were read-only and isolated.",
+    "**Operator's gate.** `cargo test --workspace`, the smoke scripts, the dogfood and the `#[ignore]` daemon-backed `docs_extract_*` tests were NOT RUN; they are the operator's gate after acceptance.",
+    "**Inherited effect not checked.** The change to orient's Docs ranking on corpora other than hadoop stays unverified, as the slice document states.",
+    "**Cleanup.** The eight `-before` roots were left in place for the manager. I created none and deleted none.",
+    "Manager interpretation by in-place-manager: The builder delivered its evidence as a Markdown report instead of the implementation-evidence-result JSON object (an output-contract slip; agent-to-agent results are not schema-policed — human ruling 2026-09-13). Interpreted verbatim: 14/14 checks passed (each row's text as `actual`, the check's capture paths as supporting evidence), the ten change justifications from its table, its six limitations, and the full report (which carries the code-under-analysis witnesses incl. Configuration.md:15). No code changed this admission: candidate-2.patch re-applied on 74969de. Source provider run build-DOCS-DISCOVERY-1-0; retained output .agent-manager/slices/DOCS-DISCOVERY-1/build-0.md sha256:21c4a87f10fb1911a2ecb0e732f7085adcbf049a1b5da3ce561d63e5d01bdfb5. The provider remains the performer; this interpretation is not independent execution evidence."
+  ],
+  "report": "# DOCS-DISCOVERY-1, third admission (INPUT-3): all 14 checks pass\n\nI re-applied the second admission's preserved candidate (`candidate-2.patch`, the ten allocated paths) and changed no code. I then re-ran DD-C01 to DD-C14 as they now read in the INPUT-3 slice document (sha256 `d44c43db5d1d3fe116d0b943d8300a4997d4addd6b03ebdf29079e7275864dfc`). Nothing is committed; the diff is in the working tree: 10 files, 938 insertions, 56 deletions.\n\n- **Base:** HEAD `74969de6cd79d5e10edc5e36d237685bb1194ab3`. `git diff --stat b44a7c4 HEAD -- rust` is empty.\n- **Before binary:** built from the clean tree before the patch was applied.\n- **Registry:** `registry-before 4762fd948a05b208f1eda8e8e026f63715f0d98630023ba28a48b831a879d64c`, unchanged at the end.\n- **Progress log:** `.agent-manager/slices/DOCS-DISCOVERY-1/build-progress.md`.\n- **Test captures:** `/tmp/dd-c0*.txt`.\n- **Corpus captures:** `/tmp/dd-<corpus>-*`.\n\n## Checks (every one EXECUTED)\n\nEach check was run with the exact command in the allocation block, from the `cwd` it names. Each finished with exit 0.\n\n| Check | Result |\n|---|---|\n| DD-C01 | doc-facts `--lib discovery`: 16 passed, all 16 named tests ok. Constant greps ok; the five exact doc names are gone from `known_docs`. |\n| DD-C02 | doc-facts `--lib classification`: 29 passed. The old `readme.md \\|\\| readme` rule is gone. |\n| DD-C03 | Whole doc-facts crate: 121 passed (doctests: 1 ignored). `self_generated.rs`, `release_notes.rs` and `types.rs` are byte-identical. `DiscoveryRule` and `discovery_rule()` are defined in `discovery.rs`, not `lib.rs`. |\n| DD-C04 | daemon-runtime `--lib modules_method`: 37 passed. The inline stem list is gone; `ORIENTATION_STEMS` is used; the `false` comment is corrected. |\n| DD-C05 | rgr `presentation::docs` 38, `presentation::orient::tests` 70, `presentation::modules_list` 57, all passed. The extracted `handle_docs_list` (112 lines) carries both payload keys and no `unwrap_or(`, `unwrap_or_default` or `.ok()`; the rule is built with `.expect(..)`. |\n| DD-C06 | rgr `--lib` 1268 passed; daemon-runtime whole `--lib` 785 passed, 1 ignored (36 s); `docs_command` 6 passed. Every out-of-scope path is byte-identical. |\n| DD-C07 | `cargo fmt --check` and clippy `-D warnings --all-targets` are clean on the three touched crates. |\n| DD-C08 | hadoop: `22 documents` → `556 documents` (`doc 527`, `readme 26`, `architecture 2`, `config 1`), `+3 vendored docs`, `+3 markdown/prose files … not scanned`. The line `6813 generated maps excluded (…)` is identical before and after. `modules list` and `orient --budget medium` both print `read: README.txt — or the tree.` JSON: count 559, 520 entries under `src/site` (519 `doc`), and the rule object. |\n| DD-C09 | django: 616 → 622 (`readme 7`, `doc 225`, `release-notes 386`, `architecture 3`, `license 1`), `+54 vendored`, `+4` not scanned. The recommendation changes from `read: docs/` to `read: CONTRIBUTING.rst, README.rst, docs/ — or the tree.` JSON count 676. |\n| DD-C10 | buildroot: 4 → 310 (`readme 234`, `doc 75`, `config 1`), `+3` not scanned. JSON: 73 `.adoc` files under `docs/` (all `doc`), 225 `board/**` readmes. |\n| DD-C11 | kafka: 133 both sides, byte-identical except the added line `+1 markdown/prose file … not scanned`; `modules list` identical. leveldb: 7 → 9 (`AUTHORS`, `NEWS`), no unscanned line, and neither gated JSON key present. |\n| DD-C12 | grpc-java: 49 → 50, `+12 markdown/prose files … not scanned`, `AUTHORS  doc`. FRAKTAG: 14 both sides, `+5` → `+11 vendored docs`, `+165` not scanned. `modules list` identical on both. |\n| DD-C13 | repo-graph, checked relative to its before capture: 660 {doc 623, architecture 28, readme 9} → 661 {doc 622, architecture 29, readme 10}. `agent_docs/architecture.md` is `architecture`; 1257 not scanned; the generated-maps line is identical. |\n| DD-C14 | Registry digest unchanged. The only running `rmapd` is the operator's `/Users/apple/.local/bin/rmapd`. The before-binary directory is removed and the eight `-before` roots are kept. `git status` lists only the ten paths; `git diff --check` is clean. |\n\n## Code-under-analysis examples\n\nThese are quoted from the checkouts. BEFORE and AFTER kinds come from before-binary and candidate `docs list --json` runs on the same isolated roots.\n\n1. **hadoop, the site guide.** `hadoop-common-project/hadoop-auth/src/site/markdown/Configuration.md:15` reads `Hadoop Auth, Java HTTP SPNEGO - Server Side Configuration`. BEFORE: absent. AFTER: `doc`.\n2. **hadoop, the root README.** `README.txt:1` reads `For the latest information about Hadoop, please visit our website at:`. BEFORE: absent. AFTER: `readme`.\n   - The recommendation changed from `No README or architecture doc found — the tree is the best orientation.` to `For module boundaries as the authors describe them, read: README.txt — or the tree.`\n3. **django.** `README.rst:1-2` reads `======` / `Django` (BEFORE absent, AFTER `readme`). `CONTRIBUTING.rst:2` reads `Contributing to Django` (BEFORE absent, AFTER `doc`).\n   - The recommendation changed from `read: docs/ — or the tree.` to `read: CONTRIBUTING.rst, README.rst, docs/ — or the tree.`\n4. **buildroot.** `docs/manual/manual.adoc:1` reads `// -*- mode:doc; -*-` (absent → `doc`). `board/arm/foundation-v8/readme.txt:1` reads `Introduction` (absent → `readme`).\n5. **grpc-java, a refused file.** `CODE-OF-CONDUCT.md` exists at the root and is one of the files behind `+12 markdown/prose files outside a docs tree not scanned (--json for the rule)`. The JSON gives only the count, not the refused paths.\n6. **leveldb, deliberately not counted.** `CMakeLists.txt` is a `.txt` outside a docs tree; leveldb's output has no unscanned line (D-DD1-002).\n\n## Change justifications\n\n| Path | Obligations | What changed |\n|---|---|---|\n| `doc-facts/src/discovery.rs` | L01, L06, L07, 011-L07 | One stem, extension and doc-tree rule, including `src/site`. `doc_name_stem`, the refused-markup count (skips `.rgr/` via `is_tool_state_path`), `DocDiscovery`, `DiscoveryRule` and `discovery_rule()`. |\n| `doc-facts/src/classification.rs` | L02 | `readme` by stem; neutral-doc rule reads `DOC_EXTENSIONS`; bare stems → `doc`. |\n| `doc-facts/src/lib.rs` | L06, P-DD-01 | New `unscanned_markup_outside_docs_tree` field, `.files` reads, one re-export. |\n| `doc-facts/src/lib_tests.rs` | L06 | Inventory test for the unscanned count. |\n| `daemon-runtime/src/modules_method.rs` | L07, 003-L09 | Orientation file names come from `doc_name_stem` + `ORIENTATION_STEMS`; new test. |\n| `daemon-runtime/src/orient_additive_fields.rs` | 003-L09 | Comment only (`true`). |\n| `daemon-runtime/src/dispatch.rs` | L06, P-DD-02 | Payload keys added together when count > 0; rule built without a silent fallback. |\n| `rgr/src/presentation/docs.rs` | L06, L08 | Typed `DiscoveryRuleView`; count and rule decode as one fact; header line; filtered JSON re-emits both. |\n| `rgr/src/presentation/docs_tests.rs` | L06, L08 | New tests and updated literals. |\n| `rgr/src/presentation/orient_tests.rs` | 003-L09 | Orient-side recommendation test. |\n\n## Limitations\n\n- **No code change this admission, so no fail-first run.** I did not re-run the failing-tests-first step. Fail-first was done in the earlier admissions; this cycle is re-verification only.\n- **repo-graph figures differ from the packet, as expected.** The packet's note says \"repo-graph 658 / architecture 29\"; the live checkout reads 660 → 661 (architecture 28 → 29). DD-C13 is relative by design (OC-1), so this is not a stop condition.\n- **Extra witness probes.** The BEFORE kinds in the examples come from additional before-binary `docs list --json` runs on the same isolated roots, outside the allocated commands. They were read-only and isolated.\n- **Operator's gate.** `cargo test --workspace`, the smoke scripts, the dogfood and the `#[ignore]` daemon-backed `docs_extract_*` tests were NOT RUN; they are the operator's gate after acceptance.\n- **Inherited effect not checked.** The change to orient's Docs ranking on corpora other than hadoop stays unverified, as the slice document states.\n- **Cleanup.** The eight `-before` roots were left in place for the manager. I created none and deleted none.\n\nNo stop condition was hit and no decision is required."
+}

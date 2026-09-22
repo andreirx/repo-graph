@@ -28,6 +28,9 @@ pub(crate) mod release_notes; // DOCS-LIST-2 §2: `release-notes` STRUCTURAL sub
 pub mod self_generated;
 pub mod types;
 
+pub use discovery::{
+    discovery_rule, doc_name_stem, DiscoveryRule, DOC_EXTENSIONS, DOC_NAME_STEMS, ORIENTATION_STEMS,
+};
 pub use self_generated::{
     has_map_sidecar_name, is_os_noise, is_self_generated, is_tool_state_path, GENERATED_MARKER,
 };
@@ -104,6 +107,10 @@ pub struct DocInventoryResult {
     /// ("+N unreadable, counted"), never a silent claim (operator RULING 3, honesty rule #1). ⊆ the
     /// entry count.
     pub unreadable_count: usize,
+    /// DOCS-DISCOVERY-1 (RG-REQ-008-L06): markup files (`.md`/`.markdown`/`.rst`/`.adoc`) the
+    /// discovery walk visited and the rule refused — prose outside a doc tree, NOT in `entries`.
+    /// Stated so a reader knows what the rule did not scan ([`discovery_rule`] states the rule).
+    pub unscanned_markup_outside_docs_tree: usize,
 }
 
 /// Discover documentation inventory without extracting semantic facts.
@@ -148,7 +155,10 @@ pub fn discover_doc_inventory(
     // doc value — so it never enters the inventory (and thus never orient's Docs
     // line). It remains a discovery candidate for `docs extract`'s env-surface
     // hint; only the inventory surface drops it.
-    let mut doc_files: Vec<DocFile> = discovery::discover_doc_files(repo_path)
+    let discovered = discovery::discover_doc_files(repo_path);
+    let unscanned_markup_outside_docs_tree = discovered.unscanned_markup_outside_docs_tree;
+    let mut doc_files: Vec<DocFile> = discovered
+        .files
         .into_iter()
         .filter(|d| !is_env_path(&d.relative_path))
         .collect();
@@ -307,6 +317,7 @@ pub fn discover_doc_inventory(
         counts_by_kind,
         generated_count,
         unreadable_count,
+        unscanned_markup_outside_docs_tree,
     })
 }
 
@@ -328,7 +339,7 @@ pub fn extract_semantic_facts(repo_path: &Path) -> Result<ExtractionResult, DocF
     }
 
     // Step 1: Discover candidate files
-    let mut doc_files = discovery::discover_doc_files(repo_path);
+    let mut doc_files = discovery::discover_doc_files(repo_path).files;
 
     // Step 2: Read content and compute hashes
     let mut warnings = Vec::new();

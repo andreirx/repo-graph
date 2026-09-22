@@ -1,0 +1,696 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-DOCS-DISCOVERY-1-0",
+  "workItemId": "DOCS-DISCOVERY-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/DOCS-DISCOVERY-1-INPUT-3.json",
+    "sha256": "sha256:91c2e764743e2d84ccb156a03c87c52745f2a9ab587c820d0ca2862cf8d5e27c"
+  },
+  "allocation": {
+    "path": "docs/slices/docs-discovery-1.md",
+    "sha256": "sha256:d44c43db5d1d3fe116d0b943d8300a4997d4addd6b03ebdf29079e7275864dfc"
+  },
+  "subject": {
+    "candidateSha256": "sha256:476a8283904f47cd0b587363a3cbe0b0c1fcb128114477573c1523f150295dbf",
+    "verification": {
+      "path": "docs/assurance/DOCS-DISCOVERY-1/verification.json",
+      "sha256": "sha256:0f4868cfd20eb506f9fad19fe56bf10966657f025964c890bdd9b6849cfb19d8"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-DOCS-DISCOVERY-1-0"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/DOCS-DISCOVERY-1-INPUT-3.json",
+      "sha256": "sha256:91c2e764743e2d84ccb156a03c87c52745f2a9ab587c820d0ca2862cf8d5e27c"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/DOCS-DISCOVERY-1-INPUT-3.json",
+        "sha256": "sha256:91c2e764743e2d84ccb156a03c87c52745f2a9ab587c820d0ca2862cf8d5e27c",
+        "byteLength": 4361
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-003-orientation-surfaces.md",
+        "sha256": "sha256:bf4630448569e9de5b84fa874b44f0476a4656dcbd0e3627e8f2809d33b6bbcb",
+        "byteLength": 13084
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-008-documentation-inventory.md",
+        "sha256": "sha256:c72c463696cee69c749055218077e5393eb6480635bc5458d880be6fc766ea29",
+        "byteLength": 13966
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+        "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb",
+        "byteLength": 15479
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35",
+        "byteLength": 20305,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/headline-truth-1.md",
+        "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351",
+        "byteLength": 8211,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/coherence-3.md",
+        "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36",
+        "byteLength": 3408,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/modules-method-1.md",
+        "sha256": "sha256:8c5c41ca832099568431228145556caae17d35c0dc3bc093f3b202311971820e",
+        "byteLength": 5226,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/docs-list-2.md",
+        "sha256": "sha256:edc2185eee6bd8a9206b777b03c50d4988368e83b59ef5b38d3d6b0390b90c1f",
+        "byteLength": 3486,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/audit5-minors-1.md",
+        "sha256": "sha256:cf4db06b57ba95e2730f0342b4b896cbd1d7758274d8daba5f0d201a85edb496",
+        "byteLength": 7535,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/self-pollution-1.md",
+        "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199",
+        "byteLength": 4474,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/state-root-separation-1.md",
+        "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f",
+        "byteLength": 10847,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/snapshot-retention-1.md",
+        "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff",
+        "byteLength": 5984,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/daemon-residuals-2.md",
+        "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408",
+        "byteLength": 9750,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/audits/2026-09-08-root-causes-v0.18.0.md",
+        "sha256": "sha256:6ffe87b1606ec2e683a248aeb0c290ca28cce20758616a7632b4c4771aac7965",
+        "byteLength": 48460,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/DOCS-DISCOVERY-1/oracle-corrections.md",
+        "sha256": "sha256:f87a6f9de8d65318fe1d1668c63a728039c5d62cdd3a507d51514bb4414f841a",
+        "byteLength": 4085,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DD1-003.md",
+        "sha256": "sha256:509fe4ef551d35b375584fa43a2ca0e2c4eefd3abda57cc3b7d8e3686a8971d3",
+        "byteLength": 3267,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:8b00604325d3d0e8fd8afd2abfa17f0d05ac2a88ce6ccd8a340dd43ec137ab6e",
+        "byteLength": 12963
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:4e6e2a618c2c15f1546d38736b876bdba688d1926ab102741cbe60c3a9bb3f04",
+        "byteLength": 10492
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/docs-discovery-1.md",
+        "sha256": "sha256:d44c43db5d1d3fe116d0b943d8300a4997d4addd6b03ebdf29079e7275864dfc",
+        "byteLength": 110203
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/DOCS-DISCOVERY-1-INPUT-3/requirements-review.json",
+        "sha256": "sha256:d1285945a4df4b03bb39d42eb8ae0dd3312147c41f46870997ccb2a4da1ca24e",
+        "byteLength": 54066
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/DOCS-DISCOVERY-1-INPUT-3/baseline-approval.json",
+        "sha256": "sha256:1fd6945ffbebeccd18d35b6b6dc2d5edc0081fbb4e8a8b30d02b7265ab8b4707",
+        "byteLength": 1534
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:004436c6c7ea7f33b212f36251189f0f513516c75c2d1b94deddbdbc786443fe",
+        "byteLength": 7524
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/DOCS-DISCOVERY-1/selection.md",
+        "sha256": "sha256:3538e38faa7734f8373354399eb4dd2664ccf64fdffbae1e1c130663a8ff276b",
+        "byteLength": 11823
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-0",
+        "sha256": "sha256:21c4a87f10fb1911a2ecb0e732f7085adcbf049a1b5da3ce561d63e5d01bdfb5",
+        "byteLength": 8272
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "implementation-allocation-0",
+        "sha256": "sha256:138b19afae586f43be52b4461cb367623b0ad904f6660883ca79260855c0e20b",
+        "byteLength": 80680
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-0",
+        "sha256": "sha256:3ec60a8b5b3ae1fce73d0d9cd47eb7a1c503674461ab367e9b3ffd2a43a6e57f",
+        "byteLength": 4119
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "verification-draft-0",
+        "sha256": "sha256:0f4868cfd20eb506f9fad19fe56bf10966657f025964c890bdd9b6849cfb19d8",
+        "byteLength": 110382
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-0",
+        "sha256": "sha256:e920dcb9588e217ef69e0fea5c8f22fb31b94cbc186449e7a6fee2c58276e446",
+        "byteLength": 57847
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:adc3347d40601f66db526617cbed753b836aeab2c53e336c13017b3308064473",
+        "byteLength": 22085
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:47f696ef24b1204ae8dca8584e7859ba64436acf947ca96dffe35c1bb67bf9f5",
+        "byteLength": 551427
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-008-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-003-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DD-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DD-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DD-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DD-04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "DD-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: `cargo test -p repo-graph-doc-facts --lib discovery` passed 16 tests, including stem, case-insensitive extension, src/site, refusal-count, and .rgr exclusion cases.",
+          "supportingEvidence": [
+            "reviewer command output"
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "DD-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: `cargo test -p repo-graph-doc-facts --lib classification` passed 29 tests.",
+          "supportingEvidence": [
+            "reviewer command output"
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "DD-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: `cargo test -p repo-graph-doc-facts` passed 121 tests; one doctest remained ignored.",
+          "supportingEvidence": [
+            "reviewer command output"
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "DD-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: `cargo test -p repo-graph-daemon-runtime --lib modules_method` passed 37 tests.",
+          "supportingEvidence": [
+            "reviewer command output"
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "DD-C05",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "OBSERVED: docs, orient, and modules-list presentation filters passed 38, 70, and 57 tests respectively.",
+          "supportingEvidence": [
+            "reviewer command output",
+            "/tmp/dd-c05.txt",
+            "/tmp/dd-c05b.txt",
+            "/tmp/dd-c05c.txt"
+          ]
+        }
+      }
+    },
+    {
+      "checkId": "DD-C06",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED: captures report rgr lib 1268 passed, daemon-runtime lib 785 passed/1 ignored, and docs_command 6 passed. Reviewer independently reproduced the rgr lib suite; the daemon-runtime full run was not retained to a final reviewer-visible summary."
+      }
+    },
+    {
+      "checkId": "DD-C07",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "OBSERVED: reviewer reproduced `cargo fmt --check`; BUILDER-EXECUTED evidence reports the required all-target clippy invocation clean."
+      }
+    },
+    {
+      "checkId": "DD-C08",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED isolated corpus command passed. OBSERVED capture inspection confirms Hadoop's 556-document headline, +3 refusal line, and README.txt recommendation."
+      }
+    },
+    {
+      "checkId": "DD-C09",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED isolated Django corpus command passed."
+      }
+    },
+    {
+      "checkId": "DD-C10",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED isolated Buildroot corpus command passed."
+      }
+    },
+    {
+      "checkId": "DD-C11",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED isolated Kafka and LevelDB control-corpus command passed."
+      }
+    },
+    {
+      "checkId": "DD-C12",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED isolated grpc-java and FRAKTAG corpus command passed."
+      }
+    },
+    {
+      "checkId": "DD-C13",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED relative repo-graph corpus command passed."
+      }
+    },
+    {
+      "checkId": "DD-C14",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "BUILDER-EXECUTED report records unchanged operator-registry digest, isolated-root retention, allocated-path-only status, and clean diff check."
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "rust/crates/doc-facts/src/discovery.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/doc-facts/src/classification.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/doc-facts/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/doc-facts/src/lib_tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/modules_method.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_additive_fields.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/docs.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/docs_tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/orient_tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-09-22T19:39:14.119Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nOBSERVED: working tree contains exactly the ten allocated modified paths; `git diff --check` passed. The implementation centralizes the ratified stem/extension/tree rule in doc-facts, preserves the existing dependency direction, and adds no module or dependency boundary. The typed wire decode rejects an unscanned count without its discovery rule before either human or raw-JSON rendering, preserving the honesty condition. OBSERVED witnesses: Hadoop Configuration.md:15 is `Hadoop Auth, Java HTTP SPNEGO - Server Side Configuration`; Hadoop README.txt begins `For the latest information about Hadoop, please visit our website at:`; Django README.rst begins `======` / `Django`; CONTRIBUTING.rst:2 is `Contributing to Django`; Buildroot manual.adoc begins `// -*- mode:doc; -*-`; its board readme begins `Introduction`. These support the VISION's orientation goal: the first answer now identifies documentation where authors actually placed it while stating refused markup rather than implying exhaustive discovery. Operator-only workspace, smoke, dogfood, and ignored daemon-backed extraction gates remain outside this review scope.\n\nManager interpretation by in-place-manager: Reviewer output carried the off-shape subject (candidateCheckpointSha256); agent-to-agent results are not schema-policed. Applied verbatim: accepted, no findings, no decisions; all 16 obligations, 14 checks and 10 paths accepted. Source provider run review-DOCS-DISCOVERY-1-0; retained output .agent-manager/slices/DOCS-DISCOVERY-1/review-0.json sha256:2489a9ed3451459db7b1ac6ae209e7cd5164dbd95fbe2b54279b3fb522609349. The provider remains the performer; this interpretation is not independent execution evidence."
+}

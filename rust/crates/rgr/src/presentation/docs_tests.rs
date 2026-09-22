@@ -40,6 +40,8 @@ fn sample_list_response() -> DocsListResponse {
         counts_by_kind,
         generated_count: 1,
         unreadable: 0,
+        unscanned_markup_outside_docs_tree: 0,
+        discovery_rule: None,
     }
 }
 
@@ -63,6 +65,8 @@ fn sample_list_response_no_generated() -> DocsListResponse {
         counts_by_kind,
         generated_count: 0,
         unreadable: 0,
+        unscanned_markup_outside_docs_tree: 0,
+        discovery_rule: None,
     }
 }
 
@@ -152,6 +156,8 @@ fn list_render_empty_shows_hint() {
         counts_by_kind: BTreeMap::new(),
         generated_count: 0,
         unreadable: 0,
+        unscanned_markup_outside_docs_tree: 0,
+        discovery_rule: None,
     };
     let out = resp.render_human(true, false);
     assert!(out.contains("0 documents"));
@@ -178,6 +184,8 @@ fn list_render_singular_document() {
         counts_by_kind,
         generated_count: 0,
         unreadable: 0,
+        unscanned_markup_outside_docs_tree: 0,
+        discovery_rule: None,
     };
     let out = resp.render_human(true, false);
     assert!(out.contains("1 document\n")); // singular
@@ -218,6 +226,8 @@ fn response_with_generated_maps() -> DocsListResponse {
         counts_by_kind: BTreeMap::new(),
         generated_count: 2,
         unreadable: 0,
+        unscanned_markup_outside_docs_tree: 0,
+        discovery_rule: None,
     }
 }
 
@@ -289,6 +299,8 @@ fn list_all_generated_does_not_claim_no_docs() {
         counts_by_kind: BTreeMap::new(),
         generated_count: 1,
         unreadable: 0,
+        unscanned_markup_outside_docs_tree: 0,
+        discovery_rule: None,
     };
     let out = resp.render_human(false, false);
     assert!(out.contains("0 documents"), "{out}");
@@ -341,6 +353,8 @@ fn response_with(entries: Vec<DocEntry>) -> DocsListResponse {
         counts_by_kind: BTreeMap::new(),
         generated_count: 0,
         unreadable: 0,
+        unscanned_markup_outside_docs_tree: 0,
+        discovery_rule: None,
     }
 }
 
@@ -605,6 +619,189 @@ fn json_filtered_view_surfaces_unreadable_when_present() {
         v["unreadable"], 2,
         "unreadable count surfaced in machine view: {v}"
     );
+}
+
+// ── DOCS-DISCOVERY-1: unscanned markup (RG-REQ-008-L06) ─────────────────
+
+#[test]
+fn list_render_states_unscanned_markup_outside_docs_tree() {
+    let mut resp = sample_list_response_no_generated();
+    resp.unscanned_markup_outside_docs_tree = 3;
+    let out = resp.render_human(false, false);
+    assert!(
+        out.lines().any(|l| l
+            == "+3 markdown/prose files outside a docs tree not scanned (--json for the rule)"),
+        "plural unscanned line:\n{out}"
+    );
+    resp.unscanned_markup_outside_docs_tree = 1;
+    let out = resp.render_human(false, false);
+    assert!(
+        out.lines()
+            .any(|l| l
+                == "+1 markdown/prose file outside a docs tree not scanned (--json for the rule)"),
+        "singular unscanned line:\n{out}"
+    );
+    // Placed after the unreadable line (both honesty lines above the listing).
+    resp.unreadable = 2;
+    let out = resp.render_human(false, false);
+    let unreadable_at = out.find("+2 unreadable, counted").expect("unreadable line");
+    let unscanned_at = out.find("+1 markdown/prose file").expect("unscanned line");
+    assert!(unreadable_at < unscanned_at, "order:\n{out}");
+}
+
+#[test]
+fn list_render_omits_the_unscanned_line_when_nothing_was_refused() {
+    let resp = sample_list_response_no_generated();
+    let out = resp.render_human(false, false);
+    assert!(
+        !out.contains("outside a docs tree not scanned"),
+        "no unscanned line at count 0:\n{out}"
+    );
+    // An empty headline still states the refusals (before the empty-headline early return).
+    let mut empty = response_with(Vec::new());
+    empty.unscanned_markup_outside_docs_tree = 2;
+    let out = empty.render_human(false, false);
+    assert!(
+        out.contains(
+            "+2 markdown/prose files outside a docs tree not scanned (--json for the rule)"
+        ),
+        "stated even with no admitted docs:\n{out}"
+    );
+}
+
+#[test]
+fn json_filtered_view_surfaces_unscanned_and_rule_when_present() {
+    let mut resp = response_with_generated_maps();
+    resp.unscanned_markup_outside_docs_tree = 4;
+    resp.discovery_rule = Some(sample_rule_view());
+    let v = resp.filtered_json_view(false).expect("filtered view");
+    assert_eq!(v["unscanned_markup_outside_docs_tree"], 4, "{v}");
+    assert_eq!(v["discovery_rule"]["stems"][0], "readme", "{v}");
+    assert_eq!(v["discovery_rule"], sample_rule_json(), "{v}");
+
+    // Nothing refused → neither key in the filtered view.
+    let resp = response_with_generated_maps();
+    let v = resp.filtered_json_view(false).expect("filtered view");
+    assert!(v.get("unscanned_markup_outside_docs_tree").is_none(), "{v}");
+    assert!(v.get("discovery_rule").is_none(), "{v}");
+}
+
+/// The rule object exactly as the daemon serializes doc-facts' `DiscoveryRule`.
+fn sample_rule_json() -> serde_json::Value {
+    serde_json::json!({
+        "stems": ["readme", "contributing", "changelog", "architecture", "design",
+                  "overview", "install", "building", "authors", "news"],
+        "extensions": [".md", ".markdown", ".txt", ".rst", ".adoc"],
+        "doc_tree_dirs": ["docs", "doc", "design"],
+        "doc_tree_conventions": ["src/site"],
+        "unscanned_extensions": [".md", ".markdown", ".rst", ".adoc"]
+    })
+}
+
+fn sample_rule_view() -> DiscoveryRuleView {
+    serde_json::from_value(sample_rule_json()).expect("well-formed rule")
+}
+
+/// A daemon `docs_list` payload with NO generated maps (so `--json` is the raw passthrough),
+/// one readme entry, and the given extra keys merged in.
+fn raw_payload(extra: serde_json::Value) -> serde_json::Value {
+    let mut p = serde_json::json!({
+        "command": "docs list",
+        "repo": "r",
+        "repo_path": "/tmp/r",
+        "entries": [{"path": "README.md", "kind": "readme", "generated": false, "content_hash": "a"}],
+        "count": 1,
+        "counts_by_kind": {"readme": 1},
+        "generated_count": 0
+    });
+    for (k, v) in extra.as_object().expect("object").iter() {
+        p[k] = v.clone();
+    }
+    p
+}
+
+// RG-REQ-008-L06 raw-JSON amendment: the count and the rule decode as ONE fact at the single
+// `from_value::<DocsListResponse>` both modes pass through (commands/docs.rs) — any other pairing
+// is a named malformed-payload error, so it is never rendered in either mode.
+#[test]
+fn malformed_unscanned_payload_is_rejected_never_rendered() {
+    let mut rule_missing_stems = sample_rule_json();
+    rule_missing_stems.as_object_mut().unwrap().remove("stems");
+    let malformed = [
+        (
+            "count without rule",
+            serde_json::json!({"unscanned_markup_outside_docs_tree": 3}),
+        ),
+        (
+            "count with null rule",
+            serde_json::json!({"unscanned_markup_outside_docs_tree": 3, "discovery_rule": null}),
+        ),
+        (
+            "rule missing stems",
+            serde_json::json!({"unscanned_markup_outside_docs_tree": 3, "discovery_rule": rule_missing_stems}),
+        ),
+        (
+            "rule without count",
+            serde_json::json!({"discovery_rule": sample_rule_json()}),
+        ),
+        (
+            "explicit count 0",
+            serde_json::json!({"unscanned_markup_outside_docs_tree": 0, "discovery_rule": sample_rule_json()}),
+        ),
+        (
+            "explicit count 0 without rule",
+            serde_json::json!({"unscanned_markup_outside_docs_tree": 0}),
+        ),
+    ];
+    for (case, extra) in malformed {
+        let err = serde_json::from_value::<DocsListResponse>(raw_payload(extra))
+            .expect_err(case)
+            .to_string();
+        assert!(
+            err.contains("malformed docs_list payload"),
+            "{case}: the error names the malformed payload: {err}"
+        );
+    }
+
+    // Both keys absent (every pre-slice and nothing-refused payload): decodes, count 0, no rule,
+    // and no unscanned line.
+    let ok = serde_json::from_value::<DocsListResponse>(raw_payload(serde_json::json!({})))
+        .expect("both keys absent decodes");
+    assert_eq!(ok.unscanned_markup_outside_docs_tree, 0);
+    assert!(ok.discovery_rule.is_none());
+    assert!(!ok
+        .render_human(false, false)
+        .contains("outside a docs tree not scanned"));
+}
+
+#[test]
+fn raw_json_path_prints_only_payloads_whose_count_carries_the_rule() {
+    let with_rule = raw_payload(serde_json::json!({
+        "unscanned_markup_outside_docs_tree": 2,
+        "discovery_rule": sample_rule_json()
+    }));
+    let resp = serde_json::from_value::<DocsListResponse>(with_rule.clone())
+        .expect("count + well-formed rule decodes");
+    assert_eq!(resp.unscanned_markup_outside_docs_tree, 2);
+    assert_eq!(resp.discovery_rule, Some(sample_rule_view()));
+    // No generated maps → `filtered_json_view` is None → the command prints the RAW payload,
+    // which carries the rule object beside the count.
+    assert!(resp.filtered_json_view(false).is_none());
+    assert_eq!(with_rule["unscanned_markup_outside_docs_tree"], 2);
+    assert_eq!(with_rule["discovery_rule"], sample_rule_json());
+    // The human line points at that rule.
+    assert!(resp
+        .render_human(false, false)
+        .contains("+2 markdown/prose files outside a docs tree not scanned (--json for the rule)"));
+
+    // The same payload with the rule removed does not decode — the command prints its
+    // "failed to parse response" error, never the payload.
+    let mut without_rule = with_rule;
+    without_rule
+        .as_object_mut()
+        .unwrap()
+        .remove("discovery_rule");
+    assert!(serde_json::from_value::<DocsListResponse>(without_rule).is_err());
 }
 
 // ── docs extract tests ───────────────────────────────────────────────────

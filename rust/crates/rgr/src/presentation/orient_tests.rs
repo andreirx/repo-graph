@@ -954,6 +954,24 @@ fn orient_method_not_recorded_renders_canonical_sentence() {
     );
 }
 
+/// DOCS-DISCOVERY-1 (RG-REQ-003-L09): the orient-side assertion that the modules section
+/// renders the docs recommendation line derived from the inventory (`orientation_docs`).
+#[test]
+fn orient_renders_the_docs_recommendation_line() {
+    let mut r = nginx_like();
+    r.orientation_docs = Some(serde_json::json!({
+        "paths": ["README.md", "docs/"],
+        "recommendation": "For module boundaries as the authors describe them, read: README.md, docs/ — or the tree."
+    }));
+    let out = r.render_human(OrientDepth::Full);
+    assert!(
+        out.contains(
+            "For module boundaries as the authors describe them, read: README.md, docs/ — or the tree."
+        ),
+        "orient must render the docs recommendation line:\n{out}"
+    );
+}
+
 #[test]
 fn medium_adds_limits_and_next_but_small_does_not() {
     let mut r = nginx_like();

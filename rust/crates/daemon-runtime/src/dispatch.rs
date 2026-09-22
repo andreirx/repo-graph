@@ -5721,6 +5721,18 @@ impl ServiceDispatcher {
         if inventory.unreadable_count > 0 {
             payload["unreadable"] = serde_json::json!(inventory.unreadable_count);
         }
+        // DOCS-DISCOVERY-1 (RG-REQ-008-L06, D-DD1-002): the markup files the discovery rule refused,
+        // and the rule itself (the header's "--json for the rule"). Gated TOGETHER like `unreadable`:
+        // a repo with nothing refused keeps its byte-identical payload.
+        if inventory.unscanned_markup_outside_docs_tree > 0 {
+            payload["unscanned_markup_outside_docs_tree"] =
+                serde_json::json!(inventory.unscanned_markup_outside_docs_tree);
+            // F-DD1-001: built INFALLIBLY — a `DiscoveryRule` holds only static string slices, so
+            // serialization cannot fail; never a silent `null` in place of the rule.
+            payload["discovery_rule"] =
+                serde_json::to_value(repo_graph_doc_facts::discovery_rule())
+                    .expect("DiscoveryRule serializes: static string slices only");
+        }
         DispatchResult::success(&request.id, payload)
     }
 

@@ -162,7 +162,7 @@ fn inject_modules_method(
     // `unwrap_or_default()` which would turn a failure into "no docs found" (false).
     //
     // review-1 fix #1: apply the vendored-path check to match `docs list`'s classified
-    // facts. `get_doc_inventory` uses `discover_doc_inventory(..., false)` and does NOT
+    // facts. `get_doc_inventory` uses `discover_doc_inventory(..., true)` and does NOT
     // apply the vendored overlay, so vendored docs would be classified by their content
     // kind (readme, license) rather than demoted to "vendored". The is_vendored_path
     // check ensures vendored docs are excluded from orientation recommendations.

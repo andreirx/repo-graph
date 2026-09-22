@@ -429,23 +429,20 @@ pub(crate) fn select_orientation_docs<'a>(docs: &[OrientationDocInput<'a>]) -> V
     out
 }
 
-/// Whether `path` is a §2.2 *named* orientation file: basename stem (case-insensitive,
-/// extension stripped) ∈ {architecture, design, overview, contributing}, located at the
-/// repo root OR directly under a top-level `docs/` or `design/` directory.
+/// Whether `path` is a §2.2 *named* orientation file: its documentation stem
+/// (doc-facts' `doc_name_stem` — case-insensitive, one documentation extension stripped)
+/// is in doc-facts' `ORIENTATION_STEMS` {architecture, design, overview, contributing}
+/// (DOCS-DISCOVERY-1: the ONE stem constant discovery and classification read), located
+/// at the repo root OR directly under a top-level `docs/` or `design/` directory.
 ///
 /// The depth bound is what excludes `docs/faq/contributing.txt` (stem "contributing"
 /// but two levels deep — arbitrary prose, not the authors' architecture doc) while
 /// admitting `docs/ARCHITECTURE.md` and root `CONTRIBUTING.md`.
 fn is_named_orientation_file(path: &str) -> bool {
-    let file_name = path.rsplit('/').next().unwrap_or(path).to_lowercase();
-    let stem = file_name
-        .rsplit_once('.')
-        .map(|(s, _)| s)
-        .unwrap_or(&file_name);
-    if !matches!(
-        stem,
-        "architecture" | "design" | "overview" | "contributing"
-    ) {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    if !repo_graph_doc_facts::doc_name_stem(file_name)
+        .is_some_and(|s| repo_graph_doc_facts::ORIENTATION_STEMS.contains(&s))
+    {
         return false;
     }
     match path.matches('/').count() {
@@ -944,6 +941,67 @@ mod tests {
         assert!(
             paths.is_empty(),
             "nested readme must be excluded: {paths:?}"
+        );
+    }
+
+    // DOCS-DISCOVERY-1 (RG-REQ-008-L07): the named-file rule reads doc-facts' ONE stem constant
+    // (`doc_name_stem` + `ORIENTATION_STEMS`) — any documentation extension, case-insensitive;
+    // documentation stems that are not orientation stems (INSTALL, AUTHORS) are not named targets;
+    // the depth rule is unchanged.
+    #[test]
+    fn orientation_named_files_match_by_stem_with_any_doc_extension() {
+        for p in [
+            "CONTRIBUTING.rst",
+            "docs/ARCHITECTURE.adoc",
+            "design/overview.txt",
+            "Design.markdown",
+            "OVERVIEW",
+        ] {
+            assert!(is_named_orientation_file(p), "{p} must be a named target");
+        }
+        for p in [
+            "INSTALL",
+            "AUTHORS",
+            "README.rst",
+            "docs/deep/ARCHITECTURE.md",
+            "OVERVIEW.html",
+            "docs/design.yaml",
+        ] {
+            assert!(
+                !is_named_orientation_file(p),
+                "{p} must NOT be a named target"
+            );
+        }
+        let docs = vec![
+            OrientationDocInput {
+                path: "CONTRIBUTING.rst",
+                kind: "doc",
+                generated: false,
+            },
+            OrientationDocInput {
+                path: "README.rst",
+                kind: "readme",
+                generated: false,
+            },
+            OrientationDocInput {
+                path: "INSTALL",
+                kind: "doc",
+                generated: false,
+            },
+            OrientationDocInput {
+                path: "docs/ARCHITECTURE.adoc",
+                kind: "architecture",
+                generated: false,
+            },
+            OrientationDocInput {
+                path: "docs/deep/ARCHITECTURE.md",
+                kind: "architecture",
+                generated: false,
+            },
+        ];
+        assert_eq!(
+            select_orientation_docs(&docs),
+            vec!["CONTRIBUTING.rst", "README.rst", "docs/ARCHITECTURE.adoc"]
         );
     }
 

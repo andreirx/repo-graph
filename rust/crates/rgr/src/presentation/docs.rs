@@ -36,7 +36,14 @@ const RELEASE_NOTES_KIND: &str = "release-notes";
 // ── docs list ────────────────────────────────────────────────────────────────
 
 /// Response DTO for `docs list`.
+///
+/// Decoded through [`DocsListWire`] (`try_from`) so the unscanned-markup count and the discovery
+/// rule are validated as ONE fact at the single decode both `--json` and human mode pass through
+/// (DOCS-DISCOVERY-1, RG-REQ-008-L06): a payload decodes only when both keys are absent, or both
+/// are present with the count > 0 and a well-formed rule. So a count never renders — in the human
+/// line or the raw `--json` passthrough — without the rule its "(--json for the rule)" points at.
 #[derive(Debug, Deserialize)]
+#[serde(try_from = "DocsListWire")]
 pub struct DocsListResponse {
     pub command: String,
     pub repo: String,
@@ -47,11 +54,130 @@ pub struct DocsListResponse {
     pub generated_count: usize,
     /// Sidecar-named files the daemon could not read to check the `rmap map` marker
     /// (UNKNOWN — admitted but not asserted authored; operator RULING 3). The daemon
-    /// emits this key ONLY when > 0, so `#[serde(default)]` keeps older/clean payloads
-    /// (no key) parsing as 0 — and keeps `docs list --json` byte-identical to pre-slice
-    /// when nothing is unreadable (review-5 finding 1).
-    #[serde(default)]
+    /// emits this key ONLY when > 0, so an absent key (older/clean payloads) decodes
+    /// as 0 — and keeps `docs list --json` byte-identical to pre-slice when nothing is
+    /// unreadable (review-5 finding 1).
     pub unreadable: usize,
+    /// DOCS-DISCOVERY-1 (RG-REQ-008-L06): markup files (`.md`/`.markdown`/`.rst`/`.adoc`) the
+    /// discovery rule refused — prose outside a docs tree, not in `entries`. The daemon emits the
+    /// key ONLY when > 0 (D-DD1-002); an absent key decodes as 0.
+    pub unscanned_markup_outside_docs_tree: usize,
+    /// DOCS-DISCOVERY-1: the discovery rule the daemon applied. After decode it is `Some` exactly
+    /// when `unscanned_markup_outside_docs_tree > 0` (the one-fact invariant above).
+    pub discovery_rule: Option<DiscoveryRuleView>,
+}
+
+/// DOCS-DISCOVERY-1 (RG-REQ-008-L06): the discovery rule as `docs list --json` carries it — the
+/// daemon serializes doc-facts' `DiscoveryRule` (every field the constant the walk applies).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoveryRuleView {
+    /// Documentation name stems admitted anywhere (with or without a documentation extension).
+    pub stems: Vec<String>,
+    /// Documentation extensions (admitted inside a doc tree; stripped to find a stem).
+    pub extensions: Vec<String>,
+    /// Ancestor directory components that open a doc tree.
+    pub doc_tree_dirs: Vec<String>,
+    /// Consecutive ancestor component sequences that open a doc tree (`src/site`).
+    pub doc_tree_conventions: Vec<String>,
+    /// Extensions whose refused files are counted as unscanned markup.
+    pub unscanned_extensions: Vec<String>,
+}
+
+/// The `docs_list` wire payload exactly as received, before the one-fact validation of the
+/// unscanned count and the rule. Those two keys are captured as raw JSON values with presence
+/// kept distinct from `null` ([`present_value`]), so a `null` rule is malformed, not absent.
+#[derive(Deserialize)]
+struct DocsListWire {
+    command: String,
+    repo: String,
+    repo_path: String,
+    entries: Vec<DocEntry>,
+    count: usize,
+    counts_by_kind: BTreeMap<String, usize>,
+    generated_count: usize,
+    #[serde(default)]
+    unreadable: usize,
+    #[serde(default, deserialize_with = "present_value")]
+    unscanned_markup_outside_docs_tree: Option<serde_json::Value>,
+    #[serde(default, deserialize_with = "present_value")]
+    discovery_rule: Option<serde_json::Value>,
+}
+
+/// A present key → `Some(value)`, INCLUDING an explicit `null`; `#[serde(default)]` makes an
+/// absent key `None`.
+fn present_value<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde_json::Value::deserialize(deserializer).map(Some)
+}
+
+/// A `docs_list` payload whose unscanned count and discovery rule do not form one fact. Surfaces
+/// through the command's decode error ("failed to parse response"), never as a rendered answer.
+#[derive(Debug)]
+pub struct MalformedDocsListPayload(String);
+
+impl std::fmt::Display for MalformedDocsListPayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "malformed docs_list payload: {}", self.0)
+    }
+}
+
+/// The one-fact rule: both keys absent → `(0, None)`; both present with an integer count > 0 and
+/// a well-formed rule object → `(count, Some(rule))`; every other pairing is malformed.
+fn decode_unscanned_markup(
+    count: Option<serde_json::Value>,
+    rule: Option<serde_json::Value>,
+) -> Result<(usize, Option<DiscoveryRuleView>), MalformedDocsListPayload> {
+    let malformed = |why: String| Err(MalformedDocsListPayload(why));
+    match (count, rule) {
+        (None, None) => Ok((0, None)),
+        (Some(_), None) => malformed(
+            "`unscanned_markup_outside_docs_tree` is present without `discovery_rule`".into(),
+        ),
+        (None, Some(_)) => malformed(
+            "`discovery_rule` is present without `unscanned_markup_outside_docs_tree`".into(),
+        ),
+        (Some(count), Some(rule)) => {
+            let n = match count.as_u64().and_then(|n| usize::try_from(n).ok()) {
+                Some(n) if n > 0 => n,
+                Some(_) => return malformed(
+                    "`unscanned_markup_outside_docs_tree` is 0 (the key is emitted only when > 0)"
+                        .into(),
+                ),
+                None => {
+                    return malformed(format!(
+                        "`unscanned_markup_outside_docs_tree` is not a count: {count}"
+                    ))
+                }
+            };
+            match serde_json::from_value::<DiscoveryRuleView>(rule) {
+                Ok(rule) => Ok((n, Some(rule))),
+                Err(e) => malformed(format!("`discovery_rule` is not a well-formed rule: {e}")),
+            }
+        }
+    }
+}
+
+impl TryFrom<DocsListWire> for DocsListResponse {
+    type Error = MalformedDocsListPayload;
+
+    fn try_from(w: DocsListWire) -> Result<Self, Self::Error> {
+        let (unscanned_markup_outside_docs_tree, discovery_rule) =
+            decode_unscanned_markup(w.unscanned_markup_outside_docs_tree, w.discovery_rule)?;
+        Ok(Self {
+            command: w.command,
+            repo: w.repo,
+            repo_path: w.repo_path,
+            entries: w.entries,
+            count: w.count,
+            counts_by_kind: w.counts_by_kind,
+            generated_count: w.generated_count,
+            unreadable: w.unreadable,
+            unscanned_markup_outside_docs_tree,
+            discovery_rule,
+        })
+    }
 }
 
 /// Individual documentation entry.
@@ -148,6 +274,16 @@ impl DocsListResponse {
         if self.unreadable > 0 {
             view["unreadable"] = serde_json::json!(self.unreadable);
         }
+        // DOCS-DISCOVERY-1: the filtered view never drops what the rule refused, nor the rule.
+        if self.unscanned_markup_outside_docs_tree > 0 {
+            view["unscanned_markup_outside_docs_tree"] =
+                serde_json::json!(self.unscanned_markup_outside_docs_tree);
+            // The decoded rule re-serialized (plain string vectors — infallible). The decode
+            // guarantees it is present whenever the count is.
+            if let Some(rule) = &self.discovery_rule {
+                view["discovery_rule"] = serde_json::json!(rule);
+            }
+        }
         Some(view)
     }
 
@@ -231,6 +367,20 @@ impl DocsListResponse {
             out.push_str(&format!(
                 "+{} unreadable, counted (content unreadable — kind refinement unverifiable)\n",
                 self.unreadable
+            ));
+        }
+
+        // DOCS-DISCOVERY-1 (RG-REQ-008-L06): the markup the discovery rule refused, stated so a
+        // widened scope counts its own refusals (the rule rides `--json`). Absent when 0.
+        if self.unscanned_markup_outside_docs_tree > 0 {
+            let file_word = if self.unscanned_markup_outside_docs_tree == 1 {
+                "file"
+            } else {
+                "files"
+            };
+            out.push_str(&format!(
+                "+{} markdown/prose {} outside a docs tree not scanned (--json for the rule)\n",
+                self.unscanned_markup_outside_docs_tree, file_word
             ));
         }
 
