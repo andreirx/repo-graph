@@ -1,0 +1,33 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DOCS-DISCOVERY-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DOCS-DISCOVERY-1-INPUT-2.json",
+    "sha256": "sha256:76d27e25ef283512aa72806198698b2d72b5bf458395cf3e45c2648f096682c1"
+  },
+  "review": {
+    "path": "docs/assurance/DOCS-DISCOVERY-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:76b5091fa41d593d1907dd205dfdc97498b36fe9fa3b1ee1a081370a04a5e51c"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-22T18:56:41.855Z",
+  "rationale": "Operator approves DOCS-DISCOVERY-1's second admission baseline: OC-1 (six manager oracle defects found by the first implementation admission; the product reproduced every measured headline), the F-DD1-001 fix direction (no silent null for the discovery rule), D-DD1-004 (orient proof at --budget medium; operator resolution of the reviewer's decision, overridable) and — from this document item's review — the RG-REQ-008-L06 raw-JSON amendment (the unscanned count and the typed rule decode as one fact before either rendering path; malformed-payload and raw-passthrough tests bound); accepted at cycle 2 by codex gpt-5.6-terra; author claude-opus-5-5."
+}
