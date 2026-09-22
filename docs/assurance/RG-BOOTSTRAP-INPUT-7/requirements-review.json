@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-7-1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-7.json",
+    "sha256": "sha256:2654847e69a0848a92b313c3892729f5a26c732676a2f832444556fcb8bdba96"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-7"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-7-2"
+  },
+  "result": "accepted",
+  "completedAt": "2026-09-22T17:41:19.000Z",
+  "report": "PASS 1 (REFINE, one finding) then PASS 2 (ACCEPT) \u2014 standalone read-only codex exec (prompts/standalone-review.md discipline; evidence inlined: the git diff of rg-req-008, the decision record D-DD1-003, the ledger diff, the normalized INPUT-6 \u2192 INPUT-7 manifest diff). Scope of INPUT-7: RG-REQ-008-L01's statement amended by the human 2026-09-22 (D-DD1-003, 'extension matching case insensitive'): stem and extension are compared case-insensitively, the stem being the name minus a recognised documentation extension or the whole name; CC-8's field numbers revised (django 616 \u2192 622 with extras/README.TXT; langchain4j +1 langchain4j-milvus/README.MD \u2014 both through the stem branch; 12 moving, 5 byte-stable). PASS 1 finding (applied): the record had not stated how the stem is derived from the extension, so the two examples looked like extension-branch admissions. Reviewer's pass-1 text: ## REFINE\n\n**File:** `docs/requirements/rg-req-008-documentation-inventory.md` and D-DD1-003\n\n**Quoted text:** \u201cdjango `extras/README.TXT`, langchain4j `langchain4j-milvus/README.MD` were refused while `readme.txt` was admitted\u201d and the CC-8 count changes attributed to extension case-insensitivity.\n\n**Issue:** Under the requirement\u2019s own rule, both named files already qualify through their **case-insensitive stem** (`README` \u2192 `readme`), irrespective of extension case: a listed stem qualifies \u201cwith or without a documentation extension.\u201d The revision therefore conflates the newly ratified extension behavior with examples whose admission is already required by the stem branch. This is internally inconsistent with D-DD1-003\u2019s statement that the stem comparison is necessarily case-insensitive.\n\n**Smallest correction:** Retain the ratified clause requiring case-insensitive extension matching, but revise the decision record and CC-8 rationale so those two files are described as admissions required by the case-insensitive stem rule (and investigate/correct the claimed current-code refusal separately). If available, cite an uppercase-extension file that qualifies **only** via the extension-in-doc-tree branch as the measured consequence of the extension change; otherwise state that this wording correction has no independently demonstrated corpus-count delta.\n\nThe statement\u2019s new clause is clear and testable, and the moving/byte-stable partition is arithmetically complete: 12 moving corpora and 5 byte-stable corpora, with no listed overlap. However, the justification and claimed measurement consequence must not misstate which branch of the rule admits the two examples.\n\n**Evidence basis:** PURE-REASONING over the inlined text. || Reviewer's pass-2 text: ## ACCEPT\n\nPASS 1 finding is closed.\n\n- The statement now defines stem derivation explicitly and makes both extension recognition and stem comparison case-insensitive.\n- D-DD1-003 correctly explains that the two examples become eligible through the **stem branch** once their extensions are recognized case-insensitively.\n- The ledger agrees with that explanation and with the revised statement.\n- CC-8 partitions all 17 corpora exactly once: 12 moving and 5 byte-stable. `langchain4j` moved correctly to moving; `django` changes 616 \u2192 622.\n- The diff shows no unrelated L01 change beyond the ratified clause and its consequential verification-criterion update.\n\n**Evidence basis:** PURE-REASONING over the inlined text."
+}

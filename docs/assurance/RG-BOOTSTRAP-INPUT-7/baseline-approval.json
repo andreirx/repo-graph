@@ -1,0 +1,29 @@
+{
+  "formatVersion": 1,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "RG-BOOTSTRAP-BASELINE-APPROVAL-7",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-7.json",
+    "sha256": "sha256:2654847e69a0848a92b313c3892729f5a26c732676a2f832444556fcb8bdba96"
+  },
+  "review": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-7/requirements-review.json",
+    "sha256": "sha256:619bdd7f7975c9fdcabcf49453466c718b0d4ef97d5ae8c0ff568e07d808a3e9"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [],
+  "decidedAt": "2026-09-22T17:41:19.000Z",
+  "rationale": "Operator approves the seventh bootstrap baseline: the human's amendment of RG-REQ-008-L01 (D-DD1-003, 2026-09-22 \u2014 stem and extension matched case-insensitively, stem derivation stated) with CC-8's field numbers revised; codex gpt-5.6-terra standalone review REFINE (stem derivation stated) then ACCEPT; only rg-req-008's digest moves. The human's authority for requirement wording is the ratification itself; the operator records it under docs/assurance/RG-BOOTSTRAP/human-authorization.md."
+}
