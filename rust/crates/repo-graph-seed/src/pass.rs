@@ -9,7 +9,9 @@
 use std::collections::HashMap;
 
 use crate::classify;
-use crate::document::{build_chunk_document, MAX_BODY_LINES};
+use crate::document::{
+    build_chunk_document, enclosing_doc_sentence, parent_qualified_name, MAX_BODY_LINES,
+};
 use crate::hash::content_hash;
 use crate::ports::{EmbedError, Embedder, SeedCorpusEntry, SeedForwardDecl, SeedVectorEntry};
 use crate::rank::l2_normalize;
@@ -21,6 +23,88 @@ pub const EMBED_BATCH_SIZE: usize = 32;
 /// corpus's `(path, line)` order are embedded and the remainder is an honest
 /// omission (never silently dropped). INFERRED default for the large-monorepo target.
 pub const CORPUS_CAP: usize = 200_000;
+
+/// The stored `subtype` values that declare a member scope and can therefore ENCLOSE a method
+/// (SEED-DOCUMENT-1, RG-REQ-010-L10 "the enclosing TYPE's doc"): the type-declaring variants of
+/// `indexer::types::NodeSubtype` as the extractors emit them — TypeScript class/interface/enum;
+/// Java class/record → CLASS, interface/`@interface` → INTERFACE, enum → ENUM; Python class →
+/// CLASS; Rust struct → CLASS, trait → INTERFACE, enum → ENUM; C/C++ class → CLASS, struct →
+/// STRUCT, enum → ENUM. TYPE_ALIAS is excluded (an alias names a type but declares no member
+/// scope); every other subtype never encloses.
+const ENCLOSING_TYPE_SUBTYPES: [&str; 4] = ["CLASS", "INTERFACE", "STRUCT", "ENUM"];
+
+/// The stored `subtype` of the only chunks that receive an enclosing sentence (D-SD1-002:
+/// RG-REQ-010-L10 says "a method chunk"; properties, constructors, variables and nested types
+/// embed exactly as before).
+const METHOD_SUBTYPE: &str = "METHOD";
+
+/// Per corpus entry (same index), the enclosing type's first sentence to carry into its
+/// document — `Some` only for a METHOD chunk whose enclosing type is found by the LOOKUP RULE
+/// and documented:
+///
+/// the parent qualified name is the chunk's minus its last `.`/`::` segment; (1) if the chunk's
+/// own file holds ANY entry with that qualified name, the enclosing type is decided in that file —
+/// the first entry in corpus order with a canonical type subtype ([`ENCLOSING_TYPE_SUBTYPES`]) and
+/// a non-empty doc supplies the sentence, otherwise there is none and the cross-file branch is not
+/// consulted; (2) only if the chunk's file holds no such entry, the corpus-wide canonical-type
+/// entries with that name are counted — exactly one, if documented, supplies its sentence; none,
+/// or two or more (ambiguous), supply nothing. Genuine forward declarations
+/// ([`SeedForwardDecl::ForwardDecl`]) are ignored throughout — ONE predicate (`takes_part`)
+/// excludes them on both sides: a forward declaration is never an index key, never supplies a
+/// sentence, and never RECEIVES one (a C++ in-class method prototype is a forward-declared
+/// METHOD; it embeds exactly as before, review SD-R-001).
+///
+/// Called with the COMPLETE corpus, BEFORE the corpus cap truncates it: a name-parent beyond the
+/// cap still decides (a unique one contributes, a second one makes the name ambiguous); only the
+/// emitted vectors are cap-limited.
+fn enclosing_sentences(entries: &[SeedCorpusEntry]) -> Vec<Option<String>> {
+    let takes_part = |e: &SeedCorpusEntry| !matches!(e.forward_decl, SeedForwardDecl::ForwardDecl);
+    let is_type = |e: &SeedCorpusEntry| {
+        e.subtype
+            .as_deref()
+            .is_some_and(|s| ENCLOSING_TYPE_SUBTYPES.contains(&s))
+    };
+    fn doc_of(e: &SeedCorpusEntry) -> Option<&str> {
+        e.doc_comment.as_deref().filter(|d| !d.is_empty())
+    }
+
+    // Step (1) index: every (path, qualified_name) of a non-forward-declared entry of ANY subtype
+    // (key present ⇒ decided in that file) → the doc of the first documented canonical-type entry.
+    let mut per_file: HashMap<(&str, &str), Option<&str>> = HashMap::new();
+    // Step (2) index: qualified_name → (first canonical-type entry's doc, count of such entries).
+    let mut corpus_wide: HashMap<&str, (Option<&str>, usize)> = HashMap::new();
+    for e in entries.iter().filter(|e| takes_part(e)) {
+        let Some(qn) = e.qualified_name.as_deref() else {
+            continue;
+        };
+        let slot = per_file.entry((e.path.as_str(), qn)).or_insert(None);
+        if is_type(e) {
+            if slot.is_none() {
+                *slot = doc_of(e);
+            }
+            let (_, count) = corpus_wide.entry(qn).or_insert((doc_of(e), 0));
+            *count += 1;
+        }
+    }
+
+    entries
+        .iter()
+        .map(|chunk| {
+            if !takes_part(chunk) || chunk.subtype.as_deref() != Some(METHOD_SUBTYPE) {
+                return None;
+            }
+            let parent = parent_qualified_name(chunk.qualified_name.as_deref()?)?;
+            let doc = match per_file.get(&(chunk.path.as_str(), parent)) {
+                Some(same_file) => (*same_file)?,
+                None => match corpus_wide.get(parent) {
+                    Some((doc, 1)) => (*doc)?,
+                    _ => return None,
+                },
+            };
+            enclosing_doc_sentence(doc)
+        })
+        .collect()
+}
 
 /// Tunables for a build (defaults are the spec constants).
 #[derive(Debug, Clone, Copy)]
@@ -107,6 +191,9 @@ fn span_source(lines: &[&str], line_start: Option<i64>, line_end: Option<i64>) -
 ///   property doc extraction) — so the file hash alone is NOT the embedding-input identity, and
 ///   reusing on it would re-stamp a stale vector as current. A prior entry with a NULL
 ///   `document_hash` (a pre-migration-037 parent) is EXCLUDED from reuse and re-embedded.
+///   SEED-DOCUMENT-1: a METHOD chunk's document also carries its enclosing type's first sentence
+///   ([`enclosing_sentences`]), which can change when ANOTHER file changes (a header's class doc);
+///   the `document_hash` covers it, so such a chunk is re-embedded rather than reused stale.
 #[allow(clippy::too_many_arguments)]
 pub fn build_store<R, C>(
     entries: Vec<SeedCorpusEntry>,
@@ -124,11 +211,16 @@ where
         return BuildOutcome::NoCorpus;
     }
 
+    // SEED-DOCUMENT-1: resolve every METHOD chunk's enclosing-type sentence over the COMPLETE
+    // corpus, BEFORE the cap below truncates it (a parent beyond the cap still decides).
+    let mut enclosing = enclosing_sentences(&entries);
+
     // Corpus cap: keep the first `corpus_cap` in the corpus's (path, line) order.
     let corpus_omitted = entries.len().saturating_sub(cfg.corpus_cap);
     let mut entries = entries;
     if corpus_omitted > 0 {
         entries.truncate(cfg.corpus_cap);
+        enclosing.truncate(cfg.corpus_cap);
     }
 
     // Group chunks by file path (the corpus is ordered by path, so this is a single
@@ -193,7 +285,7 @@ where
         // `#[cfg(test)] mod` / `describe(` bodies), reused for every chunk in the run.
         let lang = classify::lang_for_path(&path);
         let test_regions = classify::compute_test_regions(lang, &content);
-        for chunk in run {
+        for (offset, chunk) in run.iter().enumerate() {
             if file_hash != chunk.content_hash {
                 drifted += 1;
                 continue;
@@ -251,6 +343,7 @@ where
             // ACTUAL embedding input rather than the file hash.
             let doc = build_chunk_document(
                 chunk.qualified_name.as_deref(),
+                enclosing[run_start + offset].as_deref(),
                 chunk.doc_comment.as_deref(),
                 &span,
             );

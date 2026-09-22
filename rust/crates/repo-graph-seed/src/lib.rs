@@ -6,9 +6,11 @@
 //! behind ([`Embedder`], [`SeedCorpusRead`]) and implements the deterministic
 //! logic the VISION bounds require:
 //!
-//! - [`document`] — the exact serialized chunk document (`qualified_name` +
-//!   `doc_comment` + capped span source) and the verbatim query the code model
-//!   embeds (spec §2.1; SEED-CHUNK-1 drops nomic's role prefixes).
+//! - [`document`] — the exact serialized chunk document (`qualified_name`, then for a
+//!   METHOD chunk the first sentence of its enclosing type's doc comment bounded by
+//!   `MAX_ENCLOSING_SENTENCE_CHARS` (SEED-DOCUMENT-1, RG-REQ-010-L10), then `doc_comment`,
+//!   then the capped span source) and the verbatim query the code model embeds (spec
+//!   §2.1; SEED-CHUNK-1 drops nomic's role prefixes).
 //! - [`hash`] — the content pin ([`content_hash`], `SHA-256(bytes).hex[..16]`),
 //!   byte-identical to the scanner's `hash_content`. The background pass re-runs
 //!   it on the working tree to close the source/snapshot race (spec §3.5).
