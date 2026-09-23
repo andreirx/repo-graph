@@ -24,11 +24,35 @@
   "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
  },
  "resolvedDecisions": [
-  "D-CERTAINTY-MARK-1",
-  "D-TEST-SCOPE-1",
-  "D-GRADLE-DECLARED-1",
-  "D-DU-CC10"
+  {
+   "id": "D-CERTAINTY-MARK-1",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+    "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+   }
+  },
+  {
+   "id": "D-TEST-SCOPE-1",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+    "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d"
+   }
+  },
+  {
+   "id": "D-GRADLE-DECLARED-1",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+    "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+   }
+  },
+  {
+   "id": "D-DU-CC10",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DU-CC10.md",
+    "sha256": "sha256:88ff0bc17769d3101471ad66eccd7b90a66361eb87679f6728d1e774cd17b5b8"
+   }
+  }
  ],
  "decidedAt": "2026-09-23T02:58:13.000Z",
- "rationale": "Operator approves the eighth bootstrap baseline: the human's rulings of 2026-09-23 (the certainty rule in the human's words; test-scope partition option A; Gradle declared-set option A in two slices; content_hash null through the certainty rule) applied as RG-REQ-002-L11, RG-REQ-004-L12, RG-REQ-006-L13, RG-REQ-008-L05/L08 and cross-references in 001-L01, 005-L02, 006-L04 (Python), L06, L11; codex gpt-5.6-terra standalone review REFINE → REJECT (the npm-workspace amendment collided with IMPORTS-WORKSPACE-PACKAGE-EDGE-1's ratified no-go; removed and put to the human as Q8) → REFINE → ACCEPT. The human's authority for requirement wording is the ratification itself; the operator records it under docs/assurance/RG-BOOTSTRAP/human-authorization.md."
+ "rationale": "Operator approves the eighth bootstrap baseline: the human's rulings of 2026-09-23 (the certainty rule in the human's words; test-scope partition option A; Gradle declared-set option A in two slices; content_hash null through the certainty rule) applied as RG-REQ-002-L11, RG-REQ-004-L12, RG-REQ-006-L13, RG-REQ-008-L05/L08 and cross-references in 001-L01, 005-L02, 006-L04 (Python), L06, L11; codex gpt-5.6-terra standalone review REFINE → REJECT (the npm-workspace amendment collided with IMPORTS-WORKSPACE-PACKAGE-EDGE-1's ratified no-go; removed and put to the human as Q8) → REFINE → ACCEPT. The human's authority for requirement wording is the ratification itself; the operator records it under docs/assurance/RG-BOOTSTRAP/human-authorization.md. (Record corrected 2026-09-23 before any admission: resolvedDecisions entries were written as bare ids; the contract requires {id, record: ContentRef} — the runtime refused the first dry-run under this baseline, no item was admitted against the malformed record.)"
 }
