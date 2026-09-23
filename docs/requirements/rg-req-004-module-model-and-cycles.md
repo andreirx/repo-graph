@@ -22,7 +22,8 @@
     { "id": "RG-REQ-004-L08", "parentId": "RG-REQ-004" },
     { "id": "RG-REQ-004-L09", "parentId": "RG-REQ-004" },
     { "id": "RG-REQ-004-L10", "parentId": "RG-REQ-004" },
-    { "id": "RG-REQ-004-L11", "parentId": "RG-REQ-004" }
+    { "id": "RG-REQ-004-L11", "parentId": "RG-REQ-004" },
+    { "id": "RG-REQ-004-L12", "parentId": "RG-REQ-004" }
   ]
 }
 -->
@@ -55,7 +56,7 @@ Fan-in/fan-out on `trust`, `modules list` and `modules deps` shall be counted ov
 
 ### RG-REQ-004-L02 — Module dependency edges derive only from resolved, cross-module, file→file imports
 
-For each resolved IMPORTS edge whose source and target files are owned by different modules, one aggregated `ModuleDependencyEdge {importCount, sourceFileCount}`; unresolved and intra-module imports are excluded; derivation is query-time, never persisted.
+For each resolved IMPORTS edge whose source and target files are owned by different modules, one aggregated `ModuleDependencyEdge {importCount, sourceFileCount}`; unresolved and intra-module imports are excluded; an edge whose `resolution` is `inferred` participates only in the `--include-inferred` view of RG-REQ-004-L12 / RG-REQ-002-L11; derivation is query-time, never persisted.
 
 **Verification criterion:** `modules_list_tests.rs` (`two_crate_fixture_renders_a_to_b_edge_verbatim`, `list_render_edge_list_count_equals_rows`, `list_render_edges_sorted_by_refcount_then_name`); `scripts/compare-module-cycles.sh` (SQLite vs LiveGraph equivalence).
 
@@ -132,6 +133,16 @@ An edge list and the table above it shall use one identifier space (grpc `grpc-c
 **Verification criterion:** a render test asserting edge-list keys equal table keys on the grpc fixture (to be added); a `stats`↔`modules list` population statement test (to be added); field: `ir-grpc-modules` shows `grpc-core → grpc-api`, not `core → api`.
 
 **Evidence (v0.18.0):** NOT MET — D-N10 (grpc identifier spaces); `stats`' module rows come from `queries.rs::compute_module_stats` (the directory-node population), a fourth population RC-5's fix does not close.
+
+### RG-REQ-004-L12 — Module edges are partitioned by the importing file's test status; the default view is production, the remainder is stated
+
+STATUS: RATIFIED 2026-09-23 (human, option A — decision record D-TEST-SCOPE-1).
+
+Before aggregation, IMPORTS edges shall be partitioned by the importing file's `is_test` (RG-REQ-001-L07) and by resolution class (RG-REQ-002-L11); a source→target module relation may contribute to more than one partition. The default view of `modules list`, `modules deps`, `cycles`, `orient` and `explain`'s Import-cycles block contains static/dynamic production imports; `--include-tests` adds static/dynamic test imports; `--include-inferred` adds inferred production imports; both flags add all four partitions; each surface states the excluded remainder as counts with the flags that show them ("+415 imports from test files, not shown — `--include-tests`"); a cycle that exists only through excluded partitions is not a cycle in the default view and is named in the remainder; JSON carries the four partition counts on every module edge and cycle; `trust`'s connectivity reads the default partition.
+
+**Verification criterion:** module-edge derivation tests with an `is_test` importer (`compute_module_stats` and the pure `derive_module_dependency_edges` twin); renderer tests for the remainder line on each of the five surfaces; field: poco `Foundation → CppUnit (415)` leaves the default view (281 files under `Foundation/testsuite/`), leveldb's `db → table → db` cycle (closed only by `table/table_test.cc:11-13`) leaves `cycles` and is named in the remainder; kafka, grpc-java and FRAKTAG production edges unchanged.
+
+**Evidence (v0.19.0):** NOT MET — RC-3 (test-source edges promoted to production structure). Queue: TEST-EDGE-SCOPE-1 (+ IS-TEST-CPPUNIT-1 for the CppUnit test marker).
 
 ## Preservation obligations named by the ratifying specifications
 

@@ -77,9 +77,9 @@ Using the index's one vendored-path predicate (never a second definition), the l
 
 ### RG-REQ-008-L05 — Unreadable documents are admitted, counted and never asserted
 
-`+N unreadable, counted (content unreadable — kind refinement unverifiable)`; a license-named unreadable file stays `license` by name and is counted; nothing is silently dropped or silently asserted authored.
+`+N unreadable, counted (content unreadable — kind refinement unverifiable)`; a license-named unreadable file stays `license` by name and is counted; nothing is silently dropped or silently asserted authored; a document whose bytes could not be read at all carries `content_hash: null` in JSON (L08); a document whose bytes were read but do not decode as UTF-8 carries the hash of its bytes.
 
-**Verification criterion:** `docs_tests.rs::list_render_surfaces_unreadable_count`; `lib_tests::inventory_unreadable_sidecar_is_admitted_and_counted_never_asserted_generated`, `::inventory_unreadable_license_named_doc_is_license_by_name_and_still_counted`.
+**Verification criterion:** `docs_tests.rs::list_render_surfaces_unreadable_count`; `lib_tests::inventory_unreadable_sidecar_is_admitted_and_counted_never_asserted_generated`, `::inventory_unreadable_license_named_doc_is_license_by_name_and_still_counted`; to be added by DOCS-UNREADABLE-DECODE-1: a doc-facts test that a document whose bytes are not UTF-8 is admitted with the hash of its bytes and counted unreadable, and that a readable document's hash is unchanged by the byte read.
 
 **Evidence (v0.18.0):** OBSERVED MET.
 
@@ -101,9 +101,9 @@ Beside the generated and vendored lines, the header names the prose the discover
 
 ### RG-REQ-008-L08 — `docs list` is budgeted in human form and complete in JSON; `docs extract` states its scan
 
-`docs list` human output caps entries with `(+N more — --full)` while `--json` carries every entry with `path, kind, generated, content_hash`, `count`, `counts_by_kind`, `generated_count`; `docs extract` renders header, files scanned, files by kind, facts extracted/inserted/deleted, generated count and warnings (or an explicit no-warnings line).
+`docs list` human output caps entries with `(+N more — --full)` while `--json` carries every entry with `path, kind, generated, content_hash` — `content_hash` is always present and is `null` when the document's bytes could not be read (an unknown is marked, never omitted, never fabricated — RG-REQ-002-L11; amended 2026-09-23, CC-10, D-DU-CC10) — plus `count`, `counts_by_kind`, `generated_count`; `docs extract` renders header, files scanned, files by kind, facts extracted/inserted/deleted, generated count and warnings (or an explicit no-warnings line).
 
-**Verification criterion:** `docs_tests.rs` (`entry_list_budgeted_with_remainder`, `family_lines_and_entries_share_one_budget`, `extract_render_shows_*`); `rgr/tests/cli_out_5_inventory.rs::docs_extract_*`.
+**Verification criterion:** `docs_tests.rs` (`entry_list_budgeted_with_remainder`, `family_lines_and_entries_share_one_budget`, `extract_render_shows_*`); `rgr/tests/cli_out_5_inventory.rs::docs_extract_*`; to be added by DOCS-UNREADABLE-DECODE-1: a daemon-side serialization test that an entry whose bytes could not be read serializes `"content_hash": null` (the key present) and a non-UTF-8 readable entry serializes its byte hash; a CLI decode test that `DocEntry` accepts both a string and `null` and that the filtered `--json` view re-emits the key in both cases.
 
 **Evidence (v0.18.0):** OBSERVED MET (docs list ECONOMY A on every class).
 

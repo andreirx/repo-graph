@@ -1,0 +1,34 @@
+{
+ "formatVersion": 1,
+ "kind": "requirements-baseline-approval",
+ "approvalId": "RG-BOOTSTRAP-BASELINE-APPROVAL-8",
+ "subject": {
+  "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-8.json",
+  "sha256": "sha256:0c48955efa62c2bb2de3918273578ee21d0250bc06dc6d68eca2032a500de265"
+ },
+ "review": {
+  "path": "docs/assurance/RG-BOOTSTRAP-INPUT-8/requirements-review.json",
+  "sha256": "sha256:9b814c21cf6a33aac3b7e732caed0e2a3f8737f0b0b5807351895476c30c861a"
+ },
+ "decision": "approved",
+ "approvedBy": {
+  "actorType": "operator",
+  "actorId": "in-place-manager"
+ },
+ "recordedBy": {
+  "actorType": "operator",
+  "actorId": "in-place-manager"
+ },
+ "authorityBasis": {
+  "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+  "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+ },
+ "resolvedDecisions": [
+  "D-CERTAINTY-MARK-1",
+  "D-TEST-SCOPE-1",
+  "D-GRADLE-DECLARED-1",
+  "D-DU-CC10"
+ ],
+ "decidedAt": "2026-09-23T02:58:13.000Z",
+ "rationale": "Operator approves the eighth bootstrap baseline: the human's rulings of 2026-09-23 (the certainty rule in the human's words; test-scope partition option A; Gradle declared-set option A in two slices; content_hash null through the certainty rule) applied as RG-REQ-002-L11, RG-REQ-004-L12, RG-REQ-006-L13, RG-REQ-008-L05/L08 and cross-references in 001-L01, 005-L02, 006-L04 (Python), L06, L11; codex gpt-5.6-terra standalone review REFINE → REJECT (the npm-workspace amendment collided with IMPORTS-WORKSPACE-PACKAGE-EDGE-1's ratified no-go; removed and put to the human as Q8) → REFINE → ACCEPT. The human's authority for requirement wording is the ratification itself; the operator records it under docs/assurance/RG-BOOTSTRAP/human-authorization.md."
+}

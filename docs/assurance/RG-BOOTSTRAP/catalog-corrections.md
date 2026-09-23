@@ -31,3 +31,13 @@ A catalog edit invalidates the bootstrap baseline and every not-yet-approved sli
 `docs/requirements/rg-req-008-documentation-inventory.md` L07 criterion: "django `read: README.rst, CONTRIBUTING.rst, docs/`". `select_orientation_docs` (daemon-runtime/src/modules_method.rs:419-429, MODULES-METHOD-1, pinned by `orientation_root_first_ranking`) ranks root-first then path-ASC, so the product prints `read: CONTRIBUTING.rst, README.rst, docs/ — or the tree.` (today, with both files invisible, `read: docs/ — or the tree.`). Found 2026-09-22 by the DOCS-DISCOVERY-1 grounding. Correction: reorder the example. The requirement statement ("root first") is untouched and does not order root files among themselves.
 
 - D-DD1-003 (2026-09-22, human): RG-REQ-008-L01's statement now says stem AND extension match case-insensitively; CC-8's field numbers revised accordingly (django 616 → 622 with `extras/README.TXT`; langchain4j +1 `langchain4j-milvus/README.MD`, no longer byte-stable — both admitted through the STEM branch: a stem is the name minus a recognised documentation extension, and the extension is now recognised case-insensitively; no uppercase-extension file exists inside any docs tree in the 17 corpora). Carried by RG-BOOTSTRAP-INPUT-7. The human also ruled the `license` stem question closed (no `license` stem; root `LICENSE.txt` stays outside the inventory) — recorded, no catalog change.
+
+## CC-10 (2026-09-23) — RG-REQ-008-L05 and L08 contradicted each other for a document whose bytes cannot be read (three document reviews of DOCS-UNREADABLE-DECODE-1) → L08 amended: `content_hash` always present, `null` when unread; L05 names it (D-DU-CC10; applied in RG-BOOTSTRAP-INPUT-8).
+
+## CC-11 (2026-09-23) — the catalog had no rule for facts the index cannot determine; four slices stalled between guessing, withholding and deferring → RG-REQ-002-L11 in the human's words, with cross-references in RG-REQ-001-L01, RG-REQ-005-L02, RG-REQ-006-L04/L11, RG-REQ-008-L08 (D-CERTAINTY-MARK-1; INPUT-8).
+
+## CC-12 (2026-09-23) — RG-REQ-004 had no test-scope statement although `files.is_test` is a stored fact and the module-edge derivation never reads it → RG-REQ-004-L12 (human: option A; D-TEST-SCOPE-1; INPUT-8).
+
+## CC-13 (2026-09-23) — RG-REQ-006 never said whose build block declares for which Gradle module, nor that catalog aliases are declarations → RG-REQ-006-L13 (human: option A, two slices; D-GRADLE-DECLARED-1; INPUT-8).
+
+## CC-14 (2026-09-23) — RG-REQ-006-L04's Python clause named neither the submodule rule nor its certainty (PSI-R01/PSI-D02) and L11 forbade single-segment matching outright → amended as INFERRED forms under L11 (INPUT-8). The TS clause is not amended (its parenthesis names an open human ruling; the ratified no-go stands).

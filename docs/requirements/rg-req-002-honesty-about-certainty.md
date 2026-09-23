@@ -22,7 +22,8 @@
     { "id": "RG-REQ-002-L07", "parentId": "RG-REQ-002" },
     { "id": "RG-REQ-002-L08", "parentId": "RG-REQ-002" },
     { "id": "RG-REQ-002-L09", "parentId": "RG-REQ-002" },
-    { "id": "RG-REQ-002-L10", "parentId": "RG-REQ-002" }
+    { "id": "RG-REQ-002-L10", "parentId": "RG-REQ-002" },
+    { "id": "RG-REQ-002-L11", "parentId": "RG-REQ-002" }
   ]
 }
 -->
@@ -124,6 +125,16 @@ When a fix removes fabricated inputs, the affected headline numbers (resolution 
 **Verification criterion:** the ship record of every slice touching a headline states before/after with attribution (operator practice since ECONOMY-2's metric-redefinition incident); reviewers reject a redefinition (the ≤15% cursor-bytes case is the precedent).
 
 **Evidence (v0.18.0):** OBSERVED practised (HEADLINE-TRUTH-1, SEED-CHUNK-3 restated acceptance); binds Q1 (trust % falls, dead rises).
+
+### RG-REQ-002-L11 — What the index cannot determine is marked for the agent to investigate, never guessed and never dropped
+
+STATUS: RATIFIED 2026-09-23 (human): "anything hard to determine from our indexes we explicitly mark for the agents to investigate themselves" (decision record D-CERTAINTY-MARK-1).
+
+When a fact cannot be determined from the index — an identity the parse leaves ambiguous (two parenthesised identifiers between a member's type and its body or terminator), a binding the language decides at run time (`from X import Y` where both `X/__init__.py` and `X/Y.py` are indexed; a call on an untyped receiver whose method name is unique), a target that exists in two forms (a single-segment include whose basename is unique) — the product shall record every candidate, mark the fact UNDETERMINED (an identity) or INFERRED (an edge) with its reason, and render it on the agent-facing surface as something to investigate ("identity undetermined — 2 candidates: Lock, EXCLUSIVE_LOCK_FUNCTION"; "inferred: name-only binding, 271 rows"; "inferred: unique basename"); it never picks one candidate silently, never drops the fact, and never counts it among certain facts. The marking uses the existing axes — `edges.resolution ∈ static | dynamic | inferred` and additive `metadata_json` keys on nodes and edges — never a new data shape. Every surface that aggregates edges (module edges, `cycles`, `trust`'s resolved share and connectivity, `dead`, `explain`'s relationship sections, `callers`/`callees`, `imports`) shows the certain facts by default and states the inferred remainder as a count with the flag that includes it ("+41 inferred imports — `--include-inferred`"), the same partition pattern RG-REQ-004-L12 applies to test scope.
+
+**Verification criterion:** each consuming slice shall test every surface it changes — identity candidates on `explain` and `find` (CPP-ATTRIBUTE-MACRO-1: cpp-extractor tests for the marked node's `identity_candidates`, `rgr` explain/find renderer tests for the wording); inferred call bindings on `callers`, `callees` and `explain` (PYTHON-RECEIVER-BINDING-1: resolver tests that the untyped unique-name shape persists its candidate pool as `inferred`, renderer tests, a `dead` and trust exclusion test); inferred imports on `imports`, the module surfaces and dependency rows (PYTHON-SUBMODULE-IMPORT-1, CPP-INCLUDE-BASENAME-1: resolver tests per candidate, `modules deps`/`cycles` default-exclusion and `--include-inferred` tests, `imports <file>` rendering, deps-row evidence). Each test asserts the candidate set, the reason, the JSON representation, the default exclusion and the flag inclusion; a corpus assertion per slice that no `inferred` edge enters trust's calls-resolved numerator, `dead`, or a default-view module edge or cycle. Field: leveldb `explain leveldb::port::Mutex` lists `Lock` with "identity undetermined — 2 candidates (Lock, EXCLUSIVE_LOCK_FUNCTION)"; django `callers ListMixin.extend` renders its 271 name-only rows under "inferred — investigate", not as callers.
+
+**Evidence (v0.19.0):** NOT MET — RC-2 (name-only bindings rendered as certain callers), RC-4 (a macro token printed as an identity), RC-7 (a run-time-decided import target rendered certain). Queue: CPP-ATTRIBUTE-MACRO-1, PYTHON-SUBMODULE-IMPORT-1, PYTHON-RECEIVER-BINDING-1, CPP-INCLUDE-BASENAME-1 — each re-cut against this L.
 
 ## Preservation obligations named by the ratifying specifications
 

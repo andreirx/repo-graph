@@ -23,7 +23,8 @@
     { "id": "RG-REQ-006-L09", "parentId": "RG-REQ-006" },
     { "id": "RG-REQ-006-L10", "parentId": "RG-REQ-006" },
     { "id": "RG-REQ-006-L11", "parentId": "RG-REQ-006" },
-    { "id": "RG-REQ-006-L12", "parentId": "RG-REQ-006" }
+    { "id": "RG-REQ-006-L12", "parentId": "RG-REQ-006" },
+    { "id": "RG-REQ-006-L13", "parentId": "RG-REQ-006" }
   ]
 }
 -->
@@ -72,9 +73,9 @@ Candidate include roots shall be derived from the indexed file list — every di
 
 ### RG-REQ-006-L04 — TypeScript and Python resolve what the language resolves, leaving usage evidence
 
-TS: tsconfig `paths` (with `extends`), relative (extensionless, `index.ts`), then package; aliased named imports look up the imported name; `import * as X` scopes member lookup to the module and a default import does not; a bare-package import emits an IMPORTS edge (unresolved external candidate); `require('x')` literals bind; `import type` binds flagged type-only and the flag survives the storage read. Python: the IMPORTS `target_key` agrees with the binding specifier (dotted); extensionless and `__init__.py` shortcuts.
+TS: tsconfig `paths` (with `extends`), relative (extensionless, `index.ts`), then package; aliased named imports look up the imported name; `import * as X` scopes member lookup to the module and a default import does not; a bare-package import emits an IMPORTS edge (unresolved external candidate — whether a specifier naming an npm WORKSPACE member may resolve to the member's indexed source entry is an open ruling: IMPORTS-WORKSPACE-PACKAGE-EDGE-1 measured and rejected the `src/index.ts` convention absent verified evidence, and the human's 2026-09-23 certainty rule (RG-REQ-002-L11) offers a marked INFERRED form; until the human rules, the ratified no-go stands); `require('x')` literals bind; `import type` binds flagged type-only and the flag survives the storage read. Python: the IMPORTS `target_key` agrees with the binding specifier (dotted); extensionless and `__init__.py` shortcuts for a symbol import; `from X import Y` where `X/Y.py` or `X/Y/__init__.py` is indexed and the init's extracted facts show no binding of `Y` (no symbol `Y`, no import of a `Y` other than the submodule itself) resolves to that file as INFERRED with the init as the alternate candidate (RG-REQ-002-L11) — the extractor's blind spots (multi-target assignment, `__getattr__`, star imports) are the stated reason it is not `static`; an init that shows a binding of `Y` keeps the init target (amended 2026-09-23, PSI-R01).
 
-**Verification criterion:** `indexer/src/resolver.rs` (`aliased_named_import_uses_imported_name_for_lookup`, `namespace_import_member_resolves_to_target_module`, `default_import_member_does_not_resolve_by_bare_method_name`, `file_resolution_*`, `import_type_only_reads_injected_metadata`, `…malformed_carrier_is_unreadable_not_absent`).
+**Verification criterion:** `indexer/src/resolver.rs` (`aliased_named_import_uses_imported_name_for_lookup`, `namespace_import_member_resolves_to_target_module`, `default_import_member_does_not_resolve_by_bare_method_name`, `file_resolution_*`, `import_type_only_reads_injected_metadata`, `…malformed_carrier_is_unreadable_not_absent`); Python submodule inference (to be added by PYTHON-SUBMODULE-IMPORT-1): resolver tests for the sibling-module, subpackage, symbol-import (init keeps the target), init-binds-`Y` (init keeps the target) and relative-form cases, each asserting `resolution` and the alternate candidate on the edge; an end-to-end fixture asserting the three targets and `explain <Class>`'s Referenced-by rendering the inferred importers under the inferred remainder.
 
 **Evidence (v0.18.0):** OBSERVED MET for the stages (TS-IMPORT-RESOLUTION-1, TYPE-ONLY-IMPORTS-1, DEPS-CLASSIFIER-1B); the repo-wide TS resolution RATE is UNKNOWN (no probe isolates it).
 
@@ -88,7 +89,7 @@ TS: tsconfig `paths` (with `extends`), relative (extensionless, `index.ts`), the
 
 ### RG-REQ-006-L06 — A declared dependency is used when any of its modules is imported, via one shared head reduction
 
-Python `a.b.c` → `a` (PEP 503 normalised), npm `@scope/pkg/sub` → `@scope/pkg`, Rust `a::b` → `a`, Java unchanged — ONE function used by the index-time classifier and the query-time normaliser. The manifest-side `-`→`_` transform is a different family and stays separate.
+Python `a.b.c` → `a` (PEP 503 normalised), npm `@scope/pkg/sub` → `@scope/pkg`, Rust `a::b` → `a`, Java unchanged — ONE function used by the index-time classifier and the query-time normaliser. The manifest-side `-`→`_` transform is a different family and stays separate. For Java, "unchanged" applies to the observed-import reduction; RG-REQ-006-L13 separately compares the declared Maven group to that unchanged package name on a `.`-segment boundary.
 
 **Verification criterion:** `classification/src/dep_reduce.rs` tests; `unresolved_classifier.rs::asgiref_call_site_classifies_external_via_reduced_binding_specifier`; `module-queries/src/deps/normalize.rs` family; field: django asgiref used (51 import sites, 131 call sites); storybook used 16 → 39.
 
@@ -128,9 +129,9 @@ Attributed ecosystems render; a secondary material one is named with its manifes
 
 ### RG-REQ-006-L11 — A unique multi-segment path-suffix fallback for includes no root resolves
 
-STATUS: RATIFIED 2026-09-14 (human, option A): adopted for specifiers of two or more path segments, unique match only; a non-unique match stays unresolved; single-segment names never guess. Its own slice, separate from CPP-INCLUDE-ROOTS-1.
+STATUS: RATIFIED 2026-09-14 (human, option A): adopted for specifiers of two or more path segments, unique match only; a non-unique match stays unresolved; single-segment names never guess as `static`. AMENDED 2026-09-23 (RG-REQ-002-L11): a single-segment specifier with exactly one indexed file of that basename resolves as INFERRED with the basis `unique_basename` and is stated as a remainder. Its own slice, separate from CPP-INCLUDE-ROOTS-1.
 
-Where no include root resolves a ≥2-segment specifier, a UNIQUE path-suffix match over the indexed file list shall resolve it (the `build_java_suffix_index` shape); a non-unique match stays unresolved; single-segment specifiers are never suffix-matched.
+Where no include root resolves a ≥2-segment specifier, a UNIQUE path-suffix match over the indexed file list shall resolve it (the `build_java_suffix_index` shape); a non-unique match stays unresolved; a single-segment specifier is never suffix-matched as `static` — where exactly one indexed file has that basename (nginx `<ngx_core.h>`) it resolves as INFERRED (`unique_basename`), rendered and counted under RG-REQ-002-L11.
 
 **Verification criterion:** a resolver test that a unique 2-segment suffix resolves and a duplicated one stays unresolved; `no_suffix_guessing` stays green for single segments; field: gstreamer unresolved 22,392 → ~12,600 with cross-module edges; vcmi +300; duckdb +1,618; nothing that resolves today changes.
 
@@ -143,6 +144,16 @@ Where no include root resolves a ≥2-segment specifier, a UNIQUE path-suffix ma
 **Verification criterion:** `rgr/tests/cli_out_3_drilldown.rs` imports cases (human/JSON pairs); a test asserting unresolved rows carry their classification (to be added); the CLI contract `docs/cli/rmap-contracts.md` imports section.
 
 **Evidence (v0.18.0):** NOT MET — the default per-file listing is an INNER JOIN on the target node (`storage/src/queries.rs:1726-1771`), so unresolved/external specifiers held in `unresolved_edges` are ABSENT from `imports <file>` while the same file's `map` section splits resolved from external/unresolved by contract; no test asserts per-row classification; the JSON pair test (`cli_out_3_drilldown.rs`) is `#[ignore]`d and asserts key presence only (extraction 2026-09-12; review finding: the CLI outcome had no obligation).
+
+### RG-REQ-006-L13 — A module's declared dependencies are those its build declares for it
+
+STATUS: RATIFIED 2026-09-23 (human, option A — decision record D-GRADLE-DECLARED-1; two slices: 1A block scoping, then 1B aliases and matching).
+
+For a Gradle project P, the declared set shall be the union of P's own build script's direct `dependencies` block, the `allprojects` blocks that apply to P, the `subprojects` blocks that apply to P when P is not the root project, and the `project(':P')` blocks that name P (the Gradle path mapped through `settings.gradle`); a root script's top-level `dependencies` block applies only to the root project; `buildscript` and `pluginManagement` classpaths and other projects' blocks are never attributed to P; a declaration written as a version-catalog alias (`libs.x`, a `libraries = libs` alias, a Groovy `libs += [ alias: "group:artifact:version" ]` map applied from the root script) resolves through that catalog to its Maven group; a declared group matches an observed Java package on a `.`-segment boundary (`com.github.luben` owns `com.github.luben.zstd`).
+
+**Verification criterion:** `repo-index/src/config.rs` scanner tests (a `buildscript { dependencies { classpath … } }` beside a real block yields only the real block; a root top-level `dependencies` block reaches the root project only; an `allprojects` block reaches every project and a `subprojects` block every non-root project; a `project(':a') { dependencies { } }` block is attributed to `a` only; TOML `[libraries]` and Groovy `libs += [ ]` alias fixtures; a positive `.`-segment match `com.github.luben` → `com.github.luben.zstd` and a negative mid-segment case `com.foo` ↛ `com.foobar.Type`); `manifest_deps.rs` attribution tests; `module-queries/src/deps/reconcile.rs` segment-prefix tests; field (1A): kafka's 61 modules lose `org.ajoberstar.grgit` (build.gradle:27, a buildscript classpath), grpc-java `core` loses the buildscript-only `com.google.guava` row, spring-petclinic byte-identical; field (1B): kafka `clients` declares and uses `org.mockito`, `com.github.luben`, `at.yawk.lz4`, `org.xerial.snappy`, `org.slf4j`; grpc-java modules' `libraries.*` declarations resolve.
+
+**Evidence (v0.19.0):** NOT MET — RC-8 (corrected 2026-09-23: kafka has no `libs.versions.toml`; its aliases live in `gradle/dependencies.gradle`). Queue: DEPS-GRADLE-CATALOG-1A → 1B. Follow-up: DEPS-JAVA-SELF-1 (the repo's own `package` declarations as the self set).
 
 ## Preservation obligations named by the ratifying specifications
 
