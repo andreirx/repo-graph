@@ -1,0 +1,105 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-manifest",
+  "baselineId": "DOCS-UNREADABLE-DECODE-1-INPUT-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "requirements": [
+    {
+      "path": "docs/requirements/rg-req-008-documentation-inventory.md",
+      "sha256": "sha256:1fc97cd13e03f0bc874897ba30af4d33ff0d0b0879d7c9cadbeb2b5c7ae116ad"
+    },
+    {
+      "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+      "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb"
+    }
+  ],
+  "dependencies": [
+    {
+      "role": "source",
+      "path": "docs/VISION.md",
+      "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/docs-list-2.md",
+      "sha256": "sha256:edc2185eee6bd8a9206b777b03c50d4988368e83b59ef5b38d3d6b0390b90c1f"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/audit5-minors-1.md",
+      "sha256": "sha256:cf4db06b57ba95e2730f0342b4b896cbd1d7758274d8daba5f0d201a85edb496"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/self-pollution-1.md",
+      "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/modules-method-1.md",
+      "sha256": "sha256:8c5c41ca832099568431228145556caae17d35c0dc3bc093f3b202311971820e"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/state-root-separation-1.md",
+      "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/snapshot-retention-1.md",
+      "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/daemon-residuals-2.md",
+      "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+      "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+    },
+    {
+      "role": "governance",
+      "path": "docs/slices/rg-requirements-bootstrap-1.md",
+      "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b"
+    },
+    {
+      "role": "governance",
+      "path": "docs/requirements/README.md",
+      "sha256": "sha256:ec35dbb2addbfd2e12be593f8f17b83ca437eebe21719365b99735d6931bd4fa"
+    },
+    {
+      "role": "governance",
+      "path": "CLAUDE.md",
+      "sha256": "sha256:4e6e2a618c2c15f1546d38736b876bdba688d1926ab102741cbe60c3a9bb3f04"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DU-CC10.md",
+      "sha256": "sha256:88ff0bc17769d3101471ad66eccd7b90a66361eb87679f6728d1e774cd17b5b8"
+    },
+    {
+      "role": "allocation",
+      "path": "docs/slices/docs-unreadable-decode-1.md",
+      "sha256": "sha256:90e6ea6f85d6c98cb87193df5e85a836c66b2ccaa1a335499828474296afa506"
+    }
+  ],
+  "reviewObligationIds": [
+    "RG-REQ-008",
+    "RG-REQ-011",
+    "RG-REQ-008-L05",
+    "RG-REQ-008-L01",
+    "RG-REQ-008-L03",
+    "RG-REQ-008-L04",
+    "RG-REQ-008-L06",
+    "RG-REQ-008-L08",
+    "RG-REQ-011-L06"
+  ],
+  "requiredDecisionIds": [
+    "D-DU-CC10"
+  ]
+}

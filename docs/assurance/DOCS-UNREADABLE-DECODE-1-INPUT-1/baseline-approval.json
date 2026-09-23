@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DOCS-UNREADABLE-DECODE-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DOCS-UNREADABLE-DECODE-1-INPUT-1.json",
+    "sha256": "sha256:33ca4de01d1eb8cc7a3011cf68ded0e1eabcad8c7cfe1bd568246e6debab8a27"
+  },
+  "review": {
+    "path": "docs/assurance/DOCS-UNREADABLE-DECODE-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:691e586940aecbeeca88b34f5a661c335d838225cdab85d367da8ebaf8ec1ddc"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-DU-CC10",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DU-CC10.md",
+        "sha256": "sha256:88ff0bc17769d3101471ad66eccd7b90a66361eb87679f6728d1e774cd17b5b8"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-23T21:01:49.963Z",
+  "rationale": "DOCS-UNREADABLE-DECODE-1 INPUT-1 under RG-BOOTSTRAP-INPUT-9: RC-1 (poco `docs list` exits 2 on one undecodable README) with the byte-hash read (D-DU-01) and CC-10's ratified `content_hash: null` contract (D-DU-CC10, human) end to end \u2014 doc-facts serializes the key always, the CLI decodes a string or null. Document items: PREP..PREP-3 (blocked on the catalog contradiction until INPUT-8), PREP-4 cycles 1-2 (claude-opus-5-5 / gpt-6-sol) accepted. Validator ALLOCATION VALID: 5 checks. Documentation facts are query-time: no toolchain version change; implementation not gated on TOOLCHAIN-STALENESS-1."
+}
