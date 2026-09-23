@@ -1,0 +1,55 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "CPP-ATTRIBUTE-MACRO-1A-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/CPP-ATTRIBUTE-MACRO-1A-INPUT-1.json",
+    "sha256": "sha256:5136bf9bc7f2140397746fd82da640ca6f6886f09852e004983b91edb754103c"
+  },
+  "review": {
+    "path": "docs/assurance/CPP-ATTRIBUTE-MACRO-1A-INPUT-1/requirements-review.json",
+    "sha256": "sha256:0a0a415bb125f5f051ea8f404d5d4696087a11beda45089b0ef46df39ad3c50c"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-CAM-MARKER-BOUNDARY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CAM-MARKER-BOUNDARY-1.md",
+        "sha256": "sha256:275686da2fb2d634a88b07b7f0941f4345b91b1b84f5fdd748fdbcc07abc686b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-23T19:29:08.479Z",
+  "rationale": "CPP-ATTRIBUTE-MACRO-1A INPUT-1 under RG-BOOTSTRAP-INPUT-9: the re-cut of CPP-ATTRIBUTE-MACRO-1 under RG-REQ-002-L11 (D-CERTAINTY-MARK-1, human) with the first document item's two decisions answered by records \u2014 D-CAM-MARKER-BOUNDARY-1 (operator, option A: additive all-or-nothing DTO fields, the forward_decl precedent; human may override) and D-REFRESH-STALE-1 (human, option B: explicit rebuild; the cpp-core:0.2.0 bump makes TOOLCHAIN-STALENESS-1's line fire on existing stores). Document items: PREP (terra, decision-required \u00d72), PREP-2 cycles 1-3 (claude-opus-5-5 author / codex gpt-6-sol reviewer): refinement-required \u00d74, \u00d72 (one a manager packet defect \u2014 the five-check packet vs the author's six; the author folded the stale-store proof into CAM-A04 and the packet was re-aligned), accepted 25/25. RG-REQ-002-L11 is PARTIAL in 1A (explain; find in 1B) and is carried under `changes`. Implementation is gated on TOOLCHAIN-STALENESS-1's accepted record at HEAD. Validator ALLOCATION VALID: 5 checks."
+}
