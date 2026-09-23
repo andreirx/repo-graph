@@ -1,0 +1,62 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "PYTHON-SUBMODULE-IMPORT-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/PYTHON-SUBMODULE-IMPORT-1-INPUT-1.json",
+    "sha256": "sha256:bdda3a6124db375689f124603ea0b9df5ebce74feaa5d4b41195fbd6626292a4"
+  },
+  "review": {
+    "path": "docs/assurance/PYTHON-SUBMODULE-IMPORT-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:fff0e56d0038a92166c265d64f5590890246c934bb39dadca1ba0cffbccf2e89"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-PSI-REFRESH-SIGNALS-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSI-REFRESH-SIGNALS-1.md",
+        "sha256": "sha256:f4ddb39341e09562248bcc2881696d90f2f70725a1ba9ddffb7e6dc351bad3ca"
+      }
+    },
+    {
+      "id": "D-PSI-RELEASE-GATE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSI-RELEASE-GATE-1.md",
+        "sha256": "sha256:75eeec71f03eb211011817f69aa5734fdc90d6b2f4aaf44c0bfbe94babf7bb49"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-23T20:41:07.938Z",
+  "rationale": "PYTHON-SUBMODULE-IMPORT-1 INPUT-1 under RG-BOOTSTRAP-INPUT-9: the re-cut of RC-7 under RG-REQ-006-L04's Python clause and RG-REQ-002-L11 (inferred submodule target with the init as alternate). Document items: PREP (decision-required), PREP-2 (decision-required \u00d73 \u2192 D-PSI-REFRESH-SIGNALS-1 operator A: the refresh loads copied-forward import bindings, parity proven; D-PSI-RELEASE-GATE-1 operator B: TEST-EDGE-SCOPE-1B gates the release; RG-REQ-001 a parent with L06 under `changes`), PREP-3 cycles 1-4 (claude-opus-5-5 / gpt-6-sol): three refinement cycles on the completeness of the before/after row oracles (strain noted), accepted 31/31. Validator ALLOCATION VALID: 7 checks. Implementation gated on TOOLCHAIN-STALENESS-1's accepted record."
+}
