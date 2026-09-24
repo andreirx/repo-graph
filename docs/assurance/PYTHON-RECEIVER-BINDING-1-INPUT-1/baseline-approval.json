@@ -1,0 +1,76 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "PYTHON-RECEIVER-BINDING-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/PYTHON-RECEIVER-BINDING-1-INPUT-1.json",
+    "sha256": "sha256:b47150980a902576154ada6a0dbe1bcc238ed8e26a2ac4ffad27083c5e5b75a8"
+  },
+  "review": {
+    "path": "docs/assurance/PYTHON-RECEIVER-BINDING-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:829ba7ed2aa2d6c8a76a9d4e6fb18da00637df04f2c3310693c2484e577415d3"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-PRB-RATE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PRB-RATE-1.md",
+        "sha256": "sha256:3e60cb1715683cc6936c7a8b94635a0e18e84794a99d8d8aa2a5298d667d3bb7"
+      }
+    },
+    {
+      "id": "D-PRB-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PRB-SCOPE-1.md",
+        "sha256": "sha256:0f48c8942a33ba79cfc1a8b80e8e954a2ae327e37ea3cdd72980160699fb9cf9"
+      }
+    },
+    {
+      "id": "D-PRB-ENRICH-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PRB-ENRICH-1.md",
+        "sha256": "sha256:8103c76601b38824509f6c9d189be3bee9b2a35ead1958de0094c1cba6f1da4e"
+      }
+    },
+    {
+      "id": "D-PRB-CARRIER-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PRB-CARRIER-1.md",
+        "sha256": "sha256:2fac0a65ba16cbda3e4f601db77d4f914d63f8c14424ec4dd63faf66d9a4025d"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-24T03:00:01.989Z",
+  "rationale": "Accepted at PYTHON-RECEIVER-BINDING-1-PREP-6 cycle 0 (claude-opus-5-5 author, gpt-6-sol reviewer) after six document items and eleven review cycles. Decisions: D-PRB-RATE-1 (operator A: the resolved-call numerator counts static/dynamic only; every rate surface states the inferred count), D-PRB-SCOPE-1 (the author's allocation with five amendments; addendum: path over certain call/import edges with inferred_edges_on_route), D-PRB-ENRICH-1 (operator A: the compiler promoter writes static under L02's receiver-type-evidence clause; correction: reader-facing legacy wording, gate 5 class-or-enum), D-PRB-CARRIER-1 (operator C: the carrier records the receiver's lexical binding; correction: writer check, HEAD stage order for python-core:0.1.0 carriers, terminal hierarchy miss). Three of the eleven cycles corrected the manager's own records; every finding was verified on the source or the stores. Implementation gated on TOOLCHAIN-STALENESS-1."
+}
