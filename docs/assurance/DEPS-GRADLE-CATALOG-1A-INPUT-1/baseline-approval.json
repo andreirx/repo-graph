@@ -1,0 +1,55 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DEPS-GRADLE-CATALOG-1A-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DEPS-GRADLE-CATALOG-1A-INPUT-1.json",
+    "sha256": "sha256:24b163b783442626fc7a68d6461ed929aa6d88608e414cfa4db63073c3f42f68"
+  },
+  "review": {
+    "path": "docs/assurance/DEPS-GRADLE-CATALOG-1A-INPUT-1/requirements-review.json",
+    "sha256": "sha256:d506e4e331d267ae1900278593d5b29735a3a8c0f02da42841eec4b687fc1022"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-GRADLE-DECLARED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+        "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-DGC-CONDITIONAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-CONDITIONAL-1.md",
+        "sha256": "sha256:240e67c53adcd3f4daf09233d8bdbd003d5acaa61a300230977af94da4bfa3f0"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-24T00:00:04.412Z",
+  "rationale": "Accepted at DEPS-GRADLE-CATALOG-1A-PREP-3 cycle 1 (claude-opus-5-5 author, gpt-6-sol reviewer) after three document items: review-0 (four findings on scoping, conditional blocks, projectDir, staleness), PREP-2 (F-DGC-05 marking of skipped dependency blocks, resolved by D-DGC-CONDITIONAL-1; F-DGC-06/09 oracle corrections), PREP-3 (the record's dated correction: kafka 1 at build.gradle:518; class-wide wording; F-DGC-10 None-rule alignment). Every finding was verified against the source or the corpora at their pinned commits; the manager's own record carried the one wrong literal. Implementation gated on TOOLCHAIN-STALENESS-1 (DGC-A01)."
+}

@@ -1,0 +1,166 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-manifest",
+  "baselineId": "DEPS-GRADLE-CATALOG-1A-INPUT-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "requirements": [
+    {
+      "path": "docs/requirements/rg-req-006-import-resolution-and-dependencies.md",
+      "sha256": "sha256:ac269e45e110557bd19e92e446474e8b0fe9da4601f998de879b3527fb78c55c"
+    },
+    {
+      "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+      "sha256": "sha256:8f2da793ee99d9f756ec48b66c133b49716db1d079686e2b90d5fce2cc88c68b"
+    },
+    {
+      "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+      "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb"
+    }
+  ],
+  "dependencies": [
+    {
+      "role": "source",
+      "path": "docs/VISION.md",
+      "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/import-resolution-rust-1.md",
+      "sha256": "sha256:0e4e22bd8d833396c337443d02e44439a1670809937d5fb1956d64c726a26731"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/import-resolution-java-1.md",
+      "sha256": "sha256:64643bf118f5cc89db6bdcd23abcc89c8933a38f6b088f4dca85637b3eebaff0"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/deps-classifier-1.md",
+      "sha256": "sha256:27b4fa517231cd6bec8063bbc0e463f8cdc5d3998e1c8511a1d54ea1bbad4082"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/honesty-gate-1.md",
+      "sha256": "sha256:99605ec1f96c75b88a16bda7db349b029cf0048211118e28eeb7776d5d8642d8"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/honesty-gate-2.md",
+      "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/coherence-3.md",
+      "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/headline-truth-1.md",
+      "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/find-facts-1.md",
+      "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/state-root-separation-1.md",
+      "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/snapshot-retention-1.md",
+      "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/daemon-residuals-2.md",
+      "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/self-pollution-1.md",
+      "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+      "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+    },
+    {
+      "role": "governance",
+      "path": "docs/slices/rg-requirements-bootstrap-1.md",
+      "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b"
+    },
+    {
+      "role": "governance",
+      "path": "docs/requirements/README.md",
+      "sha256": "sha256:ec35dbb2addbfd2e12be593f8f17b83ca437eebe21719365b99735d6931bd4fa"
+    },
+    {
+      "role": "governance",
+      "path": "CLAUDE.md",
+      "sha256": "sha256:4e6e2a618c2c15f1546d38736b876bdba688d1926ab102741cbe60c3a9bb3f04"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+      "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+      "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-CONDITIONAL-1.md",
+      "sha256": "sha256:240e67c53adcd3f4daf09233d8bdbd003d5acaa61a300230977af94da4bfa3f0"
+    },
+    {
+      "role": "allocation",
+      "path": "docs/slices/deps-gradle-catalog-1a.md",
+      "sha256": "sha256:62bc3277e5e38ede3e4f686e568522e8181ce9295f62eedc1cd63800fb5f9793"
+    }
+  ],
+  "reviewObligationIds": [
+    "RG-REQ-006",
+    "RG-REQ-002",
+    "RG-REQ-011",
+    "RG-REQ-006-L13",
+    "RG-REQ-006-L01",
+    "RG-REQ-006-L02",
+    "RG-REQ-006-L03",
+    "RG-REQ-006-L04",
+    "RG-REQ-006-L05",
+    "RG-REQ-006-L06",
+    "RG-REQ-006-L07",
+    "RG-REQ-006-L08",
+    "RG-REQ-006-L09",
+    "RG-REQ-006-L10",
+    "RG-REQ-006-L11",
+    "RG-REQ-006-L12",
+    "RG-REQ-002-L01",
+    "RG-REQ-002-L02",
+    "RG-REQ-002-L03",
+    "RG-REQ-002-L04",
+    "RG-REQ-002-L05",
+    "RG-REQ-002-L06",
+    "RG-REQ-002-L07",
+    "RG-REQ-002-L08",
+    "RG-REQ-002-L09",
+    "RG-REQ-002-L10",
+    "RG-REQ-002-L11",
+    "RG-REQ-011-L06",
+    "RG-REQ-011-L07"
+  ],
+  "requiredDecisionIds": [
+    "D-GRADLE-DECLARED-1",
+    "D-REFRESH-STALE-1",
+    "D-DGC-CONDITIONAL-1"
+  ]
+}
