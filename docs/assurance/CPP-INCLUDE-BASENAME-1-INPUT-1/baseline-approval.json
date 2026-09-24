@@ -1,0 +1,55 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "CPP-INCLUDE-BASENAME-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/CPP-INCLUDE-BASENAME-1-INPUT-1.json",
+    "sha256": "sha256:5f2607afd33a85479c909753c3fdd0e9afc1b32ecf46218969e62a9af62a794c"
+  },
+  "review": {
+    "path": "docs/assurance/CPP-INCLUDE-BASENAME-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:ac42cbdfced717e68427864a64842393748dbf698057c671add9424dc805d0de"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-CIB-REVIEW-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CIB-REVIEW-1.md",
+        "sha256": "sha256:9fb5e241565cf239eaebe18a742e8ac1dab80e0c7fd7823832170198ac79b058"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-24T01:32:01.731Z",
+  "rationale": "Accepted at CPP-INCLUDE-BASENAME-1-PREP-3 cycle 0 (claude-opus-5-5 author, gpt-6-sol reviewer) after three document items: PREP (four decisions \u2014 refresh re-resolves every include, trust sums the IMPORTS family through the shared category set, the INDEXER_VERSION bump is a reported consequence, the reason reaches imports <file> \u2014 and three findings, resolved in D-CIB-REVIEW-1), PREP-2 (trust-level propagation to import-graph/change-impact reliability; present-valid as an internally consistent carrier), PREP-3 (a this-slice inferred include with a missing basis renders reason-missing). Two errors were the manager's packet (refresh contract; the nginx.c witness), verified on the source and corrected in the record. Implementation gated on TOOLCHAIN-STALENESS-1 and TEST-EDGE-SCOPE-1B (release gate)."
+}
