@@ -23,6 +23,7 @@
 //!      agent crate does NOT depend on `repo-graph-trust`; trust
 //!      policy lives on the adapter side of this boundary.
 
+use repo_graph_agent::storage_port::AgentUndeterminedIdentity;
 use repo_graph_agent::{
     AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
     AgentCancelCheck, AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDirectoryGroup,
@@ -91,6 +92,81 @@ pub(crate) fn map_err<E: std::fmt::Display>(
 }
 
 // ── Agent-specific helpers ───────────────────────────────────────
+
+/// CPP-ATTRIBUTE-MACRO-1A: one present key of a stored undetermined-identity marker — its SQLite
+/// `json_type` and its `json_extract` value (an array extracts as its JSON text).
+struct StoredMarkerKey {
+    json_type: String,
+    value: rusqlite::types::Value,
+}
+
+/// CPP-ATTRIBUTE-MACRO-1A (RG-REQ-002-L11, D-CAM-MARKER-BOUNDARY-1): decode the node-metadata
+/// marker keys `identity`, `identity_candidates` and `basis` ALL-OR-NOTHING. All three absent →
+/// `Ok(None)` (a determined member). All three present and well formed — `identity` the string
+/// `"undetermined"`, `identity_candidates` an array of exactly two distinct non-empty strings,
+/// `basis` a non-empty string — → `Ok(Some(..))`, candidates in stored order. Any other state
+/// (one or two keys present, a JSON `null` value, a wrong type, a wrong count, an empty or
+/// duplicate candidate, another `identity` value) → `Err(reason)`: the caller fails the read, as a
+/// present-but-unreadable `forward_decl` does, never defaulting to "determined".
+fn decode_undetermined_identity(
+    identity: Option<StoredMarkerKey>,
+    candidates: Option<StoredMarkerKey>,
+    basis: Option<StoredMarkerKey>,
+) -> Result<Option<AgentUndeterminedIdentity>, String> {
+    use rusqlite::types::Value;
+    let (identity, candidates, basis) = match (identity, candidates, basis) {
+        (None, None, None) => return Ok(None),
+        (Some(i), Some(c), Some(b)) => (i, c, b),
+        (i, c, b) => {
+            let state =
+                |k: &Option<StoredMarkerKey>| if k.is_some() { "present" } else { "absent" };
+            return Err(format!(
+                "partial marker: identity {}, identity_candidates {}, basis {}",
+                state(&i),
+                state(&c),
+                state(&b),
+            ));
+        }
+    };
+    match (identity.json_type.as_str(), &identity.value) {
+        ("text", Value::Text(t)) if t == "undetermined" => {}
+        (ty, _) => return Err(format!("identity is not \"undetermined\" (json type {ty})")),
+    }
+    let Value::Text(candidates_json) = &candidates.value else {
+        return Err("identity_candidates is not a JSON array".to_string());
+    };
+    if candidates.json_type != "array" {
+        return Err(format!(
+            "identity_candidates is not a JSON array (json type {})",
+            candidates.json_type
+        ));
+    }
+    let parsed: Vec<serde_json::Value> = serde_json::from_str(candidates_json)
+        .map_err(|e| format!("identity_candidates unreadable: {e}"))?;
+    let strings: Vec<String> = parsed
+        .into_iter()
+        .map(|v| match v {
+            serde_json::Value::String(s) if !s.is_empty() => Ok(s),
+            other => Err(format!(
+                "identity_candidates holds a non-string or empty entry: {other}"
+            )),
+        })
+        .collect::<Result<_, _>>()?;
+    let [first, second]: [String; 2] = strings
+        .try_into()
+        .map_err(|v: Vec<String>| format!("identity_candidates has {} entries, not 2", v.len()))?;
+    if first == second {
+        return Err(format!("identity_candidates repeats {first:?}"));
+    }
+    let basis = match (basis.json_type.as_str(), basis.value) {
+        ("text", Value::Text(t)) if !t.is_empty() => t,
+        (ty, _) => return Err(format!("basis is not a non-empty string (json type {ty})")),
+    };
+    Ok(Some(AgentUndeterminedIdentity {
+        candidates: [first, second],
+        basis,
+    }))
+}
 
 impl StorageConnection {
     /// Map a dead-node row into an `AgentDeadNode` DTO. Used by the
@@ -1522,7 +1598,13 @@ impl AgentStorageRead for StorageConnection {
         let mut stmt = conn
             .prepare(
                 "SELECT n.name, n.qualified_name, n.subtype, f.path, n.line_start, \
-                        json_extract(n.metadata_json, '$.forward_decl') AS fd \
+                        json_extract(n.metadata_json, '$.forward_decl') AS fd, \
+                        json_type(n.metadata_json, '$.identity'), \
+                        json_extract(n.metadata_json, '$.identity'), \
+                        json_type(n.metadata_json, '$.identity_candidates'), \
+                        json_extract(n.metadata_json, '$.identity_candidates'), \
+                        json_type(n.metadata_json, '$.basis'), \
+                        json_extract(n.metadata_json, '$.basis') \
                  FROM nodes n \
                  JOIN files f ON n.file_uid = f.file_uid \
                  WHERE n.snapshot_uid = ?1 AND n.kind = 'SYMBOL' \
@@ -1553,6 +1635,30 @@ impl AgentStorageRead for StorageConnection {
                         .get::<_, Option<i64>>(5)?
                         .map(|v| v != 0)
                         .unwrap_or(false);
+                    // CPP-ATTRIBUTE-MACRO-1A (RG-REQ-002-L11): the undetermined-identity marker,
+                    // decoded all-or-nothing. A partial or malformed marker is a conversion error
+                    // that PROPAGATES as an AgentStorageError — never read as a determined member.
+                    let marker_key = |type_col: usize, value_col: usize| {
+                        Ok::<_, rusqlite::Error>(match row.get::<_, Option<String>>(type_col)? {
+                            None => None,
+                            Some(json_type) => Some(StoredMarkerKey {
+                                json_type,
+                                value: row.get::<_, rusqlite::types::Value>(value_col)?,
+                            }),
+                        })
+                    };
+                    let undetermined_identity = decode_undetermined_identity(
+                        marker_key(6, 7)?,
+                        marker_key(8, 9)?,
+                        marker_key(10, 11)?,
+                    )
+                    .map_err(|reason| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            8,
+                            rusqlite::types::Type::Text,
+                            format!("member {qualified}: {reason}").into(),
+                        )
+                    })?;
                     Ok(AgentMemberEntry {
                         name,
                         qualified_name: qualified,
@@ -1560,6 +1666,7 @@ impl AgentStorageRead for StorageConnection {
                         file,
                         line_start,
                         forward_decl,
+                        undetermined_identity,
                     })
                 },
             )
@@ -2021,5 +2128,208 @@ impl AgentStorageRead for StorageConnection {
             unknown,
             earliest_impacted_at,
         })
+    }
+}
+
+/// CPP-ATTRIBUTE-MACRO-1A (RG-REQ-002-L11): the undetermined-identity marker read through the real
+/// SQLite adapter. Lives beside the adapter because the slice's allocation names this file, not the
+/// crate's `tests/agent_impl.rs` integration target (a packet scope gap reported with the build).
+#[cfg(test)]
+mod undetermined_identity_tests {
+    use repo_graph_agent::AgentStorageRead;
+
+    use crate::types::{
+        CreateSnapshotInput, FileVersion, GraphNode, Repo, SourceLocation, TrackedFile,
+        UpdateSnapshotStatusInput,
+    };
+    use crate::StorageConnection;
+
+    fn storage_with_class() -> (StorageConnection, String) {
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        storage
+            .add_repo(&Repo {
+                repo_uid: "r1".into(),
+                name: "my-repo".into(),
+                root_path: "/tmp/r1".into(),
+                default_branch: None,
+                created_at: "2026-09-26T00:00:00Z".into(),
+                metadata_json: None,
+            })
+            .unwrap();
+        let snap = storage
+            .create_snapshot(&CreateSnapshotInput {
+                repo_uid: "r1".into(),
+                parent_snapshot_uid: None,
+                kind: "full".into(),
+                basis_ref: None,
+                basis_commit: None,
+                label: None,
+                toolchain_json: None,
+            })
+            .unwrap();
+        storage
+            .update_snapshot_status(&UpdateSnapshotStatusInput {
+                snapshot_uid: snap.snapshot_uid.clone(),
+                status: "ready".into(),
+                completed_at: Some("2026-09-26T00:01:00Z".into()),
+            })
+            .unwrap();
+        storage
+            .upsert_files(&[TrackedFile {
+                file_uid: "f1".into(),
+                repo_uid: "r1".into(),
+                path: "port/port_stdcxx.h".into(),
+                language: Some("cpp".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            }])
+            .unwrap();
+        storage
+            .upsert_file_versions(&[FileVersion {
+                snapshot_uid: snap.snapshot_uid.clone(),
+                file_uid: "f1".into(),
+                content_hash: "h".into(),
+                ast_hash: None,
+                extractor: None,
+                parse_status: "ok".into(),
+                size_bytes: Some(1),
+                line_count: Some(1),
+                indexed_at: "2026-09-26T00:00:00Z".into(),
+            }])
+            .unwrap();
+        storage
+            .insert_nodes(&[member("nt", &snap.snapshot_uid, "Mutex", "CLASS", 51, None)])
+            .unwrap();
+        (storage, snap.snapshot_uid)
+    }
+
+    fn member(
+        uid: &str,
+        snapshot_uid: &str,
+        name: &str,
+        subtype: &str,
+        line: i64,
+        metadata_json: Option<&str>,
+    ) -> GraphNode {
+        let qualified = if subtype == "CLASS" {
+            name.to_string()
+        } else {
+            format!("Mutex::{name}")
+        };
+        GraphNode {
+            node_uid: uid.into(),
+            snapshot_uid: snapshot_uid.into(),
+            repo_uid: "r1".into(),
+            stable_key: format!("r1:port/port_stdcxx.h#{qualified}:SYMBOL:{subtype}:{uid}"),
+            kind: "SYMBOL".into(),
+            subtype: Some(subtype.into()),
+            name: name.into(),
+            qualified_name: Some(qualified),
+            file_uid: Some("f1".into()),
+            parent_node_uid: None,
+            location: Some(SourceLocation {
+                line_start: line,
+                col_start: 0,
+                line_end: line,
+                col_end: 0,
+            }),
+            signature: None,
+            visibility: None,
+            doc_comment: None,
+            metadata_json: metadata_json.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn list_members_of_type_reads_the_identity_marker_and_a_partial_or_malformed_marker_is_an_error(
+    ) {
+        let (mut storage, snap) = storage_with_class();
+        storage
+            .insert_nodes(&[
+                member(
+                    "n1",
+                    &snap,
+                    "EXCLUSIVE_LOCK_FUNCTION",
+                    "METHOD",
+                    59,
+                    Some(r#"{"identity":"undetermined","basis":"macro_recovery_ambiguous_identity","identity_candidates":["Lock","EXCLUSIVE_LOCK_FUNCTION"]}"#),
+                ),
+                // A determined member: no marker key (other metadata keys unaffected).
+                member("n2", &snap, "Unlocked", "METHOD", 70, Some(r#"{"forward_decl":true}"#)),
+                member("n3", &snap, "Plain", "METHOD", 71, None),
+            ])
+            .unwrap();
+        let members =
+            <StorageConnection as AgentStorageRead>::list_members_of_type(&storage, &snap, "Mutex")
+                .unwrap();
+        let marked = members
+            .iter()
+            .find(|m| m.name == "EXCLUSIVE_LOCK_FUNCTION")
+            .unwrap();
+        let u = marked
+            .undetermined_identity
+            .as_ref()
+            .expect("the complete marker is read");
+        assert_eq!(
+            u.candidates,
+            ["Lock".to_string(), "EXCLUSIVE_LOCK_FUNCTION".to_string()],
+            "candidates verbatim, stored order"
+        );
+        assert_eq!(u.basis, "macro_recovery_ambiguous_identity");
+        for name in ["Unlocked", "Plain"] {
+            let m = members.iter().find(|m| m.name == name).unwrap();
+            assert_eq!(
+                m.undetermined_identity, None,
+                "{name}: absent keys = determined"
+            );
+        }
+        assert!(
+            members
+                .iter()
+                .find(|m| m.name == "Unlocked")
+                .unwrap()
+                .forward_decl
+        );
+
+        // Every partial or malformed marker fails the read — never silently determined.
+        let malformed = [
+            r#"{"identity":"undetermined"}"#,
+            r#"{"identity_candidates":["A","B"]}"#,
+            r#"{"basis":"macro_recovery_ambiguous_identity"}"#,
+            r#"{"identity":"undetermined","identity_candidates":["A","B"]}"#,
+            r#"{"identity":"undetermined","basis":"b"}"#,
+            r#"{"identity_candidates":["A","B"],"basis":"b"}"#,
+            r#"{"identity":"determined","identity_candidates":["A","B"],"basis":"b"}"#,
+            r#"{"identity":null,"identity_candidates":["A","B"],"basis":"b"}"#,
+            r#"{"identity":1,"identity_candidates":["A","B"],"basis":"b"}"#,
+            r#"{"identity":"undetermined","identity_candidates":"A,B","basis":"b"}"#,
+            r#"{"identity":"undetermined","identity_candidates":["A"],"basis":"b"}"#,
+            r#"{"identity":"undetermined","identity_candidates":["A","B","C"],"basis":"b"}"#,
+            r#"{"identity":"undetermined","identity_candidates":["A",2],"basis":"b"}"#,
+            r#"{"identity":"undetermined","identity_candidates":["A",""],"basis":"b"}"#,
+            r#"{"identity":"undetermined","identity_candidates":["A","A"],"basis":"b"}"#,
+            r#"{"identity":"undetermined","identity_candidates":["A","B"],"basis":""}"#,
+            r#"{"identity":"undetermined","identity_candidates":["A","B"],"basis":7}"#,
+            r#"{"identity":"undetermined","identity_candidates":["A","B"],"basis":null}"#,
+        ];
+        for (i, meta) in malformed.iter().enumerate() {
+            let (mut s, snap) = storage_with_class();
+            s.insert_nodes(&[member(
+                &format!("bad{i}"),
+                &snap,
+                "Weird",
+                "METHOD",
+                80,
+                Some(meta),
+            )])
+            .unwrap();
+            let read =
+                <StorageConnection as AgentStorageRead>::list_members_of_type(&s, &snap, "Mutex");
+            assert!(
+                read.is_err(),
+                "a partial or malformed marker must fail the read, got {read:?} for {meta}"
+            );
+        }
     }
 }

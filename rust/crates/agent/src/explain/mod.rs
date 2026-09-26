@@ -575,6 +575,14 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
                     // by the adapter), for the `path:line` anchor.
                     line: m.line_start,
                     forward_decl: m.forward_decl,
+                    // CPP-ATTRIBUTE-MACRO-1A (RG-REQ-002-L11): the all-or-nothing marker, verbatim.
+                    undetermined_identity: m.undetermined_identity.map(|u| {
+                        ExplainUndeterminedIdentity {
+                            identity: MemberIdentityState::Undetermined,
+                            identity_candidates: u.candidates,
+                            identity_basis: u.basis,
+                        }
+                    }),
                 })
                 .collect();
             let (trunc, omitted) = truncate_items(&mut items, cap);

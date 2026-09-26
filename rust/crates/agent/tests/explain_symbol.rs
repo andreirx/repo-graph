@@ -517,6 +517,7 @@ fn explain_type_focus_emits_members_and_referenced_by() {
                 file: "src/service.ts".into(),
                 line_start: Some(12),
                 forward_decl: false,
+                undetermined_identity: None,
             },
             AgentMemberEntry {
                 name: "stop".into(),
@@ -525,6 +526,7 @@ fn explain_type_focus_emits_members_and_referenced_by() {
                 file: "src/service.ts".into(),
                 line_start: Some(20),
                 forward_decl: false,
+                undetermined_identity: None,
             },
         ],
     );
@@ -588,6 +590,7 @@ fn explain_function_focus_emits_no_members_or_referenced_by() {
             file: "src/w.ts".into(),
             line_start: Some(6),
             forward_decl: false,
+            undetermined_identity: None,
         }],
     );
 
@@ -622,6 +625,7 @@ fn explain_type_focus_members_count_is_the_pre_truncation_total() {
             file: "src/service.ts".into(),
             line_start: Some(10 + i as u64),
             forward_decl: false,
+            undetermined_identity: None,
         })
         .collect();
     fake.members_of_type
@@ -634,4 +638,74 @@ fn explain_type_focus_members_count_is_the_pre_truncation_total() {
     assert_eq!(ev.items.len(), 15, "items capped by items_cap(Medium)");
     assert_eq!(ev.items_truncated, Some(true));
     assert_eq!(ev.items_omitted_count, Some(5));
+}
+
+// ── CPP-ATTRIBUTE-MACRO-1A (RG-REQ-002-L11): the undetermined-identity marker reaches explain ──
+
+#[test]
+fn explain_members_carry_the_undetermined_identity_marker_verbatim() {
+    use repo_graph_agent::storage_port::AgentUndeterminedIdentity;
+
+    let mut fake = FakeAgentStorage::new();
+    seed_symbol_repo(&mut fake);
+    fake.members_of_type.insert(
+        ("snap1".into(), "src/service.ts:MyService".into()),
+        vec![
+            AgentMemberEntry {
+                name: "IncrementBy".into(),
+                qualified_name: "src/service.ts:MyService::IncrementBy".into(),
+                subtype: Some("METHOD".into()),
+                file: "db/db_test.cc".into(),
+                line_start: Some(47),
+                forward_decl: true,
+                undetermined_identity: None,
+            },
+            AgentMemberEntry {
+                name: "LOCKS_EXCLUDED".into(),
+                qualified_name: "src/service.ts:MyService::LOCKS_EXCLUDED".into(),
+                subtype: Some("METHOD".into()),
+                file: "db/db_test.cc".into(),
+                line_start: Some(47),
+                forward_decl: false,
+                undetermined_identity: Some(AgentUndeterminedIdentity {
+                    candidates: ["IncrementBy".into(), "LOCKS_EXCLUDED".into()],
+                    basis: "macro_recovery_ambiguous_identity".into(),
+                }),
+            },
+        ],
+    );
+
+    let result = run_explain(&fake, "r1", "MyService", Budget::Medium, TEST_NOW).unwrap();
+    let members = members_evidence(&result).expect("type focus emits EXPLAIN_MEMBERS");
+    assert_eq!(members.count, 2);
+
+    // The wire shape: the marker's three flat keys on the marked member only; a determined
+    // member's JSON carries none of them (byte-identical to before this slice).
+    let json = serde_json::to_value(&members).unwrap();
+    let items = json["items"].as_array().unwrap();
+    assert_eq!(
+        items[0],
+        serde_json::json!({
+            "name": "IncrementBy", "subtype": "METHOD", "file": "db/db_test.cc",
+            "line": 47, "forward_decl": true
+        }),
+        "a determined member serializes exactly as before"
+    );
+    assert_eq!(
+        items[1],
+        serde_json::json!({
+            "name": "LOCKS_EXCLUDED", "subtype": "METHOD", "file": "db/db_test.cc",
+            "line": 47, "forward_decl": false,
+            "identity": "undetermined",
+            "identity_candidates": ["IncrementBy", "LOCKS_EXCLUDED"],
+            "identity_basis": "macro_recovery_ambiguous_identity"
+        }),
+        "the marker is carried verbatim, candidates in stored order"
+    );
+    let as_text = serde_json::to_string(&members.items[0]).unwrap();
+    assert_eq!(
+        as_text,
+        r#"{"name":"IncrementBy","subtype":"METHOD","file":"db/db_test.cc","line":47,"forward_decl":true}"#,
+        "key order and bytes of a determined member unchanged"
+    );
 }

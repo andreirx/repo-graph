@@ -1,0 +1,408 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-CPP-ATTRIBUTE-MACRO-1A-1",
+  "workItemId": "CPP-ATTRIBUTE-MACRO-1A",
+  "baseline": {
+    "path": "docs/requirements/baselines/CPP-ATTRIBUTE-MACRO-1A-INPUT-4.json",
+    "sha256": "sha256:e07275f9d4cfd5d430f9cc4bdbb63a0e7492ebd811cf61329bd054d7e8381ed2"
+  },
+  "allocation": {
+    "path": "docs/slices/cpp-attribute-macro-1a.md",
+    "sha256": "sha256:d615fd241961d11828c07325e52a2c43fd88b775ede5831df4005ecb50d77541"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "7974e6d336f8957c803b8fcdef845bc00f736250",
+    "entries": [
+      {
+        "path": "rust/crates/agent/src/dto/signal.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:7abceb684a141cedf5e79b23d3bad1c7c33057bcb235397f7c9ec6d02c6d6fa8",
+          "byteLength": 98438
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f8fead843a27870924901ce4189d6c9fdeed50be5335a52168a22615939d4f1d",
+          "byteLength": 99718
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/explain/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:e4ce861b8a0adf2cf6e06e5b6bbc175ff679ed99f220bd7af7b0ac1590e4afb5",
+          "byteLength": 52590
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:5c7176a9f14ff625e9e22cd3d043e677ba9ae2eef19b14db8a6fe29b2baa2b12",
+          "byteLength": 53061
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/storage_port.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:b95fc196b6622865fe938bedd8e5007be8c78b3c4ea040900aff65c19b88d744",
+          "byteLength": 61857
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:522c56217aa695b8457e975468de961d84ecabc49cf723e36c479f5117400272",
+          "byteLength": 62917
+        }
+      },
+      {
+        "path": "rust/crates/agent/tests/explain_symbol.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:cb2ddfb39f6edb8bb0e9a45465e7128872e5baea56d7f48609b123489ef9f7dd",
+          "byteLength": 23890
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:3e7db413ccc3e27c195a254ac2dfea0b3b5343644f44427911f327120f22e702",
+          "byteLength": 26994
+        }
+      },
+      {
+        "path": "rust/crates/cpp-extractor/src/extractor.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:8ab8e0f5a34ae939df23b6bf894527ffac9f4108f240381555c1b58da6708cfc",
+          "byteLength": 184058
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:94618efc0df723decfd83271afff11c93673f3c8895505aafe4c99a815e67870",
+          "byteLength": 231216
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/explain.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:418bfb79fc6030b2aa97403c105ba2feef8b03f3e628a0935a956c4efb4e3adb",
+          "byteLength": 78855
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:58e6078de969b89e82b882beb33938eadba63142f60e21f99907393821f01e96",
+          "byteLength": 85572
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/explain_sections.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:fca5df6bce7bccc1e9beef2b58021bc5896875ca38a3d89bd8e1254a4187ffee",
+          "byteLength": 33273
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:82522244538684440cad8dff019069a670d14b951ea9e4707a3a09185a21976b",
+          "byteLength": 35656
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/agent_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d85cdffd17dd1d831af0d8a322c9923b80acd3ddcbfa776f5b4f44dfc5393471",
+          "byteLength": 87393
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f49451b8ffda11f1d55410152e9969f1d135fe9e25a780fd537a25d67dd97da5",
+          "byteLength": 100752
+        }
+      }
+    ],
+    "sha256": "sha256:78c19e14bf5f29f8df148d366eba679f9d71b3cd7ab3f8bab469c4b57662a160"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-CPP-ATTRIBUTE-MACRO-1A-1"
+  },
+  "checks": [
+    {
+      "checkId": "CAM-A01",
+      "obligationIds": [
+        "RG-REQ-001-L01",
+        "RG-REQ-002-L11",
+        "P-CAM-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-cpp-extractor  2>&1 | tee /tmp/cama-01.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/cama-01.txt && for t in static_member_with_trailing_macro_is_still_marked constructor_with_member_initializer_list_is_not_marked leading_export_macro_before_a_primitive_return_type_is_not_marked trailing_macro_followed_by_a_member_initializer_list_is_still_marked field_with_trailing_attribute_macro_naming_a_member_is_a_typed_data_member_not_a_node pointer_field_with_trailing_attribute_macro_naming_a_member_records_the_member_type definition_with_trailing_attribute_macro_is_stored_once_marked_with_both_identity_candidates split_prototype_and_typeless_macro_definition_are_both_kept_and_the_definition_is_marked atomic_counter_class_yields_six_nodes_three_marked_and_no_field_phantom constructor_and_destructor_shapes_are_marked_with_both_candidates ambiguous_shape_without_member_evidence_is_kept_and_marked_never_silently_renamed two_line_trailing_macro_on_a_prototype_stays_one_unmarked_declaration terminated_prototype_and_a_following_typeless_definition_are_not_paired q_object_body_macro_emits_nothing every_marked_node_carries_undetermined_basis_and_two_distinct_candidates method_in_class constructor_detected destructor_detected error_sibling_of_declarator_does_not_trigger_macro_name_extraction zstd_attribute_macro_function_name_is_the_declarator_not_the_macros macro_call_shape_function_name_pcre2_priv forward_decl_class_is_flagged_definition_is_not in_class_method_prototype_is_flagged_out_of_line_def_is_not receiver_type_field_declaration_records_declared_type leveldb_export_db_class_not_function macro_struct_with_base_is_struct_named_bar_not_function file_node_has_correct_stable_key; do grep -qE \"^test .*$t .* ok$\" /tmp/cama-01.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(grep -cE '^test extractor::tests::.* ok$' /tmp/cama-01.txt)\" -ge 81 && ! awk '/^#\\[cfg\\(test\\)\\]/{exit} {print}' crates/cpp-extractor/src/extractor.rs | grep -qE 'GUARDED_BY|LOCKS_EXCLUDED|EXCLUSIVE_LOCKS_REQUIRED|EXCLUSIVE_LOCK_FUNCTION|UNLOCK_FUNCTION|ASSERT_EXCLUSIVE_LOCK|is_ascii_uppercase|to_uppercase|is_uppercase' && test \"$(awk '/^#\\[cfg\\(test\\)\\]/{exit} {print}' crates/cpp-extractor/src/extractor.rs | grep -cE 'fn (macro_call_shape|error_child_name)\\(')\" = 2 && grep -qE '^const EXTRACTOR_NAME: &str = \"cpp-core:0.2.0\";$' crates/cpp-extractor/src/extractor.rs && test \"$(grep -c 'cpp-core:0.1.0' crates/cpp-extractor/src/extractor.rs)\" = 0",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the WHOLE cpp-extractor test run (66 `extractor::tests` today — `cargo test -p repo-graph-cpp-extractor -- --list`, 2026-09-23 — + fifteen NEW; the floor asserts ≥ 81 so no existing test vanishes; every existing test kept verbatim, twelve bound by name incl. `file_node_has_correct_stable_key`). Fixtures are the corpus lines VERBATIM (recovery is context-dependent: `class LOCKABLE Mutex {` and `class SCOPED_LOCKABLE MutexLock {` parse as a `function_definition` whose body is a `compound_statement`, so their members are `function_definition`/`declaration`/`labeled_statement`/`ERROR` children, not `field_declaration`s): leveldb 7ee830d db/db_impl.h:187/189 (in a minimal class with `port::Mutex mutex_;` and an in-body call), port/port_stdcxx.h:51-66, util/mutexlock.h:23-35, db/db_test.cc:43-63, util/env_posix.cc:499-516, db/db_impl.h:113-114; vcmi 93dd4ee launcher/gamepadHandler.h:16-29 (rule 10); synthetic probes for the no-evidence shapes and the `;`-terminated case. MARKER (SLICE_DOC §2.1 rule 2): a marked node's `metadata_json` carries all three of `identity: \"undetermined\"`, `basis: \"macro_recovery_ambiguous_identity\"` and `identity_candidates: [<displaced>, <declarator-slot>]`, ordered STRUCTURALLY — the identifier recovery displaced into the ERROR or the paired prototype first, the identifier in the declarator slot (today's node name) second; the order asserts nothing about which one is real. The rules: (1) `field_with_trailing_attribute_macro_naming_a_member_is_a_typed_data_member_not_a_node` — `SnapshotList snapshots_ GUARDED_BY(mutex_);` where `mutex_` is a data member: NO node, and the in-body `snapshots_.empty()` CALLS edge carries `\"receiverType\":\"SnapshotList\"` (RG-REQ-001-L01 as amended: 'a field whose trailing macro argument names a data member of the class is a data member'); (2) the pointer variant `WriteBatch* tmp_batch_ GUARDED_BY(mutex_);` → receiverType `WriteBatch`, no node, and `class_field_types` never records `GUARDED_BY` (today `descend_to_field_identifier` walks the `pointer_declarator` into the `function_declarator` and records `GUARDED_BY`, :2602-2620); (3) `definition_with_trailing_attribute_macro_is_stored_once_marked_with_both_identity_candidates` — port_stdcxx.h:51-66: exactly ONE node per member, named as today (`EXCLUSIVE_LOCK_FUNCTION`, `UNLOCK_FUNCTION`, `ASSERT_EXCLUSIVE_LOCK` — the extractor never picks), each carrying the marker with `identity_candidates` = [`Lock`,`EXCLUSIVE_LOCK_FUNCTION`] / [`Unlock`,`UNLOCK_FUNCTION`] / [`AssertHeld`,`ASSERT_EXCLUSIVE_LOCK`] (:59/:60 shape (2a) — the identifier inside the ERROR's `init_declarator`; :61 shape (2b) — the preceding `declaration(init_declarator(AssertHeld, ()))` with no `;`), no node named `Lock`; (4) `split_prototype_and_typeless_macro_definition_are_both_kept_and_the_definition_is_marked` — env_posix.cc:499-516: `Insert` (decl, :501, unmarked) AND `LOCKS_EXCLUDED` (:501-506, marked [`Insert`,`LOCKS_EXCLUDED`] — the immediately preceding prototype with only whitespace between is the candidate); likewise `Remove`; NO merge, NO rename; (5) `atomic_counter_class_yields_six_nodes_three_marked_and_no_field_phantom` — db_test.cc:43-63: exactly {`AtomicCounter` CONSTRUCTOR, `Increment`, `IncrementBy` (decl, unmarked), `LOCKS_EXCLUDED` ×3 marked [`IncrementBy`|`Read`|`Reset`, `LOCKS_EXCLUDED`]}, NO `GUARDED_BY` node (`count_` is a typed member); (6) `constructor_and_destructor_shapes_are_marked_with_both_candidates` — mutexlock.h:23-35: the :25 typeless definition marked [`MutexLock`,`EXCLUSIVE_LOCK_FUNCTION`] (its prototype a `declaration` inside the `public:` `labeled_statement`), the :28 node marked [`~MutexLock`,`UNLOCK_FUNCTION`] (its prototype an `ERROR` holding a `function_declarator` whose declarator is a `destructor_name` — the `~` kept), the deleted copy constructor present; (7) `ambiguous_shape_without_member_evidence_is_kept_and_marked_never_silently_renamed` — `class C { int MYAPI foo(Foo x); int seed_ MACRO(Foo); };` with no member named `Foo`/`x`: node `foo` marked [`MYAPI`,`foo`], node `MACRO` marked [`seed_`,`MACRO`] — today's names kept, both candidates recorded, nothing withheld; (8) `two_line_trailing_macro_on_a_prototype_stays_one_unmarked_declaration` — db_impl.h:113-114 `Recover`: one node, forward_decl, NO marker key; (9) `terminated_prototype_and_a_following_typeless_definition_are_not_paired` — `class T { public: void helper(); TEST_METHOD(A) { helper(); } };`: `helper` unmarked (its `;` is a real token), `TEST_METHOD` unmarked (today's reading, §8); (10) `q_object_body_macro_emits_nothing` — vcmi gamepadHandler.h:16-29: no node named `Q_OBJECT`; (11) `every_marked_node_carries_undetermined_basis_and_two_distinct_candidates` — across the fixtures of (3)–(7), every node carrying any of the three marker keys carries all three: `identity` = `undetermined`, `basis` = `macro_recovery_ambiguous_identity`, and exactly two distinct non-empty strings; no unmarked node carries any of them; (12) `constructor_with_member_initializer_list_is_not_marked` — OpenXcom yaml-cpp `exceptions.h:204-207` (`KeyNotFound(const Mark& mark_, const T& key_)` / `: RepresentationException(mark_, …) {`) in its class: today's node (named `RepresentationException` — §8 CPP-CTOR-INITIALIZER-NAME-1), NO marker key — the `:` lies between the displaced `KeyNotFound` and the declarator-slot identifier; (13) `leading_export_macro_before_a_primitive_return_type_is_not_marked` — OpenXcom yaml-cpp `node/convert.h:245` `YAML_CPP_API static bool decode(const Node& node, bool& rhs);` in its `struct convert<bool>`: today's node `decode`, NO marker key — the pinned grammar reads `type: type_identifier(YAML_CPP_API)`, then `storage_class_specifier(static)`, then `ERROR(identifier bool)`, so a storage-class specifier lies between the `type` node and the displaced candidate; (14) `trailing_macro_followed_by_a_member_initializer_list_is_still_marked` — leveldb `util/mutexlock.h:25` in its class: marked [`MutexLock`,`EXCLUSIVE_LOCK_FUNCTION`] — the `:` of `: mu_(mu)` follows the declarator-slot identifier; (15) `static_member_with_trailing_macro_is_still_marked` — `class S { public: static int x_ GUARDED_BY(mu_); };` with NO member named `mu_` (with one, rule (1)'s field evidence applies and no node exists): node `GUARDED_BY` marked [`x_`,`GUARDED_BY`] — `static` precedes the `type` node. Negated grep: no macro token literal and no case-class predicate in the non-test part (empty on HEAD); the two CPP-DECLARATORS-1 shape functions still present (2 on HEAD). The doc comment of `error_sibling_of_declarator_does_not_trigger_macro_name_extraction` corrected (its 'only reachable other ERROR' claim is false), assertion untouched. VERSION (D-REFRESH-STALE-1 = B, no refresh invalidation; RG-REQ-001-L06 as amended by RG-BOOTSTRAP-INPUT-10): the marker changes what a fresh extraction produces for content-unchanged files, which delta refresh copies forward, so `EXTRACTOR_NAME` is bumped `cpp-core:0.1.0` → `cpp-core:0.2.0` (extractor.rs:26, the only occurrence in the crate; `grep -c` = 1 on HEAD) — what an existing store then shows and does is TOOLCHAIN-STALENESS-1's, as RG-REQ-001-L06 (as amended by RG-BOOTSTRAP-INPUT-10) states, and this slice does not restate it (D-STALE-SIGNAL-1: staleness is a signal to rebuild, not an account of which facts are old). CAM-A04 proves one case only: a store stamped `cpp-core:0.1.0`, read by the candidate over stdio with `RMAP_AUTO_REINDEX=off`, shows `index toolchain differs from running rmap (cpp-core 0.1.0 → 0.2.0) — run rmap repo rebuild <path>` on `orient` and `check` with `check`'s verdict and exit code unchanged; a fresh index is current."
+      },
+      "expected": "exit 0: on every macro recovery shape the extractor names nothing by choice — a field with member evidence becomes a typed member (no node), an ambiguous member is stored once, marked `identity: undetermined` with its basis and BOTH identity candidates (RG-REQ-001-L01 as amended; RG-REQ-002-L11's store-side part only — L11 stays PARTIAL until 1B, §0), a clear declaration stays unmarked; every pre-existing cpp-extractor test remains green (no behavior change for CPP-DECLARATORS-1's shapes, receiver typing, the forward-decl carrier, stable keys); the extractor's version constant is `cpp-core:0.2.0` and no `cpp-core:0.1.0` literal remains in the crate; the marker is recorded only when the displaced candidate is a name node (`identifier`, `field_identifier` or `destructor_name`), no member-initializer `:` lies between the two candidates, and no storage-class specifier lies between the member's type and the displaced candidate (D-CAM-OX-CONTROL-1): a constructor with an initializer list and a leading export macro before a primitive return type stay unmarked; a trailing macro followed by an initializer list and a static member whose `static` precedes its type are still marked.",
+      "candidateSha256": "sha256:78c19e14bf5f29f8df148d366eba679f9d71b3cd7ab3f8bab469c4b57662a160",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED: exit 0.\n- All 115 cpp-extractor crate tests passed.\n- 83 `extractor::tests` passed (floor ≥ 81). This includes the new `field_evidence_requires_an_error_free_argument_list_of_bare_member_types`, which failed first on the iteration-0 rule for the intended reason (the nested-ERROR member was silently typed as a field and its node dropped: left 0, right 1).\n- All 27 named tests are present and ok.\n- EXTRACTOR_NAME is `cpp-core:0.2.0` and no `cpp-core:0.1.0` literal remains in the crate.\n- The non-test part has no macro-token literal and no case-class predicate.\n- Both CPP-DECLARATORS-1 shape functions are still present.",
+        "supportingEvidence": [
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-01.txt",
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/build-progress.md (Step 1 failing-first; CAM-A01)",
+          "command: the CAM-A01 method.command extracted verbatim from the SLICE_DOC allocation block, cwd rust/"
+        ]
+      }
+    },
+    {
+      "checkId": "CAM-A02",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-001-L05",
+        "P-CAM-02",
+        "RG-REQ-001-L04",
+        "RG-REQ-001-L07",
+        "RG-REQ-001-L08",
+        "RG-REQ-001-L09",
+        "RG-REQ-001-L10",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L05",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L07",
+        "RG-REQ-002-L08",
+        "RG-REQ-002-L09",
+        "RG-REQ-002-L10"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-storage list_members_of_type 2>&1 | tee /tmp/cama-02a.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/cama-02a.txt && for t in list_members_of_type_returns_direct_members_only list_members_of_type_orders_focus_file_first_then_other_files_by_path_and_line list_members_of_type_marks_forward_declarations list_members_of_type_reads_the_identity_marker_and_a_partial_or_malformed_marker_is_an_error; do grep -qE \"^test .*$t .* ok$\" /tmp/cama-02a.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-agent --test explain_symbol 2>&1 | tee /tmp/cama-02b.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/cama-02b.txt && for t in explain_type_focus_emits_members_and_referenced_by explain_members_carry_the_undetermined_identity_marker_verbatim; do grep -qE \"^test .*$t .* ok$\" /tmp/cama-02b.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-rgr --lib presentation::explain 2>&1 | tee /tmp/cama-02c.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/cama-02c.txt && for t in explain_members_section_anchors_file_line_and_marks_decl member_row_with_identity_candidates_renders_the_undetermined_marker members_section_with_a_malformed_identity_marker_renders_the_unreadable_line members_section_with_a_partial_single_or_duplicate_candidate_marker_renders_the_unreadable_line; do grep -qE \"^test .*$t .* ok$\" /tmp/cama-02c.txt || { echo \"MISSING $t\"; exit 1; }; done && git diff --quiet HEAD -- crates/daemon-runtime crates/repo-index crates/repo-graph-livegraph crates/indexer crates/classification crates/trust crates/module-queries crates/repo-graph-seed crates/c-extractor crates/ts-extractor crates/python-extractor crates/java-extractor crates/rust-extractor crates/rgr/src/commands crates/rgr/src/presentation/seed.rs",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "the vertical from the store to the reader. STORAGE: `list_members_of_type` (storage/src/agent_impl.rs:1488-1580) reads `json_extract(metadata_json, '$.identity')`, `'$.identity_candidates'` and `'$.basis'` beside the existing `'$.forward_decl'`: all three absent → a determined member; all three present and well-formed (`identity` = `undetermined`, an array of exactly two distinct non-empty strings, a non-empty basis string) → `AgentMemberEntry` carries the undetermined identity as ONE all-or-nothing value (candidates + basis — the port never carries half a marker); any other state (one or two keys present, a non-array, fewer or more than two entries, a non-string, empty or duplicate entry, another `identity` value) is an `AgentStorageError` — the read fails, exactly as a present-but-unreadable `forward_decl` fails today (`list_members_of_type_marks_forward_declarations` asserts `is_err`, storage/tests/agent_impl.rs:1619-1637), never silently read as determined (RG-REQ-002-L04). AGENT: `explain/mod.rs:566-580` passes it through to `ExplainMemberItem` (dto/signal.rs:922-931), serialized as three flat keys `identity: \"undetermined\"`, `identity_candidates`, `identity_basis`, all ABSENT for a determined member (`skip_serializing_if`), so a determined member's JSON is byte-identical to today. RGR: `render_member_row` (explain_sections.rs:160-195) renders `<name> (<subtype>, identity undetermined — 2 candidates: <c1>, <c2>)  <path>:<line>` (`<name> (<subtype>, decl, identity undetermined — …)` when both apply; `<name> (identity undetermined — …)  <path>` when subtype is absent); the three keys absent/null → today's row byte-identical; any other state (a partial marker, a non-array, not exactly two distinct non-empty strings, a non-string basis, an `identity` value other than `undetermined`) returns `None`, so `render_members` (:306-337) renders the WHOLE section as its existing single `members unreadable on this snapshot` line (F-ETS-01's whole-section rule) — never a coerced or silently shorter row. The existing tests named stay green verbatim; the five `AgentMemberEntry {` literals (storage/src/agent_impl.rs:1556; agent/tests/explain_symbol.rs:513/521/584/618 — the sixth grep hit, agent/src/storage_port.rs:1253, is the struct definition) and the one `ExplainMemberItem {` literal (explain/mod.rs:570) gain the field; the test fakes that return members by clone (agent/tests/common/mod.rs:593, agent/src/aggregators/complexity_tests.rs:316) and the daemon-runtime spies that delegate (explain_serve_tests/spy.rs:301, orient_serve/tests.rs:556) need no edit. Byte-identity (git diff --quiet): daemon-runtime (the payload is serde of the agent DTO — no daemon-runtime file names `ExplainMemberItem`/`ExplainMembersEvidence`; `dispatch.rs` is not touched), repo-index and repo-graph-livegraph (the indexing pipeline and the LiveGraph serving path), the resolver, classification, trust, module-queries, the seed crate (`find` is not changed in this slice — §8), every other extractor, rgr's command layer and the seed renderer. Every RG-REQ-002 L01–L10 honesty obligation and RG-REQ-001-L04/L07–L10 are PRESERVED by leaving their machinery untouched (RG-REQ-001-L06's staleness comparison and its orient/check attachment are TOOLCHAIN-STALENESS-1's code in agent and daemon-runtime, untouched here; the slice's intended L06 movement — existing C++ stores reading stale — is CAM-A04's staleness part): the crates in the diff --quiet list carry the unknown-never-zero, coverage, degradation, label and overlay rules and the reproducibility/registry/is_test/generated-flag machinery; the rgr explain tests named keep the unreadable pattern (L04) for the new keys; a determined member's JSON is byte-identical (L02 surfaces agree)."
+      },
+      "expected": "exit 0: a marked member reaches the agent on `explain` (RG-REQ-002-L11's `explain` part only — L11 stays PARTIAL until 1B covers `find`, §0) with the `identity undetermined` marker, its basis and both candidates, a determined member renders exactly as before, a partial or malformed marker fails loudly (a storage error at the read, the unreadable section at the render) and is never coerced (no behavior change outside the marked rows); identity hand-back (RG-REQ-001-L05) unchanged — the node keeps today's name and stable key; every RG-REQ-002 L01–L10 rule and the RG-REQ-001 machinery outside the marked rows remain exactly as before (no behavior change)",
+      "candidateSha256": "sha256:78c19e14bf5f29f8df148d366eba679f9d71b3cd7ab3f8bab469c4b57662a160",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED: exit 0.\n- The storage `list_members_of_type` filter passed its 4 named tests, including agent_impl::undetermined_identity_tests::list_members_of_type_reads_the_identity_marker_and_a_partial_or_malformed_marker_is_an_error.\n- `agent --test explain_symbol` passed 17 tests, including the 2 named ones.\n- `rgr --lib presentation::explain` passed 48 tests, including the 4 named ones.\n- `git diff --quiet HEAD` over the frozen crates exited 0.",
+        "supportingEvidence": [
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-02a.txt",
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-02b.txt",
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-02c.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CAM-A03",
+      "obligationIds": [
+        "P-CAM-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo fmt --check -p repo-graph-cpp-extractor -p repo-graph-storage -p repo-graph-agent -p repo-graph-rgr && cargo clippy -p repo-graph-cpp-extractor -p repo-graph-storage -p repo-graph-agent -p repo-graph-rgr --all-targets -- -D warnings > /tmp/cama-03.txt 2>&1; rc=$?; tail -3 /tmp/cama-03.txt; test $rc -eq 0",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rustfmt and clippy (deny warnings, all targets) over the four touched crates"
+      },
+      "expected": "exit 0: no formatting or lint debt enters with the candidate",
+      "candidateSha256": "sha256:78c19e14bf5f29f8df148d366eba679f9d71b3cd7ab3f8bab469c4b57662a160",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED: exit 0. `cargo fmt --check` is clean for cpp-extractor, storage, agent and rgr. `cargo clippy --all-targets -- -D warnings` over the same four crates finished with no warnings.",
+        "supportingEvidence": [
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-03.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CAM-A04",
+      "obligationIds": [
+        "RG-REQ-001-L01",
+        "RG-REQ-002-L11",
+        "RG-REQ-001-L04",
+        "RG-REQ-001-L02",
+        "RG-REQ-001-L03",
+        "RG-REQ-001-L07",
+        "RG-REQ-001-L08",
+        "P-CAM-01",
+        "RG-REQ-001-L06",
+        "RG-REQ-011-L06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "git cat-file -e HEAD:docs/assurance/TOOLCHAIN-STALENESS-1/implementation-review.json && git show HEAD:docs/assurance/TOOLCHAIN-STALENESS-1/implementation-review.json | python3 -c \"import json,sys; d=json.load(sys.stdin); sys.exit(0 if (d.get('workItemId'), d.get('result')) == ('TOOLCHAIN-STALENESS-1', 'accepted') else 1)\" && (cd rust && cargo build --release --bin rmap --bin rmapd > /tmp/cama-build.txt 2>&1; rc=$?; tail -1 /tmp/cama-build.txt; exit $rc) && test ! -e /private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after && mkdir /private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after RMAP_SOCKET_PATH=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/cama-ldb-index.txt 2>&1; echo $? > /tmp/cama-ldb-index.txt.rc ) && test \"$(cat /tmp/cama-ldb-index.txt.rc)\" = 0 && test ! -e /private/tmp/CPP-ATTRIBUTE-MACRO-1A-openxcom-after && mkdir /private/tmp/CPP-ATTRIBUTE-MACRO-1A-openxcom-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/OpenXcom' && export RMAP_STATE_ROOT=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-openxcom-after RMAP_SOCKET_PATH=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-openxcom-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/cama-ox-index.txt 2>&1; echo $? > /tmp/cama-ox-index.txt.rc ) && test \"$(cat /tmp/cama-ox-index.txt.rc)\" = 0 && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after RMAP_SOCKET_PATH=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain 'leveldb::AtomicCounter' > /tmp/cama-ldb-explain.txt 2> /tmp/cama-ldb-explain.txt.err; echo $? > /tmp/cama-ldb-explain.txt.rc ) && test \"$(cat /tmp/cama-ldb-explain.txt.rc)\" = 0 && grep -qE '^Members \\(6\\)$' /tmp/cama-ldb-explain.txt && grep -qE '^  - LOCKS_EXCLUDED \\(METHOD, identity undetermined — 2 candidates: IncrementBy, LOCKS_EXCLUDED\\)  db/db_test\\.cc:47$' /tmp/cama-ldb-explain.txt && grep -qE '^  - LOCKS_EXCLUDED \\(METHOD, identity undetermined — 2 candidates: Read, LOCKS_EXCLUDED\\)  db/db_test\\.cc:51$' /tmp/cama-ldb-explain.txt && grep -qE '^  - LOCKS_EXCLUDED \\(METHOD, identity undetermined — 2 candidates: Reset, LOCKS_EXCLUDED\\)  db/db_test\\.cc:55$' /tmp/cama-ldb-explain.txt && grep -qE '^  - IncrementBy \\(METHOD, decl\\)  db/db_test\\.cc:47$' /tmp/cama-ldb-explain.txt && ! grep -q 'GUARDED_BY' /tmp/cama-ldb-explain.txt && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after RMAP_SOCKET_PATH=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain 'leveldb::DBImpl' > /tmp/cama-ldb-dbimpl.txt 2> /tmp/cama-ldb-dbimpl.txt.err; echo $? > /tmp/cama-ldb-dbimpl.txt.rc ) && test \"$(cat /tmp/cama-ldb-dbimpl.txt.rc)\" = 0 && grep -qE '^Members \\(69\\)$' /tmp/cama-ldb-dbimpl.txt && ! grep -q 'GUARDED_BY' /tmp/cama-ldb-dbimpl.txt && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after RMAP_SOCKET_PATH=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain 'leveldb::AtomicCounter' --json > /tmp/cama-ldb-explain.json 2> /tmp/cama-ldb-explain.json.err; echo $? > /tmp/cama-ldb-explain.json.rc ) && test \"$(cat /tmp/cama-ldb-explain.json.rc)\" = 0 && test -d /private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after && test ! -e /private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale && M0=\"$(shasum -a 256 /private/tmp/CPP-ATTRIBUTE-MACRO-1-leveldb-before/registry.json /private/tmp/CPP-ATTRIBUTE-MACRO-1-leveldb-before/databases/*)\" && cp -R /private/tmp/CPP-ATTRIBUTE-MACRO-1-leveldb-before /private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale && sed -i '' 's#/private/tmp/CPP-ATTRIBUTE-MACRO-1-leveldb-before/#/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale/#g' /private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale/registry.json && ! grep -q 'CPP-ATTRIBUTE-MACRO-1-leveldb-before' /private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale/registry.json && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale RMAP_SOCKET_PATH=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient > /tmp/cama-06-stale-orient.txt 2> /tmp/cama-06-stale-orient.txt.err; echo $? > /tmp/cama-06-stale-orient.txt.rc ) && test \"$(cat /tmp/cama-06-stale-orient.txt.rc)\" = 0 && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale RMAP_SOCKET_PATH=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" check > /tmp/cama-06-stale-check.txt 2> /tmp/cama-06-stale-check.txt.err; echo $? > /tmp/cama-06-stale-check.txt.rc ) && echo \"REPORTED stale-root stale-check.txt exit $(cat /tmp/cama-06-stale-check.txt.rc)\" && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale RMAP_SOCKET_PATH=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" check --json > /tmp/cama-06-stale-check.json 2> /tmp/cama-06-stale-check.json.err; echo $? > /tmp/cama-06-stale-check.json.rc ) && echo \"REPORTED stale-root stale-check.json exit $(cat /tmp/cama-06-stale-check.json.rc)\" && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb' && export RMAP_STATE_ROOT=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after RMAP_SOCKET_PATH=/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" check --json > /tmp/cama-06-after-check.json 2> /tmp/cama-06-after-check.json.err; echo $? > /tmp/cama-06-after-check.json.rc ) && echo \"REPORTED after-root check exit $(cat /tmp/cama-06-after-check.json.rc)\" && grep -qE 'index toolchain differs from running rmap \\(.*cpp-core 0\\.1\\.0 → 0\\.2\\.0.*\\) — run rmap repo rebuild .+' /tmp/cama-06-stale-orient.txt && grep -qE 'index toolchain differs from running rmap \\(.*cpp-core 0\\.1\\.0 → 0\\.2\\.0.*\\) — run rmap repo rebuild .+' /tmp/cama-06-stale-check.txt && test \"$M0\" = \"$(shasum -a 256 /private/tmp/CPP-ATTRIBUTE-MACRO-1-leveldb-before/registry.json /private/tmp/CPP-ATTRIBUTE-MACRO-1-leveldb-before/databases/*)\" && python3 - <<'PY'\nimport sqlite3, glob, json, os\nBEFORE_LDB, BEFORE_OX = \"/private/tmp/CPP-ATTRIBUTE-MACRO-1-leveldb-before\", \"/private/tmp/CPP-ATTRIBUTE-MACRO-1-openxcom-before\"\nAFTER_LDB, AFTER_OX = \"/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after\", \"/private/tmp/CPP-ATTRIBUTE-MACRO-1A-openxcom-after\"\ndef db(root, before):\n    [path] = glob.glob(root + \"/databases/*.db\")\n    if before:\n        wal = path + \"-wal\"\n        assert not os.path.exists(wal) or os.path.getsize(wal) == 0, (\"manager before-store WAL is not empty: an immutable read would miss it — STOP\", wal)\n        return sqlite3.connect(\"file:\" + path + \"?immutable=1\", uri=True)\n    return sqlite3.connect(\"file:\" + path + \"?mode=ro\", uri=True)\ndef one(c, q, *a): return c.execute(q, a).fetchone()[0]\ndef norm(c):\n    uids = [r[0] for r in c.execute(\"select repo_uid from repos\")]\n    assert len(uids) == 1, (\"one repo per root\", uids)\n    ru = uids[0]\n    return lambda row: tuple(v.replace(ru, \"<repo>\") if isinstance(v, str) else v for v in row)\nBASIS = \"macro_recovery_ambiguous_identity\"\ndef member_items(v):\n    if isinstance(v, dict):\n        if \"name\" in v and \"file\" in v and \"forward_decl\" in v:\n            yield v\n        for x in v.values(): yield from member_items(x)\n    elif isinstance(v, list):\n        for x in v: yield from member_items(x)\nitems = list(member_items(json.load(open(\"/tmp/cama-ldb-explain.json\"))))\nmarked = sorted((i.get(\"name\"), tuple(i.get(\"identity_candidates\") or ()), i.get(\"identity\"), i.get(\"identity_basis\")) for i in items if any(k in i for k in (\"identity\", \"identity_candidates\", \"identity_basis\")))\nassert marked == sorted([(\"LOCKS_EXCLUDED\", (real, \"LOCKS_EXCLUDED\"), \"undetermined\", BASIS) for real in (\"IncrementBy\", \"Read\", \"Reset\")]), marked\nassert not [i for i in items if i.get(\"name\") == \"GUARDED_BY\"], \"field phantom in --json\"\nprint(\"json: the marker on exactly the three members,\", len(items), \"member items\")\nMAC = ('GUARDED_BY','LOCKS_EXCLUDED','EXCLUSIVE_LOCKS_REQUIRED','EXCLUSIVE_LOCK_FUNCTION','UNLOCK_FUNCTION','ASSERT_EXCLUSIVE_LOCK')\nPAIRS = [[\"db/db_test.cc\", 47, \"LOCKS_EXCLUDED\", \"IncrementBy\"], [\"db/db_test.cc\", 51, \"LOCKS_EXCLUDED\", \"Read\"], [\"db/db_test.cc\", 55, \"LOCKS_EXCLUDED\", \"Reset\"], [\"db/fault_injection_test.cc\", 150, \"LOCKS_EXCLUDED\", \"IsFilesystemActive\"], [\"db/fault_injection_test.cc\", 154, \"LOCKS_EXCLUDED\", \"SetFilesystemActive\"], [\"db/skiplist_test.cc\", 309, \"LOCKS_EXCLUDED\", \"Wait\"], [\"db/skiplist_test.cc\", 317, \"LOCKS_EXCLUDED\", \"Change\"], [\"helpers/memenv/memenv.cc\", 312, \"EXCLUSIVE_LOCKS_REQUIRED\", \"RemoveFileInternal\"], [\"port/port_stdcxx.h\", 59, \"EXCLUSIVE_LOCK_FUNCTION\", \"Lock\"], [\"port/port_stdcxx.h\", 60, \"UNLOCK_FUNCTION\", \"Unlock\"], [\"port/port_stdcxx.h\", 61, \"ASSERT_EXCLUSIVE_LOCK\", \"AssertHeld\"], [\"util/env_posix.cc\", 501, \"LOCKS_EXCLUDED\", \"Insert\"], [\"util/env_posix.cc\", 507, \"LOCKS_EXCLUDED\", \"Remove\"], [\"util/mutexlock.h\", 25, \"EXCLUSIVE_LOCK_FUNCTION\", \"MutexLock\"], [\"util/mutexlock.h\", 28, \"UNLOCK_FUNCTION\", \"~MutexLock\"]]\nB, A = db(BEFORE_LDB, True), db(AFTER_LDB, False)\nq_mac = \"select f.path, n.line_start, n.name, n.metadata_json from nodes n join files f on f.file_uid=n.file_uid where n.kind='SYMBOL' and n.name in (%s) order by 1,2\" % \",\".join(\"?\"*len(MAC))\nrb, ra = B.execute(q_mac, MAC).fetchall(), A.execute(q_mac, MAC).fetchall()\nassert len(rb) == 35, (\"before-root sanity\", len(rb))\nassert len(ra) == 15 and not [r for r in ra if r[2] == 'GUARDED_BY'], (\"expected exactly the 15 (2a)/(2b) rows, no field phantom\", len(ra), [r[:3] for r in ra if r[2]=='GUARDED_BY'][:5])\ngot = {(p, l): (n, json.loads(m or '{}')) for p, l, n, m in ra}\nfor p, l, mac, real in PAIRS:\n    n, md = got.get((p, l), (None, {}))\n    assert (n, md.get(\"identity\"), md.get(\"basis\"), md.get(\"identity_candidates\")) == (mac, \"undetermined\", BASIS, [real, mac]), (\"marker\", p, l, n, md, \"expected\", [real, mac])\nprint(\"15 rows keep today's name and carry the marker with the predicted candidate pairs\")\nMARKED = \"select count(*) from nodes where json_extract(metadata_json,'$.identity') is not null or json_extract(metadata_json,'$.identity_candidates') is not null or json_extract(metadata_json,'$.basis') is not null\"\nassert one(A, MARKED) == 15, (\"marked rows beyond the fifteen\", one(A, MARKED))\nassert one(B, MARKED) == 0\nNQ = \"select n.stable_key, n.kind, n.subtype, n.name, n.qualified_name, f.path, p.stable_key, n.line_start, n.col_start, n.line_end, n.col_end, n.signature, n.visibility, n.doc_comment, n.metadata_json from nodes n left join files f on f.file_uid=n.file_uid left join nodes p on p.node_uid=n.parent_node_uid\"\ndef nodes_by_key(c):\n    nm, out = norm(c), {}\n    for r in c.execute(NQ):\n        r = nm(r)\n        assert r[0] not in out, (\"duplicate stable key\", r[0])\n        out[r[0]] = (r[1:-1], json.loads(r[-1] or \"{}\"))\n    return out\nNB, NA = nodes_by_key(B), nodes_by_key(A)\nphantom = {k for k, (t, _) in NB.items() if t[0] == \"SYMBOL\" and t[2] == \"GUARDED_BY\"}\nassert len(phantom) == 20, len(phantom)\nassert set(NA) == set(NB) - phantom, (\"stable keys moved (repo-uid prefix normalized)\", sorted(set(NA) ^ (set(NB) - phantom))[:10])\nexpect_marker = {}\nfor p, l, mac, real in PAIRS:\n    [k] = [k for k, (t, _) in NB.items() if t[0] == \"SYMBOL\" and t[2] == mac and t[4] == p and t[6] == l]\n    expect_marker[k] = [real, mac]\nfor k in NA:\n    (tb, mb), (ta, ma) = NB[k], NA[k]\n    assert ta == tb, (\"node fields moved\", k, tb, ta)\n    want = dict(mb, identity=\"undetermined\", basis=BASIS, identity_candidates=expect_marker[k]) if k in expect_marker else mb\n    assert ma == want, (\"node metadata moved\", k, mb, ma)\nprint(\"every surviving node keeps its stable key and every field;\", len(NA), \"nodes; metadata moves only on the 15 marked keys\")\nfor qn, line in ((\"leveldb::AtomicCounter::IncrementBy\", 47), (\"leveldb::PosixLockTable::Insert\", 501), (\"leveldb::DBImpl::Recover\", 113)):\n    r = A.execute(\"select coalesce(json_extract(metadata_json,'$.forward_decl'),0), json_extract(metadata_json,'$.identity'), json_extract(metadata_json,'$.identity_candidates') from nodes where kind='SYMBOL' and qualified_name=? and line_start=?\", (qn, line)).fetchall(); assert r == [(1, None, None)], (qn, r)\nprint(\"prototypes kept as unmarked declarations\")\nTYPED = \"select count(*) from edges where type='CALLS' and json_extract(metadata_json,'$.receiver')=? and json_extract(metadata_json,'$.receiverType') is not null\"\nfor recv in (\"state_cv_\", \"file_map_\", \"blocks_\", \"snapshots_\", \"table_\", \"tmp_batch_\"):\n    print(\"REPORTED typed CALLS edges with receiver\", recv, one(B, TYPED, recv), \"->\", one(A, TYPED, recv))\nfor recv in (\"state_cv_\", \"file_map_\"):\n    assert one(B, TYPED, recv) == 0 and one(A, TYPED, recv) > 0, (\"in-body calls on a newly typed member carry no receiverType\", recv)\nassert one(A, \"select count(*) from edges where type='CALLS' and source_node_uid=target_node_uid and metadata_json like '%receiver%'\") == 0, \"receiver-bearing self-loop\"\nfor label, c in ((\"leveldb before\", B), (\"leveldb after\", A)):\n    print(label, \"nodes\", one(c, \"select count(*) from nodes\"), \"SYMBOL\", one(c, \"select count(*) from nodes where kind='SYMBOL'\"), \"METHOD\", one(c, \"select count(*) from nodes where subtype='METHOD'\"), \"edges\", one(c, \"select count(*) from edges\"), \"CALLS\", one(c, \"select count(*) from edges where type='CALLS'\"), \"unresolved\", one(c, \"select count(*) from unresolved_edges\"))\nassert one(A, \"select count(*) from nodes\") == one(B, \"select count(*) from nodes\") - 20, \"exactly the 20 field phantoms leave\"\nassert one(A, \"select count(*) from edges where type='CALLS'\") >= one(B, \"select count(*) from edges where type='CALLS'\") and one(A, \"select count(*) from unresolved_edges\") <= one(B, \"select count(*) from unresolved_edges\"), \"typed members may only add bindings\"\nFQ = \"select path, language, is_test, is_generated, is_excluded from files order by path\"\nassert B.execute(FQ).fetchall() == A.execute(FQ).fetchall(), \"leveldb file inventory (is_test/is_generated/is_excluded) differs\"\nEQ = \"select s.stable_key, t.stable_key, e.type, e.resolution, e.line_start, e.col_start, e.line_end, e.col_end, e.metadata_json, e.is_type_only from edges e left join nodes s on s.node_uid=e.source_node_uid left join nodes t on t.node_uid=e.target_node_uid\"\nUQ = \"select s.stable_key, u.target_key, u.type, u.resolution, u.line_start, u.col_start, u.line_end, u.col_end, u.metadata_json, u.category, u.classification, u.classifier_version, u.basis_code from unresolved_edges u left join nodes s on s.node_uid=u.source_node_uid\"\nVQ = \"select f.path, v.content_hash, v.ast_hash, v.parse_status, v.size_bytes, v.line_count from file_versions v join files f on f.file_uid=v.file_uid\"\nMQ = \"select target_stable_key, kind, value_json from measurements\"\nSQ = \"select f.path, s.import_bindings_json, s.package_dependencies_json, s.tsconfig_aliases_json from file_signals s join files f on f.file_uid=s.file_uid\"\nXQ = \"select s.stable_key, f.path, x.target_key, x.type, x.resolution, x.line_start, x.col_start, x.line_end, x.col_end, x.metadata_json from extraction_edges x left join nodes s on s.node_uid=x.source_node_uid left join files f on f.file_uid=x.source_file_uid\"\nTABLES = ((\"nodes\", NQ), (\"edges\", EQ), (\"unresolved_edges\", UQ), (\"files\", FQ), (\"file_versions\", VQ), (\"measurements\", MQ), (\"file_signals\", SQ), (\"extraction_edges\", XQ))\ndef dump(c):\n    nm = norm(c)\n    return [sorted((nm(r) for r in c.execute(q)), key=repr) for _, q in TABLES]\nOB, OA = db(BEFORE_OX, True), db(AFTER_OX, False)\ndb_, da_ = dump(OB), dump(OA)\nprint(\"openxcom before\", {t: len(x) for (t, _), x in zip(TABLES, db_)}, \"after\", {t: len(x) for (t, _), x in zip(TABLES, da_)})\nfor (name, _), xb, xa in zip(TABLES, db_, da_):\n    assert xb == xa, (\"OpenXcom \" + name + \" differ in a semantic field\", len(xb), len(xa), [r for r in xa if r not in set(xb)][:3])\nprint(\"CAM-A04 store oracles ok\")\nimport json\ndef walk(v):\n    if isinstance(v, dict):\n        yield v\n        for x in v.values(): yield from walk(x)\n    elif isinstance(v, list):\n        for x in v: yield from walk(x)\nenv = json.load(open(\"/tmp/cama-06-stale-check.json\"))\nts = env[\"value\"][\"toolchain_staleness\"]\nassert ts.get(\"state\") == \"stale\", (\"copied v0.19.0 store must read stale under the candidate\", ts)\ndiffs = ts[\"differences\"]\ncpp = [f for f in diffs if f.get(\"component\") == \"cpp-core\"]\nassert cpp == [{\"component\": \"cpp-core\", \"snapshot_version\": \"0.1.0\", \"current_version\": \"0.2.0\"}], (\"the cpp-core difference\", diffs)\nothers = [f for f in diffs if f.get(\"component\") != \"cpp-core\"]\nassert all(f.get(\"component\") == \"indexer\" for f in others), (\"no extractor other than cpp-core may differ on leveldb (C is unchanged)\", others)\nprint(\"REPORTED non-cpp-core differences (an INDEXER_VERSION bump, if any):\", others)\nassert ts.get(\"reindex\") == \"disabled\", (\"RMAP_AUTO_REINDEX=off must report disabled\", ts)\nconds = [d for d in walk(env) if d.get(\"code\") == \"TOOLCHAIN_STALENESS\"]\nassert not conds, (\"the signal is verdict-neutral: no TOOLCHAIN_STALENESS condition\", conds)\nassert open(\"/tmp/cama-06-stale-check.txt.rc\").read() == open(\"/tmp/cama-06-stale-check.json.rc\").read(), \"human and JSON check exit codes agree\"\nfresh = json.load(open(\"/tmp/cama-06-after-check.json\"))[\"value\"][\"toolchain_staleness\"]\nassert fresh == {\"state\": \"current\"}, (\"a fresh index by the candidate is current\", fresh)\nprint(\"CAM-A04 staleness: copied store differs for cpp-core (0.1.0 -> 0.2.0), reindex disabled, verdict-neutral; fresh after-root current\")\nPY",
+        "cwd": ".",
+        "environment": "the candidate binary indexes /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb (7ee830d) and /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/OpenXcom (1edb0a5) into NEW isolated `-after` roots under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off (stdio; builder-owned, deleted in CAM-A05); the manager's `-before` roots /private/tmp/CPP-ATTRIBUTE-MACRO-1-leveldb-before and /private/tmp/CPP-ATTRIBUTE-MACRO-1-openxcom-before (re-captured 2026-09-26 by the release binary built from HEAD 23d12a9b — `cpp-core:0.1.0`, TOOLCHAIN-STALENESS-1 included; the 2026-09-23 captures were lost to a /private/tmp purge; OC-2) are READ with sqlite3 only (`?immutable=1`, after asserting their `-wal` is absent or empty so the immutable read misses nothing), never served, never reindexed; the builder's after-roots are read `mode=ro`. An after-root is created only when absent (`test ! -e` then `mkdir`): if one exists when CAM-A04 starts (a stopped earlier attempt), the check fails by design — inspect it, record what it is and why it is being discarded in build-progress.md, remove it deliberately, then rerun; never an unconditional delete; THEN, for the toolchain-staleness consequence (formerly a separate check, folded into CAM-A04 so the implementation round keeps its five checks CAM-A01..A05): a builder-owned COPY `/private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale` of the manager's leveldb before-root (re-captured store: `toolchain_json` stamps `cpp-core:0.1.0`, `c-core:0.1.0`, `indexer:1.0.0`), created only when absent, its registry.json's absolute `db_path` rewritten to the copy before it is served (the manager's root is never served), served with RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off; the manager's root is read only by `cp -R` and `shasum`, and its digests must be identical afterwards; deleted in CAM-A05",
+        "inputs": "BEFORE (measured on the before-store): 35 SYMBOL rows named by a macro token — 20 shape-(1) `GUARDED_BY` field phantoms (benchmarks/db_bench.cc:348/349/358/359, db/db_impl.h:183/186/189/203, db/db_test.cc:62, db/skiplist_test.cc:326/327, helpers/memenv/memenv.cc:145/148/149/383, util/cache.cc:184/189/193/195, util/env_test.cc:144), 4 shape-(2a) and 11 shape-(2b) rows; no `identity_candidates` anywhere; `explain leveldb::AtomicCounter` renders `Members (7)` with `IncrementBy (METHOD, decl)  db/db_test.cc:47`, three bare `LOCKS_EXCLUDED (METHOD)` rows (:47/:51/:55) and `GUARDED_BY (METHOD, decl)  db/db_test.cc:62`; `explain leveldb::DBImpl` `Members (73)` (four `GUARDED_BY` decls among them); nodes 2255 / SYMBOL 2112 / METHOD 1053 / edges 4187 / CALLS 3488 / unresolved 6230; self-loops 0. AFTER (predicted from the inventory under §2.1; the product is the truth — a differing literal is a STOP-and-report with the construct): exactly 15 macro-named rows remain, each keeping today's name and carrying `identity: \"undetermined\"`, `basis: \"macro_recovery_ambiguous_identity\"` and `identity_candidates` = [displaced identifier, macro] as listed in the oracle (`IncrementBy`/`Read`/`Reset` + `LOCKS_EXCLUDED`; `IsFilesystemActive`/`SetFilesystemActive`; `Wait`/`Change`; `RemoveFileInternal` + `EXCLUSIVE_LOCKS_REQUIRED`; `Lock` + `EXCLUSIVE_LOCK_FUNCTION`, `Unlock` + `UNLOCK_FUNCTION`, `AssertHeld` + `ASSERT_EXCLUSIVE_LOCK`; `Insert`/`Remove`; `MutexLock` + `EXCLUSIVE_LOCK_FUNCTION`, `~MutexLock` + `UNLOCK_FUNCTION`); no other node carries any marker key (before: 0); the 20 field phantoms are gone (nodes exactly −20) and their members are typed for IN-BODY calls — `current_class` is set only inside the class-body walk (extractor.rs:812/:890) and read at :2075-2082, so calls in out-of-line definitions stay untyped: ASSERTED `state_cv_` (db/skiplist_test.cc:312 `state_cv_.Wait();`, :320 `state_cv_.Signal();`) and `file_map_` (helpers/memenv/memenv.cc:291 `return file_map_.find(fname) != file_map_.end();` in `InMemoryEnv::FileExists`, and :323 in `RemoveFile`; :235 stays untyped because the same body reads `file_map_[fname]` at :240 (a subscript inside a constructor argument, not a call receiver), and CALL-BINDING-RECEIVER's conservative rule withholds the member-field type from any name that occurs in the function's parameters or body other than as the receiver of a `->m()`/`.m()` call — OC-5) go from 0 typed CALLS edges to > 0; REPORTED `blocks_` (memenv.cc `FileState`) and the out-of-line `snapshots_`/`table_`/`tmp_batch_` (db_impl.cc, cache.cc — expected unchanged); typing cannot remove a binding — the receiver-type stage only narrows an ambiguous pool and otherwise falls through to the unchanged unique-name rule (indexer/src/resolver.rs:1062-1100); the prototypes `IncrementBy` :47, `Insert` :501, `Recover` :113 stay unmarked declarations; `explain leveldb::AtomicCounter` `Members (6)` with `LOCKS_EXCLUDED (METHOD, identity undetermined — 2 candidates: IncrementBy, LOCKS_EXCLUDED)  db/db_test.cc:47` and the `Read`/`Reset` rows alike, `IncrementBy (METHOD, decl)`, no `GUARDED_BY`; `--json` carries the marker (`identity`, `identity_candidates`, `identity_basis`) on exactly the three `LOCKS_EXCLUDED` members and no `GUARDED_BY` member; `explain leveldb::DBImpl` `Members (69)`, no `GUARDED_BY`; CALLS edges ≥ before and unresolved ≤ before (typed members can only add bindings); self-loops 0; the `files` inventory (path, language, is_test, is_generated, is_excluded) identical before/after (RG-REQ-001-L07/L08 untouched); REPORTED totals. `explain leveldb::port::Mutex` is NOT a witness: leveldb has two `Mutex` classes (port_example.h:24, port_stdcxx.h:51) and the focus is ambiguous — RG-REQ-002-L11's field example names it and needs a text-only correction (§8). IDENTITY (RG-REQ-001-L04, P-CAM-02): every leveldb node except the 20 phantoms keeps its stable key and every field (kind, subtype, name, qualified name, file, parent, line/col span, signature, visibility, doc comment), and its `metadata_json` is unchanged except that the 15 marked keys gain exactly the three marker keys — keys compared with the store's own `<repo_uid>:` replaced by `<repo>` (repo_uid is a random ULID per registration, daemon-runtime/src/registry.rs:536; no other key renumbers — no surviving node shares a base key with a phantom, measured on the before-store); OpenXcom (no attribute macro anywhere): EVERY TABLE WRITTEN FROM EXTRACTOR OUTPUT — and the claim names exactly these eight — identical between the before and after stores as multisets: nodes (every field above plus `metadata_json`), edges (source and target stable key, type, resolution, line/col span, `metadata_json`, `is_type_only`), unresolved edges (source stable key, `target_key`, type, resolution, line/col span, `metadata_json`, category, classification, `classifier_version`, `basis_code`), files (path, language, `is_test`, `is_generated`, `is_excluded`), file_versions by path (`content_hash`, `ast_hash`, `parse_status`, `size_bytes`, `line_count` — the source of `compute_repo_summary`'s indexed/tracked-only counts, storage/src/agent_impl.rs:277-318), measurements (`target_stable_key`, kind, `value_json`), file_signals by path (import bindings, package dependencies, tsconfig aliases) and extraction_edges (source stable key and file, `target_key`, type, resolution, line/col span, `metadata_json`); excluded are only run-specific identity (`*_uid`, `snapshot_uid`; `repo_uid` normalized), timestamps (`observed_at`, `indexed_at`, `created_at`) and version-provenance strings (`extractor`, `measurements.source`); the `extractor` columns and the snapshot's `toolchain_json` move to `cpp-core:0.2.0` by design (§2.1 step 4; 21539 OpenXcom edges carry `cpp-core:0.1.0` in the before-store; no node or edge `metadata_json` names an extractor version). Before-store sizes, re-measured 2026-09-23: nodes 11274, edges 22514, unresolved 28219, files 733, file_versions 733, measurements 15861, file_signals 706, extraction_edges 49927. NOT compared, and not claimed: tables filled by later passes over these facts (module candidates and ownership, surfaces, boundaries, inferences, seeds, call-degree caches) — their inputs are the compared tables and their code is untouched (CAM-A02's diff --quiet), so their equality is INFERRED, not verified here. STALENESS (folded from the former CAM-A06): GATE (D-REFRESH-STALE-1's queue order: TOOLCHAIN-STALENESS-1 ships first): HEAD carries TOOLCHAIN-STALENESS-1's committed implementation-review record with `workItemId` TOOLCHAIN-STALENESS-1 and `result` accepted (docs/assurance/<ID>/implementation-review.json is the post-review record convention; it is committed only after the operator's acceptance) — accepted evidence, not a source string; absent on 76f23a58, so this slice cannot be implemented today. CONSEQUENCE under test (RG-REQ-001-L06 as amended by RG-BOOTSTRAP-INPUT-10, shipped by TOOLCHAIN-STALENESS-1; OC-2): a store written by the previous binary and read by the candidate with `RMAP_AUTO_REINDEX=off`, whose running C++ extractor is `cpp-core:0.2.0` (§2.1 step 4), carries the stamp `cpp-core:0.1.0`, so `orient` and `check` render `index toolchain differs from running rmap (… cpp-core 0.1.0 → 0.2.0 …) — run rmap repo rebuild <path>` (the `<path>` slot matched as any non-empty text), `check`'s verdict and exit code are unchanged (no `TOOLCHAIN_STALENESS` condition; the stale-root exits are reported and the human and JSON exits agree), and `check --json`'s `value.toolchain_staleness` has `state` `stale`, `differences` containing `{\"component\":\"cpp-core\",\"snapshot_version\":\"0.1.0\",\"current_version\":\"0.2.0\"}` (any other difference only `indexer`) and `reindex` `disabled`. Control: a fresh index by the candidate (CAM-A04's leveldb after-root) reads `{\"state\":\"current\"}`. The refresh-carried-forward and rebuild-clears cases are TOOLCHAIN-STALENESS-1's own verification (RG-REQ-001-L06's criterion) and are not repeated here."
+      },
+      "expected": "exit 0: on the corpus that motivated RC-4 no member is silently renamed and none is withheld — the twenty field phantoms become typed members, the fifteen ambiguous members are stored once, marked undetermined with their basis and both identity candidates and rendered to the agent on `explain` as something to investigate (RG-REQ-002-L11 PARTIAL — `find` is 1B's), every clear declaration is unchanged, every surviving node keeps its stable key and every field (no behavior change), no call binds to its own caller, bindings are only added, the file inventory (is_test/is_generated) is unchanged, and a corpus without the construct is identical in the eight tables written from extractor output (no behavior change); and the version bump reaches the agent — an existing C++ store read by the candidate (automatic re-index disabled for the proof) states on `orient` and `check` that its toolchain differs (`cpp-core 0.1.0 → 0.2.0`) and names the rebuild, without changing `check`'s verdict or exit code (RG-REQ-001-L06 as amended by RG-BOOTSTRAP-INPUT-10); a fresh index is current; the manager's before-root is byte-identical",
+      "candidateSha256": "sha256:78c19e14bf5f29f8df148d366eba679f9d71b3cd7ab3f8bab469c4b57662a160",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED: exit 0. Every result is identical to iteration 0; the stricter field-evidence rule changed no leveldb or OpenXcom fact.\n- Gate: TOOLCHAIN-STALENESS-1's implementation review at HEAD is accepted.\n- Release build ok; both after-roots indexed with exit 0.\n- `explain leveldb::AtomicCounter` shows Members (6) with the three marked LOCKS_EXCLUDED rows. `explain leveldb::DBImpl` shows Members (69). Neither shows GUARDED_BY. The `--json` output carries the marker on exactly the three members.\n- 15 macro-named rows keep today's name with the predicted pairs. The 20 phantoms are gone. Every surviving node keeps its stable key and every field.\n- Typed CALLS edges: state_cv_ 0→2, file_map_ 0→2, blocks_ 0→0, snapshots_ 0→0, table_ 2→2, tmp_batch_ 0→0.\n- leveldb totals: nodes 2255→2235, SYMBOL 2112→2092, METHOD 1053→1033. Edges 4187, CALLS 3488 and unresolved 6230 are unchanged. Self-loops 0; the files inventory is identical.\n- OpenXcom is identical in all eight extractor-output tables, with 0 marked nodes.\n- Staleness: the stale copy renders the cpp-core 0.1.0 → 0.2.0 line with the rebuild suffix on `orient` and `check`. `check` exits 0 in both human and JSON form. `reindex` is `disabled` and there is no TOOLCHAIN_STALENESS condition. The fresh after-root reports current. The manager's before-root digests are unchanged.",
+        "supportingEvidence": [
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-04.txt",
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-ldb-explain.txt",
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-ldb-explain.json",
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-ldb-dbimpl.txt",
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-06-stale-orient.txt",
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-06-stale-check.txt",
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-06-stale-check.json",
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-06-after-check.json",
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-witness.txt",
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/cama-ldb-explain-before.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CAM-A05",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "P-CAM-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "test \"$(grep -E '^registry-before [0-9a-f]{64}$' .agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/build-progress.md | tail -1 | cut -d' ' -f2)\" = \"$(shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -d' ' -f1)\" && PIDS=$(pgrep -x rmapd | paste -sd, -); { [ -z \"$PIDS\" ] || ! ps -o command= -p \"$PIDS\" | grep -v '/\\.local/bin/rmapd' | grep -q .; } && rm -rf /private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after /private/tmp/CPP-ATTRIBUTE-MACRO-1A-openxcom-after /private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale && ! test -e /private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-after && ! test -e /private/tmp/CPP-ATTRIBUTE-MACRO-1A-openxcom-after && ! test -e /private/tmp/CPP-ATTRIBUTE-MACRO-1A-leveldb-stale && ls -d /private/tmp/CPP-ATTRIBUTE-MACRO-1-leveldb-before /private/tmp/CPP-ATTRIBUTE-MACRO-1-openxcom-before >/dev/null && ! git status --short | grep -vE '^[ MA?][ MA?] (rust/crates/cpp\\-extractor/src/extractor\\.rs|rust/crates/storage/src/agent_impl\\.rs|rust/crates/agent/src/storage_port\\.rs|rust/crates/agent/src/dto/signal\\.rs|rust/crates/agent/src/explain/mod\\.rs|rust/crates/agent/tests/explain_symbol\\.rs|rust/crates/rgr/src/presentation/explain_sections\\.rs|rust/crates/rgr/src/presentation/explain\\.rs)$' | grep -q . && git diff --check",
+        "cwd": ".",
+        "environment": "candidate tree, after every other check",
+        "inputs": "the full sha256 of the operator registry recorded as `registry-before <digest>` in build-progress.md at step 0 equals the current one; no stray isolated daemon; the three builder-owned roots (the two `-after` roots and CAM-A04's `-stale` copy) removed at the end of the round, after every check that reads them; the two manager-owned `-before` roots kept; `git status --short` names only the eight candidate paths (the worktree holds no foreign untracked file at admission — the manager's duty); no trailing whitespace"
+      },
+      "expected": "exit 0: every proof was isolated (the operator's registry byte-identical — no behavior change outside the isolated roots), the tree holds only the allocated paths",
+      "candidateSha256": "sha256:78c19e14bf5f29f8df148d366eba679f9d71b3cd7ab3f8bab469c4b57662a160",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED: exit 0.\n- The operator registry digest equals registry-before 4762fd948a05b208f1eda8e8e026f63715f0d98630023ba28a48b831a879d64c.\n- No isolated rmapd is left running.\n- The leveldb-after, openxcom-after and leveldb-stale roots are removed.\n- The manager's two -before roots are kept.\n- `git status --short` lists only the eight candidate paths.\n- `git diff --check` is clean.\n- My throwaway grammar probe /private/tmp/CPP-ATTRIBUTE-MACRO-1A-parse and the temporary check scripts are also removed.",
+        "supportingEvidence": [
+          ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/build-progress.md (CAM-A05)",
+          "post-check `ls -d /private/tmp/CPP-ATTRIBUTE-MACRO-1*` lists only the manager's -before roots and their .index.txt files"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/cpp-extractor/src/extractor.rs",
+      "obligationIds": [
+        "RG-REQ-001-L01",
+        "RG-REQ-002-L11",
+        "RG-REQ-001-L06",
+        "P-CAM-01",
+        "P-CAM-02"
+      ],
+      "summary": "Rule 1, field evidence: a trailing macro whose argument names a data member makes the member a typed field (recorded in class_field_types, including the pointer variant) with no node.\n- Iteration 1 fixes F-CAM-PARAM-ERROR-1: the evidence now requires the parameter list's whole subtree to hold no ERROR or MISSING node (`has_error()`), and every parameter_declaration to be exactly its bare type_identifier.\n\nRule 2, marking: every other macro-recovery shape keeps today's node and gains the all-or-none marker, under D-CAM-OX-CONTROL-1's three parse-tree conditions.\n\nVersion: EXTRACTOR_NAME is bumped to cpp-core:0.2.0.\n\nTests: 17 new; the one new test in iteration 1 is field_evidence_requires_an_error_free_argument_list_of_bare_member_types."
+    },
+    {
+      "path": "rust/crates/storage/src/agent_impl.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L04",
+        "P-CAM-02"
+      ],
+      "summary": "`list_members_of_type` reads the three marker keys all-or-nothing. A partial or malformed marker is an AgentStorageError. Includes a unit test module. Unchanged in iteration 1."
+    },
+    {
+      "path": "rust/crates/agent/src/storage_port.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11"
+      ],
+      "summary": "AgentMemberEntry gains one optional undetermined-identity value, per D-CAM-MARKER-BOUNDARY-1 option A. Unchanged in iteration 1."
+    },
+    {
+      "path": "rust/crates/agent/src/dto/signal.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L02"
+      ],
+      "summary": "ExplainMemberItem gains the flat keys identity, identity_candidates and identity_basis, skipped when absent, so a determined member is byte-identical. Unchanged in iteration 1."
+    },
+    {
+      "path": "rust/crates/agent/src/explain/mod.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11"
+      ],
+      "summary": "Passes the member marker through to the DTO. Unchanged in iteration 1."
+    },
+    {
+      "path": "rust/crates/agent/tests/explain_symbol.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "P-CAM-02"
+      ],
+      "summary": "Adds the new field to the existing AgentMemberEntry literals, plus the verbatim marker pass-through test. Unchanged in iteration 1."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain_sections.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L04"
+      ],
+      "summary": "Renders the 'identity undetermined — 2 candidates: A, B' row. A malformed marker produces the whole-section unreadable line. Unchanged in iteration 1."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L04"
+      ],
+      "summary": "Renderer tests for the marker row and the unreadable-line rule. Unchanged in iteration 1."
+    }
+  ],
+  "completedAt": "2026-09-26T22:01:09.366Z",
+  "limitations": [
+    "Step 0: `git diff --stat 438e0e28 HEAD -- rust` is NOT empty. All 20 files are TOOLCHAIN-STALENESS-1 (23d12a9b), the accepted gate this slice requires; none is a candidate path. OBSERVED.",
+    "The admission-2 parse dump is carried, not redone, because the witness-line rule is unchanged. The new probe for F-CAM-PARAM-ERROR-1 was EXECUTED with the pinned grammar (tree-sitter =0.24.7, tree-sitter-cpp =0.23.4). It showed the finding's shape is reachable: `int x_ GUARDED_BY(const @ mutex_);` parses to `parameter_declaration(type_qualifier const, ERROR(@), type: type_identifier mutex_)`, which the iteration-0 rule accepted as field evidence.",
+    "Tightening the 'bare type' condition is a behaviour change on synthetic input only. `GUARDED_BY(mutex_ const)`, `mutex_ volatile` and `mutex_ [[x]]` are no longer field evidence, so such members are kept and marked rather than typed. CAM-A04 shows no leveldb or OpenXcom fact moved. duckdb's `DUCKDB_GUARDED_BY` forms are not measured here (SLICE_DOC §8).",
+    "RG-REQ-002-L11 is PARTIAL: store marker and `explain` only. `find`, `callers`/`callees` and inferred binding belong to 1B. No L11 PASS is claimed.",
+    "Later-pass tables (modules, surfaces, boundaries, inferences, seeds) are not compared. Their equality is INFERRED from untouched code.",
+    "Residual of another class, unchanged (RG-REQ-005-L02): leveldb `helpers/memenv/memenv.cc:291` `return file_map_.find(fname) != file_map_.end();`. Its `end()` CALLS edge binds to `leveldb::Slice::end` both before and after, even though it now carries receiverType `FileSystem`. The same happens at :323 and :235. This is a unique-name fabrication for the call-binding queue.",
+    "Not run, by process: `cargo test --workspace`, the smoke scripts and the dogfood. These are the operator's gate."
+  ],
+  "report": "OUTCOME: review-0's single finding F-CAM-PARAM-ERROR-1 is fixed at its class, and all five checks CAM-A01..A05 pass (EXECUTED). The CAM-A04 results are identical to iteration 0.\n\nFINDING CLASS AND RULE: field evidence was judged from a projection of the argument list (the top-level child kinds plus each parameter's `type` field) instead of the whole list. `field_evidence_member_name` now uses one rule: evidence holds only if `params.has_error()` is false (no ERROR or MISSING node at any depth) and every parameter_declaration consists of exactly one non-comment named child, its bare type_identifier naming a member. Anything else is not evidence, and rule 2 keeps and marks the member instead of withholding it.\n\nThe pinned-grammar probe showed the finding was reachable: `int x_ GUARDED_BY(const @ mutex_);`. The new test `field_evidence_requires_an_error_free_argument_list_of_bare_member_types` covers it and the non-bare `mutex_ const` form, each with a plain `GUARDED_BY(mutex_)` control in the same class. It FAILED first on the old rule (the nested-ERROR member was silently typed and its node dropped) and passes now. The member keeps its node, marked [x_ | y_, GUARDED_BY]. No other file changed in this iteration. Candidate: 8 files, +1645/−25.\n\nCODE-UNDER-ANALYSIS (leveldb 7ee830d; lines quoted from the checkout; rows from cama-witness.txt and the explain captures):\n\n(1) `db/db_impl.h:189`: `SnapshotList snapshots_ GUARDED_BY(mutex_);`\n- BEFORE: `leveldb::DBImpl::GUARDED_BY` METHOD, line 189, {\"forward_decl\":true}.\n- AFTER: no row. DBImpl goes from Members (73) to Members (69).\n\n(2) `db/db_test.cc:47`: `void IncrementBy(int count) LOCKS_EXCLUDED(mu_) {`\n- BEFORE: `  - IncrementBy (METHOD, decl)  db/db_test.cc:47` and `  - LOCKS_EXCLUDED (METHOD)  db/db_test.cc:47`, in Members (7), which also includes `GUARDED_BY (METHOD, decl)  db/db_test.cc:62`.\n- AFTER: `  - LOCKS_EXCLUDED (METHOD, identity undetermined — 2 candidates: IncrementBy, LOCKS_EXCLUDED)  db/db_test.cc:47`, beside the unchanged `IncrementBy (METHOD, decl)` row, in Members (6).\n\n(3) `port/port_stdcxx.h:59`: `void Lock() EXCLUSIVE_LOCK_FUNCTION() { mu_.lock(); }`\n- The node `leveldb::port::Mutex::EXCLUSIVE_LOCK_FUNCTION` METHOD keeps its name.\n- metadata goes from null to {\"identity\":\"undetermined\",\"basis\":\"macro_recovery_ambiguous_identity\",\"identity_candidates\":[\"Lock\",\"EXCLUSIVE_LOCK_FUNCTION\"]}.\n\nTyped-member witness: `db/skiplist_test.cc:320` `state_cv_.Signal();`. receiverType goes from absent to `port::CondVar`, target `leveldb::port::CondVar::Signal`.\n\n(4) leveldb totals, before → after:\n- nodes 2255 → 2235; SYMBOL 2112 → 2092; METHOD 1053 → 1033\n- edges 4187, CALLS 3488 and unresolved 6230 unchanged\n- 0 self-loops\n- macro-named rows 35 → 15, all marked\n\n(5) OpenXcom: `openxcom before {'nodes': 11274, 'edges': 22514, 'unresolved_edges': 28219, 'files': 733, 'file_versions': 733, 'measurements': 15861, 'file_signals': 706, 'extraction_edges': 49927}`, and `after` is identical. All eight tables compare equal, with 0 marked nodes.\n\nStaleness: the line is `index toolchain differs from running rmap (cpp-core 0.1.0 → 0.2.0) — run rmap repo rebuild '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb'`. `check` exits 0; the fresh index is current.\n\nIsolation: every rmap run used /private/tmp/CPP-ATTRIBUTE-MACRO-1A-* roots over stdio with the auto passes off. The operator registry is unchanged, every root I created is deleted, and nothing is committed.\n\nProgress log: .agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/build-progress.md. The iteration-0 log is in admission-3/."
+}

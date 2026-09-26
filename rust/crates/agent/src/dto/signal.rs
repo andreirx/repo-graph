@@ -918,6 +918,11 @@ pub struct ExplainCalleesEvidence {
 /// One DIRECT member of a type, for the `Members` section. `line` is the member's start line
 /// (already normalised: a `0`/absent line means no anchor — RG-REQ-012-L07); `forward_decl` renders
 /// the `(decl)` marker below the definition (RG-REQ-005-L07).
+///
+/// CPP-ATTRIBUTE-MACRO-1A (RG-REQ-002-L11, D-CAM-MARKER-BOUNDARY-1): `undetermined_identity`
+/// serializes FLAT as the three keys `identity` (`"undetermined"`), `identity_candidates` and
+/// `identity_basis`, all present together or all absent — a determined member's JSON is
+/// byte-identical to before.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExplainMemberItem {
     pub name: String,
@@ -927,6 +932,27 @@ pub struct ExplainMemberItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<u64>,
     pub forward_decl: bool,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub undetermined_identity: Option<ExplainUndeterminedIdentity>,
+}
+
+/// The identity state an [`ExplainUndeterminedIdentity`] reports. One variant: the index cannot
+/// determine the member's name. Serialized `"undetermined"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemberIdentityState {
+    Undetermined,
+}
+
+/// CPP-ATTRIBUTE-MACRO-1A (RG-REQ-002-L11): the marker of a member whose identity the index could
+/// not determine — the two stored candidates in stored (structural) order, never ranked, and the
+/// stored basis naming why. Flattened into [`ExplainMemberItem`] as `identity`,
+/// `identity_candidates`, `identity_basis`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainUndeterminedIdentity {
+    pub identity: MemberIdentityState,
+    pub identity_candidates: [String; 2],
+    pub identity_basis: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

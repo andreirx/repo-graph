@@ -1630,6 +1630,172 @@ mod tests {
         assert!(!full.contains("more)"), "--full has no more-line:\n{full}");
     }
 
+    // ── CPP-ATTRIBUTE-MACRO-1A (RG-REQ-002-L11): the undetermined-identity marker on Members ──
+
+    /// A member row carrying the complete marker (the wire shape `ExplainMemberItem` serializes).
+    fn marked_member(
+        name: &str,
+        line: u64,
+        forward_decl: bool,
+        c1: &str,
+        c2: &str,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "name": name, "subtype": "METHOD", "file": "db/db_test.cc", "line": line,
+            "forward_decl": forward_decl, "identity": "undetermined",
+            "identity_candidates": [c1, c2], "identity_basis": "macro_recovery_ambiguous_identity"
+        })
+    }
+
+    #[test]
+    fn member_row_with_identity_candidates_renders_the_undetermined_marker() {
+        let r = typed_response(
+            "CLASS",
+            vec![members_signal(
+                4,
+                serde_json::json!([
+                    {"name": "IncrementBy", "subtype": "METHOD", "file": "db/db_test.cc", "line": 47, "forward_decl": true},
+                    marked_member("LOCKS_EXCLUDED", 47, false, "IncrementBy", "LOCKS_EXCLUDED"),
+                    marked_member("GUARDED_FN", 60, true, "Helper", "GUARDED_FN"),
+                    {"name": "Bare", "file": "db/db_test.cc", "line": 70, "forward_decl": false,
+                     "identity": "undetermined", "identity_candidates": ["Real", "Bare"],
+                     "identity_basis": "macro_recovery_ambiguous_identity"}
+                ]),
+            )],
+        );
+        let out = r.render_human(false);
+        assert!(
+            out.contains("  - IncrementBy (METHOD, decl)  db/db_test.cc:47\n"),
+            "a determined member renders exactly as before:\n{out}"
+        );
+        assert!(
+            out.contains(
+                "  - LOCKS_EXCLUDED (METHOD, identity undetermined — 2 candidates: IncrementBy, LOCKS_EXCLUDED)  db/db_test.cc:47\n"
+            ),
+            "the marked row names both candidates in carried order:\n{out}"
+        );
+        assert!(
+            out.contains(
+                "  - GUARDED_FN (METHOD, decl, identity undetermined — 2 candidates: Helper, GUARDED_FN)  db/db_test.cc:60\n"
+            ),
+            "decl and marker together:\n{out}"
+        );
+        assert!(
+            out.lines().any(|l| l
+                == "  - Bare (identity undetermined — 2 candidates: Real, Bare)  db/db_test.cc:70"),
+            "no subtype: the marker alone in parentheses:\n{out}"
+        );
+        // JSON `null` marker keys are legitimate absence: today's row, byte-identical.
+        let nulls = typed_response(
+            "CLASS",
+            vec![members_signal(
+                1,
+                serde_json::json!([{"name": "Recover", "subtype": "METHOD", "file": "db/db_impl.cc",
+                    "line": 292, "forward_decl": false, "identity": null,
+                    "identity_candidates": null, "identity_basis": null}]),
+            )],
+        );
+        assert!(nulls
+            .render_human(false)
+            .lines()
+            .any(|l| l == "  - Recover (METHOD)  db/db_impl.cc:292"));
+    }
+
+    /// Render one Members section whose single item is `item`; assert the WHOLE section is the
+    /// unreadable line with no row.
+    fn assert_members_unreadable(item: serde_json::Value, why: &str) {
+        let r = typed_response(
+            "CLASS",
+            vec![members_signal(
+                2,
+                serde_json::json!([
+                    {"name": "Fine", "subtype": "METHOD", "file": "a.h", "line": 1, "forward_decl": false},
+                    item
+                ]),
+            )],
+        );
+        let out = r.render_human(false);
+        assert!(
+            out.contains("Members (2)") && out.contains("members unreadable on this snapshot"),
+            "{why}: the whole section is the unreadable line:\n{out}"
+        );
+        assert!(!out.contains("- Fine"), "{why}: no partial rows:\n{out}");
+        assert!(
+            !out.contains("identity undetermined"),
+            "{why}: never a coerced marker:\n{out}"
+        );
+    }
+
+    #[test]
+    fn members_section_with_a_malformed_identity_marker_renders_the_unreadable_line() {
+        let base = marked_member("M", 5, false, "A", "M");
+        let with = |key: &str, v: serde_json::Value| {
+            let mut item = base.clone();
+            item[key] = v;
+            item
+        };
+        assert_members_unreadable(
+            with("identity", serde_json::json!("determined")),
+            "other identity value",
+        );
+        assert_members_unreadable(
+            with("identity", serde_json::json!(true)),
+            "non-string identity",
+        );
+        assert_members_unreadable(
+            with("identity_candidates", serde_json::json!("A, M")),
+            "non-array candidates",
+        );
+        assert_members_unreadable(
+            with("identity_candidates", serde_json::json!(["A", 7])),
+            "non-string candidate",
+        );
+        assert_members_unreadable(
+            with("identity_basis", serde_json::json!(3)),
+            "non-string basis",
+        );
+        assert_members_unreadable(with("identity_basis", serde_json::json!("")), "empty basis");
+    }
+
+    #[test]
+    fn members_section_with_a_partial_single_or_duplicate_candidate_marker_renders_the_unreadable_line(
+    ) {
+        let base = marked_member("M", 5, false, "A", "M");
+        let without = |key: &str| {
+            let mut item = base.clone();
+            item.as_object_mut().unwrap().remove(key);
+            item
+        };
+        let with = |key: &str, v: serde_json::Value| {
+            let mut item = base.clone();
+            item[key] = v;
+            item
+        };
+        assert_members_unreadable(without("identity"), "partial: no identity");
+        assert_members_unreadable(without("identity_candidates"), "partial: no candidates");
+        assert_members_unreadable(without("identity_basis"), "partial: no basis");
+        assert_members_unreadable(
+            with("identity_basis", serde_json::Value::Null),
+            "partial: null basis",
+        );
+        assert_members_unreadable(
+            with("identity_candidates", serde_json::json!(["A"])),
+            "single candidate",
+        );
+        assert_members_unreadable(
+            with("identity_candidates", serde_json::json!(["A", "M", "B"])),
+            "three candidates",
+        );
+        assert_members_unreadable(
+            with("identity_candidates", serde_json::json!(["M", "M"])),
+            "duplicate candidate",
+        );
+        assert_members_unreadable(
+            with("identity_candidates", serde_json::json!(["", "M"])),
+            "empty candidate",
+        );
+    }
+
     #[test]
     fn explain_referenced_by_section_names_count_top_modules_and_files() {
         let r = typed_response(

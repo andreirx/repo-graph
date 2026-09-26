@@ -23,7 +23,7 @@ use crate::linkage::{
 use crate::metrics::compute_function_metrics;
 
 /// Extractor name and version.
-const EXTRACTOR_NAME: &str = "cpp-core:0.1.0";
+const EXTRACTOR_NAME: &str = "cpp-core:0.2.0";
 
 /// Languages this extractor handles.
 const LANGUAGES: &[&str] = &["cpp"];
@@ -791,7 +791,7 @@ fn extract_type(
         signature: None,
         visibility: Some(Visibility::Export),
         doc_comment: extract_doc_comment(construct, src),
-        metadata_json: build_node_metadata(&linkage_meta, &macros, is_forward_decl),
+        metadata_json: build_node_metadata(&linkage_meta, &macros, is_forward_decl, None),
     });
 
     // Base classes (IMPLEMENTS). Only recoverable when the base clause parsed as
@@ -815,21 +815,55 @@ fn extract_type(
         // types BEFORE its methods are walked, so an inline method's `a_->run()` sees `a_`'s
         // type regardless of member/method source order. Keyed by the class bare name (the same
         // value `current_class` holds), which is how `extract_call` looks a member up.
+        //
+        // CPP-ATTRIBUTE-MACRO-1A rule 1, two phases: (1) the body's PLAIN data members (a
+        // `field_declaration` with no recovered trailing macro); (2) a field whose recovered
+        // trailing macro's arguments all name phase-(1) members is a data member too — named by
+        // its `ERROR` identifier, typed with the field's type, and recorded in `field_evidence`
+        // so the member walk emits NO node for it. A recovered field WITHOUT that evidence records
+        // no member type (neither identifier is known to be the member's name).
+        let mut field_evidence: HashSet<usize> = HashSet::new();
         if let Some(class_key) = ctx.current_class.clone() {
+            let in_body =
+                |child: &tree_sitter::Node| true_close.map_or(true, |c| child.start_byte() < c);
+            let mut plain_members: HashSet<String> = HashSet::new();
             let mut member_cursor = body.walk();
             for child in body.children(&mut member_cursor) {
-                if let Some(close) = true_close {
-                    if child.start_byte() >= close {
-                        continue;
-                    }
+                if !in_body(&child)
+                    || child.kind() != "field_declaration"
+                    || has_function_declarator(&child)
+                    || recovered_field_macro_declarator(&child).is_some()
+                {
+                    continue;
                 }
-                if child.kind() == "field_declaration" && !has_function_declarator(&child) {
-                    if let Some((member, ty)) = extract_field_member_type(&child, src) {
-                        ctx.class_field_types
-                            .entry(class_key.clone())
-                            .or_default()
-                            .insert(member, ty);
-                    }
+                if let Some(member) = child
+                    .child_by_field_name("declarator")
+                    .and_then(|d| descend_to_field_identifier(&d, src))
+                {
+                    plain_members.insert(member);
+                }
+                if let Some((member, ty)) = extract_field_member_type(&child, src) {
+                    ctx.class_field_types
+                        .entry(class_key.clone())
+                        .or_default()
+                        .insert(member, ty);
+                }
+            }
+            let mut evidence_cursor = body.walk();
+            for child in body.children(&mut evidence_cursor) {
+                if !in_body(&child) || child.kind() != "field_declaration" {
+                    continue;
+                }
+                let Some(member) = field_evidence_member_name(&child, src, &plain_members) else {
+                    continue;
+                };
+                field_evidence.insert(child.id());
+                let ty = extract_declaration_type(&child, src);
+                if !ty.is_empty() {
+                    ctx.class_field_types
+                        .entry(class_key.clone())
+                        .or_default()
+                        .insert(member, ty);
                 }
             }
         }
@@ -857,7 +891,9 @@ fn extract_type(
                     extract_method(construct, &child, src, ctx, current_visibility);
                 }
                 "field_declaration" => {
-                    if has_function_declarator(&child) {
+                    // CPP-ATTRIBUTE-MACRO-1A rule 1: a field proven by member evidence is a data
+                    // member (typed above), never a method node.
+                    if has_function_declarator(&child) && !field_evidence.contains(&child.id()) {
                         extract_method_declaration(&child, src, ctx, current_visibility);
                     }
                 }
@@ -1243,6 +1279,11 @@ fn line_of(src: &[u8], pos: usize) -> usize {
 /// SHAPE is unchanged (no new columns). Returns `None` only when there is nothing to
 /// record (no linkage, no macros, not a decl) — so the common case stays byte-identical.
 ///
+/// CPP-ATTRIBUTE-MACRO-1A (D-CERTAINTY-MARK-1's node keys): `identity_candidates` — the two
+/// identifiers a macro recovery left for one member — adds, all together or not at all,
+/// `identity: "undetermined"`, `basis: "macro_recovery_ambiguous_identity"` and
+/// `identity_candidates: [<displaced>, <declarator-slot>]`. `None` adds none of them.
+///
 /// Note (name-honesty): this replaces the former `type_metadata_json`, which was already
 /// used ONLY for the macro/linkage merge and is now shared by the function/method paths
 /// too — the old `type_` prefix no longer matches its behavior. Local private rename,
@@ -1251,9 +1292,10 @@ fn build_node_metadata(
     linkage: &LinkageMetadata,
     macros: &[String],
     forward_decl: bool,
+    identity_candidates: Option<&[String; 2]>,
 ) -> Option<String> {
     let linkage_json = linkage.to_json();
-    if macros.is_empty() && !forward_decl {
+    if macros.is_empty() && !forward_decl && identity_candidates.is_none() {
         return linkage_json;
     }
     let mut obj = match linkage_json
@@ -1276,6 +1318,25 @@ fn build_node_metadata(
     }
     if forward_decl {
         obj.insert("forward_decl".to_string(), serde_json::Value::Bool(true));
+    }
+    if let Some(candidates) = identity_candidates {
+        obj.insert(
+            "identity".to_string(),
+            serde_json::Value::String("undetermined".to_string()),
+        );
+        obj.insert(
+            "basis".to_string(),
+            serde_json::Value::String(MACRO_RECOVERY_IDENTITY_BASIS.to_string()),
+        );
+        obj.insert(
+            "identity_candidates".to_string(),
+            serde_json::Value::Array(
+                candidates
+                    .iter()
+                    .map(|c| serde_json::Value::String(c.clone()))
+                    .collect(),
+            ),
+        );
     }
     serde_json::to_string(&serde_json::Value::Object(obj)).ok()
 }
@@ -1342,6 +1403,350 @@ fn has_function_declarator(node: &tree_sitter::Node) -> bool {
         }
     }
     false
+}
+
+// ── CPP-ATTRIBUTE-MACRO-1A: macro-recovered class members ──────────
+//
+// tree-sitter-cpp 0.23.4 has no derivation for `type ident MACRO(args)` inside a class body: its
+// recovery moves one identifier into an `ERROR` (or leaves it in a preceding, unterminated
+// prototype) and lets the macro call fill the `function_declarator` slot. The parse tree is
+// SYMMETRIC — `void Lock() ANNOTATION() {…}` and `void MYAPI() foo() {…}` recover
+// identically — so the extractor decides only where the evidence is decisive (a trailing macro
+// whose arguments name data members of the class makes the construct a FIELD) and otherwise keeps
+// today's node and records BOTH identifiers for the agent to investigate (RG-REQ-002-L11). It
+// never picks a candidate, never renames a node, and never withholds one. No macro-name list and
+// no lexical (case) rule: every decision below reads the tree shape only.
+
+/// The `basis` recorded beside a macro-recovery identity marker: tree-sitter's recovery of a
+/// macro-bearing member left two identifiers, either of which may be the member's name.
+const MACRO_RECOVERY_IDENTITY_BASIS: &str = "macro_recovery_ambiguous_identity";
+
+/// The `function_declarator` of a class-body `field_declaration` that recovery built around a
+/// trailing macro, together with the `ERROR` sibling immediately before it — either as direct
+/// children of the `field_declaration`, or inside its (pointer/reference/array-wrapped) declarator
+/// (`WriteBatch* tmp_batch_ ANNOTATION(mutex_);` puts both inside the `pointer_declarator`).
+/// `None` when the field has no such `ERROR`-then-`function_declarator` pair.
+fn recovered_field_macro_declarator<'a>(
+    field_decl: &tree_sitter::Node<'a>,
+) -> Option<(tree_sitter::Node<'a>, tree_sitter::Node<'a>)> {
+    let with_error_before = |fd: tree_sitter::Node<'a>| {
+        fd.prev_sibling()
+            .filter(|e| e.kind() == "ERROR")
+            .map(|e| (e, fd))
+    };
+    let mut cursor = field_decl.walk();
+    if let Some(fd) = field_decl
+        .children(&mut cursor)
+        .find(|c| c.kind() == "function_declarator")
+    {
+        return with_error_before(fd);
+    }
+    let mut current = field_decl.child_by_field_name("declarator")?;
+    while matches!(
+        current.kind(),
+        "pointer_declarator" | "reference_declarator" | "array_declarator"
+    ) {
+        let inner = current.child_by_field_name("declarator")?;
+        if inner.kind() == "function_declarator" {
+            return with_error_before(inner);
+        }
+        current = inner;
+    }
+    None
+}
+
+/// The text of an `ERROR` node whose only child is one identifier (`ERROR(identifier seed_)`).
+fn single_identifier_error_text(error: &tree_sitter::Node, src: &[u8]) -> Option<String> {
+    if error.child_count() != 1 {
+        return None;
+    }
+    let only = error.child(0)?;
+    if !matches!(
+        only.kind(),
+        "identifier" | "field_identifier" | "type_identifier"
+    ) {
+        return None;
+    }
+    only.utf8_text(src).ok().map(|s| s.to_string())
+}
+
+/// SLICE_DOC §2.1 rule 1 — FIELD EVIDENCE. A class-body `field_declaration` whose recovered
+/// trailing macro `F` (see [`recovered_field_macro_declarator`]) follows a single-identifier
+/// `ERROR`, where `F` has at least one parameter and EVERY parameter is an unnamed
+/// `parameter_declaration` consisting of nothing but a bare `type_identifier` naming a data member
+/// of this class (`members`, collected from the body's plain data members), and the parameter
+/// list's WHOLE subtree holds no recovery node (`ERROR` or `MISSING`, at any depth), is a DATA
+/// MEMBER: returns its name (the `ERROR`'s identifier). A member name cannot also be a type in
+/// that class's declarations, so the argument list is not a parameter list and the construct is
+/// not a function. `None` otherwise — the member is then marked, never decided.
+fn field_evidence_member_name(
+    field_decl: &tree_sitter::Node,
+    src: &[u8],
+    members: &HashSet<String>,
+) -> Option<String> {
+    let (error, fd) = recovered_field_macro_declarator(field_decl)?;
+    let member = single_identifier_error_text(&error, src)?;
+    let params = fd.child_by_field_name("parameters")?;
+    if params.has_error() {
+        return None; // an ERROR or MISSING node anywhere in the argument list
+    }
+    let mut cursor = params.walk();
+    let mut seen_parameter = false;
+    for child in params.named_children(&mut cursor) {
+        match child.kind() {
+            "parameter_declaration" => {
+                if child.child_by_field_name("declarator").is_some() {
+                    return None;
+                }
+                let mut parts = child.walk();
+                if child
+                    .named_children(&mut parts)
+                    .filter(|part| part.kind() != "comment")
+                    .count()
+                    != 1
+                {
+                    return None; // more than the bare type (`mutex_ const`, an attribute, …)
+                }
+                let ty = child.child_by_field_name("type")?;
+                if ty.kind() != "type_identifier" || !members.contains(ty.utf8_text(src).ok()?) {
+                    return None;
+                }
+                seen_parameter = true;
+            }
+            "comment" => {}
+            _ => return None, // any other construct in the argument list
+        }
+    }
+    seen_parameter.then_some(member)
+}
+
+/// The declarator node of a `function_declarator` when it is a plain name or a destructor name
+/// (`~MutexLock`, the `~` kept). `None` for qualified, operator and other declarators.
+fn function_declarator_name_node<'a>(fd: &tree_sitter::Node<'a>) -> Option<tree_sitter::Node<'a>> {
+    fd.child_by_field_name("declarator").filter(|d| {
+        matches!(
+            d.kind(),
+            "identifier" | "field_identifier" | "destructor_name"
+        )
+    })
+}
+
+/// The declarator node of an `init_declarator` whose value is an EMPTY argument list
+/// (`AssertHeld()` recovered as a variable initialised with `()`). `None` otherwise.
+fn empty_call_init_declarator_name_node<'a>(
+    init: &tree_sitter::Node<'a>,
+) -> Option<tree_sitter::Node<'a>> {
+    let value = init.child_by_field_name("value")?;
+    if value.kind() != "argument_list" || value.named_child_count() != 0 {
+        return None;
+    }
+    init.child_by_field_name("declarator")
+        .filter(|d| matches!(d.kind(), "identifier" | "field_identifier"))
+}
+
+/// The node recovery displaced into an `ERROR` that sits between a member's type and its
+/// declarator: the declarator of the `ERROR`'s lone `function_declarator` / empty-call
+/// `init_declarator` (shape (2a), any member), or — only when `lone_identifier_is_a_shape`, i.e.
+/// for a `field_declaration` (shape (1) without field evidence) — the `ERROR`'s lone child. A lone
+/// identifier before a DEFINITION's declarator is not one of the recovery shapes (the declarator
+/// identifier names it, as CPP-DECLARATORS-1 reads `int MYAPI foo() {…}`). `None` for any other
+/// `ERROR` content. The returned node's KIND is not checked here (see
+/// [`macro_recovery_identity_candidates`]).
+fn error_displaced_node<'a>(
+    error: &tree_sitter::Node<'a>,
+    lone_identifier_is_a_shape: bool,
+) -> Option<tree_sitter::Node<'a>> {
+    if error.child_count() == 1 && error.named_child_count() == 1 {
+        let only = error.named_child(0)?;
+        if matches!(
+            only.kind(),
+            "identifier" | "field_identifier" | "type_identifier"
+        ) {
+            return lone_identifier_is_a_shape.then_some(only);
+        }
+    }
+    if error.named_child_count() != 1 {
+        return None;
+    }
+    let only = error.named_child(0)?;
+    match only.kind() {
+        "function_declarator" => function_declarator_name_node(&only),
+        "init_declarator" => empty_call_init_declarator_name_node(&only),
+        _ => None,
+    }
+}
+
+/// The name node declared by an UNTERMINATED prototype that immediately precedes a typeless member
+/// definition (shape (2b)), together with that prototype: a `field_declaration` / `declaration`
+/// (possibly the last statement of an access `labeled_statement`) whose `;` is MISSING or absent
+/// and whose declarator is a `function_declarator` (through pointer/reference wrappers) or an
+/// empty-call `init_declarator`, or an `ERROR` holding a `function_declarator`. Only whitespace may
+/// separate the prototype's end from `definition`'s start. A `;`-terminated prototype is never
+/// paired (SLICE_DOC §8).
+fn split_prototype_name_node<'a>(
+    definition: &tree_sitter::Node<'a>,
+    src: &[u8],
+) -> Option<(tree_sitter::Node<'a>, tree_sitter::Node<'a>)> {
+    let mut proto = definition.prev_sibling()?;
+    if proto.kind() == "labeled_statement" {
+        let count = proto.named_child_count();
+        proto = proto.named_child(count.checked_sub(1)?)?;
+    }
+    let gap = src.get(proto.end_byte()..definition.start_byte())?;
+    if !gap.iter().all(|b| b.is_ascii_whitespace()) {
+        return None;
+    }
+    let terminated = proto
+        .child(proto.child_count().checked_sub(1)?)
+        .is_some_and(|last| last.kind() == ";" && !last.is_missing());
+    if terminated {
+        return None;
+    }
+    let name = match proto.kind() {
+        "field_declaration" | "declaration" => {
+            let mut current = proto.child_by_field_name("declarator")?;
+            loop {
+                match current.kind() {
+                    "function_declarator" => break function_declarator_name_node(&current)?,
+                    "init_declarator" => break empty_call_init_declarator_name_node(&current)?,
+                    "pointer_declarator" | "reference_declarator" => {
+                        current = current.child_by_field_name("declarator")?;
+                    }
+                    _ => return None,
+                }
+            }
+        }
+        "ERROR" => {
+            let mut cursor = proto.walk();
+            let fd = proto
+                .named_children(&mut cursor)
+                .find(|c| c.kind() == "function_declarator")?;
+            function_declarator_name_node(&fd)?
+        }
+        _ => return None,
+    };
+    Some((name, proto))
+}
+
+/// True when some node in `root`'s subtree lying wholly inside the byte range `[start, end)`
+/// satisfies `pred`. Subtrees outside the range are not visited.
+fn any_node_within(
+    root: &tree_sitter::Node,
+    start: usize,
+    end: usize,
+    pred: &dyn Fn(&tree_sitter::Node) -> bool,
+) -> bool {
+    if root.end_byte() <= start || root.start_byte() >= end {
+        return false;
+    }
+    if root.start_byte() >= start && root.end_byte() <= end && pred(root) {
+        return true;
+    }
+    let mut cursor = root.walk();
+    let found = root
+        .children(&mut cursor)
+        .any(|child| any_node_within(&child, start, end, pred));
+    found
+}
+
+/// A real (not MISSING) `:` token — the token that opens a member-initializer list. The `::` scope
+/// operator is a different token kind and never matches.
+fn is_colon_token(n: &tree_sitter::Node) -> bool {
+    n.kind() == ":" && n.child_count() == 0 && !n.is_missing()
+}
+
+/// A C++ storage-class specifier as the pinned grammar spells it: a `storage_class_specifier`
+/// node (`static`, `extern`, `thread_local`, …), or the `type_qualifier` under which the grammar
+/// files C++'s `mutable` storage-class specifier.
+fn is_storage_class_specifier(n: &tree_sitter::Node) -> bool {
+    match n.kind() {
+        "storage_class_specifier" => true,
+        "type_qualifier" => n.child(0).is_some_and(|k| k.kind() == "mutable"),
+        _ => false,
+    }
+}
+
+/// SLICE_DOC §2.1 rule 2 — the two identity candidates of a class member whose macro recovery left
+/// two identifiers, ordered STRUCTURALLY (never by a judgement of which is real): first the
+/// identifier recovery displaced (into an `ERROR` between the member's type and its declarator, or
+/// into the unterminated prototype preceding a typeless definition), second the identifier in the
+/// `function_declarator`'s declarator slot — `name`, the node's name as extracted today. `None`
+/// for a member recovery did not split (the common case), or when the two are not distinct.
+///
+/// The marker is recorded ONLY when three parse-tree facts hold (D-CAM-OX-CONTROL-1 and its
+/// revision; never a name rule): (1) the displaced candidate is a name node (`identifier`,
+/// `field_identifier` or `destructor_name`) — never a type keyword or a specifier; (2) no `:` token
+/// (a member-initializer list) lies between the displaced candidate and the declarator-slot
+/// identifier (`KeyNotFound(…) : RepresentationException(…)` stays unmarked; a `:` AFTER the
+/// declarator, as in `MutexLock(…) ANNOTATION(mu) : mu_(mu)`, does not count); and
+/// (3) no storage-class specifier lies between the declaring node's `type` and the displaced
+/// candidate (`YAML_CPP_API static bool decode(…)` misreads the macro as the type; a genuine
+/// `static int x_ ANNOTATION(mu_);` puts `static` before its type and stays marked).
+fn macro_recovery_identity_candidates(
+    member: &tree_sitter::Node,
+    declarator: &tree_sitter::Node,
+    name: &str,
+    src: &[u8],
+) -> Option<[String; 2]> {
+    if declarator.kind() != "function_declarator" {
+        return None;
+    }
+    let slot = function_declarator_name_node(declarator)?;
+    if slot.utf8_text(src).ok() != Some(name) {
+        return None;
+    }
+    let (displaced, declaring) = match declarator.prev_sibling() {
+        Some(error) if error.kind() == "ERROR" => {
+            let ty = member.child_by_field_name("type")?;
+            if error.start_byte() < ty.end_byte() {
+                return None;
+            }
+            let node = error_displaced_node(&error, member.kind() == "field_declaration")?;
+            (node, *member)
+        }
+        _ if member.kind() == "function_definition"
+            && member.child_by_field_name("type").is_none() =>
+        {
+            split_prototype_name_node(member, src)?
+        }
+        _ => return None,
+    };
+    // (1) the displaced candidate is a name node.
+    if !matches!(
+        displaced.kind(),
+        "identifier" | "field_identifier" | "destructor_name"
+    ) {
+        return None;
+    }
+    // (2) no member-initializer `:` between the two candidates. The scope is the member's parent,
+    // which holds both the member and (shape (2b)) its preceding prototype.
+    let scope = member.parent().unwrap_or(*member);
+    if displaced.end_byte() <= slot.start_byte()
+        && any_node_within(
+            &scope,
+            displaced.end_byte(),
+            slot.start_byte(),
+            &is_colon_token,
+        )
+    {
+        return None;
+    }
+    // (3) no storage-class specifier between the declaring node's type and the displaced candidate.
+    if let Some(ty) = declaring.child_by_field_name("type") {
+        if ty.end_byte() <= displaced.start_byte()
+            && any_node_within(
+                &declaring,
+                ty.end_byte(),
+                displaced.start_byte(),
+                &is_storage_class_specifier,
+            )
+        {
+            return None;
+        }
+    }
+    let displaced = displaced.utf8_text(src).ok()?.to_string();
+    (!displaced.is_empty() && !name.is_empty() && displaced != name)
+        .then(|| [displaced, name.to_string()])
 }
 
 // ── Base class extraction ────────────────────────────────────────
@@ -1560,7 +1965,7 @@ fn extract_function(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCt
         signature,
         visibility: Some(visibility),
         doc_comment: extract_doc_comment(node, src),
-        metadata_json: build_node_metadata(&linkage_meta, &macro_tokens, false),
+        metadata_json: build_node_metadata(&linkage_meta, &macro_tokens, false, None),
     });
 
     // Extract calls and compute metrics
@@ -1604,6 +2009,10 @@ fn extract_method(
         NodeSubtype::Method
     };
 
+    // CPP-ATTRIBUTE-MACRO-1A rule 2: today's node, plus both identifiers when macro recovery
+    // split this member (never a rename, never a choice).
+    let identity_candidates = macro_recovery_identity_candidates(node, &declarator, &name, src);
+
     let qualified_name = ctx.qualified_name(&name);
     let stable_key = ctx.make_stable_key(&qualified_name, &subtype);
     let func_uid = uuid::Uuid::new_v4().to_string();
@@ -1629,7 +2038,12 @@ fn extract_method(
         visibility: Some(visibility),
         doc_comment: extract_doc_comment(node, src),
         // An in-class method DEFINITION (has a body) is not a declaration.
-        metadata_json: build_node_metadata(&linkage_meta, &macro_tokens, false),
+        metadata_json: build_node_metadata(
+            &linkage_meta,
+            &macro_tokens,
+            false,
+            identity_candidates.as_ref(),
+        ),
     });
 
     if let Some(body) = node.child_by_field_name("body") {
@@ -1673,6 +2087,10 @@ fn extract_method_declaration(
         NodeSubtype::Method
     };
 
+    // CPP-ATTRIBUTE-MACRO-1A rule 2 (a field-shaped member without field evidence): today's node,
+    // plus both identifiers.
+    let identity_candidates = macro_recovery_identity_candidates(node, &declarator, &name, src);
+
     let qualified_name = ctx.qualified_name(&name);
     let stable_key = ctx.make_stable_key(&qualified_name, &subtype);
     let linkage_meta = ctx.linkage_metadata();
@@ -1699,7 +2117,12 @@ fn extract_method_declaration(
         // CPP-DECLARATORS-1 §2.2 (root cause §H-B): an in-class method PROTOTYPE is a
         // bodiless DECLARATION — flagged so it ranks below (and no longer makes ambiguous)
         // its out-of-line definition. Same qualified_name/stable_key as today.
-        metadata_json: build_node_metadata(&linkage_meta, &macro_tokens, true),
+        metadata_json: build_node_metadata(
+            &linkage_meta,
+            &macro_tokens,
+            true,
+            identity_candidates.as_ref(),
+        ),
     });
 
     // No body for declarations, so no calls or metrics
@@ -3106,8 +3529,13 @@ mod tests {
         //
         // Empirical note (18 constructs probed against the pinned tree-sitter-cpp 0.23.4): whenever
         // an `ERROR` is a CHILD of the `function_declarator` the grammar places it directly before
-        // `parameters`, so a non-adjacent fd-internal ERROR is unreachable; the reachable "other
-        // ERROR" is exactly this sibling shape, which the strict test must reject.
+        // `parameters`, so a non-adjacent fd-internal ERROR is unreachable. An ERROR OUTSIDE the
+        // `function_declarator` is reachable in more than this one sibling shape: CPP-ATTRIBUTE-
+        // MACRO-1A (SLICE_DOC §1) records an `ERROR` holding an `init_declarator` or a
+        // `function_declarator` before a member's declarator (`void Lock() EXCLUSIVE_LOCK_FUNCTION()
+        // {…}`), and one inside a `pointer_declarator` (`WriteBatch* tmp_batch_ GUARDED_BY(mutex_);`).
+        // None of them is fd-internal, so the strict test rejects all of them; the class-body ones
+        // are handled by that slice's field-evidence and identity-marker rules, not here.
         let mut ext = CppExtractor::new();
         ext.initialize().unwrap();
         let result = extract_ok(&ext, "int MYAPI foo(int x) { return 0; }\n", "src/a.cpp");
@@ -4585,5 +5013,553 @@ int db_open() {
         let cs = &result.resolved_callsites[0];
         assert_eq!(cs.resolved_module, "sqlite3");
         assert_eq!(cs.resolved_symbol, "sqlite3_open");
+    }
+
+    // ── CPP-ATTRIBUTE-MACRO-1A (RG-REQ-001-L01 as amended, RG-REQ-002-L11): macro-recovered
+    // members — typed when the evidence says field, marked with both identity candidates otherwise.
+    // Every fixture that quotes a corpus is copied VERBATIM from the named checkout lines.
+
+    /// The three marker keys of a node's `metadata_json`: `(identity, basis, identity_candidates)`,
+    /// each `None` when absent. Panics on unparseable metadata (a test-fixture defect).
+    fn identity_marker(n: &ExtractedNode) -> (Option<String>, Option<String>, Option<Vec<String>>) {
+        let Some(raw) = n.metadata_json.as_deref() else {
+            return (None, None, None);
+        };
+        let v: serde_json::Value = serde_json::from_str(raw).expect("node metadata is JSON");
+        let s = |k: &str| {
+            v.get(k)
+                .map(|x| x.as_str().expect("marker key is a string").to_string())
+        };
+        let c = v.get("identity_candidates").map(|x| {
+            x.as_array()
+                .expect("identity_candidates is an array")
+                .iter()
+                .map(|e| e.as_str().expect("candidate is a string").to_string())
+                .collect()
+        });
+        (s("identity"), s("basis"), c)
+    }
+
+    /// Assert `n` carries the complete undetermined-identity marker with exactly `candidates`
+    /// (displaced identifier first, declarator-slot identifier second).
+    fn assert_marked(n: &ExtractedNode, candidates: [&str; 2]) {
+        let (identity, basis, cands) = identity_marker(n);
+        assert_eq!(
+            (identity.as_deref(), basis.as_deref()),
+            (
+                Some("undetermined"),
+                Some("macro_recovery_ambiguous_identity")
+            ),
+            "node {} at {:?} must carry the undetermined marker; metadata {:?}",
+            n.name,
+            n.location.as_ref().map(|l| l.line_start),
+            n.metadata_json
+        );
+        assert_eq!(
+            cands,
+            Some(candidates.iter().map(|c| c.to_string()).collect()),
+            "candidates of {} ({:?})",
+            n.name,
+            n.metadata_json
+        );
+    }
+
+    fn assert_unmarked(n: &ExtractedNode) {
+        assert_eq!(
+            identity_marker(n),
+            (None, None, None),
+            "node {} must carry no marker key: {:?}",
+            n.name,
+            n.metadata_json
+        );
+    }
+
+    /// Every SYMBOL node named `name`, in source order.
+    fn syms_named<'a>(r: &'a ExtractionResult, name: &str) -> Vec<&'a ExtractedNode> {
+        r.nodes
+            .iter()
+            .filter(|n| n.kind == NodeKind::Symbol && n.name == name)
+            .collect()
+    }
+
+    fn line_of_node(n: &ExtractedNode) -> i64 {
+        n.location
+            .as_ref()
+            .expect("member has a location")
+            .line_start
+    }
+
+    /// The Calls edge whose receiver is `receiver`.
+    fn call_on<'a>(r: &'a ExtractionResult, receiver: &str) -> &'a ExtractedEdge {
+        let needle = format!("\"receiver\":\"{receiver}\"");
+        r.edges
+            .iter()
+            .find(|e| {
+                e.edge_type == EdgeType::Calls
+                    && e.metadata_json.as_deref().unwrap_or("").contains(&needle)
+            })
+            .unwrap_or_else(|| panic!("no Calls edge with receiver {receiver}"))
+    }
+
+    // leveldb 7ee830d db/db_impl.h:187 and :189 VERBATIM, in a minimal class with the guarding
+    // member and in-body calls on the guarded members.
+    const DB_IMPL_FIELDS: &str = "class DBImpl {\n public:\n  bool HasSnapshots() { return !snapshots_.empty(); }\n  void ClearBatch() { tmp_batch_->Clear(); }\n  void Probe() { GUARDED_BY.Clear(); }\n\n private:\n  port::Mutex mutex_;\n  WriteBatch* tmp_batch_ GUARDED_BY(mutex_);\n\n  SnapshotList snapshots_ GUARDED_BY(mutex_);\n};\n";
+
+    #[test]
+    fn field_with_trailing_attribute_macro_naming_a_member_is_a_typed_data_member_not_a_node() {
+        // Rule 1 (member-argument evidence): `SnapshotList snapshots_ GUARDED_BY(mutex_);` whose
+        // trailing macro argument `mutex_` names a data member of the class is a DATA MEMBER — no
+        // node, and its declared type types the in-body call.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, DB_IMPL_FIELDS, "db/db_impl.h");
+        assert!(
+            syms_named(&result, "GUARDED_BY").is_empty(),
+            "a field with member evidence is never a node"
+        );
+        assert!(
+            syms_named(&result, "snapshots_").is_empty(),
+            "a data member is not a node"
+        );
+        let call = call_on(&result, "snapshots_");
+        assert!(
+            call.metadata_json
+                .as_deref()
+                .unwrap_or("")
+                .contains("\"receiverType\":\"SnapshotList\""),
+            "the member's declared type types the in-body call: {:?}",
+            call.metadata_json
+        );
+    }
+
+    #[test]
+    fn pointer_field_with_trailing_attribute_macro_naming_a_member_records_the_member_type() {
+        // Rule 1, pointer variant: `WriteBatch* tmp_batch_ GUARDED_BY(mutex_);` puts the ERROR
+        // inside the `pointer_declarator`. The member `tmp_batch_` is typed `WriteBatch`, and the
+        // macro token is NEVER recorded as a member: a receiver literally named `GUARDED_BY` stays
+        // untyped (before this slice it was typed `WriteBatch`).
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, DB_IMPL_FIELDS, "db/db_impl.h");
+        assert!(syms_named(&result, "GUARDED_BY").is_empty());
+        let call = call_on(&result, "tmp_batch_");
+        assert!(
+            call.metadata_json
+                .as_deref()
+                .unwrap_or("")
+                .contains("\"receiverType\":\"WriteBatch\""),
+            "pointer member typed: {:?}",
+            call.metadata_json
+        );
+        let probe = call_on(&result, "GUARDED_BY");
+        assert!(
+            !probe
+                .metadata_json
+                .as_deref()
+                .unwrap_or("")
+                .contains("receiverType"),
+            "class_field_types must never record the macro token: {:?}",
+            probe.metadata_json
+        );
+    }
+
+    // leveldb 7ee830d port/port_stdcxx.h:51-66 VERBATIM.
+    const PORT_STDCXX_MUTEX: &str = "class LOCKABLE Mutex {\n public:\n  Mutex() = default;\n  ~Mutex() = default;\n\n  Mutex(const Mutex&) = delete;\n  Mutex& operator=(const Mutex&) = delete;\n\n  void Lock() EXCLUSIVE_LOCK_FUNCTION() { mu_.lock(); }\n  void Unlock() UNLOCK_FUNCTION() { mu_.unlock(); }\n  void AssertHeld() ASSERT_EXCLUSIVE_LOCK() {}\n\n private:\n  friend class CondVar;\n  std::mutex mu_;\n};\n";
+
+    #[test]
+    fn definition_with_trailing_attribute_macro_is_stored_once_marked_with_both_identity_candidates(
+    ) {
+        // Shapes (2a) :59/:60 (the displaced declarator inside the ERROR's `init_declarator`) and
+        // (2b) :61 (the preceding unterminated `declaration(init_declarator(AssertHeld, ()))`): ONE
+        // node per member, named as today — the extractor never picks — carrying both candidates.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, PORT_STDCXX_MUTEX, "port/port_stdcxx.h");
+        for (mac, real, line) in [
+            ("EXCLUSIVE_LOCK_FUNCTION", "Lock", 9),
+            ("UNLOCK_FUNCTION", "Unlock", 10),
+            ("ASSERT_EXCLUSIVE_LOCK", "AssertHeld", 11),
+        ] {
+            let nodes = syms_named(&result, mac);
+            assert_eq!(nodes.len(), 1, "exactly one node for {mac}");
+            assert_eq!(line_of_node(nodes[0]), line, "{mac} line");
+            assert_eq!(nodes[0].subtype, Some(NodeSubtype::Method));
+            assert_marked(nodes[0], [real, mac]);
+            assert!(
+                syms_named(&result, real).is_empty(),
+                "no node is renamed to {real}"
+            );
+        }
+    }
+
+    // leveldb 7ee830d util/env_posix.cc:499-516 VERBATIM.
+    const ENV_POSIX_LOCK_TABLE: &str = "class PosixLockTable {\n public:\n  bool Insert(const std::string& fname) LOCKS_EXCLUDED(mu_) {\n    mu_.Lock();\n    bool succeeded = locked_files_.insert(fname).second;\n    mu_.Unlock();\n    return succeeded;\n  }\n  void Remove(const std::string& fname) LOCKS_EXCLUDED(mu_) {\n    mu_.Lock();\n    locked_files_.erase(fname);\n    mu_.Unlock();\n  }\n\n private:\n  port::Mutex mu_;\n  std::set<std::string> locked_files_ GUARDED_BY(mu_);\n};\n";
+
+    #[test]
+    fn split_prototype_and_typeless_macro_definition_are_both_kept_and_the_definition_is_marked() {
+        // Shape (2b): `bool Insert(const std::string& fname) LOCKS_EXCLUDED(mu_) {` splits into an
+        // unterminated prototype (a `field_declaration`, kept as today's unmarked decl node) and a
+        // typeless definition named by the macro (kept, marked with the prototype's name). No
+        // merge, no rename.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, ENV_POSIX_LOCK_TABLE, "util/env_posix.cc");
+        for (real, line) in [("Insert", 3), ("Remove", 9)] {
+            let protos = syms_named(&result, real);
+            assert_eq!(protos.len(), 1, "one {real} prototype");
+            assert_eq!(line_of_node(protos[0]), line);
+            assert!(
+                protos[0]
+                    .metadata_json
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("\"forward_decl\":true"),
+                "{real} stays a declaration"
+            );
+            assert_unmarked(protos[0]);
+            let def = syms_named(&result, "LOCKS_EXCLUDED")
+                .into_iter()
+                .find(|n| line_of_node(n) == line)
+                .unwrap_or_else(|| panic!("the typeless definition at line {line}"));
+            assert_marked(def, [real, "LOCKS_EXCLUDED"]);
+        }
+        assert_eq!(syms_named(&result, "LOCKS_EXCLUDED").len(), 2);
+    }
+
+    // leveldb 7ee830d db/db_test.cc:43-63 VERBATIM.
+    const DB_TEST_ATOMIC_COUNTER: &str = "class AtomicCounter {\n public:\n  AtomicCounter() : count_(0) {}\n  void Increment() { IncrementBy(1); }\n  void IncrementBy(int count) LOCKS_EXCLUDED(mu_) {\n    MutexLock l(&mu_);\n    count_ += count;\n  }\n  int Read() LOCKS_EXCLUDED(mu_) {\n    MutexLock l(&mu_);\n    return count_;\n  }\n  void Reset() LOCKS_EXCLUDED(mu_) {\n    MutexLock l(&mu_);\n    count_ = 0;\n  }\n\n private:\n  port::Mutex mu_;\n  int count_ GUARDED_BY(mu_);\n};\n";
+
+    #[test]
+    fn atomic_counter_class_yields_six_nodes_three_marked_and_no_field_phantom() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, DB_TEST_ATOMIC_COUNTER, "db/db_test.cc");
+        let mut members: Vec<(String, Option<NodeSubtype>, i64)> = result
+            .nodes
+            .iter()
+            .filter(|n| {
+                n.kind == NodeKind::Symbol
+                    && n.qualified_name
+                        .as_deref()
+                        .is_some_and(|q| q.starts_with("AtomicCounter::"))
+            })
+            .map(|n| (n.name.clone(), n.subtype, line_of_node(n)))
+            .collect();
+        members.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
+        assert_eq!(
+            members,
+            vec![
+                (
+                    "AtomicCounter".to_string(),
+                    Some(NodeSubtype::Constructor),
+                    3
+                ),
+                ("Increment".to_string(), Some(NodeSubtype::Method), 4),
+                ("IncrementBy".to_string(), Some(NodeSubtype::Method), 5),
+                ("LOCKS_EXCLUDED".to_string(), Some(NodeSubtype::Method), 5),
+                ("LOCKS_EXCLUDED".to_string(), Some(NodeSubtype::Method), 9),
+                ("LOCKS_EXCLUDED".to_string(), Some(NodeSubtype::Method), 13),
+            ],
+            "exactly six member nodes, no GUARDED_BY field phantom"
+        );
+        assert!(syms_named(&result, "GUARDED_BY").is_empty());
+        assert_unmarked(sym(&result, "IncrementBy"));
+        let marked = syms_named(&result, "LOCKS_EXCLUDED");
+        for (node, real) in marked.iter().zip(["IncrementBy", "Read", "Reset"]) {
+            assert_marked(node, [real, "LOCKS_EXCLUDED"]);
+        }
+    }
+
+    // leveldb 7ee830d util/mutexlock.h:23-35 VERBATIM.
+    const MUTEXLOCK: &str = "class SCOPED_LOCKABLE MutexLock {\n public:\n  explicit MutexLock(port::Mutex* mu) EXCLUSIVE_LOCK_FUNCTION(mu) : mu_(mu) {\n    this->mu_->Lock();\n  }\n  ~MutexLock() UNLOCK_FUNCTION() { this->mu_->Unlock(); }\n\n  MutexLock(const MutexLock&) = delete;\n  MutexLock& operator=(const MutexLock&) = delete;\n\n private:\n  port::Mutex* const mu_;\n};\n";
+
+    #[test]
+    fn constructor_and_destructor_shapes_are_marked_with_both_candidates() {
+        // Inside `class SCOPED_LOCKABLE MutexLock` (a `function_definition` whose body is a
+        // `compound_statement`): the :25 prototype is a `declaration` inside the `public:`
+        // `labeled_statement`; the :28 prototype is an `ERROR` holding a `function_declarator`
+        // whose declarator is a `destructor_name` — the `~` is kept.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, MUTEXLOCK, "util/mutexlock.h");
+        let ctor_def = syms_named(&result, "EXCLUSIVE_LOCK_FUNCTION");
+        assert_eq!(ctor_def.len(), 1);
+        assert_eq!(line_of_node(ctor_def[0]), 3);
+        assert_marked(ctor_def[0], ["MutexLock", "EXCLUSIVE_LOCK_FUNCTION"]);
+        let dtor_def = syms_named(&result, "UNLOCK_FUNCTION");
+        assert_eq!(dtor_def.len(), 1);
+        assert_eq!(line_of_node(dtor_def[0]), 6);
+        assert_marked(dtor_def[0], ["~MutexLock", "UNLOCK_FUNCTION"]);
+        let deleted_copy = syms_named(&result, "MutexLock");
+        assert!(
+            deleted_copy
+                .iter()
+                .any(|n| line_of_node(n) == 8 && n.subtype == Some(NodeSubtype::Constructor)),
+            "the deleted copy constructor is present: {deleted_copy:?}"
+        );
+        for n in &deleted_copy {
+            assert_unmarked(n);
+        }
+    }
+
+    const AMBIGUOUS_WITHOUT_EVIDENCE: &str =
+        "class C { int MYAPI foo(Foo x); int seed_ MACRO(Foo); };\n";
+
+    #[test]
+    fn ambiguous_shape_without_member_evidence_is_kept_and_marked_never_silently_renamed() {
+        // No member named `Foo`/`x`: nothing decides field vs method, so today's nodes are kept
+        // under today's names and BOTH identifiers are recorded — nothing withheld, nothing chosen.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, AMBIGUOUS_WITHOUT_EVIDENCE, "src/c.h");
+        assert_marked(sym(&result, "foo"), ["MYAPI", "foo"]);
+        assert_marked(sym(&result, "MACRO"), ["seed_", "MACRO"]);
+        assert!(syms_named(&result, "MYAPI").is_empty());
+        assert!(syms_named(&result, "seed_").is_empty());
+    }
+
+    #[test]
+    fn field_evidence_requires_an_error_free_argument_list_of_bare_member_types() {
+        // Rule 1 reads the WHOLE argument list: a recovery node anywhere in it (the pinned grammar
+        // nests `const @ mutex_` as `parameter_declaration(type_qualifier, ERROR(@), type:
+        // type_identifier mutex_)`), or a parameter that is more than its bare type
+        // (`mutex_ const`), is not member evidence — the member is kept and marked, never
+        // silently decided to be a field. The plain control in the same class stays a field.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        for (source, name) in [
+            (
+                "class C {\n  int mutex_;\n  int a_ GUARDED_BY(mutex_);\n  int x_ GUARDED_BY(const @ mutex_);\n};\n",
+                "x_",
+            ),
+            (
+                "class C {\n  int mutex_;\n  int a_ GUARDED_BY(mutex_);\n  int y_ GUARDED_BY(mutex_ const);\n};\n",
+                "y_",
+            ),
+        ] {
+            let result = extract_ok(&ext, source, "src/c.h");
+            let nodes = syms_named(&result, "GUARDED_BY");
+            assert_eq!(
+                nodes.len(),
+                1,
+                "only the member without evidence keeps its node: {source}"
+            );
+            assert_eq!(line_of_node(nodes[0]), 4, "{source}");
+            assert_marked(nodes[0], [name, "GUARDED_BY"]);
+        }
+    }
+
+    // leveldb 7ee830d db/db_impl.h:110-114 VERBATIM (the comment and the two-line prototype),
+    // in a minimal class holding the guarding member.
+    const DB_IMPL_RECOVER: &str =
+        "class DBImpl {\n private:\n  // Recover the descriptor from persistent storage.  May do a significant\n  // amount of work to recover recently logged updates.  Any changes to\n  // be made to the descriptor are added to *edit.\n  Status Recover(VersionEdit* edit, bool* save_manifest)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n\n  port::Mutex mutex_;\n};\n";
+
+    #[test]
+    fn two_line_trailing_macro_on_a_prototype_stays_one_unmarked_declaration() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, DB_IMPL_RECOVER, "db/db_impl.h");
+        let recover = syms_named(&result, "Recover");
+        assert_eq!(recover.len(), 1, "one Recover node");
+        assert!(recover[0]
+            .metadata_json
+            .as_deref()
+            .unwrap_or("")
+            .contains("\"forward_decl\":true"));
+        assert_unmarked(recover[0]);
+        assert!(syms_named(&result, "EXCLUSIVE_LOCKS_REQUIRED").is_empty());
+    }
+
+    #[test]
+    fn terminated_prototype_and_a_following_typeless_definition_are_not_paired() {
+        // `helper();` ends with a REAL `;`, so the typeless `TEST_METHOD(A) {…}` is not a split of
+        // it: both keep today's reading, unmarked (a stated limit, SLICE_DOC §8).
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class T { public: void helper(); TEST_METHOD(A) { helper(); } };\n",
+            "src/t.cc",
+        );
+        assert_unmarked(sym(&result, "helper"));
+        assert_unmarked(sym(&result, "TEST_METHOD"));
+    }
+
+    // vcmi 93dd4ee launcher/gamepadHandler.h:16-29 VERBATIM.
+    const GAMEPAD_HANDLER: &str = "class GamepadHandler : public QObject\n{\n\tQ_OBJECT\n\npublic:\n\texplicit GamepadHandler(QObject * parent = nullptr);\n\t~GamepadHandler() override;\n\nsignals:\n\tvoid startGameRequested();\n\nprivate:\n\tvoid poll();\n};\n";
+
+    #[test]
+    fn q_object_body_macro_emits_nothing() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, GAMEPAD_HANDLER, "launcher/gamepadHandler.h");
+        assert!(syms_named(&result, "Q_OBJECT").is_empty());
+        for n in result.nodes.iter().filter(|n| n.kind == NodeKind::Symbol) {
+            assert_unmarked(n);
+        }
+    }
+
+    #[test]
+    fn definition_with_a_lone_identifier_error_before_its_declarator_stays_unmarked() {
+        // OpenXcom 1edb0a5 deps/include/yaml-cpp/emitter.h:33 and :86-88 VERBATIM: the access label
+        // and `template <typename T>` recover into the definition's `type`, and `void` into a lone
+        // `ERROR` before the declarator. A lone identifier before a DEFINITION's declarator is not
+        // one of the recovery shapes (shape (1) is a field): the node keeps its declarator name,
+        // unmarked — never `[void, SetStreamablePrecision]`.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class YAML_CPP_API Emitter {\n private:\n  template <typename T>\n  void SetStreamablePrecision(std::stringstream&) {}\n};\n",
+            "deps/include/yaml-cpp/emitter.h",
+        );
+        assert_unmarked(sym(&result, "SetStreamablePrecision"));
+    }
+
+    // D-CAM-OX-CONTROL-1 (with its 2026-09-27 revision): the marker is recorded only when three
+    // parse-tree facts hold — the displaced candidate is a name node, no member-initializer `:`
+    // lies between the two candidates, and no storage-class specifier lies between the member's
+    // `type` and the displaced candidate. The fixtures are the observed OpenXcom/leveldb lines.
+
+    // OpenXcom 1edb0a5 deps/include/yaml-cpp/exceptions.h:203-211 and :260-267 VERBATIM.
+    const YAML_CPP_INITIALIZER_CTORS: &str = "class YAML_CPP_API KeyNotFound : public RepresentationException {\n public:\n  template <typename T>\n  KeyNotFound(const Mark& mark_, const T& key_)\n      : RepresentationException(mark_, ErrorMsg::KEY_NOT_FOUND_WITH_KEY(key_)) {\n  }\n  KeyNotFound(const KeyNotFound&) = default;\n  ~KeyNotFound() YAML_CPP_NOEXCEPT override;\n};\nclass YAML_CPP_API BadSubscript : public RepresentationException {\n public:\n  template <typename Key>\n  BadSubscript(const Mark& mark_, const Key& key)\n      : RepresentationException(mark_, ErrorMsg::BAD_SUBSCRIPT_WITH_KEY(key)) {}\n  BadSubscript(const BadSubscript&) = default;\n  ~BadSubscript() YAML_CPP_NOEXCEPT override;\n};\n";
+
+    #[test]
+    fn constructor_with_member_initializer_list_is_not_marked() {
+        // The recovery leaves `KeyNotFound(...)` and `:` in an ERROR before the declarator slot,
+        // which holds the initializer's `RepresentationException(...)`. The `:` between the two
+        // identifiers is a member-initializer list, not a trailing macro: today's node (named
+        // `RepresentationException` — CPP-CTOR-INITIALIZER-NAME-1, not this slice) stays UNMARKED.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            YAML_CPP_INITIALIZER_CTORS,
+            "deps/include/yaml-cpp/exceptions.h",
+        );
+        let ctors = syms_named(&result, "RepresentationException");
+        let lines: Vec<i64> = ctors.iter().map(|n| line_of_node(n)).collect();
+        // Today's reading: the access label and `template <…>` recover into the definition's
+        // `type`, so each node starts at the ` public:` line (fixture lines 2 and 11).
+        assert_eq!(
+            lines,
+            vec![2, 11],
+            "today's nodes at the two constructors are kept: {lines:?}"
+        );
+        for n in &ctors {
+            assert_unmarked(n);
+        }
+        for n in result.nodes.iter().filter(|n| n.kind == NodeKind::Symbol) {
+            assert_unmarked(n);
+        }
+    }
+
+    // OpenXcom 1edb0a5 deps/include/yaml-cpp/node/convert.h:241-246 VERBATIM.
+    const YAML_CPP_CONVERT_BOOL: &str = "template <>\nstruct convert<bool> {\n  static Node encode(bool rhs) { return rhs ? Node(\"true\") : Node(\"false\"); }\n\n  YAML_CPP_API static bool decode(const Node& node, bool& rhs);\n};\n";
+
+    #[test]
+    fn leading_export_macro_before_a_primitive_return_type_is_not_marked() {
+        // The pinned grammar reads `type: type_identifier(YAML_CPP_API)`, then
+        // `storage_class_specifier(static)`, then `ERROR(identifier bool)` before the declarator
+        // `decode`: a storage-class specifier after the `type` node shows the "type" is a misread
+        // leading macro, so `bool` is not a displaced member name. Today's node `decode`, UNMARKED.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            YAML_CPP_CONVERT_BOOL,
+            "deps/include/yaml-cpp/node/convert.h",
+        );
+        let decode = syms_named(&result, "decode");
+        assert_eq!(decode.len(), 1, "today's node `decode` is kept");
+        assert_eq!(line_of_node(decode[0]), 5);
+        assert_unmarked(decode[0]);
+        // (`struct convert<bool>` is read today as a STRUCT named `bool` — unrelated, unchanged.)
+        assert!(
+            syms_named(&result, "bool")
+                .iter()
+                .all(|n| n.subtype == Some(NodeSubtype::Struct)),
+            "no member node is named `bool`"
+        );
+        for n in result.nodes.iter().filter(|n| n.kind == NodeKind::Symbol) {
+            assert_unmarked(n);
+        }
+    }
+
+    #[test]
+    fn trailing_macro_followed_by_a_member_initializer_list_is_still_marked() {
+        // leveldb util/mutexlock.h:25: the `:` of `: mu_(mu)` FOLLOWS the declarator-slot
+        // identifier (and the `::` of `port::Mutex` between the candidates is not a `:` token), so
+        // the constructor definition stays marked.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(&ext, MUTEXLOCK, "util/mutexlock.h");
+        let ctor_def = syms_named(&result, "EXCLUSIVE_LOCK_FUNCTION");
+        assert_eq!(ctor_def.len(), 1);
+        assert_eq!(line_of_node(ctor_def[0]), 3);
+        assert_marked(ctor_def[0], ["MutexLock", "EXCLUSIVE_LOCK_FUNCTION"]);
+    }
+
+    #[test]
+    fn static_member_with_trailing_macro_is_still_marked() {
+        // A genuine static member puts `static` BEFORE its type; with no member named `mu_` there
+        // is no field evidence (rule 1), so today's node `GUARDED_BY` is kept and marked.
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            "class S { public: static int x_ GUARDED_BY(mu_); };\n",
+            "src/s.h",
+        );
+        let node = syms_named(&result, "GUARDED_BY");
+        assert_eq!(node.len(), 1, "today's node is kept");
+        assert_marked(node[0], ["x_", "GUARDED_BY"]);
+        assert!(syms_named(&result, "x_").is_empty());
+    }
+
+    #[test]
+    fn every_marked_node_carries_undetermined_basis_and_two_distinct_candidates() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let mut marked = 0;
+        for (src, path) in [
+            (PORT_STDCXX_MUTEX, "port/port_stdcxx.h"),
+            (ENV_POSIX_LOCK_TABLE, "util/env_posix.cc"),
+            (DB_TEST_ATOMIC_COUNTER, "db/db_test.cc"),
+            (MUTEXLOCK, "util/mutexlock.h"),
+            (AMBIGUOUS_WITHOUT_EVIDENCE, "src/c.h"),
+        ] {
+            let result = extract_ok(&ext, src, path);
+            for n in &result.nodes {
+                let (identity, basis, cands) = identity_marker(n);
+                if identity.is_none() && basis.is_none() && cands.is_none() {
+                    continue;
+                }
+                marked += 1;
+                assert_eq!(identity.as_deref(), Some("undetermined"), "{}", n.name);
+                assert_eq!(
+                    basis.as_deref(),
+                    Some("macro_recovery_ambiguous_identity"),
+                    "{}",
+                    n.name
+                );
+                let cands = cands.unwrap_or_else(|| panic!("{} lacks candidates", n.name));
+                assert_eq!(cands.len(), 2, "{}: {cands:?}", n.name);
+                assert!(
+                    cands.iter().all(|c| !c.is_empty()) && cands[0] != cands[1],
+                    "{}: two distinct non-empty candidates {cands:?}",
+                    n.name
+                );
+                assert_eq!(
+                    cands[1], n.name,
+                    "the second candidate is the declarator slot (today's name)"
+                );
+            }
+        }
+        assert_eq!(
+            marked,
+            3 + 2 + 3 + 2 + 2,
+            "every expected marked node was seen"
+        );
     }
 }

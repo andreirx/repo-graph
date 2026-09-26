@@ -1257,6 +1257,22 @@ pub struct AgentMemberEntry {
     pub file: String,
     pub line_start: Option<u64>,
     pub forward_decl: bool,
+    /// CPP-ATTRIBUTE-MACRO-1A (RG-REQ-002-L11, D-CAM-MARKER-BOUNDARY-1): `Some` when the index
+    /// could not determine this member's identity — the stored node carries the complete marker
+    /// (`identity: "undetermined"`, `identity_candidates`, `basis`). ONE all-or-nothing value: the
+    /// port never carries half a marker. `None` = a determined member (all three keys absent); a
+    /// partial or malformed stored marker is an `AgentStorageError` at the adapter, never `None`.
+    pub undetermined_identity: Option<AgentUndeterminedIdentity>,
+}
+
+/// CPP-ATTRIBUTE-MACRO-1A (RG-REQ-002-L11): a member identity the index could not determine — the
+/// two stored candidates, in their stored (structural) order, and the stored `basis` naming why.
+/// The order asserts nothing about which candidate is real. The storage adapter constructs it only
+/// from two distinct non-empty candidates and a non-empty basis.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentUndeterminedIdentity {
+    pub candidates: [String; 2],
+    pub basis: String,
 }
 
 /// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): one file that REFERENCES a given file — the inverse of

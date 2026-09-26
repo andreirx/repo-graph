@@ -167,6 +167,10 @@ fn unordered_members(item: &serde_json::Value) -> String {
 /// `null`) optional field is legitimate absence — `subtype`/`line` → omitted, `forward_decl` → false;
 /// an absent or `0` line renders the bare path (never `:0`). A present field of the wrong JSON type is
 /// wire/schema drift, never silently coerced to a default.
+///
+/// CPP-ATTRIBUTE-MACRO-1A (RG-REQ-002-L11): a member whose identity the index could not determine
+/// renders `<name> (<subtype>[, decl], identity undetermined — 2 candidates: <c1>, <c2>)  <anchor>`
+/// (`<name> (identity undetermined — …)` without a subtype) — see [`member_identity_marker`].
 fn render_member_row(item: &serde_json::Value) -> Option<String> {
     let name = item.get("name")?.as_str()?;
     let file = item.get("file")?.as_str()?;
@@ -186,12 +190,52 @@ fn render_member_row(item: &serde_json::Value) -> Option<String> {
         None | Some(serde_json::Value::Null) => None,
         Some(v) => Some(v.as_u64()?),
     };
-    let head = match subtype {
-        Some(st) if forward_decl => format!("{name} ({st}, decl)"),
-        Some(st) => format!("{name} ({st})"),
-        None => name.to_string(),
+    let marker = member_identity_marker(item)?;
+    let head = match (subtype, marker) {
+        (Some(st), None) if forward_decl => format!("{name} ({st}, decl)"),
+        (Some(st), None) => format!("{name} ({st})"),
+        (None, None) => name.to_string(),
+        (Some(st), Some(m)) if forward_decl => format!("{name} ({st}, decl, {m})"),
+        (Some(st), Some(m)) => format!("{name} ({st}, {m})"),
+        (None, Some(m)) => format!("{name} ({m})"),
     };
     Some(format!("{head}  {}", anchor(file, line)))
+}
+
+/// CPP-ATTRIBUTE-MACRO-1A (RG-REQ-002-L11): the undetermined-identity marker of one member row,
+/// read ALL-OR-NOTHING from the flat keys `identity`, `identity_candidates`, `identity_basis`.
+/// `Some(None)`: all three absent (or JSON `null`) — a determined member, today's row. `Some(Some(
+/// text))`: `identity` is `"undetermined"`, `identity_candidates` exactly two distinct non-empty
+/// strings and `identity_basis` a non-empty string — `identity undetermined — 2 candidates: <c1>,
+/// <c2>` in carried order (the order ranks nothing). `None`: any other state (a partial marker, a
+/// non-array, a wrong count, a non-string, empty or duplicate candidate, a non-string basis,
+/// another `identity` value) — the caller renders the whole section's unreadable line, never a
+/// coerced or silently shorter row.
+fn member_identity_marker(item: &serde_json::Value) -> Option<Option<String>> {
+    let present = |key: &str| item.get(key).filter(|v| !v.is_null());
+    match (
+        present("identity"),
+        present("identity_candidates"),
+        present("identity_basis"),
+    ) {
+        (None, None, None) => Some(None),
+        (Some(identity), Some(candidates), Some(basis)) => {
+            if identity.as_str()? != "undetermined" || basis.as_str()?.is_empty() {
+                return None;
+            }
+            let [first, second] = candidates.as_array()?.as_slice() else {
+                return None;
+            };
+            let (first, second) = (first.as_str()?, second.as_str()?);
+            if first.is_empty() || second.is_empty() || first == second {
+                return None;
+            }
+            Some(Some(format!(
+                "identity undetermined — 2 candidates: {first}, {second}"
+            )))
+        }
+        _ => None,
+    }
 }
 
 /// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04, F-ETS-01): the unreadable render of the `Members`

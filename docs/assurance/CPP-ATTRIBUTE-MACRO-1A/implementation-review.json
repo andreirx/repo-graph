@@ -1,0 +1,707 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-CPP-ATTRIBUTE-MACRO-1A-1",
+  "workItemId": "CPP-ATTRIBUTE-MACRO-1A",
+  "baseline": {
+    "path": "docs/requirements/baselines/CPP-ATTRIBUTE-MACRO-1A-INPUT-4.json",
+    "sha256": "sha256:e07275f9d4cfd5d430f9cc4bdbb63a0e7492ebd811cf61329bd054d7e8381ed2"
+  },
+  "allocation": {
+    "path": "docs/slices/cpp-attribute-macro-1a.md",
+    "sha256": "sha256:d615fd241961d11828c07325e52a2c43fd88b775ede5831df4005ecb50d77541"
+  },
+  "subject": {
+    "candidateSha256": "sha256:78c19e14bf5f29f8df148d366eba679f9d71b3cd7ab3f8bab469c4b57662a160",
+    "verification": {
+      "path": "docs/assurance/CPP-ATTRIBUTE-MACRO-1A/verification.json",
+      "sha256": "sha256:21fa98ab3aa4155f986f14f82d7ad1e8c15b5e168bc3d2b7d8034aa8e1360c7c"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-CPP-ATTRIBUTE-MACRO-1A-1"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/CPP-ATTRIBUTE-MACRO-1A-INPUT-4.json",
+      "sha256": "sha256:e07275f9d4cfd5d430f9cc4bdbb63a0e7492ebd811cf61329bd054d7e8381ed2"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/CPP-ATTRIBUTE-MACRO-1A-INPUT-4.json",
+        "sha256": "sha256:e07275f9d4cfd5d430f9cc4bdbb63a0e7492ebd811cf61329bd054d7e8381ed2",
+        "byteLength": 5340,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-001-deterministic-extraction-and-identity.md",
+        "sha256": "sha256:ffed1773d34fee9d22329d932711828715f28e47693e3ae42b9a424da27da342",
+        "byteLength": 20314,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+        "sha256": "sha256:8f2da793ee99d9f756ec48b66c133b49716db1d079686e2b90d5fce2cc88c68b",
+        "byteLength": 17414,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+        "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb",
+        "byteLength": 15479,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35",
+        "byteLength": 20305,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/architecture/artifact-contract-model.md",
+        "sha256": "sha256:acde7231a15e30f99eb5eca5f0a1765c9aa979bb980bcc6c2f459051544dd332",
+        "byteLength": 13896,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/symbol-identity-1.md",
+        "sha256": "sha256:0c5960434f1e4f9689069fd1a2b2abdcd997b519841a3bb6d0114434d0f1f647",
+        "byteLength": 7330,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cpp-declarators-1.md",
+        "sha256": "sha256:e882b256aab71af8d5dc7c0961b5dc5774503a563b8f68fdab3064192be8a408",
+        "byteLength": 13202,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/honesty-gate-2.md",
+        "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed",
+        "byteLength": 5569,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/coherence-3.md",
+        "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36",
+        "byteLength": 3408,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/headline-truth-1.md",
+        "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351",
+        "byteLength": 8211,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/find-facts-1.md",
+        "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3",
+        "byteLength": 8017,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/state-root-separation-1.md",
+        "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f",
+        "byteLength": 10847,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/snapshot-retention-1.md",
+        "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff",
+        "byteLength": 5984,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/daemon-residuals-2.md",
+        "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408",
+        "byteLength": 9750,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/self-pollution-1.md",
+        "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199",
+        "byteLength": 4474,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:6bafbfb4a000ae346b79ae396adbd7564f268437a511fd556e89cde2ecda1c47",
+        "byteLength": 13830,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:4e6e2a618c2c15f1546d38736b876bdba688d1926ab102741cbe60c3a9bb3f04",
+        "byteLength": 10492,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27",
+        "byteLength": 3147,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CAM-MARKER-BOUNDARY-1.md",
+        "sha256": "sha256:275686da2fb2d634a88b07b7f0941f4345b91b1b84f5fdd748fdbcc07abc686b",
+        "byteLength": 2005,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996",
+        "byteLength": 3584,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CAM-OX-CONTROL-1.md",
+        "sha256": "sha256:91aa42a365126e22279b8089b4dc2fcb1a04dcd708a23e8ecc48cdce89b21b7b",
+        "byteLength": 4675,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/cpp-attribute-macro-1a.md",
+        "sha256": "sha256:d615fd241961d11828c07325e52a2c43fd88b775ede5831df4005ecb50d77541",
+        "byteLength": 95640,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/CPP-ATTRIBUTE-MACRO-1A-INPUT-4/requirements-review.json",
+        "sha256": "sha256:4077357230b6d63e1d10b8557aa55edb7f656cd76507bc9889089fb469fcf3bd",
+        "byteLength": 63844,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/CPP-ATTRIBUTE-MACRO-1A-INPUT-4/baseline-approval.json",
+        "sha256": "sha256:90995b6f9e5be66dddaf8a0611bb58609fd96caf28c124c9a56c0c224cb87e90",
+        "byteLength": 2359,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:e4e9c5944a15f5fe4b7cdbfb4483a1bf5436cf18aa6c608452c30419abeedd55",
+        "byteLength": 7940,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/selection.md",
+        "sha256": "sha256:bd1d61edff3d308349ddb3f0896e53dd681865a662da6bfccf6b6875b82962ef",
+        "byteLength": 7708,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-1",
+        "sha256": "sha256:bd4def516daff546992ae9ff120085da1d2edb61e9e70107b07fb9d1fdd573c6",
+        "byteLength": 14266
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/CPP-ATTRIBUTE-MACRO-1A/review-0.json",
+        "sha256": "sha256:b162862eedea117e7bbc25489c1fc5490273f0bb3e13228e24f2af5e8f12a3a7",
+        "byteLength": 19422
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "implementation-allocation-1",
+        "sha256": "sha256:5da2243b40fb686183e1134311e6f69e97682cc5cca670be070b851c3aa435dd",
+        "byteLength": 55726,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-1",
+        "sha256": "sha256:4de89ce00e3b6ef5bc4bc1013e1a717b56d8fc151c288b9786f1f02e66441017",
+        "byteLength": 3316
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "verification-draft-1",
+        "sha256": "sha256:21fa98ab3aa4155f986f14f82d7ad1e8c15b5e168bc3d2b7d8034aa8e1360c7c",
+        "byteLength": 74844
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-1",
+        "sha256": "sha256:690605cc78cba75873863d54e70f7c9e238b9805dd70722f868f493c40ecdf83",
+        "byteLength": 92423
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:41fe7d7d590b421b72e0436d69ae14b138ea972b2d24748e939aafea41a8637c",
+        "byteLength": 23964
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:0452b231c6d0927aa83a5689bc7f7ce7c9c294e9ff4112efcbb381190219d655",
+        "byteLength": 239523
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-001-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-001-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L11",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-CAM-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-CAM-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-CAM-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "CAM-A01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "OBSERVED code now rejects ERROR/MISSING anywhere in the parameter-list subtree and rejects non-bare parameters; OBSERVED new negative fixture and passing 115-test log. Failing-first and Cargo execution are BUILDER-EXECUTED, not independently reproduced in the read-only sandbox."
+      }
+    },
+    {
+      "checkId": "CAM-A02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "OBSERVED storage, agent and renderer changes and passing logs; Cargo execution was not independently reproduced."
+      }
+    },
+    {
+      "checkId": "CAM-A03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "OBSERVED clippy completion log; independently executed git diff --check with exit 0. Cargo fmt/clippy were not independently run."
+      }
+    },
+    {
+      "checkId": "CAM-A04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "OBSERVED source checkout lines, before/after captures and printed store-oracle output. Indexing was BUILDER-EXECUTED; cleaned after-roots were not independently recreated."
+      }
+    },
+    {
+      "checkId": "CAM-A05",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "OBSERVED git status lists exactly eight allocated paths, their file hashes match this cycle’s checkpoint, and git diff --check exits 0. Registry digest, process state and temporary-root cleanup rely on builder evidence."
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "rust/crates/cpp-extractor/src/extractor.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/agent_impl.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/storage_port.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/dto/signal.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/explain/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/tests/explain_symbol.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain_sections.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-09-26T22:03:59.646Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nOBSERVED: I inspected git status and git diff; only the eight allocated paths are modified, their SHA-256 values match this cycle’s checkpoint, and git diff --check exits 0. The prior finding F-CAM-PARAM-ERROR-1 is closed: field_evidence_member_name now checks params.has_error() over the whole argument-list subtree and requires each parameter to contain only its bare member-name type. OBSERVED: the new test covers a nested ERROR and a non-bare qualifier alongside a plain field control; the builder’s log records the intended failing-first result and then 115 passing extractor tests. INFERRED from the code and test: malformed recovery no longer silently suppresses the node or its uncertainty marker.\n\nOBSERVED in the leveldb checkout: db/db_impl.h:189 is `SnapshotList snapshots_ GUARDED_BY(mutex_);`; builder captures show a former `leveldb::DBImpl::GUARDED_BY` METHOD row and no after-row. OBSERVED: db/db_test.cc:47 is `void IncrementBy(int count) LOCKS_EXCLUDED(mu_) {`; captures move from `IncrementBy (METHOD, decl)` plus bare `LOCKS_EXCLUDED (METHOD)` to the unchanged declaration plus `LOCKS_EXCLUDED (METHOD, identity undetermined — 2 candidates: IncrementBy, LOCKS_EXCLUDED)`. OBSERVED: port/port_stdcxx.h:59 is `void Lock() EXCLUSIVE_LOCK_FUNCTION() { mu_.lock(); }`; the store capture retains `leveldb::port::Mutex::EXCLUSIVE_LOCK_FUNCTION` and records `[Lock, EXCLUSIVE_LOCK_FUNCTION]` with identity undetermined. BUILDER-EXECUTED CAM-A04 reports leveldb nodes 2255→2235, SYMBOL 2112→2092, METHOD 1053→1033, with edges 4187, CALLS 3488 and unresolved 6230 unchanged; OpenXcom’s eight compared extractor-output tables are identical before/after. These bounded observations support VISION’s honest orientation goal: decisive field evidence removes phantoms, while uncertain identities remain visible rather than being guessed.\n\nOBSERVED design path: extractor metadata is read all-or-nothing by the storage adapter, carried as one optional boundary value through agent explain, and rendered with both candidates; malformed stored markers fail the read and malformed wire markers make the whole Members section unreadable. The added boundary values serve the documented storage→agent and agent→CLI consumers; separate nullable marker fields were rejected because they would permit partial certainty claims. INFERRED: no new component edge or cycle is introduced by this diff. RG-REQ-002-L11 is accepted only for this allocated 1A increment—store and explain; find, callers/callees and inferred binding remain explicitly deferred to 1B. Workspace tests, smoke scripts and isolated dogfood were NOT RUN by this reviewer and remain the operator’s post-review gate. Acceptance is a bounded review recommendation, not a claim of global regression freedom."
+}
