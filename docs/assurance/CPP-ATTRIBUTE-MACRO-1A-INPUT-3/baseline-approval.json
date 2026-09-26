@@ -1,0 +1,62 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "CPP-ATTRIBUTE-MACRO-1A-BASELINE-APPROVAL-3",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/CPP-ATTRIBUTE-MACRO-1A-INPUT-3.json",
+    "sha256": "sha256:5d8cb992dd4169aad32623e9e7d002438336263616e79858adbc61774c2e6fc1"
+  },
+  "review": {
+    "path": "docs/assurance/CPP-ATTRIBUTE-MACRO-1A-INPUT-3/requirements-review.json",
+    "sha256": "sha256:339fc5e9b3455c04c33b8a1c0dbff8e05723f793d4ab35f2f6b68f9c52695a70"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-CAM-MARKER-BOUNDARY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CAM-MARKER-BOUNDARY-1.md",
+        "sha256": "sha256:275686da2fb2d634a88b07b7f0941f4345b91b1b84f5fdd748fdbcc07abc686b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-CAM-OX-CONTROL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CAM-OX-CONTROL-1.md",
+        "sha256": "sha256:91aa42a365126e22279b8089b4dc2fcb1a04dcd708a23e8ecc48cdce89b21b7b"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-26T21:22:15.606Z",
+  "rationale": "Successor baseline INPUT-3 accepted at CPP-ATTRIBUTE-MACRO-1A-PREP-7 cycle 0 (claude-opus-5-5 / gpt-6-sol / gpt-6-luna): the implementation review's F-CAM-R1 answered by D-CAM-OX-CONTROL-1 = B with two dated revisions (name nodes incl. destructor_name; no member-initializer ':' between the candidates; no storage-class specifier between the type and the displaced candidate \u2014 all parse-tree facts), four regression tests in CAM-A01 (floor 81); OC-4 CAM-A02 target; follow-up CPP-CTOR-INITIALIZER-NAME-1."
+}
