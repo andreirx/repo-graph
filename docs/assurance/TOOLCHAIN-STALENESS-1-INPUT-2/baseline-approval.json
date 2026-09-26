@@ -1,0 +1,55 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "TOOLCHAIN-STALENESS-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/TOOLCHAIN-STALENESS-1-INPUT-2.json",
+    "sha256": "sha256:1714ada48f2a43793dcf51a18d539affea54ebdd6aa29287413aa19e38f70c25"
+  },
+  "review": {
+    "path": "docs/assurance/TOOLCHAIN-STALENESS-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:e51d2467eac336b3493b0d831ae08a90f02e4f96c204e230c2dbbf12fe630ac3"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-TS-RUNTIME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TS-RUNTIME-1.md",
+        "sha256": "sha256:b93820e159acdb7db89472e973db1113ce8dccacd02349877707eeeb7c910c8b"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-26T17:20:48.891Z",
+  "rationale": "Successor baseline INPUT-2 accepted at PREP-4 cycle 0 (claude-opus-5-5 / gpt-6-sol): TS-C06's added-line cap on rgr/src/commands/orient.rs raised 4 \u2192 5 (rustfmt splits the render call; the only 4-line shapes would make the code less clear to satisfy a count); baselinePath; a \u00a79 entry. Nothing else changed. Implementation cycle 0 had passed the other eight checks with the mechanism observed on an isolated leveldb copy."
+}
