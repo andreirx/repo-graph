@@ -1,0 +1,62 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "CPP-ATTRIBUTE-MACRO-1A-BASELINE-APPROVAL-4",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/CPP-ATTRIBUTE-MACRO-1A-INPUT-4.json",
+    "sha256": "sha256:e07275f9d4cfd5d430f9cc4bdbb63a0e7492ebd811cf61329bd054d7e8381ed2"
+  },
+  "review": {
+    "path": "docs/assurance/CPP-ATTRIBUTE-MACRO-1A-INPUT-4/requirements-review.json",
+    "sha256": "sha256:4077357230b6d63e1d10b8557aa55edb7f656cd76507bc9889089fb469fcf3bd"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-CAM-MARKER-BOUNDARY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CAM-MARKER-BOUNDARY-1.md",
+        "sha256": "sha256:275686da2fb2d634a88b07b7f0941f4345b91b1b84f5fdd748fdbcc07abc686b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-CAM-OX-CONTROL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CAM-OX-CONTROL-1.md",
+        "sha256": "sha256:91aa42a365126e22279b8089b4dc2fcb1a04dcd708a23e8ecc48cdce89b21b7b"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-26T21:45:46.008Z",
+  "rationale": "Successor baseline INPUT-4 accepted at CPP-ATTRIBUTE-MACRO-1A-PREP-8 cycle 1 (claude-opus-5-5 / gpt-6-sol / gpt-6-luna): oracle correction OC-5 \u2014 CAM-A04's typed file_map_ witness is memenv.cc:291/:323, not :235 (which stays untyped: its body also reads file_map_[fname] at :240; the reason's wording corrected in cycle 1)."
+}
