@@ -1,0 +1,55 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "TOOLCHAIN-STALENESS-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/TOOLCHAIN-STALENESS-1-INPUT-1.json",
+    "sha256": "sha256:443f2a206a633db4d03f376c14e10cbec8b64067cf63b74468a8f8d818a330c8"
+  },
+  "review": {
+    "path": "docs/assurance/TOOLCHAIN-STALENESS-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:baa321430004d19881b2604e1a167a68f12e641520be05b2b5b009d87541a7f9"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-TS-RUNTIME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TS-RUNTIME-1.md",
+        "sha256": "sha256:b93820e159acdb7db89472e973db1113ce8dccacd02349877707eeeb7c910c8b"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-26T16:37:50.044Z",
+  "rationale": "Accepted at TOOLCHAIN-STALENESS-1-PREP-3 cycle 1 (claude-opus-5-5 author, gpt-6-sol reviewer) under RG-BOOTSTRAP-INPUT-10. The document was authored from scratch after the human's rulings of 2026-09-26 (D-STALE-SIGNAL-1: lazy automatic background full re-index on first use). PREP-2's three runtime decisions resolved by the operator in D-TS-RUNTIME-1 (stdio \u2192 disabled; flagless re-index like plain refresh, INCLUDE-ROOTS-PERSIST-1 filed; mechanism proof now, real-upgrade field criterion at the first version bump); PREP-3's two preservation-evidence findings applied by the author."
+}
