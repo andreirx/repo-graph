@@ -84,6 +84,8 @@ pub mod seed;
 pub mod stats;
 pub mod surfaces;
 pub mod trust;
+// TOOLCHAIN-STALENESS-1: the orient/check toolchain-stamp status line.
+pub(crate) mod toolchain_staleness;
 /// RECON-M-R3a: shared witness-block rendering (union accounting → reader lines) for
 /// trust/orient/stats — one client-side projection, no per-surface phrasing drift.
 pub mod witnesses;

@@ -41,6 +41,7 @@ fn minimal_response() -> OrientResponse {
         top_module_edges: None,
         modules_method: None,
         orientation_docs: None,
+        toolchain_staleness: None,
     }
 }
 
@@ -2665,4 +2666,125 @@ fn no_legend_when_only_addend_form_present() {
         !out.contains("(N test) = of which"),
         "legend must NOT render when only one notation form is present:\n{out}"
     );
+}
+
+// ── TOOLCHAIN-STALENESS-1 — the toolchain-stamp status line (RG-REQ-001-L06, LD-10) ──────────────
+
+/// An orient envelope with an optional `index_drift` and `toolchain_staleness` member.
+fn toolchain_env(
+    drift: Option<serde_json::Value>,
+    toolchain: Option<serde_json::Value>,
+) -> CoherenceEnvelope<OrientResponse> {
+    let mut value = serde_json::json!({
+        "schema": "rgr.agent.v1", "command": "orient", "repo": "leveldb",
+        "snapshot": "snap-1",
+        "focus": { "resolved": true, "resolved_kind": "repo" },
+        "confidence": "high",
+        "signals": [], "limits": [], "next": [], "truncated": false
+    });
+    if let Some(d) = drift {
+        value["index_drift"] = d;
+    }
+    if let Some(t) = toolchain {
+        value["toolchain_staleness"] = t;
+    }
+    serde_json::from_value(serde_json::json!({
+        "value": value,
+        "provenance": { "source": ["sqlite"] },
+        "trust": { "class": "Exact", "completeness": "Complete" },
+        "freshness": "Fresh"
+    }))
+    .unwrap()
+}
+
+const ALL_DEPTHS: [OrientDepth; 4] = [
+    OrientDepth::Small,
+    OrientDepth::Medium,
+    OrientDepth::Large,
+    OrientDepth::Full,
+];
+
+#[test]
+fn orient_renders_the_toolchain_line_after_the_index_basis_line_at_every_budget() {
+    let queued = serde_json::json!({
+        "state": "stale",
+        "differences": [{"component":"cpp-core","snapshot_version":"0.0.0","current_version":"0.1.0"}],
+        "reindex": "queued"
+    });
+    let expected =
+        "index toolchain differs from running rmap (cpp-core 0.0.0 \u{2192} 0.1.0) \u{2014} re-index queued";
+    let drift = serde_json::json!({ "state": "clean", "basis": "7ee830d02b623e8f" });
+    for depth in ALL_DEPTHS {
+        let out = render_orient_envelope_at(
+            &toolchain_env(Some(drift.clone()), Some(queued.clone())),
+            depth,
+            "/work/leveldb",
+        );
+        let lines: Vec<&str> = out.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| l.contains("index basis: 7ee830d"))
+            .unwrap_or_else(|| panic!("{depth:?}: no basis line in {out}"));
+        let next = lines[at + 1];
+        assert_eq!(
+            next.trim_start_matches("  - "),
+            expected,
+            "{depth:?}: {out}"
+        );
+        // A bullet in the full Serving block, its own line in the compressed footer — like the
+        // basis line it follows.
+        assert_eq!(
+            next.starts_with("  - "),
+            lines[at].starts_with("  - "),
+            "{depth:?}"
+        );
+        assert_eq!(
+            out.matches("index toolchain differs").count(),
+            1,
+            "{depth:?}"
+        );
+    }
+    // No basis line (an older daemon) → the same position: right after the serving line / bullet.
+    for depth in ALL_DEPTHS {
+        let out = render_orient_envelope_at(
+            &toolchain_env(None, Some(queued.clone())),
+            depth,
+            "/work/leveldb",
+        );
+        let lines: Vec<&str> = out.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| l.starts_with("Serving: ") || l.starts_with("  - answer basis "))
+            .unwrap_or_else(|| panic!("{depth:?}: no serving line in {out}"));
+        assert_eq!(
+            lines[at + 1].trim_start_matches("  - "),
+            expected,
+            "{depth:?}: {out}"
+        );
+    }
+}
+
+#[test]
+fn orient_without_toolchain_staleness_is_byte_identical() {
+    let drift = serde_json::json!({ "state": "clean", "basis": "7ee830d02b623e8f" });
+    for depth in ALL_DEPTHS {
+        for d in [None, Some(drift.clone())] {
+            let absent = toolchain_env(d.clone(), None);
+            // The pre-slice entry point and the request-path entry point render the same bytes, and
+            // a `current` status renders exactly like an absent one.
+            let head_shape = render_orient_envelope(&absent, depth);
+            assert_eq!(
+                render_orient_envelope_at(&absent, depth, "/work/my repo"),
+                head_shape,
+                "{depth:?}"
+            );
+            let current = toolchain_env(d, Some(serde_json::json!({ "state": "current" })));
+            assert_eq!(
+                render_orient_envelope_at(&current, depth, "/work/my repo"),
+                head_shape,
+                "{depth:?}"
+            );
+            assert!(!head_shape.contains("toolchain"), "{depth:?}: {head_shape}");
+        }
+    }
 }

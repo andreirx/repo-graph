@@ -8,6 +8,8 @@
 //! of the seg2 features is byte-identical to today:
 //!   - `index_drift` (INDEX-BASIS-1) — the query-time working-tree drift (computed by
 //!     the caller, which needs `&self`; passed in).
+//!   - `toolchain_staleness` (TOOLCHAIN-STALENESS-1) — the served snapshot's toolchain-stamp
+//!     status versus the running rmap (always attached; `{"state":"current"}` renders nothing).
 //!   - `parse_status` (INDEX-BASIS-1) — the honest parse axis from `get_stale_files`.
 //!   - §2.1 `directory_group_fallback` — the promoted directory-group fan-in view,
 //!     ONLY on package-group collapse (detected off `output`; from `orient_topology_fallback`).
@@ -31,7 +33,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::dispatch::{compute_parse_status, inject_value_field};
-use crate::state::RepoState;
+use crate::state::{DaemonState, RepoState};
 
 /// Attach every additive orient `value` field applicable to this request, in a fixed
 /// order. `index_drift` is computed by the caller (it needs `&self`); everything else
@@ -41,6 +43,7 @@ use crate::state::RepoState;
 pub(crate) fn inject<D: Serialize>(
     output: &mut Value,
     index_drift: &D,
+    daemon: &DaemonState,
     repo_state: &RepoState,
     emitter: &mut dyn ProgressEmitter,
     storage: &StorageConnection,
@@ -51,6 +54,17 @@ pub(crate) fn inject<D: Serialize>(
     // has moved), computed by the caller. rgr renders it as the "index basis / drift"
     // footer line.
     inject_value_field(output, "index_drift", index_drift, repo_uid);
+
+    // TOOLCHAIN-STALENESS-1 (RG-REQ-001-L06): the SERVED snapshot's toolchain-stamp status with the
+    // daemon's re-index state, right after the drift it renders beside.
+    let toolchain_staleness =
+        crate::auto_reindex::orient_status(daemon, storage, repo_state, repo_uid, snapshot_uid);
+    inject_value_field(
+        output,
+        "toolchain_staleness",
+        &toolchain_staleness,
+        repo_uid,
+    );
 
     // INDEX-BASIS-1 (review-0 fix #2): the parse axis is its OWN honest value (from
     // get_stale_files), DISTINCT from the coherence-envelope freshness meet. A FAILED

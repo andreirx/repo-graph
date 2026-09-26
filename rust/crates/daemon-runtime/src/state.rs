@@ -659,6 +659,9 @@ pub struct DaemonState {
     /// run slot, and the running pass's cancel flag. Own interior mutability, so it
     /// does not affect `DaemonState: Send + Sync`.
     seed: crate::seed_pass::SeedCoordinator,
+
+    /// TOOLCHAIN-STALENESS-1: the automatic re-index queue, worker and explicit-write guards.
+    auto_reindex: crate::auto_reindex::AutoReindexCoordinator,
 }
 
 /// FORGET-REPO-1 (review-8 slot-lifecycle fix): the outcome of evicting a repo's IN-MEMORY state,
@@ -711,6 +714,7 @@ impl DaemonState {
             last_retention: Mutex::new(None),
             enrich: crate::enrich_pass::EnrichCoordinator::new(),
             seed: crate::seed_pass::SeedCoordinator::new(),
+            auto_reindex: crate::auto_reindex::AutoReindexCoordinator::new(),
         }
     }
 
@@ -728,6 +732,7 @@ impl DaemonState {
             last_retention: Mutex::new(None),
             enrich: crate::enrich_pass::EnrichCoordinator::new(),
             seed: crate::seed_pass::SeedCoordinator::new(),
+            auto_reindex: crate::auto_reindex::AutoReindexCoordinator::new(),
         }
     }
 
@@ -801,6 +806,11 @@ impl DaemonState {
 
     pub fn enrich_coord(&self) -> &crate::enrich_pass::EnrichCoordinator {
         &self.enrich
+    }
+
+    /// TOOLCHAIN-STALENESS-1: the automatic re-index coordinator.
+    pub fn auto_reindex(&self) -> &crate::auto_reindex::AutoReindexCoordinator {
+        &self.auto_reindex
     }
 
     /// ORIENT-FACT-COHERENCE-1 (review-1 F1): is ANY enrichment pass — the AUTO background pass OR an
@@ -989,7 +999,11 @@ impl DaemonState {
         // authority (`refuse_if_rebuild_interrupted`) is consulted here too. `handle_repo_rebuild` (the
         // remedy) does NOT reach this path while its sentinel is up: it selects its coordinator via
         // `loaded_repo_by_uid`/a standalone coordinator and only reloads here AFTER the sentinel clears.
-        crate::rebuild::refuse_if_rebuild_interrupted(db_path)?;
+        if let Err(refusal) = crate::rebuild::refuse_if_rebuild_interrupted(db_path) {
+            // TOOLCHAIN-STALENESS-1 (LD-03): a request during a rebuild queues the post-rebuild check.
+            crate::auto_reindex::note_first_use(self, db_path, repo_uid);
+            return Err(refusal);
+        }
 
         let key = RepoKey::new(db_path, repo_uid)?;
 
@@ -1020,6 +1034,8 @@ impl DaemonState {
         // two-gate guarded (a live op or a contended lock → skips, never blocks/deadlocks — the
         // `try_acquire_write` is non-blocking), and is a no-op query in the common no-orphan case.
         crate::reconcile::reconcile_repo(self, db_path, repo_uid, repo_uid);
+        // TOOLCHAIN-STALENESS-1 (LD-03): first use in this process — queue a stamp check (no I/O).
+        crate::auto_reindex::note_first_use(self, db_path, repo_uid);
 
         Ok(state)
     }

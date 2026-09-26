@@ -35,9 +35,9 @@ use std::process::ExitCode;
 use crate::daemon_client::{DaemonClient, DaemonClientError};
 use repo_graph_coherence::CoherenceEnvelope;
 
-use crate::presentation::check::{check_exit_code, render_check_envelope, CheckResponse};
+use crate::presentation::check::{check_exit_code, render_check_envelope_at, CheckResponse};
 use crate::presentation::explain::ExplainResponse;
-use crate::presentation::orient::{render_orient_envelope, OrientDepth, OrientResponse};
+use crate::presentation::orient::{render_orient_envelope_at, OrientDepth, OrientResponse};
 
 // ── orient command (REG-1 + CLI-OUT-1) ───────────────────────────────
 //
@@ -246,7 +246,8 @@ pub fn run_orient(args: &[String]) -> ExitCode {
                         // trades how much detail is appended). `budget` is the validated token
                         // (`small|medium|large|full`) selected above.
                         let depth = OrientDepth::from_budget(budget);
-                        println!("{}", render_orient_envelope(&envelope, depth));
+                        let rendered = render_orient_envelope_at(&envelope, depth, &repo_path);
+                        println!("{rendered}");
                         ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
                     Err(e) => {
@@ -390,7 +391,7 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
                 // ABOVE, independent of mode, so it cannot drift from the rendered verdict.
                 match serde_json::from_value::<CoherenceEnvelope<CheckResponse>>(result) {
                     Ok(envelope) => {
-                        println!("{}", render_check_envelope(&envelope));
+                        println!("{}", render_check_envelope_at(&envelope, &repo_path));
                         exit_code
                     }
                     Err(e) => {

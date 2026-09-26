@@ -133,6 +133,7 @@ pub struct ServiceDispatcher {
 impl ServiceDispatcher {
     /// Create a new service dispatcher with the given daemon state.
     pub fn new(state: Arc<DaemonState>) -> Self {
+        crate::auto_reindex::start_worker(&state);
         Self { state }
     }
 
@@ -403,6 +404,8 @@ impl Dispatcher for ServiceDispatcher {
         // kernel-scale `index` — self-identify in the log instead of timing out
         // silently. When RMAP_PERF is off this is one relaxed atomic load + branch.
         let req_start = Instant::now();
+        // TOOLCHAIN-STALENESS-1: an explicit index/refresh/rebuild goes before the auto re-index.
+        let _explicit_write = crate::auto_reindex::explicit_write_guard(&self.state, request);
         let result = match request.method.as_str() {
             // ── Test methods ────────────────────────────────────────
             "ping" => DispatchResult::success(&request.id, serde_json::json!({"pong": true})),
@@ -4632,6 +4635,7 @@ impl ServiceDispatcher {
         crate::orient_additive_fields::inject(
             &mut output,
             &index_drift,
+            &self.state,
             &repo_state,
             emitter,
             &storage,
@@ -4833,7 +4837,7 @@ impl ServiceDispatcher {
             .then_some(repo_graph_agent::EnrichmentState::InFlight);
 
         let check_start = Instant::now();
-        let mut check_result = {
+        let (mut check_result, evaluated_stamp) = {
             // Hoist the interrupt handle BEFORE moving the connection into the worker
             // (S-A; safe no-op if fired after the worker drops the connection).
             let interrupt = storage.interrupt_handle();
@@ -4848,7 +4852,7 @@ impl ServiceDispatcher {
                 move || interrupt.interrupt(),
                 move |flag| {
                     let mut checkpoint = flag.checkpoint();
-                    repo_graph_agent::run_check_cancellable(
+                    let result = repo_graph_agent::run_check_cancellable(
                         &storage,
                         &repo_uid_w,
                         &now_w,
@@ -4858,10 +4862,16 @@ impl ServiceDispatcher {
                         reliability_by_language_w.clone(),
                         &mut checkpoint,
                     )
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| e.to_string())?;
+                    // TOOLCHAIN-STALENESS-1: the stamp of the snapshot this check evaluated (by uid).
+                    let stamp = crate::auto_reindex::compare_evaluated_snapshot_stamp(
+                        &storage,
+                        &result.snapshot,
+                    );
+                    Ok::<_, String>((result, stamp))
                 },
             ) {
-                crate::cancel::Supervised::Completed(Ok(result)) => result,
+                crate::cancel::Supervised::Completed(Ok(evaluated)) => evaluated,
                 // A genuine storage/gate failure while the peer stayed connected.
                 crate::cancel::Supervised::Completed(Err(msg)) => {
                     return DispatchResult::error(
@@ -4913,9 +4923,14 @@ impl ServiceDispatcher {
         // AUTHORITATIVE stale-index flag (`get_stale_files`) and labels the verdict with honest
         // MEET freshness + the multi-source verdict provenance. The verdict VALUE is byte-identical
         // to before; only the wrapper adds labels.
+        let toolchain =
+            crate::auto_reindex::check_status(&self.state, &repo_state, evaluated_stamp);
         let envelope = crate::check_coherence::build_check_envelope(&repo_state, check_result);
         match serde_json::to_value(&envelope) {
-            Ok(v) => DispatchResult::success(&request.id, v),
+            Ok(mut v) => {
+                crate::auto_reindex::attach_check_status(&mut v, toolchain.as_ref(), &repo_uid);
+                DispatchResult::success(&request.id, v)
+            }
             Err(e) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(ErrorCode::InternalError, e.to_string()),

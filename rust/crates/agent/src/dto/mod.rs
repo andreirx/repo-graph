@@ -20,6 +20,8 @@ pub mod parse_status;
 mod semantic_candidate;
 pub mod signal;
 pub mod source;
+/// TOOLCHAIN-STALENESS-1: the snapshot toolchain-stamp comparison and its status DTO.
+pub mod toolchain_staleness;
 
 pub use budget::Budget;
 pub use ceiling_fact::CeilingFact;

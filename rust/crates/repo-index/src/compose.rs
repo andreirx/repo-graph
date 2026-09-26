@@ -37,19 +37,16 @@ use repo_graph_boundary_interaction_extractor::emit::{
     SocketType,
 };
 use repo_graph_boundary_interaction_extractor::socket_lineage::{FdRegistry, TrackedChannelKind};
-use repo_graph_c_extractor::CExtractor;
 use repo_graph_c_extractor::{
     extract_boundary_calls, MmapFlags as RawMmapFlags, RawBoundaryCall,
     SocketFamily as RawSocketFamily, SocketType as RawSocketType,
 };
 use repo_graph_classification::spring_liveness::{classify_spring_liveness, SpringNodeInput};
 use repo_graph_classification::types::{PackageDependencySet, TsconfigAliases};
-use repo_graph_cpp_extractor::CppExtractor;
 use repo_graph_indexer::cargo_manifest::{
     self, CargoModule, CargoModuleCandidateInput, CargoModuleEvidenceInput, CargoModuleStorePort,
     FileOwnershipInput,
 };
-use repo_graph_indexer::extractor_port::ExtractorPort;
 use repo_graph_indexer::inferred_modules::{self, InferredModule};
 use repo_graph_indexer::language_sniff::classify_file_language;
 use repo_graph_indexer::orchestrator::{self, FileInput, IndexError};
@@ -62,20 +59,17 @@ use repo_graph_indexer::storage_port::{SnapshotLifecyclePort, UpdateSnapshotStat
 use repo_graph_indexer::types::{
     DeclaredModule, IndexOptions, IndexPhase, IndexProgressEvent, IndexResult, SnapshotStatus,
 };
-use repo_graph_java_extractor::JavaExtractor;
 use repo_graph_policy_facts::{
     extractors::behavioral_marker::extract_behavioral_markers,
     extractors::return_fate::extract_return_fates,
     extractors::status_mapping::extract_status_mappings, PolicyFactsStorageWrite,
 };
-use repo_graph_python_extractor::PythonExtractor;
-use repo_graph_rust_extractor::RustExtractor;
 use repo_graph_storage::types::InferenceInput;
 use repo_graph_storage::StorageConnection;
 use repo_graph_ts_extractor::{
     extract_amqp_boundary_calls, extract_kafka_boundary_calls, extract_nats_boundary_calls,
     extract_ts_boundary_calls, RawAmqpBoundaryCall, RawKafkaBoundaryCall, RawNatsBoundaryCall,
-    RawTsBoundaryCall, TsExtractor,
+    RawTsBoundaryCall,
 };
 
 use crate::config::RepoConfigContext;
@@ -1650,7 +1644,7 @@ fn persist_spring_liveness_inferences(
     // Convert to InferenceInput with provenance (ACR-4)
     // Use real ISO timestamp and version consistent with Rust indexer
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let extractor = "indexer:1.0.0"; // Match INDEXER_VERSION in orchestrator.rs
+    let extractor = orchestrator::INDEXER_VERSION;
 
     let inferences: Vec<InferenceInput> = classified
         .iter()
@@ -3358,49 +3352,16 @@ pub fn index_into_storage_with_progress(
 
     perf_log!("[PERF] index {}: > init", repo_uid);
     let init_start = Instant::now();
-    let mut ts_extractor = TsExtractor::new();
-    ts_extractor
-        .initialize()
-        .map_err(|e| ComposeError::ExtractorInit(format!("ts: {}", e)))?;
-
-    let mut c_extractor = CExtractor::new();
-    c_extractor
-        .initialize()
-        .map_err(|e| ComposeError::ExtractorInit(format!("c: {}", e)))?;
-
-    let mut cpp_extractor = CppExtractor::new();
-    cpp_extractor
-        .initialize()
-        .map_err(|e| ComposeError::ExtractorInit(format!("cpp: {}", e)))?;
-
-    let mut java_extractor = JavaExtractor::new();
-    java_extractor
-        .initialize()
-        .map_err(|e| ComposeError::ExtractorInit(format!("java: {}", e)))?;
-
-    let mut python_extractor = PythonExtractor::new();
-    python_extractor
-        .initialize()
-        .map_err(|e| ComposeError::ExtractorInit(format!("python: {}", e)))?;
-
-    let mut rust_extractor = RustExtractor::new();
-    rust_extractor
-        .initialize()
-        .map_err(|e| ComposeError::ExtractorInit(format!("rust: {}", e)))?;
+    // TOOLCHAIN-STALENESS-1 (LD-01): the one extractor set — same order, same init error text.
+    let mut extractor_set = crate::toolchain::ExtractorSet::new();
+    extractor_set.initialize()?;
     let init_ms = init_start.elapsed().as_millis();
 
     // Checkpoint BEFORE repo mutation — abort here if transport failed
     emit_progress(&mut progress, "initializing", 0, 1)?;
     ensure_repo(storage, repo_uid, repo_path, options)?;
 
-    let mut extractors: Vec<&mut dyn ExtractorPort> = vec![
-        &mut ts_extractor,
-        &mut c_extractor,
-        &mut cpp_extractor,
-        &mut java_extractor,
-        &mut python_extractor,
-        &mut rust_extractor,
-    ];
+    let mut extractors = extractor_set.ports();
 
     // State-boundary hook: wired at the composition root (SB-4-pre).
     // Constructs the hook; on invalid repo_uid it degrades
@@ -3851,48 +3812,15 @@ pub fn refresh_into_storage_with_progress(
     );
     emit_progress(&mut progress, "scanning", 1, 1)?;
 
-    let mut ts_extractor = TsExtractor::new();
-    ts_extractor
-        .initialize()
-        .map_err(|e| ComposeError::ExtractorInit(format!("ts: {}", e)))?;
-
-    let mut c_extractor = CExtractor::new();
-    c_extractor
-        .initialize()
-        .map_err(|e| ComposeError::ExtractorInit(format!("c: {}", e)))?;
-
-    let mut cpp_extractor = CppExtractor::new();
-    cpp_extractor
-        .initialize()
-        .map_err(|e| ComposeError::ExtractorInit(format!("cpp: {}", e)))?;
-
-    let mut java_extractor = JavaExtractor::new();
-    java_extractor
-        .initialize()
-        .map_err(|e| ComposeError::ExtractorInit(format!("java: {}", e)))?;
-
-    let mut python_extractor = PythonExtractor::new();
-    python_extractor
-        .initialize()
-        .map_err(|e| ComposeError::ExtractorInit(format!("python: {}", e)))?;
-
-    let mut rust_extractor = RustExtractor::new();
-    rust_extractor
-        .initialize()
-        .map_err(|e| ComposeError::ExtractorInit(format!("rust: {}", e)))?;
+    // TOOLCHAIN-STALENESS-1 (LD-01): the one extractor set — same order, same init error text.
+    let mut extractor_set = crate::toolchain::ExtractorSet::new();
+    extractor_set.initialize()?;
 
     // Checkpoint BEFORE repo mutation — abort here if transport failed
     emit_progress(&mut progress, "initializing", 0, 1)?;
     ensure_repo(storage, repo_uid, repo_path, options)?;
 
-    let mut extractors: Vec<&mut dyn ExtractorPort> = vec![
-        &mut ts_extractor,
-        &mut c_extractor,
-        &mut cpp_extractor,
-        &mut java_extractor,
-        &mut python_extractor,
-        &mut rust_extractor,
-    ];
+    let mut extractors = extractor_set.ports();
 
     // Bridge the compose progress callback to the indexer callback.
     // The indexer emits per-file extracting progress with abort checkpoints.

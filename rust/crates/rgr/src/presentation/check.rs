@@ -23,6 +23,7 @@
 use repo_graph_coherence::CoherenceEnvelope;
 use serde::Deserialize;
 
+use crate::presentation::toolchain_staleness::{push_check_row, toolchain_staleness_line};
 use crate::presentation::{bullet, heading, kv_line};
 
 // ── Response Types ───────────────────────────────────────────────────────────
@@ -50,6 +51,9 @@ pub struct CheckResponse {
     /// renderer reads each `.value` (the pristine `CheckSignal`).
     #[serde(default)]
     pub signals: Vec<CoherenceEnvelope<CheckSignal>>,
+    /// TOOLCHAIN-STALENESS-1: the snapshot-stamp status (a line beside INDEX_DRIFT, never a condition).
+    #[serde(default)]
+    pub toolchain_staleness: Option<repo_graph_agent::dto::toolchain_staleness::ToolchainStaleness>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -102,8 +106,16 @@ fn shown_in_human(c: &ConditionEvidence) -> bool {
 /// 2-axis model. check has NO `trust_briefing` (D-CHECK-2), so there is no degradation section; the
 /// verdict/condition text is otherwise byte-unchanged.
 pub fn render_check_envelope(env: &CoherenceEnvelope<CheckResponse>) -> String {
-    env.value
-        .render_human_with_freshness(&format!("{:?}", env.freshness))
+    render_check_envelope_at(env, ".")
+}
+
+/// TOOLCHAIN-STALENESS-1: as above; the toolchain line's remedy names `request_path` (the CLI's `repo`).
+pub fn render_check_envelope_at(
+    env: &CoherenceEnvelope<CheckResponse>,
+    request_path: &str,
+) -> String {
+    let freshness = format!("{:?}", env.freshness);
+    env.value.render_inner(Some(&freshness), request_path)
 }
 
 /// Derive `rmap check`'s process EXIT CODE from the daemon's wrapped result JSON (CHECK-LIVEGRAPH-IMPL
@@ -139,16 +151,16 @@ impl CheckResponse {
     /// Render the check response as human-readable plain text, WITHOUT a freshness suffix (legacy /
     /// non-coherent callers and unit tests). Coherent callers use [`render_check_envelope`].
     pub fn render_human(&self) -> String {
-        self.render_inner(None)
+        self.render_inner(None, ".")
     }
 
     /// Render with the coherence MEET freshness appended to the verdict line (`Verdict: PASS@Fresh`).
     /// CHECK-LIVEGRAPH-IMPL §5 W2 — the human surface for the new freshness axis.
     pub fn render_human_with_freshness(&self, freshness: &str) -> String {
-        self.render_inner(Some(freshness))
+        self.render_inner(Some(freshness), ".")
     }
 
-    fn render_inner(&self, freshness: Option<&str>) -> String {
+    fn render_inner(&self, freshness: Option<&str>, request_path: &str) -> String {
         let mut out = String::new();
 
         // ── Header ─────────────────────────────────────────────────
@@ -163,11 +175,18 @@ impl CheckResponse {
             None => verdict,
         };
         out.push_str(&kv_line("Verdict", &verdict_line));
+        let tc = toolchain_staleness_line(self.toolchain_staleness.as_ref(), request_path);
+        let conditions = self
+            .find_check_signal()
+            .map(|s| self.render_conditions(s, tc.as_deref()));
+        if let (Some(line), false) = (&tc, conditions.as_ref().is_some_and(|c| c.1)) {
+            out.push_str(&bullet(line));
+        }
         out.push('\n');
 
         // ── Condition details ──────────────────────────────────────
-        if let Some(signal) = self.find_check_signal() {
-            out.push_str(&self.render_conditions(signal));
+        if let Some((text, _)) = conditions {
+            out.push_str(&text);
         }
 
         out.trim_end().to_string()
@@ -194,12 +213,13 @@ impl CheckResponse {
         })
     }
 
-    fn render_conditions(&self, signal: &CheckSignal) -> String {
-        let mut out = String::new();
+    /// The condition sections; `true` iff `tc` was placed after an INDEX_DRIFT row.
+    fn render_conditions(&self, signal: &CheckSignal, tc: Option<&str>) -> (String, bool) {
+        let (mut out, mut placed) = (String::new(), false);
 
         let evidence = match &signal.evidence {
             Some(e) => e,
-            None => return out,
+            None => return (out, false),
         };
 
         // Incomplete conditions (if any)
@@ -210,7 +230,7 @@ impl CheckResponse {
                 .iter()
                 .filter(|c| shown_in_human(c))
             {
-                out.push_str(&bullet(&format!("{}: {}", c.code, c.summary)));
+                placed |= push_check_row(&mut out, &c.code, &c.summary, tc);
             }
             out.push('\n');
         }
@@ -223,7 +243,7 @@ impl CheckResponse {
                 .iter()
                 .filter(|c| shown_in_human(c))
             {
-                out.push_str(&bullet(&format!("{}: {}", c.code, c.summary)));
+                placed |= push_check_row(&mut out, &c.code, &c.summary, tc);
             }
             out.push('\n');
         }
@@ -239,11 +259,11 @@ impl CheckResponse {
         if passing.iter().any(shown_in_human) {
             out.push_str(&heading("Passing conditions"));
             for c in passing.iter().filter(|c| shown_in_human(c)) {
-                out.push_str(&bullet(&format!("{}: {}", c.code, c.summary)));
+                placed |= push_check_row(&mut out, &c.code, &c.summary, tc);
             }
         }
 
-        out
+        (out, placed)
     }
 }
 
@@ -276,6 +296,7 @@ mod tests {
             snapshot: "snap-123".to_string(),
             confidence: "high".to_string(),
             signals: vec![],
+            toolchain_staleness: None,
         }
     }
 

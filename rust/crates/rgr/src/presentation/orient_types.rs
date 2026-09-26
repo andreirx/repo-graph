@@ -121,6 +121,11 @@ pub struct OrientResponse {
     /// recommendation omitted. Additive.
     #[serde(default)]
     pub orientation_docs: Option<serde_json::Value>,
+    /// TOOLCHAIN-STALENESS-1 (RG-REQ-001-L06): the served snapshot's toolchain-stamp status versus
+    /// the running rmap. Rendered as one line right after the index-basis line while it is stale or
+    /// unknown; `current` and absent (an older daemon) render nothing.
+    #[serde(default)]
+    pub toolchain_staleness: Option<repo_graph_agent::dto::toolchain_staleness::ToolchainStaleness>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -47,6 +47,8 @@
 //! ```
 
 pub mod activity;
+// TOOLCHAIN-STALENESS-1: lazy automatic background full re-index on first use after a toolchain change.
+pub mod auto_reindex;
 pub mod callgraph_cert;
 pub mod cancel;
 pub mod check_coherence;
@@ -408,6 +410,8 @@ pub fn run_daemon_stdio() -> Result<(), String> {
         eprintln!("note: cache operations (index, refresh, queries) are allowed");
     }
 
+    // TOOLCHAIN-STALENESS-1 (D-TS-RUNTIME-1 §1): a stdio daemon exits at stdin EOF — no re-index.
+    auto_reindex::mark_stdio_transport(&state);
     let dispatcher = ServiceDispatcher::new(state);
 
     run_stdio(&dispatcher).map_err(|e| e.to_string())

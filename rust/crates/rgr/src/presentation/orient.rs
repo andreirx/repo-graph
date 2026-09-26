@@ -226,7 +226,21 @@ pub fn render_orient_envelope(
     env: &CoherenceEnvelope<OrientResponse>,
     depth: OrientDepth,
 ) -> String {
+    render_orient_envelope_at(env, depth, ".")
+}
+
+/// TOOLCHAIN-STALENESS-1: [`render_orient_envelope`] whose toolchain line (directly after the
+/// index-basis line) names `request_path` — the directory the CLI sent as `repo` — in its remedy.
+pub fn render_orient_envelope_at(
+    env: &CoherenceEnvelope<OrientResponse>,
+    depth: OrientDepth,
+    request_path: &str,
+) -> String {
     let mut out = env.value.render_human(depth);
+    let toolchain = super::toolchain_staleness::toolchain_staleness_line(
+        env.value.toolchain_staleness.as_ref(),
+        request_path,
+    );
 
     let class = format!("{:?}", env.trust.class).to_lowercase();
     let freshness = format!("{:?}", env.freshness).to_lowercase();
@@ -265,6 +279,9 @@ pub fn render_orient_envelope(
         if let Some(drift) = &env.value.index_drift {
             out.push_str(&bullet(&drift.describe()));
         }
+        if let Some(line) = &toolchain {
+            out.push_str(&bullet(line));
+        }
         if !sources.is_empty() {
             out.push_str(&bullet(&format!("sources: {}", sources.join(", "))));
         }
@@ -293,6 +310,10 @@ pub fn render_orient_envelope(
         if let Some(drift) = &env.value.index_drift {
             out.push('\n');
             out.push_str(&drift.describe());
+        }
+        if let Some(line) = &toolchain {
+            out.push('\n');
+            out.push_str(line);
         }
     }
     out.trim_end().to_string()

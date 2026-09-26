@@ -56,7 +56,8 @@ const DEFAULT_EDGE_BATCH_SIZE: usize = 10_000;
 const CLASSIFIER_VERSION: u32 = 1;
 
 /// Indexer version string stamped on module-derived edges.
-const INDEXER_VERSION: &str = "indexer:1.0.0";
+/// Also the `indexer` component of every snapshot toolchain stamp ([`build_toolchain_json`]).
+pub const INDEXER_VERSION: &str = "indexer:1.0.0";
 
 // ── Error type ───────────────────────────────────────────────────
 
@@ -1454,7 +1455,9 @@ fn create_module_edges(
 
 // ── Helper functions ─────────────────────────────────────────────
 
-fn build_toolchain_json(extractors: &[&mut dyn ExtractorPort]) -> String {
+/// The snapshot toolchain stamp: `{"extractors":[<names in the given order>],"indexer":<INDEXER_VERSION>}`.
+/// Written on every full index and refresh; TOOLCHAIN-STALENESS-1 compares it with the running rmap.
+pub fn build_toolchain_json(extractors: &[&mut dyn ExtractorPort]) -> String {
     let names: Vec<String> = extractors.iter().map(|e| e.name().to_string()).collect();
     serde_json::json!({
         "extractors": names,
@@ -4289,5 +4292,63 @@ mod tests {
 
         // files_total should include both (copied a.ts + extracted b.ts).
         assert_eq!(refresh_result.files_total, 2);
+    }
+
+    // ── TOOLCHAIN-STALENESS-1: the snapshot toolchain stamp format ──
+
+    /// An extractor that only has a name (the stamp reads nothing else).
+    struct NamedExtractor {
+        name: &'static str,
+        builtins: RuntimeBuiltinsSet,
+    }
+
+    impl ExtractorPort for NamedExtractor {
+        fn name(&self) -> &str {
+            self.name
+        }
+        fn languages(&self) -> &[String] {
+            &[]
+        }
+        fn runtime_builtins(&self) -> &RuntimeBuiltinsSet {
+            &self.builtins
+        }
+        fn initialize(&mut self) -> Result<(), ExtractorError> {
+            Ok(())
+        }
+        fn extract(
+            &self,
+            _source: &str,
+            _file_path: &str,
+            _file_uid: &str,
+            _repo_uid: &str,
+            _snapshot_uid: &str,
+        ) -> Result<ExtractionResult, ExtractorError> {
+            Err(ExtractorError {
+                message: "NamedExtractor does not extract".into(),
+            })
+        }
+    }
+
+    #[test]
+    fn build_toolchain_json_lists_extractor_names_in_order_then_the_indexer_version() {
+        let named = |name| NamedExtractor {
+            name,
+            builtins: RuntimeBuiltinsSet {
+                identifiers: vec![],
+                module_specifiers: vec![],
+            },
+        };
+        let (mut a, mut b, mut c) = (named("ts-core:0.2.0"), named("c-core:0.1.0"), named("z:9"));
+        let ports: Vec<&mut dyn ExtractorPort> = vec![&mut c, &mut a, &mut b];
+        assert_eq!(INDEXER_VERSION, "indexer:1.0.0");
+        assert_eq!(
+            build_toolchain_json(&ports),
+            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.0.0"}"#
+        );
+        let none: Vec<&mut dyn ExtractorPort> = Vec::new();
+        assert_eq!(
+            build_toolchain_json(&none),
+            r#"{"extractors":[],"indexer":"indexer:1.0.0"}"#
+        );
     }
 }

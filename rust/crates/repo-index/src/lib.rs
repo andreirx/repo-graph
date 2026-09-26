@@ -91,6 +91,9 @@ pub mod state_boundary_hook;
 // detector families + named gaps), a build-static read of the http_boundary detector
 // set so the `surfaces list` zero-state states the tool's coverage, never blames the repo.
 pub mod surface_coverage;
+// TOOLCHAIN-STALENESS-1: the one extractor set both write paths compose, and the running toolchain
+// stamp the daemon compares a snapshot's stamp with.
+pub mod toolchain;
 
 /// Iterative AST-walk helper shared by the in-crate re-parse detectors
 /// (PERSIST-RECURSION-1).
