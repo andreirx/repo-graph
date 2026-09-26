@@ -1,0 +1,93 @@
+{
+ "formatVersion": 1,
+ "kind": "requirements-baseline-approval",
+ "approvalId": "RG-BOOTSTRAP-BASELINE-APPROVAL-10",
+ "subject": {
+  "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-10.json",
+  "sha256": "sha256:6ed24aeea4e407099c8cfa021ce3d582ced8472b999ecb345d1635abd921b911"
+ },
+ "review": {
+  "path": "docs/assurance/RG-BOOTSTRAP-INPUT-10/requirements-review.json",
+  "sha256": "sha256:a0bafb3c59e42618d5bd5e370f00e997751bc6c9e90d9ac0bf590fa96ccef422"
+ },
+ "decision": "approved",
+ "approvedBy": {
+  "actorType": "operator",
+  "actorId": "in-place-manager"
+ },
+ "recordedBy": {
+  "actorType": "operator",
+  "actorId": "in-place-manager"
+ },
+ "authorityBasis": {
+  "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+  "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+ },
+ "resolvedDecisions": [
+  {
+   "id": "D-CERTAINTY-MARK-1",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+    "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+   }
+  },
+  {
+   "id": "D-TEST-SCOPE-1",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+    "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d"
+   }
+  },
+  {
+   "id": "D-GRADLE-DECLARED-1",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+    "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+   }
+  },
+  {
+   "id": "D-DU-CC10",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DU-CC10.md",
+    "sha256": "sha256:88ff0bc17769d3101471ad66eccd7b90a66361eb87679f6728d1e774cd17b5b8"
+   }
+  },
+  {
+   "id": "D-REFRESH-STALE-1",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+    "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+   }
+  },
+  {
+   "id": "D-REFRESH-STALE-2",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-2.md",
+    "sha256": "sha256:bb86d039178aa51ca5871b160e92e9431d8dea5758f74575c89278954f0da982"
+   }
+  },
+  {
+   "id": "D-STALE-SIGNAL-1",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+    "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+   }
+  },
+  {
+   "id": "D-TEST-UNDETERMINED-1",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-UNDETERMINED-1.md",
+    "sha256": "sha256:61ffac89c67841ee628c73ed7f66bce1e910ed99925a6b4ae012c2dbce0622f0"
+   }
+  },
+  {
+   "id": "D-TS-WORKSPACE-1",
+   "record": {
+    "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TS-WORKSPACE-1.md",
+    "sha256": "sha256:ae5be8b869a7cd221f51a5c55d42125eafac401c7a00d6e93b55ab00020225f4"
+   }
+  }
+ ],
+ "decidedAt": "2026-09-26T15:31:11.000Z",
+ "rationale": "Independent review accepted at pass 6 of 6 (gpt-6-sol); every finding applied and its code claims verified; the three human rulings of 2026-09-26 are quoted verbatim in their records."
+}

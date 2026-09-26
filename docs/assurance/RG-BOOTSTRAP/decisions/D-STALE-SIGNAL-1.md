@@ -1,0 +1,13 @@
+# D-STALE-SIGNAL-1 — What happens when the installed rmap is newer than the one that built a repository's index?
+
+Raised: 2026-09-24 by the manager (rulings page Q10) after verifying that extracted file versions record their producing extractor in `file_versions.extractor` and edges record one in `edges.extractor`; unrouted skipped file versions can have a NULL extractor. The ratified carried-forward design (D-REFRESH-STALE-2) would duplicate the recorded provenance more coarsely.
+Resolved: 2026-09-26 by the HUMAN, in two steps: (1) "how many times do I have to say I don't care about stale indexes and that's a signal to either delete and reindex or just refresh if possible"; (2) on the manager's proposal of a daemon-side mechanism: "yes, lazy auto-reindex on first use".
+
+## Verified before the proposal (2026-09-26)
+- The stamp exists: `toolchain_json` written at `indexer/src/orchestrator.rs:250` (full) and `:1812` (refresh).
+- A full index does not interrupt reading: `index_repo` creates a `SnapshotKind::Full` snapshot (`orchestrator.rs:254`) that becomes `ready` only at the end; readers serve the latest `ready` snapshot. `rmap repo rebuild` wipes in place and refuses to serve behind its `.rebuilding` sentinel (`daemon-runtime/src/reconcile.rs`), so it is not the automatic primitive.
+- A per-repository first-load hook exists: `DaemonState::load_repo` (crash-orphan reconciliation runs there).
+- The background-pass pattern with an env opt-out exists: auto-enrich (`enrich_pass.rs`, `RMAP_AUTO_ENRICH`), auto-retention, seed.
+
+## Resolution
+RG-REQ-001-L06 as amended in RG-BOOTSTRAP-INPUT-10: on the first request for a repository in a daemon process, a differing or unreadable stamp schedules one background FULL index (queued until no write of that repository and no other automatic re-index is running, then started without another request; previous snapshot served meanwhile; no retry after failure in the process; `RMAP_AUTO_REINDEX=off` opt-out); `orient`/`check` show one verdict-neutral line while it is queued or running, or naming the rebuild remedy when disabled or failed. Rejected: eager re-index of every registered repository at daemon start (re-indexes repositories nobody asked about). Supersedes D-REFRESH-STALE-2, INPUT-9's `INCOMPLETE` verdict and D-REFRESH-STALE-1's explicit-rebuild-only remedy; D-REFRESH-STALE-1's rule that toolchain versions do not invalidate refresh stands. Standing rule for the operator: questions about the precision of staleness reporting are not escalated. Operator consequence: once TOOLCHAIN-STALENESS-1 ships, every isolated rmap in a slice proof sets `RMAP_AUTO_REINDEX=off` beside `RMAP_AUTO_ENRICH=off`, so a before-store served by a candidate binary is not re-indexed under the proof.

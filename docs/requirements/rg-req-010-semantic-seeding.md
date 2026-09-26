@@ -85,7 +85,7 @@ Every vector shall be pinned `(model_id, dim, content_sha)`; a model mismatch is
 
 ### RG-REQ-010-L06 — Test chunks partition below production chunks on structural evidence
 
-A chunk is test-partitioned by its file's `is_test` or a structural per-symbol marker (Rust `#[test]`/`#[cfg(test)]` on the item or an enclosing module; TS/JS enclosing `describe(`/`it(`/`test(`; Python only with a framework marker); names are never the basis; an unknown partition ranks with production (never demoted) and renders an explicit unknown marker.
+A chunk is test-partitioned by its file's `is_test` (including the path and filename conventions of RG-REQ-001-L07) or a structural per-symbol marker (Rust `#[test]`/`#[cfg(test)]` on the item or an enclosing module; TS/JS enclosing `describe(`/`it(`/`test(`; Python only with a framework marker); a symbol's name alone is never the basis; an unknown partition ranks with production (never demoted) and renders an explicit unknown marker.
 
 **Verification criterion:** `repo-graph-seed/src/rank.rs` (`production_ranks_above_test_even_when_test_scores_higher`, `a_test_partition_field_stays_within_the_test_partition`); `classify_tests.rs`; `seed_render_tests.rs` partition-header and unknown-marker tests; `find_facts/rank.rs::rule_a_unknown_is_test_ranks_with_non_test_never_demoted`.
 
