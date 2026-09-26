@@ -1,0 +1,69 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "PYTHON-SUBMODULE-IMPORT-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/PYTHON-SUBMODULE-IMPORT-1-INPUT-2.json",
+    "sha256": "sha256:161c49a528d9e5b3709d33a63410979c0b6db5cc38c1b8c7a4b675bce8f5be8d"
+  },
+  "review": {
+    "path": "docs/assurance/PYTHON-SUBMODULE-IMPORT-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:edc9ee247dd8a097ce4526e3074a43a2cc98a62612ca5aa1529b4aaa1715442c"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-PSI-REFRESH-SIGNALS-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSI-REFRESH-SIGNALS-1.md",
+        "sha256": "sha256:f4ddb39341e09562248bcc2881696d90f2f70725a1ba9ddffb7e6dc351bad3ca"
+      }
+    },
+    {
+      "id": "D-PSI-RELEASE-GATE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSI-RELEASE-GATE-1.md",
+        "sha256": "sha256:75eeec71f03eb211011817f69aa5734fdc90d6b2f4aaf44c0bfbe94babf7bb49"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-26T23:26:44.024Z",
+  "rationale": "Rebase INPUT-2 accepted at PYTHON-SUBMODULE-IMPORT-1-PREP-4 cycle 0 (claude-opus-5-5 / gpt-6-sol / gpt-6-luna): re-pinned after RG-BOOTSTRAP-INPUT-10 with D-STALE-SIGNAL-1; OC-1 (RMAP_AUTO_REINDEX=off, 10 sites; before-roots re-captured with HEAD's binary), OC-2 (PSI-C07, PSI-C01's version sub-oracle and PSI-C02's compose exclusion to the shipped verdict-neutral L06; the staleness narrative replaced by one statement; literals re-verified on the re-captured stores)."
+}
