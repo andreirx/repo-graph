@@ -172,10 +172,25 @@ impl ProgressEmitter for ParkOnceEmitter {
 fn isolated() -> (Arc<ServiceDispatcher>, Arc<DaemonState>, TempDir) {
     // Unlike the other daemon-runtime integration binaries, this one does NOT globally disable
     // retention here — each test sets the override it needs while holding `RETENTION_SERIAL`.
-    let state_root = tempdir().expect("state root tempdir");
+    //
+    // Global mode is CHOSEN and asserted (PORTABLE-TMP-1 P-PT-03): the mark/unmark tests here send
+    // A1 methods, which a sandbox-local root refuses. A plain `tempdir()` lies under `/tmp` on Linux,
+    // the sandbox temp base there; `/var/tmp` is under neither OS's sandbox temp base.
+    let state_root = tempfile::Builder::new()
+        .prefix("rg-global-state-")
+        .tempdir_in("/var/tmp")
+        .expect(
+            "Global-mode state root under /var/tmp (P-PT-03: /var/tmp must exist and be writable)",
+        );
     let registry = RepoRegistry::with_state_root(state_root.path())
-        .expect("isolated registry under temp root");
+        .expect("isolated registry under the Global-mode root");
     let state = Arc::new(DaemonState::with_registry(registry));
+    assert!(
+        !state.is_sandbox_mode(),
+        "P-PT-03: a test that needs Global mode must choose a root outside the sandbox temp base; \
+         {} is classified sandbox-local",
+        state_root.path().display()
+    );
     let dispatcher = Arc::new(ServiceDispatcher::new(Arc::clone(&state)));
     (dispatcher, state, state_root)
 }

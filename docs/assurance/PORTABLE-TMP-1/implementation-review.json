@@ -1,0 +1,658 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-PORTABLE-TMP-1-0",
+  "workItemId": "PORTABLE-TMP-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/PORTABLE-TMP-1-INPUT-2.json",
+    "sha256": "sha256:f874427d4ece8950657164246e2f338beb88d92a405a464abacdebdf25a0804c"
+  },
+  "allocation": {
+    "path": "docs/slices/portable-tmp-1.md",
+    "sha256": "sha256:8207a7707bb215301702bfe494bc68161fe7ff13f14ea4e231b41503c21c80d1"
+  },
+  "subject": {
+    "candidateSha256": "sha256:f95ed343a1ec18d757b1343b43bfdfdc6a4a27eb64c86316880022fc269dc60c",
+    "verification": {
+      "path": "docs/assurance/PORTABLE-TMP-1/verification.json",
+      "sha256": "sha256:1d2f253d8975cfcbcd19548c6239264ff56cc3efa0ab16a2a81a1c94f96ec5a2"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-PORTABLE-TMP-1-0"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/PORTABLE-TMP-1-INPUT-2.json",
+      "sha256": "sha256:f874427d4ece8950657164246e2f338beb88d92a405a464abacdebdf25a0804c"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/PORTABLE-TMP-1-INPUT-2.json",
+        "sha256": "sha256:f874427d4ece8950657164246e2f338beb88d92a405a464abacdebdf25a0804c",
+        "byteLength": 3322
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+        "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb",
+        "byteLength": 15479
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-014-distribution-and-host-integration.md",
+        "sha256": "sha256:bd944943d3bb3023e4555b76ee32df62d33bbe8221378b0deb9ad4b0c23b4f63",
+        "byteLength": 10825
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35",
+        "byteLength": 20305,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/state-root-separation-1.md",
+        "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f",
+        "byteLength": 10847,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/snapshot-retention-1.md",
+        "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff",
+        "byteLength": 5984,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/daemon-residuals-2.md",
+        "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408",
+        "byteLength": 9750,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/self-pollution-1.md",
+        "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199",
+        "byteLength": 4474,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/dist-1-distribution-install-contract.md",
+        "sha256": "sha256:2f233f706c9e515ebc558691d7a2b09f0b0ce35031b945ea30d8579b3fbdd3eb",
+        "byteLength": 10925,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:6bafbfb4a000ae346b79ae396adbd7564f268437a511fd556e89cde2ecda1c47",
+        "byteLength": 13830
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:4e6e2a618c2c15f1546d38736b876bdba688d1926ab102741cbe60c3a9bb3f04",
+        "byteLength": 10492
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PTMP-ROOT-1.md",
+        "sha256": "sha256:a35ccddbd5ff5ff197a4800aa5c5252417252002b0711fedf4d54b64bfc63e4f",
+        "byteLength": 3482
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/portable-tmp-1.md",
+        "sha256": "sha256:8207a7707bb215301702bfe494bc68161fe7ff13f14ea4e231b41503c21c80d1",
+        "byteLength": 95639
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/PORTABLE-TMP-1-INPUT-2/requirements-review.json",
+        "sha256": "sha256:0834ed57964e50f6982586bfb104a19ddcde4e2e7a4d1e2a54cead869cd2204d",
+        "byteLength": 59809
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/PORTABLE-TMP-1-INPUT-2/baseline-approval.json",
+        "sha256": "sha256:3d9afcc9ff87908bcb498ab261af9cea72261fd1764afcd42303151594575e60",
+        "byteLength": 1616
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:e4e9c5944a15f5fe4b7cdbfb4483a1bf5436cf18aa6c608452c30419abeedd55",
+        "byteLength": 7940
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/PORTABLE-TMP-1/selection.md",
+        "sha256": "sha256:311b44934876b8be1fb50d4afb9f177d9073f729af36327b122877f0832d0e76",
+        "byteLength": 2803
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-0",
+        "sha256": "sha256:3c956f3e5beb00ae740813161355e7468064c7928b77b7d409159ec899ebd021",
+        "byteLength": 9158
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-0",
+        "sha256": "sha256:ed6d1ebb5178a9116f7999939861d54ee94f8a8cd45df0c5c1eb9ede00a4d058",
+        "byteLength": 8373
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review-subject",
+        "path": ".agent-manager/slices/PORTABLE-TMP-1/verification-draft-0.json",
+        "sha256": "sha256:1d2f253d8975cfcbcd19548c6239264ff56cc3efa0ab16a2a81a1c94f96ec5a2",
+        "byteLength": 85915,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-command-0",
+        "sha256": "sha256:8cac05a6a8463853187b4fade6dc1c6f59128d86e0ae24d5388dc19c2a688a00",
+        "byteLength": 1924
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:773affce2c6bdce3e0c80d17b5993b0d43eb99cb621846bd338ab1e478793d0f",
+        "byteLength": 14473
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:36a35137e532330094502fb9beef554a9bb42e854fa010e581b10821e6aa8f90",
+        "byteLength": 269487
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-011-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-014-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L11",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-014-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-014-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-014-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-014-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-014-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-014-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-014-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-014-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-PT-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-PT-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-PT-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-PT-04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "PT-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports PT-C01–C09 as BUILDER-EXECUTED PASS and inspected recorded test summaries, commands, source and diff; reviewer did not independently rerun the check."
+      }
+    },
+    {
+      "checkId": "PT-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports PT-C01–C09 as BUILDER-EXECUTED PASS and inspected recorded test summaries, commands, source and diff; reviewer did not independently rerun the check."
+      }
+    },
+    {
+      "checkId": "PT-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports PT-C01–C09 as BUILDER-EXECUTED PASS and inspected recorded test summaries, commands, source and diff; reviewer did not independently rerun the check."
+      }
+    },
+    {
+      "checkId": "PT-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports PT-C01–C09 as BUILDER-EXECUTED PASS and inspected recorded test summaries, commands, source and diff; reviewer did not independently rerun the check."
+      }
+    },
+    {
+      "checkId": "PT-C05",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports PT-C01–C09 as BUILDER-EXECUTED PASS and inspected recorded test summaries, commands, source and diff; reviewer did not independently rerun the check."
+      }
+    },
+    {
+      "checkId": "PT-C06",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports PT-C01–C09 as BUILDER-EXECUTED PASS and inspected recorded test summaries, commands, source and diff; reviewer did not independently rerun the check."
+      }
+    },
+    {
+      "checkId": "PT-C07",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports PT-C01–C09 as BUILDER-EXECUTED PASS and inspected recorded test summaries, PT-C07 output, commands, source and diff; reviewer did not independently rerun the check."
+      }
+    },
+    {
+      "checkId": "PT-C08",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports PT-C01–C09 as BUILDER-EXECUTED PASS and inspected recorded test summaries, commands, source and diff; reviewer did not independently rerun the check."
+      }
+    },
+    {
+      "checkId": "PT-C09",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports PT-C01–C09 as BUILDER-EXECUTED PASS and inspected recorded test summaries, commands, source and diff; reviewer did not independently rerun the check."
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "agent_docs/storage-architecture-v2.md",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/inventory/tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/state.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/tests/snapshot_retention.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/platform-paths/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/platform-paths/src/sandbox.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/cli/paths.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/daemon_client/stdio_transport.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/platform/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "scripts/byte-compare-five-surfaces.sh",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "scripts/byte-compare-map-modules-surfaces.sh",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "scripts/dogfood-isolated.sh",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "scripts/dv1-inflight-e2e.sh",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "scripts/find-facts-e2e.sh",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "scripts/lib/sandbox-tmp-base.sh",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "scripts/orient-density-nginx-capture.sh",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "scripts/smoke-rmap.sh",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "scripts/smoke-validation-repos.sh",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "scripts/test-install-robustness-2.sh",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "scripts/test-smoke-rmap.sh",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "scripts/validate-layer2-fixture.sh",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-09-27T14:26:50.950Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nRESULT: accepted\n\n**OBSERVED:** The uncommitted candidate matches the supplied 22-path checkpoint. The prior blockers are resolved in the approved INPUT-2 baseline: PT-C07 no longer asserts an unreachable doctor line, and the roadmap now agrees with D-PTMP-ROOT-1. No new blocker was found.\n\n**Obligations:** RG-REQ-011-L06/L08 and RG-REQ-014-L09 are supported at the allocated boundary by the shared path rule, client creation tests, daemon classification tests, and the isolated macOS fallback proof. Linux-host validation and real per-uid-root creation remain **UNVERIFIED**, as the approved slice expressly states. RG-REQ-011-L01–L05, L07, L09–L10 and RG-REQ-014-L01–L08 have bounded preservation evidence from the diff and allocated checks; L11 is **WITHDRAWN**. P-PT-01–04 are supported within those same limits. This is not a claim that the parent requirements are globally satisfied.\n\n**Checks:** PT-C01–C09 are **BUILDER-EXECUTED PASS**; I inspected the recorded test summaries, PT-C07 output, commands, source and diff. I independently ran `bash -n` on the new shell rule and `dogfood-isolated.sh`: both **EXECUTED PASS**. Cargo, the state-creating CLI proof, workspace tests and dogfood were **NOT RUN** by this read-only reviewer; the last two are the operator’s post-acceptance gate.\n\n**Changed paths:** `platform-paths/src/{lib,sandbox}.rs` defines and exports the fixed per-OS rule; `rgr/src/{cli/paths,daemon_client/stdio_transport,platform/mod}.rs` applies it to fallback creation and doctor text; `daemon-runtime/src/{lib,state,handlers/inventory/tests}.rs` and `daemon-runtime/tests/snapshot_retention.rs` apply it to clearing, classification and mode-sensitive tests. `scripts/lib/sandbox-tmp-base.sh` and the eleven allocated scripts share the shell rule. `agent_docs/storage-architecture-v2.md` states both locations. **OBSERVED:** no changed path lies outside the allocation.\n\nUnder the hood, the client and daemon now derive the same fixed root—`/private/tmp` on macOS, `/tmp` on Linux—rather than maintaining separate literals. The classification predicate deliberately covers *any* state root under that OS’s base, while the client’s per-uid creation path is narrower. This serves the VISION’s macOS-then-Linux distribution direction without changing facts reported about analyzed repositories. The `platform-paths` module has current client and daemon users; its variation is the host OS, and duplicated per-OS literals were the rejected simpler alternative."
+}

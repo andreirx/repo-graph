@@ -23,7 +23,7 @@
 # ── Isolation (identical mechanism to dogfood-isolated.sh) ────────────────────
 #   RMAP_TRANSPORT=stdio   → `rmap` spawns its OWN `rmapd --stdio`; no Unix socket,
 #                            so the operator's resident daemon is never contacted.
-#   RMAP_STATE_ROOT=<tmp>   → registry.json + databases/ under /private/tmp
+#   RMAP_STATE_ROOT=<tmp>   → registry.json + databases/ under the sandbox temp base
 #                            (SandboxLocal); the operator's real state root is only
 #                            READ (its sha256 is checked identical before/after).
 #
@@ -37,6 +37,7 @@
 # PLATFORM: macOS (mirrors dogfood-isolated.sh).
 
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sandbox-tmp-base.sh"
 
 # ── Resolve binaries (rmapd MUST be the sibling of rmap for the stdio spawn) ───
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,9 +68,9 @@ if [[ ! -d "${TARGET_REPO}" ]]; then
     exit 0
 fi
 
-# ── Isolated state root (ephemeral, under /private/tmp → SandboxLocal) ─────────
+# ── Isolated state root (ephemeral, under the sandbox temp base → SandboxLocal) ─────────
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-STATE_ROOT="/private/tmp/repo-graph-find-facts-e2e/${RUN_ID}"
+STATE_ROOT="${RG_SANDBOX_TMP_BASE}/repo-graph-find-facts-e2e/${RUN_ID}"
 OUT_DIR="${STATE_ROOT}/out"
 mkdir -p "${OUT_DIR}"
 export RMAP_TRANSPORT="stdio"

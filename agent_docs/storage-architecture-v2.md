@@ -287,7 +287,7 @@ The daemon supports two state roots:
 | Root | Path | Lifecycle | Contains |
 |------|------|-----------|----------|
 | Global | `~/Library/Application Support/repo-graph/` | Persistent | All tiers (A + B) |
-| Sandbox | `/private/tmp/repo-graph-agent/<uid>/` | Ephemeral | All tiers (A + B) — cleared on daemon restart |
+| Sandbox | `/private/tmp/repo-graph-agent/<uid>/` (macOS), `/tmp/repo-graph-agent/<uid>/` (Linux) | Ephemeral | All tiers (A + B) — cleared on daemon restart |
 
 **Current behavior (as of 2026-05-27):**
 - Sandbox root is created when stdio transport is used (sandbox fallback)

@@ -6,7 +6,7 @@
 # stats; human AND --json) between a BASELINE (pre-M-3b) rmap binary and the
 # CANDIDATE (working-tree) binary, on the same fixture, in fully isolated
 # state roots (the dogfood-isolated.sh isolation levers: RMAP_TRANSPORT=stdio
-# + RMAP_STATE_ROOT under /private/tmp — the operator's daemon/registry is
+# + RMAP_STATE_ROOT under the sandbox temp base — the operator's daemon/registry is
 # never touched).
 #
 # Three comparisons:
@@ -30,6 +30,7 @@
 # (rmapd must sit beside each rmap; that sibling is what stdio spawns.)
 
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sandbox-tmp-base.sh"
 
 BASELINE_RMAP="${BASELINE_RMAP:?set BASELINE_RMAP to the pre-slice rmap binary}"
 CANDIDATE_RMAP="${CANDIDATE_RMAP:?set CANDIDATE_RMAP to the working-tree rmap binary}"
@@ -40,7 +41,7 @@ for bin in "$BASELINE_RMAP" "$CANDIDATE_RMAP"; do
 done
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-WORK="/private/tmp/rg-m3b-bytecompare/${RUN_ID}"
+WORK="${RG_SANDBOX_TMP_BASE}/rg-m3b-bytecompare/${RUN_ID}"
 FIXTURE="${WORK}/fixture"
 mkdir -p "${FIXTURE}/src" "${WORK}/out-A" "${WORK}/out-B" "${WORK}/out-C" "${WORK}/diffs"
 

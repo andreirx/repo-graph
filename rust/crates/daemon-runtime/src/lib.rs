@@ -251,8 +251,10 @@ pub fn require_global_mode_for_authority_write(
 
 /// Clear stale sandbox state on daemon startup.
 ///
-/// The sandbox root (`/private/tmp/repo-graph-agent/<uid>/`) is used by stdio
-/// subprocess transport when socket access is denied (sandbox environments).
+/// The sandbox root (`repo_graph_platform_paths::sandbox_state_root()`:
+/// `<sandbox temp base>/repo-graph-agent/<uid>/`, the per-OS system temp
+/// directory) is used by stdio subprocess transport when socket access is
+/// denied (sandbox environments).
 /// This state is ephemeral and should not persist across daemon restarts.
 ///
 /// **Why clear on socket daemon startup:**
@@ -264,9 +266,8 @@ pub fn require_global_mode_for_authority_write(
 /// See `docs/architecture/state-root-lifecycle.md` for full lifecycle model.
 #[cfg(unix)]
 fn clear_stale_sandbox_state() {
-    // SAFETY: geteuid() is always safe to call
-    let uid = unsafe { libc::geteuid() };
-    let sandbox_root = PathBuf::from(format!("/private/tmp/repo-graph-agent/{}", uid));
+    // The same root the client creates (one definition in platform-paths).
+    let sandbox_root = repo_graph_platform_paths::sandbox_state_root();
 
     if sandbox_root.exists() {
         eprintln!(
@@ -312,7 +313,8 @@ fn log_perf_startup() {
 ///
 /// This is the primary daemon mode used by systemd/launchd services.
 ///
-/// On startup, clears any stale sandbox state from `/private/tmp/repo-graph-agent/<uid>/`.
+/// On startup, clears any stale sandbox state from the platform's sandbox state root
+/// (`<sandbox temp base>/repo-graph-agent/<uid>/`).
 /// This ensures sandbox mode is ephemeral and doesn't accumulate state across daemon restarts.
 ///
 /// Logs startup timing at INFO level (PERF-OBS-1).
@@ -386,8 +388,8 @@ pub fn run_daemon() -> Result<(), String> {
 /// **Warning:** This mode is for testing and debugging only.
 /// Do not use for production services.
 ///
-/// **Sandbox mode:** If the state root is under `/private/tmp/`, the daemon
-/// is running in sandbox-local mode. A1 authority writes (baselines, aliases,
+/// **Sandbox mode:** If the state root is under the platform's sandbox temp
+/// base, the daemon is running in sandbox-local mode. A1 authority writes (baselines, aliases,
 /// declarations) will be blocked. Cache operations (index, refresh, queries)
 /// remain allowed.
 pub fn run_daemon_stdio() -> Result<(), String> {

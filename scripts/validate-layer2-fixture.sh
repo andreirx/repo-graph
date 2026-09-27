@@ -12,7 +12,7 @@
 # A stdio `rmap` call is a fresh short-lived daemon, so the refresh-populated graph would be gone by
 # the `trust` call. This harness stands up ONE isolated, throwaway `rmapd` so index → refresh →
 # orient → trust → explain all hit the SAME resident process — fully isolated from the operator's
-# daemon (its own socket + state root under /private/tmp; a safety gate aborts if the registry is
+# daemon (its own socket + state root under the sandbox temp base; a safety gate aborts if the registry is
 # not empty). No committed fixture files: the tiny TypeScript project is generated inline.
 #
 # ── The fixture, and why P fails but S resolves (indexer/src/resolver.rs) ──────────────────────
@@ -33,9 +33,10 @@
 #
 # Exit 0 = the annotation rendered on BOTH surfaces (PASS). Exit 1 = a surface did not render it
 # (FAIL). Exit 4 = scip-typescript not found, so the compiler half cannot run (SKIP — not a pass,
-# not a code fault). PLATFORM: macOS (/private/tmp + the isolated-daemon convention).
+# not a code fault). PLATFORM: macOS (the sandbox temp base + the isolated-daemon convention).
 
 set -uo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sandbox-tmp-base.sh"
 
 KEEP=false
 for a in "$@"; do case "$a" in
@@ -76,9 +77,9 @@ if [[ -z "${RMAP_SCIP_TYPESCRIPT:-}" || ! -x "${RMAP_SCIP_TYPESCRIPT}" ]]; then
     exit 4
 fi
 
-# ── Isolated, throwaway daemon (own socket + state root; /private/tmp ⇒ SandboxLocal) ───────────
+# ── Isolated, throwaway daemon (own socket + state root; the sandbox temp base ⇒ SandboxLocal) ───────────
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-ISO="/private/tmp/repo-graph-m-r4-e2e/${RUN_ID}"
+ISO="${RG_SANDBOX_TMP_BASE}/repo-graph-m-r4-e2e/${RUN_ID}"
 STATE="${ISO}/state"; SOCK="${ISO}/daemon.sock"; FIXTURE="${ISO}/fixture"
 mkdir -p "${STATE}" "${FIXTURE}/src/lib" "${FIXTURE}/src/other"
 

@@ -34,8 +34,8 @@
 #   - sorted lexicographically
 #
 # State isolation (REG-1 daemon model):
-#   RMAP_STATE_ROOT=/private/tmp/repo-graph-tests/<task>
-#   RMAP_SOCKET_PATH=/private/tmp/repo-graph-tests/<task>/daemon.sock
+#   RMAP_STATE_ROOT=<sandbox temp base>/repo-graph-tests/<task>
+#   RMAP_SOCKET_PATH=<sandbox temp base>/repo-graph-tests/<task>/daemon.sock
 #
 # Run logging (per protocol):
 #   smoke-runs/<timestamp>/00-meta.json           — batch summary
@@ -49,6 +49,7 @@
 #   runs that do not constitute verification evidence.
 
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sandbox-tmp-base.sh"
 
 SCRIPT_VERSION="2"
 GENERATOR="smoke-validation-repos.sh"
@@ -57,7 +58,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST_PATH="$REPO_ROOT/rust/Cargo.toml"
 PACKAGE_RGR="repo-graph-rgr"
 PACKAGE_RMAPD="rmapd"
-TEST_ROOT="/private/tmp/repo-graph-tests"
+TEST_ROOT="${RG_SANDBOX_TMP_BASE}/repo-graph-tests"
 PARENT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
 LEGACY_BUCKET="$PARENT_DIR/legacy-codebases"
 

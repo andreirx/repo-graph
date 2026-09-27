@@ -9,8 +9,10 @@
 // Re-export all path resolution from platform-paths crate
 pub use repo_graph_platform_paths::{
     canonical_home, config_dir, daemon_socket_path, daemon_socket_path_with_diagnostics, data_dir,
-    databases_dir, effective_uid, ensure_dir, is_using_legacy_fallback, legacy_fallback_warning,
-    legacy_home, logs_dir, sessions_dir, PathResolutionDiagnostics, ResolutionReason,
+    databases_dir, effective_uid, ensure_dir, is_sandbox_local_state_root,
+    is_using_legacy_fallback, legacy_fallback_warning, legacy_home, logs_dir, sandbox_state_root,
+    sandbox_state_root_under, sandbox_temp_base, sessions_dir, PathResolutionDiagnostics,
+    ResolutionReason, SANDBOX_STATE_DIR,
 };
 
 #[cfg(test)]

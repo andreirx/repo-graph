@@ -17,16 +17,13 @@
 //! Those are in rgr/tests/policy_command.rs with daemon harness.
 
 use std::path::PathBuf;
-#[cfg(target_os = "macos")]
 use std::sync::Arc;
 
 use serde_json::json;
 
 use repo_graph_daemon_transport::{DispatchResult, Request};
-#[cfg(target_os = "macos")]
 use repo_graph_daemon_transport::{Dispatcher, NoOpEmitter};
 
-#[cfg(target_os = "macos")]
 use crate::dispatch::ServiceDispatcher;
 use crate::registry::RepoRegistry;
 use crate::state::DaemonState;
@@ -62,7 +59,7 @@ fn get_error_message(result: &DispatchResult) -> Option<&str> {
 
 /// Helper to create a DaemonState in sandbox mode.
 fn make_sandbox_state() -> DaemonState {
-    let sandbox_path = PathBuf::from("/private/tmp/repo-graph-agent/501");
+    let sandbox_path = repo_graph_platform_paths::sandbox_state_root();
     let registry = RepoRegistry::with_test_state_root(sandbox_path);
     DaemonState::with_registry(registry)
 }
@@ -280,7 +277,17 @@ fn mark_baseline_allowed_in_global_mode() {
     // In global mode, mark_baseline should NOT be blocked by sandbox guard.
     // It will fail later with RepoNotFound (no repo indexed), proving the
     // guard passed.
-    let state = DaemonState::new(); // Global mode
+    //
+    // Global mode is CHOSEN and asserted, never inherited from `DaemonState::new()`
+    // (whose default or `RMAP_STATE_ROOT` root may lie under the sandbox temp base).
+    // `/var/tmp` is under neither OS's sandbox temp base (PORTABLE-TMP-1 P-PT-03).
+    let registry =
+        RepoRegistry::with_test_state_root(PathBuf::from("/var/tmp/rg-global-state-control"));
+    let state = DaemonState::with_registry(registry);
+    assert!(
+        !state.is_sandbox_mode(),
+        "the Global-mode control root must lie outside the sandbox temp base"
+    );
     let request = make_request("mark_baseline", json!({"path": "/some/repo"}));
 
     let result = handle_mark_baseline(&state, &request);
@@ -312,14 +319,14 @@ fn mark_baseline_allowed_in_global_mode() {
 /// - B: extracted nodes/edges written to sandbox-local database
 ///
 /// The test:
-/// 1. Creates sandbox state root under /private/tmp/
+/// 1. Creates sandbox state root under the platform's sandbox temp base
 /// 2. Creates a tiny repo with one TypeScript file
 /// 3. Runs index through the ServiceDispatcher
 /// 4. Asserts success and verifies data was written
 ///
-/// macOS-only: sandbox detection uses /private/tmp/ which is macOS-specific.
+/// Runs on every OS: the sandbox temp base is the platform's
+/// (`repo_graph_platform_paths::sandbox_temp_base()`).
 #[test]
-#[cfg(target_os = "macos")]
 fn index_allowed_in_sandbox_mode_proves_a2_and_b_writes() {
     use std::fs;
 
@@ -329,8 +336,9 @@ fn index_allowed_in_sandbox_mode_proves_a2_and_b_writes() {
         .unwrap()
         .as_nanos();
 
-    // Create sandbox state root under /private/tmp/ (detected as sandbox-local)
-    let sandbox_root = PathBuf::from(format!("/private/tmp/repo-graph-test-{}", test_id));
+    // Create sandbox state root under the sandbox temp base (detected as sandbox-local)
+    let sandbox_root =
+        repo_graph_platform_paths::sandbox_temp_base().join(format!("repo-graph-test-{}", test_id));
     let db_dir = sandbox_root.join("databases");
     fs::create_dir_all(&db_dir).expect("failed to create sandbox db_dir");
 

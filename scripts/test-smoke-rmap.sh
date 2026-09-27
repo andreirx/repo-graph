@@ -22,6 +22,7 @@
 #   1 — one or more tests failed
 
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sandbox-tmp-base.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT="$REPO_ROOT/scripts/smoke-rmap.sh"
@@ -61,7 +62,7 @@ fail() {
 cleanup() {
     # Clean up test run directories
     rm -rf "$REPO_ROOT/smoke-runs/$TEST_RUN_DIR" 2>/dev/null || true
-    rm -rf "/private/tmp/repo-graph-tests/$TEST_TASK" 2>/dev/null || true
+    rm -rf "${RG_SANDBOX_TMP_BASE}/repo-graph-tests/$TEST_TASK" 2>/dev/null || true
 }
 
 trap cleanup EXIT
@@ -121,7 +122,7 @@ else
     rm -rf "$RUN_PATH"
 fi
 
-rm -rf "/private/tmp/repo-graph-tests/$TEST_TASK"
+rm -rf "${RG_SANDBOX_TMP_BASE}/repo-graph-tests/$TEST_TASK"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Test 2: Generator provenance fields present (v4 shape)
@@ -187,7 +188,7 @@ else
     rm -rf "$REPO_ROOT/smoke-runs/$TEST_RUN_DIR"
 fi
 
-rm -rf "/private/tmp/repo-graph-tests/$TEST_TASK-gen"
+rm -rf "${RG_SANDBOX_TMP_BASE}/repo-graph-tests/$TEST_TASK-gen"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Test 3: All required artifacts created (v4 text artifacts)
@@ -219,7 +220,7 @@ else
     rm -rf "$RUN_PATH"
 fi
 
-rm -rf "/private/tmp/repo-graph-tests/$TEST_TASK-art"
+rm -rf "${RG_SANDBOX_TMP_BASE}/repo-graph-tests/$TEST_TASK-art"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Test 4: Adhoc mode skips logging
@@ -237,7 +238,7 @@ else
     fail "adhoc mode skips logging" "smoke-runs directory count changed"
 fi
 
-rm -rf "/private/tmp/repo-graph-tests/$TEST_TASK-adhoc"
+rm -rf "${RG_SANDBOX_TMP_BASE}/repo-graph-tests/$TEST_TASK-adhoc"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Test 5: Script version is set
@@ -286,7 +287,7 @@ else
     rm -rf "$REPO_ROOT/smoke-runs/$TEST_RUN_DIR"
 fi
 
-rm -rf "/private/tmp/repo-graph-tests/$TEST_TASK-json"
+rm -rf "${RG_SANDBOX_TMP_BASE}/repo-graph-tests/$TEST_TASK-json"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Summary

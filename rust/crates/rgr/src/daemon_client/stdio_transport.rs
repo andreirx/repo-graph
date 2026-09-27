@@ -8,7 +8,9 @@
 //!
 //! When spawned as sandbox fallback (EPERM/EACCES triggered), the subprocess
 //! needs a writable state root. If `RMAP_STATE_ROOT` is not already set,
-//! we inject a sandbox-writable root: `/private/tmp/repo-graph-agent/<uid>`.
+//! we inject a sandbox-writable root: the platform's sandbox state root
+//! `<sandbox temp base>/repo-graph-agent/<uid>` (`paths::sandbox_state_root()`;
+//! the per-OS system temp directory, defined once in `platform-paths`).
 //!
 //! This ensures the subprocess can write its database even when the normal
 //! per-user state root (`~/Library/Application Support/repo-graph/`) is
@@ -26,13 +28,14 @@
 //! For agent use cases, this is acceptable.
 
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 
 use super::connection::DaemonClientError;
 use super::transport::Transport;
+use crate::cli::paths;
 
 /// Default read timeout in seconds (same as socket transport).
 const READ_TIMEOUT_SECS: u64 = 300;
@@ -178,9 +181,21 @@ impl StdioTransport {
             return Ok(None);
         }
 
-        // Compute sandbox-writable root: /private/tmp/repo-graph-agent/<uid>
-        let uid = unsafe { libc::geteuid() };
-        let sandbox_root = PathBuf::from(format!("/private/tmp/repo-graph-agent/{}", uid));
+        // Sandbox-writable root: <sandbox temp base>/repo-graph-agent/<uid>,
+        // the platform-paths root the daemon classifies as sandbox-local.
+        let sandbox_root = Self::create_sandbox_state_root(paths::sandbox_temp_base())?;
+        Ok(Some(sandbox_root))
+    }
+
+    /// Create the sandbox state root `<base>/repo-graph-agent/<euid>` if absent.
+    ///
+    /// A newly created root gets mode 0700 (user-only). An existing root is
+    /// returned untouched, mode included. Errors name the root.
+    ///
+    /// `base` is the one parameter that lets creation be tested against a
+    /// scratch directory; production passes `paths::sandbox_temp_base()`.
+    pub(crate) fn create_sandbox_state_root(base: &Path) -> Result<PathBuf, DaemonClientError> {
+        let sandbox_root = paths::sandbox_state_root_under(base, paths::effective_uid());
 
         // Create directory with mode 0700 (user-only)
         if !sandbox_root.exists() {
@@ -206,7 +221,7 @@ impl StdioTransport {
             }
         }
 
-        Ok(Some(sandbox_root))
+        Ok(sandbox_root)
     }
 
     /// Find the rmapd binary.
@@ -419,15 +434,85 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_root_path_format() {
-        // Verify the sandbox root path format without actually creating it
-        // This avoids race conditions with environment variable modifications
-        let uid = unsafe { libc::geteuid() };
-        let expected_path =
-            std::path::PathBuf::from(format!("/private/tmp/repo-graph-agent/{}", uid));
+    fn client_sandbox_root_is_the_platform_paths_root() {
+        // The root the client composes is the one platform-paths defines, and
+        // the daemon's predicate classifies it sandbox-local (computed only;
+        // nothing is created).
+        let client_root =
+            paths::sandbox_state_root_under(paths::sandbox_temp_base(), paths::effective_uid());
+        assert_eq!(client_root, paths::sandbox_state_root());
+        assert!(paths::is_sandbox_local_state_root(&client_root));
+    }
 
-        // Verify the path is constructed correctly
-        assert!(expected_path.starts_with("/private/tmp/repo-graph-agent/"));
-        assert!(expected_path.to_string_lossy().contains(&uid.to_string()));
+    #[cfg(unix)]
+    fn mode_of(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn sandbox_root_is_created_with_mode_0700_under_the_given_base() {
+        let base = tempfile::tempdir().unwrap();
+        let root = StdioTransport::create_sandbox_state_root(base.path()).unwrap();
+
+        assert_eq!(
+            root,
+            base.path()
+                .join("repo-graph-agent")
+                .join(paths::effective_uid().to_string())
+        );
+        assert!(root.is_dir());
+        assert_eq!(mode_of(&root), 0o700);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn sandbox_root_creation_is_idempotent_when_the_directory_exists() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // A second call returns the same root and keeps its contents.
+        let base = tempfile::tempdir().unwrap();
+        let first = StdioTransport::create_sandbox_state_root(base.path()).unwrap();
+        let marker = first.join("kept.txt");
+        std::fs::write(&marker, "x").unwrap();
+        let second = StdioTransport::create_sandbox_state_root(base.path()).unwrap();
+        assert_eq!(second, first);
+        assert!(marker.exists());
+
+        // A root that already exists with another mode is returned untouched,
+        // never re-permissioned (as before PORTABLE-TMP-1).
+        let base2 = tempfile::tempdir().unwrap();
+        let pre = paths::sandbox_state_root_under(base2.path(), paths::effective_uid());
+        std::fs::create_dir_all(&pre).unwrap();
+        std::fs::set_permissions(&pre, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let got = StdioTransport::create_sandbox_state_root(base2.path()).unwrap();
+        assert_eq!(got, pre);
+        assert_eq!(mode_of(&got), 0o755);
+    }
+
+    #[test]
+    fn sandbox_root_creation_failure_is_a_named_error() {
+        // The base is a regular FILE, so creating a directory under it fails
+        // whatever the uid.
+        let scratch = tempfile::tempdir().unwrap();
+        let base = scratch.path().join("not-a-directory");
+        std::fs::write(&base, "file").unwrap();
+        let root = paths::sandbox_state_root_under(&base, paths::effective_uid());
+
+        match StdioTransport::create_sandbox_state_root(&base) {
+            Err(DaemonClientError::ConnectionFailed(msg)) => {
+                assert!(
+                    msg.starts_with("failed to create sandbox state root "),
+                    "unexpected message: {msg}"
+                );
+                assert!(
+                    msg.contains(&root.display().to_string()),
+                    "message does not name the root {}: {msg}",
+                    root.display()
+                );
+            }
+            other => panic!("expected a named ConnectionFailed error, got {other:?}"),
+        }
     }
 }

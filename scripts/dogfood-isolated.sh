@@ -22,7 +22,7 @@
 #                            subprocess exits on EOF when each `rmap` call ends.
 #   RMAP_STATE_ROOT=<tmp>  → the spawned daemon writes `registry.json` and
 #                            `databases/` under <tmp> instead of the operator's
-#                            data dir. <tmp> lives under /private/tmp, which puts
+#                            data dir. <tmp> lives under the sandbox temp base, which puts
 #                            the daemon in SandboxLocal mode (STATE-ROOT-
 #                            SEPARATION-1): A1 authority writes (alias/baseline/
 #                            declaration) are blocked, but A2/B (index, query) are
@@ -48,10 +48,11 @@
 # Exit 0 on success (all commands ran AND operator registry confirmed untouched);
 # nonzero on any failure.
 #
-# PLATFORM: macOS (uses /private/tmp + the launchd state-root convention). The
+# PLATFORM: macOS (uses the sandbox temp base + the launchd state-root convention). The
 # mechanism is platform-portable; only the operator-registry path probe is macOS.
 
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sandbox-tmp-base.sh"
 
 # ── Args ─────────────────────────────────────────────────────────────────────
 KEEP=false
@@ -88,9 +89,9 @@ fi
 # Belt-and-suspenders: also expose rmapd via PATH for find_rmapd's PATH fallback.
 export PATH="${BIN_DIR}:${PATH}"
 
-# ── Isolated state root (ephemeral, under /private/tmp → SandboxLocal mode) ────
+# ── Isolated state root (ephemeral, under the sandbox temp base → SandboxLocal mode) ────
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-STATE_ROOT="/private/tmp/repo-graph-dogfood/${RUN_ID}"
+STATE_ROOT="${RG_SANDBOX_TMP_BASE}/repo-graph-dogfood/${RUN_ID}"
 FIXTURE="${STATE_ROOT}/fixture"
 OUT_DIR="${STATE_ROOT}/out"
 mkdir -p "${FIXTURE}/src" "${OUT_DIR}"

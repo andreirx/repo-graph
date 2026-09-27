@@ -289,7 +289,13 @@ pub fn granular_socket_probes() -> Vec<ProbeResult> {
             let path = client
                 .sandbox_state_root()
                 .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "/private/tmp/repo-graph-agent/<uid>".to_string());
+                .unwrap_or_else(|| {
+                    format!(
+                        "{}/{}/<uid>",
+                        paths::sandbox_temp_base().display(),
+                        paths::SANDBOX_STATE_DIR
+                    )
+                });
             format!("{} ({})", state_root_mode, path)
         }
         StateRootMode::Override => {

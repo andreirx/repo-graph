@@ -4,13 +4,14 @@
 # never contacted) and capture `rmap orient --budget small` + `rmap orient --full`.
 # Throwaway; not part of the shipped harness. Mirrors scripts/dogfood-isolated.sh.
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sandbox-tmp-base.sh"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RMAP_BIN="${REPO_ROOT}/rust/target/release/rmap"
 NGINX="$(cd "${REPO_ROOT}/../legacy-codebases/nginx" && pwd -P)"
 
 RUN_ID="orient-density-$$"
-STATE_ROOT="/private/tmp/repo-graph-density/${RUN_ID}"
+STATE_ROOT="${RG_SANDBOX_TMP_BASE}/repo-graph-density/${RUN_ID}"
 OUT="${STATE_ROOT}/out"
 mkdir -p "${OUT}"
 

@@ -24,6 +24,11 @@
 //! | macOS | ~/Library/Application Support/repo-graph | same | ~/Library/Logs/repo-graph | data/daemon.sock |
 //! | Linux | ~/.config/rmap | ~/.local/share/rmap | data/logs | data/daemon.sock |
 //!
+//! | Platform | Sandbox temp base | Sandbox state root (stdio fallback) |
+//! |----------|-------------------|-------------------------------------|
+//! | macOS | /private/tmp | /private/tmp/repo-graph-agent/<uid> |
+//! | Linux (every other OS) | /tmp | /tmp/repo-graph-agent/<uid> |
+//!
 //! # Why Not `dirs`?
 //!
 //! The `dirs` crate reads `$HOME`, which may be altered in sandboxed shells,
@@ -38,9 +43,11 @@
 //! - `home` — Canonical and legacy home directory resolution
 //! - `dirs` — Data, config, logs, sessions, databases directories
 //! - `socket` — Daemon socket path resolution with migration fallback
+//! - `sandbox` — Sandbox state root and the sandbox-local state-root predicate
 
 mod dirs;
 mod home;
+mod sandbox;
 mod socket;
 
 // Re-export from home module
@@ -50,6 +57,12 @@ pub use home::{canonical_home, effective_uid, legacy_home};
 pub use dirs::{
     config_dir, data_dir, databases_dir, ensure_dir, legacy_data_dir, logs_dir, sessions_dir,
     APP_NAME,
+};
+
+// Re-export from sandbox module
+pub use sandbox::{
+    is_sandbox_local_state_root, sandbox_state_root, sandbox_state_root_under, sandbox_temp_base,
+    SANDBOX_STATE_DIR,
 };
 
 // Re-export from socket module

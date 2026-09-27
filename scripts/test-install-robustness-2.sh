@@ -41,7 +41,7 @@
 #            there is no trailing dead sleep whose window a late-arriving daemon could slip through).
 #
 #   B (integration) — an ISOLATED real rmapd (RMAP_SOCKET_PATH/RMAP_STATE_ROOT under
-#       /private/tmp, never the operator's daemon) proves daemon_socket_answers()
+#       the sandbox temp base, never the operator's daemon) proves daemon_socket_answers()
 #       reflects real socket liveness end-to-end: 0 while up, nonzero once stopped.
 #       [review-2 #3] REQUIRED, not optional: if release rmap/rmapd are absent this is a
 #       LOUD, COUNTED failure (never a silent skip that green-washes an un-run proof).
@@ -66,6 +66,7 @@
 # Exit:    0 — all tests passed;  1 — one or more failed.
 
 set -uo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sandbox-tmp-base.sh"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMPLATE="${REPO_ROOT}/scripts/install.template.sh"
@@ -624,10 +625,10 @@ if [[ ! -x "${RMAP_BIN}" ]] || [[ ! -x "$(dirname "${RMAP_BIN}")/rmapd" ]]; then
          "build them: (cd rust && cargo build --release --bin rmap --bin rmapd), or point RMAP_BIN=<path/to/rmap> at an existing pair"
 else
     BIN_DIR="$(cd "$(dirname "${RMAP_BIN}")" && pwd)"
-    TEST_STATE_ROOT="/private/tmp/inst-robust2-daemon-$$"
+    TEST_STATE_ROOT="${RG_SANDBOX_TMP_BASE}/inst-robust2-daemon-$$"
     TEST_SOCKET="${TEST_STATE_ROOT}/daemon.sock"
     mkdir -p "${TEST_STATE_ROOT}"
-    # Start an ISOLATED daemon: RMAP_SOCKET_PATH + RMAP_STATE_ROOT under /private/tmp.
+    # Start an ISOLATED daemon: RMAP_SOCKET_PATH + RMAP_STATE_ROOT under the sandbox temp base.
     # This NEVER binds the operator's canonical socket and writes only under the tmp
     # state root (SandboxLocal). We kill ONLY our own PID (never `pkill rmapd`).
     RMAP_SOCKET_PATH="${TEST_SOCKET}" RMAP_STATE_ROOT="${TEST_STATE_ROOT}" \

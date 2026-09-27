@@ -3,7 +3,7 @@
 # dv1-inflight-e2e.sh — DAEMON-VISIBILITY-1 real-transport self-dogfood.
 #
 # Exercises the visibility contracts against REAL binaries over a REAL Unix socket, using an
-# isolated `rmapd` (its own socket + state root under /private/tmp). The operator's resident
+# isolated `rmapd` (its own socket + state root under the sandbox temp base). The operator's resident
 # launchd daemon (~/.local/bin/rmapd, ~/Library/Application Support/repo-graph) is NEVER touched:
 # RMAP_SOCKET_PATH + RMAP_STATE_ROOT relocate BOTH the daemon it binds and the client it talks to.
 #
@@ -38,6 +38,7 @@
 # PLATFORM: macOS/Linux (bash + a POSIX socket). Cleanup is via an EXIT trap.
 
 set -u
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sandbox-tmp-base.sh"
 
 # ── Resolve binaries (rmapd MUST be the sibling of rmap) ──────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,9 +54,9 @@ for b in "${RMAP_BIN}" "${RMAPD_BIN}"; do
     fi
 done
 
-# ── Isolated state root + socket (ephemeral, under /private/tmp → SandboxLocal) ─
+# ── Isolated state root + socket (ephemeral, under the sandbox temp base → SandboxLocal) ─
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-STATE_ROOT="/private/tmp/repo-graph-dv1-e2e/${RUN_ID}"
+STATE_ROOT="${RG_SANDBOX_TMP_BASE}/repo-graph-dv1-e2e/${RUN_ID}"
 SOCKET_PATH="${STATE_ROOT}/daemon.sock"
 FIXROOT="${STATE_ROOT}/fixtures"
 OUT="${STATE_ROOT}/out"

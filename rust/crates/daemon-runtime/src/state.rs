@@ -60,11 +60,13 @@ pub enum StateRootMode {
 
     /// Sandbox fallback: sandbox-local state root, A1 writes blocked.
     ///
-    /// Sandbox mode is detected when the state root is under `/private/tmp/`.
-    /// This is the macOS sandbox-writable temp directory used by Codex and
-    /// similar sandboxed environments.
+    /// Sandbox mode is detected when the state root is under the platform's
+    /// sandbox temp base (`repo_graph_platform_paths::sandbox_temp_base()`:
+    /// the per-OS system temp directory used by Codex and similar sandboxed
+    /// environments, where the stdio fallback places its state).
     ///
-    /// Example: `/private/tmp/repo-graph-agent/501/`
+    /// Example: `repo_graph_platform_paths::sandbox_state_root()`
+    /// (`<sandbox temp base>/repo-graph-agent/<uid>`).
     SandboxLocal,
 }
 
@@ -867,13 +869,15 @@ impl DaemonState {
     /// - Global: all writes allowed
     /// - SandboxLocal: A1 (user authority) writes blocked
     ///
-    /// Detection: sandbox mode if state root is under `/private/tmp/`.
+    /// Detection: sandbox mode if the state root is under the platform's
+    /// sandbox temp base (`repo_graph_platform_paths::is_sandbox_local_state_root`,
+    /// the one predicate shared with the client; PORTABLE-TMP-1).
     pub fn state_root_mode(&self) -> StateRootMode {
         let state_root = self.registry.lock().state_root().to_path_buf();
 
-        // macOS sandbox environments use /private/tmp/ as writable root
-        // This is where STDIO-STATE-ROOT-1 places sandbox state
-        if state_root.starts_with("/private/tmp/") {
+        // Sandbox environments use the platform's sandbox temp base as writable
+        // root. This is where STDIO-STATE-ROOT-1 places sandbox state.
+        if repo_graph_platform_paths::is_sandbox_local_state_root(&state_root) {
             StateRootMode::SandboxLocal
         } else {
             StateRootMode::Global
@@ -1624,10 +1628,15 @@ mod tests {
 
     #[test]
     fn state_root_mode_global_for_normal_paths() {
-        // A temp directory is NOT under /private/tmp/ on macOS
-        // (tempfile uses /var/folders/... by default)
-        let dir = tempdir().unwrap();
-        let registry = RepoRegistry::with_state_root(dir.path()).unwrap();
+        // Global mode is CHOSEN, never inferred from where a temp directory
+        // happens to be (a Linux `tempdir()` is under `/tmp`, the sandbox base).
+        // `/var/tmp` is under neither OS's sandbox temp base (PORTABLE-TMP-1 P-PT-03).
+        let control = PathBuf::from("/var/tmp/rg-global-state-control");
+        assert!(
+            !repo_graph_platform_paths::is_sandbox_local_state_root(&control),
+            "the Global-mode control root must lie outside the sandbox temp base"
+        );
+        let registry = RepoRegistry::with_test_state_root(control);
         let daemon = DaemonState::with_registry(registry);
 
         assert_eq!(daemon.state_root_mode(), StateRootMode::Global);
@@ -1636,10 +1645,10 @@ mod tests {
     }
 
     #[test]
-    fn state_root_mode_sandbox_for_private_tmp() {
+    fn state_root_mode_sandbox_for_the_platform_sandbox_root() {
         // Test sandbox mode detection through the actual implementation path
-        let sandbox_path = PathBuf::from("/private/tmp/repo-graph-agent/501");
-        let registry = RepoRegistry::with_test_state_root(sandbox_path);
+        let sandbox_path = repo_graph_platform_paths::sandbox_state_root();
+        let registry = RepoRegistry::with_test_state_root(sandbox_path.clone());
         let daemon = DaemonState::with_registry(registry);
 
         // Verify full implementation path
@@ -1648,10 +1657,20 @@ mod tests {
         assert!(!daemon.allows_authority_writes());
 
         // Verify state_root() returns the expected path
-        assert_eq!(
-            daemon.registry().state_root(),
-            Path::new("/private/tmp/repo-graph-agent/501")
-        );
+        assert_eq!(daemon.registry().state_root(), sandbox_path.as_path());
+    }
+
+    #[test]
+    fn state_root_mode_sandbox_for_any_root_under_the_sandbox_temp_base() {
+        // The scripts' isolated roots (e.g. `<base>/repo-graph-dogfood/<run>`) are
+        // sandbox-local too, not only the per-uid fallback root.
+        let root = repo_graph_platform_paths::sandbox_temp_base().join("repo-graph-dogfood/run");
+        let registry = RepoRegistry::with_test_state_root(root);
+        let daemon = DaemonState::with_registry(registry);
+
+        assert_eq!(daemon.state_root_mode(), StateRootMode::SandboxLocal);
+        assert!(daemon.is_sandbox_mode());
+        assert!(!daemon.allows_authority_writes());
     }
 
     #[test]
