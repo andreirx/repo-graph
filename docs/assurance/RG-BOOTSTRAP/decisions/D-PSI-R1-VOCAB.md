@@ -1,0 +1,13 @@
+# D-PSI-R1-VOCAB — A test fixture seeds an IMPORTS edge with a resolution the edge contract does not define
+
+Raised: 2026-09-27 by the implementation review of PYTHON-SUBMODULE-IMPORT-1 (INPUT-2 admission, cycle 1; reviewer codex gpt-6-sol; finding F-PSI-02, decision D-PSI-R1-VOCAB). `agent/src/explain/mod.rs` treats any `resolution != "inferred"` as certain; storage passes the column through unchecked, so an unknown stored value would render as a certain importer (RG-REQ-002-L04/L11). The strict read (accept `static`/`dynamic`/`inferred`, anything else unreadable) fails one daemon-runtime unit test because the fixture of `explain_serve_tests::type_focus_members_and_referenced_by_are_sqlite_delegated_on_green` seeds an IMPORTS edge with `resolution: "resolved"` (`daemon-runtime/src/explain_serve_tests/mod.rs:907`), a value outside the canonical `Resolution` enum (`indexer/src/types.rs:78-84`: Static, Dynamic, Inferred); that file is outside the slice's candidate paths and PSI-C02 requires daemon-runtime's whole library suite green.
+Resolved: 2026-09-27 by the OPERATOR — option A. The human may override.
+
+## Options (the reviewer's)
+- **A (ratified)** — amend the allocation: `daemon-runtime/src/explain_serve_tests/mod.rs` joins the candidate paths for the ONE-token fixture correction `"resolved"` → `"static"` (the fixture then models a canonical store), and the strict vocabulary lands on the explain read. Reward: an unknown stored value is never printed as a certain relationship; no vocabulary invented for a fixture. Risk: one test-file edit outside the original allocation, named and bounded.
+- **B** — defer. Risk: the false-certainty read stays.
+- **C** — accept with a recorded exception. Risk: an unknown value renders as a certain importer — the class RG-REQ-002-L11 forbids.
+- **D** — ratify `resolved` as a certain synonym. Risk: widens the canonical vocabulary for a fixture and hides malformed stores.
+
+## Note for later slices
+No production writer produces `resolution: "resolved"` (the indexer writes `static`/`dynamic`/`inferred`); daemon-runtime test fixtures seed it in seven files — `explain_coherence_tests.rs`, `explain_serve_tests/mod.rs`, `explain_serve_tests/fanin_fixture.rs`, `orient_lg_decisions/served_e2e.rs`, `focus_resolution_cert/test_fixture.rs`, `callgraph_cert/test_fixture.rs`, `callgraph_cert/ledger_tests.rs` (counted 2026-09-27). Any later strict read of the resolution column (PYTHON-RECEIVER-BINDING-1's CALLS reads in particular) will meet them; that slice's rebase allocates the corrections it needs. (The first draft of this record named `explain_coherence_tests.rs:133`, a CALLS fixture; the failing IMPORTS fixture is `explain_serve_tests/mod.rs:907` — corrected before the record was used.)
