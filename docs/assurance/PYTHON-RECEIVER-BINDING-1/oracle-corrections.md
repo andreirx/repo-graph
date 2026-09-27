@@ -134,3 +134,105 @@ Append-only (agent-manager docs/MANAGER.md § Oracle corrections).
 - **Approver:** PENDING — the operator (in-place-manager). The packet authorized the daemon-runtime corrections; the storage site and the allow-list completion are the same class, carried here for confirmation. **Carried as:** INPUT-2.
 
 - **Slice document digests (OC-2..OC-5 and A-1, one pass):** before sha256:0ca8e4cca6f3db3b2cebdd06b0646f813b261820bbe7a590ec0214f9bbde87cd; after sha256:ee41f9d0595aa1fa399d7728cb6366d04f6dd4254ac58a746662514a7404a1f6. The manifest's `allocation` digest has been re-pinned to the after value. The validator reports `ALLOCATION VALID: 12 checks`.
+
+## OC-6 (2026-09-27, PYTHON-RECEIVER-BINDING-1-PREP-8) — PRB-C02's alias oracle predicted a result HEAD never produced (→ INPUT-3)
+
+- **Id note:** the PREP-8 packet calls this item "OC-4" and the next "OC-5"; those ids are PREP-7's (above), so this ledger records them as OC-6 and OC-7. Any amendment would be A-2; none is made.
+- **Raised by:** implementation review-0 of INPUT-2, finding F-2 (decision D-1; the operator, in-place-manager, chose option A: amend the oracle).
+- **Old:** PRB-C02 `inputs` — "`Hit.f → Hit.g`, `static` (HEAD bound it through the hierarchy after the namespace stage found no `g` in `helper.py`); the alias case keeps HEAD's namespace-first result — `Aliased.caller → helper.run`, `static`, not `Aliased.run`"; the parent's `Aliased.caller → Aliased.run` called "(state i — the discriminator)". PRB-C02 `expected` — "keeps every hierarchy hit and HEAD's namespace-first result".
+- **New:** HEAD's real result, `Aliased.caller → Aliased.run`, `static`, not `helper.run`; the `Hit.f` parenthetical says the namespace stage met the binding `self` and bound nothing; the parent's state-i edge is no longer called a discriminator; `expected` keeps every hierarchy hit, the alias fixture's included. The namespace-first ORDER for a legacy carrier whose alias the stage can resolve stays proven at resolver level by the bound PRB-C01 test `python_carrier_without_a_receiver_binding_from_python_core_0_1_0_meets_the_namespace_stage_before_the_hierarchy_as_at_head`.
+- **Evidence (OBSERVED at 7a950321):**
+  - `rust/crates/indexer/src/resolver.rs:1591` — `if !specifier.starts_with('.') { return None; }` in `resolve_import_specifier_to_file`, which the namespace stage (`resolve_call_target`, :1183-1231) needs to bind anything.
+  - `rust/crates/python-extractor/src/extractor.rs` `extract_import_statement` records `import X as Y` as `ImportKind::Namespace` with the dotted module name as specifier (a Python `import` statement cannot be relative); `emit_from_import_binding` records `from … import` as `ImportKind::Named`, which the namespace stage does not match.
+  - The INPUT-2 candidate's resolver fixture (`alias_fixture`, `.agent-manager/slices/PYTHON-RECEIVER-BINDING-1/candidate-admission-1.patch`) hand-builds the specifier `./helper` — which is why the unit test binds `helper.run` and the pipeline test cannot.
+- **Rule (closes the class):** through the real pipeline the namespace stage binds no Python call. Every statement of a namespace-stage binding of a Python call is either a resolver-level statement about a hand-built `.`-relative binding, stated as such, or false and corrected. Grep of the whole slice document (`helper.run`, `helper as self`, `alias`, `namespace-first`, `binds first`) found and corrected, beyond PRB-C02: PRB-C01 `inputs` (its alias fixture described as a hand-built `.`-relative binding proving the order; "today's namespace-stage result on the hand-built binding"); §2.2's legacy-carrier bullet ("the namespace stage binds it `static` as at HEAD") and carrier-less bullet ("A file-level alias of that name binds it `static` there"); §3's stale-carrier residual ("a file-level alias named `self`/`cls` still binds first"; "would still bind through the alias there until that full index"). Kept, as true: the stage-order rule text of §2.1 R1(iii-a), the §2.1 precedence paragraph, P-PRB-02, PRB-C01 `expected`. Not edited: §9's revision-7 history entry ("keeps HEAD's alias-first result"), superseded by §9's INPUT-3 entry.
+- **Unchanged:** check ids, obligation sets, requirement text, candidate paths, every command (PRB-C02's command binds test names only; the refresh test's name stays true).
+- **Author:** requirements author of PYTHON-RECEIVER-BINDING-1-PREP-8 (claude-opus-5-5). **Approver:** in-place-manager (D-1 → A, recorded in the PREP-8 packet); the text is PENDING the operator's confirmation. **Carried as:** INPUT-3.
+
+## OC-7 (2026-09-27, PREP-8) — PRB-C07 names the proof of review-0 F-1 (inferred rows counted twice under union serving) (→ INPUT-3)
+
+- **Raised by:** implementation review-0 of INPUT-2, finding F-1: with `RMAP_RECON_UNION=1`, `--engine auto`, W-BOTH activation and `include_inferred`, the dispatch closures hand inferred SQLite rows to the union, `union_serve` serves them with `backend_used: "union"`, and `call_certainty::attach_remainder` appends them again because the backend is not `"sqlite"`; the witness basis also receives rows outside the certain set. A code defect the builder fixes at re-admission; the packet requires its tests to be named first.
+- **Old:** PRB-C07's name loop without these tests; `-- --list` floor 959 (= 946 + 13); `expected` silent on union serving.
+- **New:**
+  - four names in the loop, qualified by their host: `call_certainty::tests::callers_include_inferred_under_union_serving_lists_each_inferred_row_once`, `call_certainty::tests::callees_include_inferred_under_union_serving_lists_each_inferred_row_once`, `call_certainty::tests::callers_include_inferred_on_union_fallback_lists_each_inferred_row_once`, `call_certainty::tests::callees_include_inferred_on_union_fallback_lists_each_inferred_row_once`;
+  - floor 963 = 946 + 17 (EXECUTED `cargo test -p repo-graph-daemon-runtime -- --list` at the clean rust tree of 7a950321: 946, equal to 9df4a6ee's; 959 was the floor, not HEAD's count);
+  - `expected` gains: under `RMAP_RECON_UNION=1` union serving and its fallback `--include-inferred` lists each inferred row exactly once, `count` equals the rows listed, and the union witness basis holds only certain rows;
+  - `inputs` gains UNION SERVING: the ONE RULE (the union and its fallback receive the certain rows, so P rows and the witness ledger read the certain set; inferred rows are added once, after, whatever served), the host, the fixture approach (inferred rows added to the fixture's SQLite store in the test body; the A-1-guarded builders untouched; no process environment set), the requirement that the tests drive the `call_certainty` entry the dispatch union arm calls rather than re-assembling it, and the assertions (identities once each; `count` = rows listed; `witness_counts` sums to the union rows and no inferred row carries `witness`); §2.1 step 6 gains the rule.
+- **Host decision (no amendment):** W-BOTH activation needs a resident LiveGraph and a classified witness ledger at the request fingerprint (`callgraph_union_eligibility`, callgraph_cert/mod.rs:488-499). Only `callgraph_cert::test_fixture` builds that, and it is `#[cfg(test)] pub(crate)` (callgraph_cert/mod.rs:81-82) — reachable from any unit-test module in the crate, unreachable from `tests/callers_inferred.rs` (an integration test over the public API; the real LiveGraph is fed by a SCIP preload, `livegraph_feed::preload_partition`). `union_serve/tests.rs`, where the existing union tests live, is not a candidate path. `call_certainty.rs` is a candidate path (a new file) and holds the composition (`attach_remainder`), so it hosts a `#[cfg(test)] mod tests`. OBSERVED at 7a950321; feasibility of the four tests INFERRED from the source, not executed.
+- **Probes (EXECUTED):** `bash -n` on the changed command: ok. The name loop, extracted from the command, run against a synthetic `cargo test` output: all 31 names present → rc 0; `…callees_include_inferred_on_union_fallback…` missing → rc 1 (`MISSING …`); the four new names under `union_serve::tests::` instead of `call_certainty::tests::` → rc 1.
+- **Noted for the reviewer:** union serving's §5.2 contract states `witness_counts` 1:1 with the answer's row multiset. With `include_inferred` the answer's rows exceed the union rows by the appended inferred rows, which carry no witness and are not counted `unmeasured`; the oracle states this ("the union witness basis holds only certain rows", per the packet). Flag-gated and non-default.
+- **Unchanged:** check ids, obligation sets, requirement text, candidate paths (91), every other name and guard of PRB-C07.
+- **Author:** requirements author of PREP-8 (claude-opus-5-5). **Approver:** PENDING — the operator (in-place-manager). **Carried as:** INPUT-3.
+
+- **Slice document digests (OC-6, OC-7, Status line and §9 entry, one pass):** before sha256:d84b9a2b32678a48ca8ed0a17a89a4310b7ade144b9dcc332ef8eed0d6bd8cba (the manager's INPUT-3 re-pin); after sha256:246ee43ca6bf2de7abbdc31c7cb93fc45aa7929121e30983d269d1ff00fb53ef. The INPUT-3 manifest's `allocation` digest is re-pinned to the after value.
+
+## OC-7 revision 2 (2026-09-27, PREP-8 cycle 2) — PRB-C07's union proof rewritten under D-PRB-UNION-ROUTE-1 (→ INPUT-3)
+
+- **Raised by:** document review-0 of PREP-8 (`.agent-manager/slices/PYTHON-RECEIVER-BINDING-1-PREP-8/review-0.json`). OC-6 was supported. OC-7 was decision-required (D-PRB-UNION-COUNT): its oracle appended inferred rows to a union answer while `witness_counts` covered only the certain rows, contradicting `docs/slices/recon-design-1.md` §5.2 (`witness_counts` one-to-one with the answer's rows, `count = rows.len()`). Finding F-ROUTING: the cycle-1 tests entered below `dispatch.rs:1295–1303`, where `RMAP_RECON_UNION` is read, so they could not prove flag-on routing.
+- **Resolved by:** the operator, option D, recorded as `docs/assurance/RG-BOOTSTRAP/decisions/D-PRB-UNION-ROUTE-1.md` (the human may override); the manager added it to the INPUT-3 manifest (governance dependency, `requiredDecisionIds`).
+- **Supersedes:** OC-7 above (its four test names, its floor 963, its `expected` clause, its UNION SERVING `inputs` paragraph and the "Noted for the reviewer" item, which described the contradiction the decision removes). The published OC-7 text is not edited. None of the four cycle-1 tests was written.
+- **New (PRB-C07):**
+  - **Routing.** The union arm is selected only when the flag is on, the engine is `Auto` and `include_inferred` is false. Each arm reads `include_inferred` first and computes `union_serving` as `call_certainty::union_arm_selected(union_serve::union_serving_enabled(), engine, include_inferred)`. The new pure predicate lives in `call_certainty.rs` rather than dispatch.rs, so dispatch.rs keeps its 60-line cap: the candidate used 42, and this adds about 10 (INFERRED). An inferred-inclusive request with the flag on is served by the existing `Auto` route.
+  - **Certain rows into every comparison.** Every fetch closure handed to the engine or union responses returns certain rows only. The union's P rows, its witness ledger and `Compare`'s `compare_keys` (livegraph_feed.rs:611 at 7a950321) therefore see no inferred row. `call_certainty` adds the inferred rows once, after, whatever backend served the answer, and restates `count`. A union answer keeps §5.2 unchanged.
+  - **Seven tests, all `call_certainty::tests::`:**
+    - `union_arm_is_selected_only_with_the_flag_on_the_auto_engine_and_without_include_inferred` — the predicate's truth table: flag on/off × four engines × `include_inferred` false/true, true in exactly one cell;
+    - `callers_/callees_include_inferred_on_the_livegraph_served_auto_route_lists_each_inferred_row_once`;
+    - `callers_/callees_compare_engine_compares_only_certain_rows_with_include_inferred`;
+    - `callers_/callees_union_answer_holds_no_inferred_row_and_its_witness_counts_match_its_rows`.
+
+    The SQLite-served `Auto` route stays with the existing new `callers_include_inferred_lists_each_inferred_row_with_its_basis` (tests/callers_inferred.rs), whose oracle now also asserts each inferred row listed once and `count` equal to the rows listed.
+  - **Floor:** 966 = 946 + 20.
+  - **Union-route guard, in the command's Python block.** Each of `handle_callers` and `handle_callees` reads `include_inferred` and then computes `union_serving` through exactly one `union_arm_selected(union_serving_enabled(), engine, include_inferred)` call; `crate::` prefixes are optional and whitespace is ignored. dispatch.rs calls `union_serving_enabled()` exactly twice (2 at 7a950321, OBSERVED at :1301/:1480). So the flag reaches the arms, the epoch capture (:1311/:1489) and the served arm (:1388/:1563) only through the tested predicate.
+  - **`expected`:** the clause follows D-PRB-UNION-ROUTE-1.
+  - **Prose:** §2.1 step 6's bullet is rewritten, and §0 lists the decision.
+- **Host (unchanged reasoning):** `callgraph_cert::test_fixture` is `#[cfg(test)] pub(crate)` (callgraph_cert/mod.rs:81-82). It is reachable from a unit-test module in `call_certainty.rs`, an allocated new file, and unreachable from `tests/callers_inferred.rs`. `union_serve/tests.rs` is not allocated. No amendment.
+- **Verification limit, stated in `inputs`:** no test drives a live flag-on request through `ServiceDispatcher`. The flag is a process-wide environment read, and setting it in a parallel test binary would change every concurrent test's `Auto` arm. The source guard binds both arms to the tested predicate instead.
+- **Probes (EXECUTED, scratch `/private/tmp/PYTHON-RECEIVER-BINDING-1-PREP-8-probe`, removed):**
+  - `bash -n` on the command: ok.
+  - Name loop over 34 names: all present → rc 0. Missing `callees_union_answer…` → rc 1. Missing the predicate test → rc 1.
+  - The union-route guard, run on dispatch.rs variants, passes on:
+    - the correct shape, both arms;
+    - the imported short form.
+
+    It fails on:
+    - HEAD 7a950321;
+    - the predicate called with `false` for `include_inferred`;
+    - `include_inferred` read after the selection;
+    - only `handle_callers` changed;
+    - a third `union_serving_enabled()` call.
+- **Unchanged:** check ids, obligation sets, requirement text, candidate paths (91), every other PRB-C07 name and guard.
+- **Author:** requirements author of PREP-8 cycle 2 (claude-opus-5-5). **Approver:** the operator's decision D-PRB-UNION-ROUTE-1; this text is PENDING the operator's confirmation. **Carried as:** INPUT-3.
+- **Slice document digests (cycle 2):** before sha256:246ee43ca6bf2de7abbdc31c7cb93fc45aa7929121e30983d269d1ff00fb53ef; after sha256:9400933652495542a270b4ec92c798bf28b1ae02f4be954f369ae0839ce24343. The INPUT-3 manifest's `allocation` digest is re-pinned to the after value.
+
+## OC-7 revision 3 (2026-09-27, PREP-8 cycle 3) — PRB-C07's union-route guard follows the predicate into both branches (→ INPUT-3)
+
+- **Raised by:** document review-1 of PREP-8 (`.agent-manager/slices/PYTHON-RECEIVER-BINDING-1-PREP-8/review-1.json`), finding F-ROUTING. The revision-2 guard checked only that each handler assigns `union_serving` from `union_arm_selected`. It did not inspect the epoch-capture branch or the serving branch. A candidate with the correct predicate and `if !union_serving` branches would have passed while routing real requests wrongly.
+- **Old:** the revision-2 union-route guard in PRB-C07's command (flag read twice in dispatch.rs; each handler reads `include_inferred`, then binds `union_serving` through the predicate).
+- **New (guard extended; everything in revision 2 kept):** in each of `handle_callers` and `handle_callees`, line comments stripped and whitespace removed:
+  - `union_serving` is bound exactly once (`union_serving=` occurs once) and never negated (`!union_serving` is absent);
+  - exactly two `if union_serving { … } else { … }` branches exist, braces matched, as at HEAD (:1311/:1388 and :1489/:1563 at 7a950321, OBSERVED);
+  - the first is the epoch capture: its union branch calls `callgraph_union_eligibility(` and not `callgraph_cert_eligibility(`, and its other branch the reverse;
+  - the second is the serving call: its union branch calls `<side>_union_response(` or `<side>_union_answer(`, and not `<side>_engine_response(`/`<side>_engine_answer(`; its other branch the reverse. `<side>` is `callers` or `callees`.
+
+  PRB-C07 `inputs` states this. The union-or-Auto choice therefore stays in each arm, and any `call_certainty` entries the behaviour tests drive are per route (`<side>_union_answer`, `<side>_engine_answer`).
+- **Seam choice:** the guard, not a runtime seam. Reaching the arms at run time needs the process-wide `RMAP_RECON_UNION`; the guard needs no process environment.
+- **Probes (EXECUTED; scratch `/private/tmp/PYTHON-RECEIVER-BINDING-1-PREP-8-probe`, removed).** The guard block was extracted from the command and run on dispatch.rs variants derived from 7a950321.
+  - It passes on:
+    - the predicate edit with HEAD's branches;
+    - the same with `call_certainty::<side>_union_answer`/`_engine_answer` entries.
+  - It fails on each of these:
+    - HEAD;
+    - `handle_callees`' epoch capture as `if !union_serving`;
+    - `handle_callers`' serving call as `if !union_serving`;
+    - `handle_callers`' epoch branches swapped;
+    - `handle_callees`' serving branches swapped;
+    - `handle_callers` rebinding `union_serving`;
+    - `handle_callees`' serving branch replaced by `if true`.
+  - `bash -n` on the command: ok.
+- **Unchanged:** the seven test names, floor 966, `expected`, check ids, obligation sets, requirement text, candidate paths (91).
+- **Author:** requirements author of PREP-8 cycle 3 (claude-opus-5-5). **Approver:** PENDING — the operator (in-place-manager). **Carried as:** INPUT-3.
+- **Slice document digests (cycle 3):** before sha256:9400933652495542a270b4ec92c798bf28b1ae02f4be954f369ae0839ce24343; after sha256:6dbb7dd12d845b28bf9fe37264ab52a095c3bae069f2049bae5aa69184967f86. The INPUT-3 manifest's `allocation` digest is re-pinned to the after value.
+
+## Operator confirmation (2026-09-27, in-place-manager) — OC-6 and OC-7 (revision 3)
+
+OC-6 and OC-7 revision 3 are approved; their "Approver: PENDING" lines above are resolved by this entry. OC-6: the alias-case expectation was the manager's wrong prediction. `resolver.rs:1591` at 7a950321 refuses non-relative specifiers; the builder, implementation review-0 and PREP-8 review-0 found this independently. OC-7: carried under D-PRB-UNION-ROUTE-1 (operator; the human may override). Accepted by PREP-8 review-2 (codex gpt-6-sol). Carried as INPUT-3; records in `docs/assurance/PYTHON-RECEIVER-BINDING-1-INPUT-3/`.

@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "PYTHON-RECEIVER-BINDING-1-BASELINE-APPROVAL-3",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/PYTHON-RECEIVER-BINDING-1-INPUT-3.json",
+    "sha256": "sha256:604de9df5dbcbc9865f1870b0c243cabfc7cd78bd6523bb4e92c53355aae4f2a"
+  },
+  "review": {
+    "path": "docs/assurance/PYTHON-RECEIVER-BINDING-1-INPUT-3/requirements-review.json",
+    "sha256": "sha256:82b3f320b97d24323101d71a89b69a479f446ce93c3c3c6b2fa0b20fab2d082b"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-PRB-UNION-ROUTE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PRB-UNION-ROUTE-1.md",
+        "sha256": "sha256:b1cc2aad8eb7c1cfdfb17d2c5b77f40b6cc4f6653d8fe42957456eeaa87477e9"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-27T09:19:32.566Z",
+  "rationale": "Document item PYTHON-RECEIVER-BINDING-1-PREP-8 accepted at cycle 3 (reviewer codex gpt-6-sol): OC-6 corrects PRB-C02's alias-case oracle to HEAD's real result (implementation review-0 F-2 / D-1 = A, operator); OC-7 (revision 3) binds the proof of review-0 F-1 under D-PRB-UNION-ROUTE-1 (operator; an inferred-inclusive request is not a union answer). Approved under the standing operator authority; the human may override either decision."
+}
