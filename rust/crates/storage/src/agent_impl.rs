@@ -93,6 +93,50 @@ pub(crate) fn map_err<E: std::fmt::Display>(
 
 // ── Agent-specific helpers ───────────────────────────────────────
 
+/// The certainty carrier of one `inferred` IMPORTS edge, read from its `metadata_json`.
+struct InferredImportCarrier {
+    /// `metadata_json.basis` — why the edge is inferred.
+    basis: String,
+    /// `metadata_json.alternateTarget` — the other candidate's FILE stable key, when recorded.
+    alternate_target: Option<String>,
+}
+
+/// The named `find_file_importers` error for an inferred IMPORTS edge whose carrier is unreadable.
+fn inferred_importer_error(source_file: &str, why: &str) -> AgentStorageError {
+    AgentStorageError::new(
+        "find_file_importers",
+        format!("inferred IMPORTS edge from {source_file}: {why}"),
+    )
+}
+
+/// RG-REQ-002-L04 / L11: read the carrier of an `inferred` IMPORTS edge WITHOUT coercion. The
+/// carrier must be a JSON object with a string `basis`; `alternateTarget`, when present, must be a
+/// string. A missing, unparseable or mistyped carrier is a NAMED error (the `forward_decl`
+/// precedent) — an inferred edge is never rendered as if its reason or candidates were known.
+fn read_inferred_import_carrier(
+    source_file: &str,
+    metadata_json: Option<&str>,
+) -> Result<InferredImportCarrier, AgentStorageError> {
+    let unreadable = |why: &str| inferred_importer_error(source_file, why);
+    let raw = metadata_json.ok_or_else(|| unreadable("no metadata_json carrier"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| unreadable(&format!("carrier is not JSON ({e})")))?;
+    let basis = match value.get("basis") {
+        Some(serde_json::Value::String(b)) if !b.is_empty() => b.clone(),
+        Some(_) => return Err(unreadable("basis is not a non-empty string")),
+        None => return Err(unreadable("carrier has no basis")),
+    };
+    let alternate_target = match value.get("alternateTarget") {
+        None => None,
+        Some(serde_json::Value::String(k)) => Some(k.clone()),
+        Some(_) => return Err(unreadable("alternateTarget is not a string")),
+    };
+    Ok(InferredImportCarrier {
+        basis,
+        alternate_target,
+    })
+}
+
 /// CPP-ATTRIBUTE-MACRO-1A: one present key of a stored undetermined-identity marker — its SQLite
 /// `json_type` and its `json_extract` value (an array extracts as its JSON text).
 struct StoredMarkerKey {
@@ -1710,11 +1754,19 @@ impl AgentStorageRead for StorageConnection {
         snapshot_uid: &str,
         file_path: &str,
     ) -> Result<Vec<AgentFileImporter>, AgentStorageError> {
+        use rusqlite::OptionalExtension;
+        const OP: &str = "find_file_importers";
         let conn = self.connection();
+        // PYTHON-SUBMODULE-IMPORT-1: each row also carries the edge's `resolution` and, for an
+        // `inferred` edge only, its raw `metadata_json` (the carrier of `basis`/`alternateTarget`),
+        // parsed below in Rust so a malformed carrier is a NAMED error rather than a SQL JSON error
+        // raised by an unrelated certain edge's metadata.
         let mut stmt = conn
             .prepare(
                 "SELECT DISTINCT src_f.path AS source_file, \
-                        mod_n.qualified_name AS module_path \
+                        mod_n.qualified_name AS module_path, \
+                        e.resolution AS resolution, \
+                        CASE WHEN e.resolution = 'inferred' THEN e.metadata_json END AS inferred_carrier \
                  FROM edges e \
                  JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid \
                  JOIN files tgt_f ON tgt_n.file_uid = tgt_f.file_uid \
@@ -1730,19 +1782,102 @@ impl AgentStorageRead for StorageConnection {
                  WHERE e.snapshot_uid = ? AND e.type = 'IMPORTS' AND tgt_f.path = ? \
                  ORDER BY src_f.path ASC",
             )
-            .map_err(map_err("find_file_importers"))?;
+            .map_err(map_err(OP))?;
 
-        let rows = stmt
+        let raw_rows = stmt
             .query_map(rusqlite::params![snapshot_uid, file_path], |row| {
-                Ok(AgentFileImporter {
-                    file: row.get(0)?,
-                    module_path: row.get(1)?,
-                })
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
             })
-            .map_err(map_err("find_file_importers"))?;
+            .map_err(map_err(OP))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(map_err(OP))?;
 
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(map_err("find_file_importers"))
+        let mut alternate_paths: std::collections::HashMap<String, Option<String>> =
+            std::collections::HashMap::new();
+        let mut importers = Vec::with_capacity(raw_rows.len());
+        for (file, module_path, resolution, inferred_carrier) in raw_rows {
+            // The certainty discriminator is validated here, at the read boundary: only the
+            // canonical `static | dynamic | inferred` vocabulary is readable. An unknown value is
+            // a named error — never read as a certain edge (RG-REQ-002-L04/L11).
+            if !matches!(resolution.as_str(), "static" | "dynamic" | "inferred") {
+                let why =
+                    format!("resolution {resolution:?} is not one of static | dynamic | inferred");
+                return Err(AgentStorageError::new(
+                    OP,
+                    format!("IMPORTS edge from {file}: {why}"),
+                ));
+            }
+            let (basis, alternate_path) = if resolution == "inferred" {
+                let carrier = read_inferred_import_carrier(&file, inferred_carrier.as_deref())?;
+                let alternate_path = match carrier.alternate_target {
+                    None => None,
+                    Some(key) => {
+                        if !alternate_paths.contains_key(&key) {
+                            let path = conn
+                                .query_row(
+                                    "SELECT f.path FROM nodes n \
+                                     JOIN files f ON f.file_uid = n.file_uid \
+                                     WHERE n.snapshot_uid = ? AND n.stable_key = ? \
+                                       AND n.kind = 'FILE'",
+                                    rusqlite::params![snapshot_uid, key],
+                                    |r| r.get::<_, String>(0),
+                                )
+                                .optional()
+                                .map_err(map_err(OP))?;
+                            alternate_paths.insert(key.clone(), path);
+                        }
+                        let path = alternate_paths.get(&key).cloned().flatten();
+                        Some(path.ok_or_else(|| {
+                            let why = format!(
+                                "alternateTarget {key:?} names no FILE node of this snapshot"
+                            );
+                            inferred_importer_error(&file, &why)
+                        })?)
+                    }
+                };
+                if carrier.basis == repo_graph_indexer::resolver::PYTHON_SUBMODULE_BASIS
+                    && alternate_path.is_none()
+                {
+                    let why = "basis python_submodule without an alternateTarget";
+                    return Err(inferred_importer_error(&file, why));
+                }
+                (Some(carrier.basis), alternate_path)
+            } else {
+                (None, None)
+            };
+            importers.push(AgentFileImporter {
+                file,
+                module_path,
+                resolution,
+                basis,
+                alternate_path,
+            });
+        }
+        // Distinct (file, module, resolution, basis, alternate) rows, ordered by file path; two
+        // inferred edges whose raw carriers differ only in extractor keys collapse to one row.
+        importers.sort_by(|a, b| {
+            (
+                &a.file,
+                &a.module_path,
+                &a.resolution,
+                &a.basis,
+                &a.alternate_path,
+            )
+                .cmp(&(
+                    &b.file,
+                    &b.module_path,
+                    &b.resolution,
+                    &b.basis,
+                    &b.alternate_path,
+                ))
+        });
+        importers.dedup();
+        Ok(importers)
     }
 
     // ── Documentation inventory (docs-primary pivot) ───────────────

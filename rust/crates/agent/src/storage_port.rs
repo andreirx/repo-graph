@@ -1280,10 +1280,21 @@ pub struct AgentUndeterminedIdentity {
 /// of the queried path, enriched with the source file's owning module (via its FILE node's OWNS edge,
 /// the SAME join `find_symbol_callers` uses). `module_path` is `None` when no module owns the file —
 /// honest, never guessed.
+///
+/// PYTHON-SUBMODULE-IMPORT-1 (RG-REQ-002-L11): one row per distinct (file, resolution, basis,
+/// alternate) — a file importing the target through edges of different certainty yields a row per
+/// certainty. `resolution` is the edge's stored `edges.resolution` verbatim (`static | dynamic |
+/// inferred`). For an `inferred` edge `basis` is the stored reason (`metadata_json.basis`, e.g.
+/// `python_submodule`) and `alternate_path` the repo path of the other candidate FILE
+/// (`metadata_json.alternateTarget`); both are `None` for a certain edge. The storage adapter
+/// refuses (named error) an inferred row whose carrier is unreadable — never a coerced row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentFileImporter {
     pub file: String,
     pub module_path: Option<String>,
+    pub resolution: String,
+    pub basis: Option<String>,
+    pub alternate_path: Option<String>,
 }
 
 // ── Documentation inventory ─────────────────────────────────────────

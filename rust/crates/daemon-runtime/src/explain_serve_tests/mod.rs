@@ -904,7 +904,7 @@ mod type_fixture {
             source_node_uid: src.into(),
             target_node_uid: dst.into(),
             edge_type: ty.into(),
-            resolution: "resolved".into(),
+            resolution: "static".into(),
             extractor: "test".into(),
             location: None,
             metadata_json: None,

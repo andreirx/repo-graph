@@ -54,10 +54,13 @@ use crate::types::{
 
 const DEFAULT_EDGE_BATCH_SIZE: usize = 10_000;
 const CLASSIFIER_VERSION: u32 = 1;
+/// Files per `query_file_signals_batch` read of a refresh's copied-forward signals — one SQL
+/// `IN (…)` bind parameter per file, kept well under SQLite's bound-parameter limit.
+const COPIED_SIGNALS_READ_CHUNK: usize = 500;
 
 /// Indexer version string stamped on module-derived edges.
 /// Also the `indexer` component of every snapshot toolchain stamp ([`build_toolchain_json`]).
-pub const INDEXER_VERSION: &str = "indexer:1.0.0";
+pub const INDEXER_VERSION: &str = "indexer:1.1.0";
 
 // ── Error type ───────────────────────────────────────────────────
 
@@ -291,6 +294,7 @@ pub fn index_repo<
         &options.c_include_roots,
         &options.declared_modules,
         options.basis_diagnostic.as_ref(),
+        &[],
     ) {
         Ok(mut result) => {
             // ══════════════════════════════════════════════════════════════
@@ -478,6 +482,7 @@ fn run_pipeline<S: IndexerStoragePort>(
     c_include_roots: &[String],
     declared_modules: &[crate::types::DeclaredModule],
     basis_diagnostic: Option<&serde_json::Value>,
+    copied_file_uids: &[String],
 ) -> Result<IndexResult, IndexError<S::StorageError>> {
     let now_iso = created_at.to_string();
     let total_files = files.len() as u64;
@@ -1003,6 +1008,16 @@ fn run_pipeline<S: IndexerStoragePort>(
         Vec::new();
     let mut cursor: Option<String> = None;
     let classification_observed_at = now_iso.clone();
+
+    // PYTHON-SUBMODULE-IMPORT-1 (D-PSI-REFRESH-SIGNALS-1 = A; RG-REQ-001-L09): on a delta
+    // refresh every copied-forward extraction edge is re-resolved below, but `all_signals` holds
+    // only the freshly extracted files' rows. Read the copied-forward files' signals — already
+    // copied into THIS snapshot by `copy_forward_unchanged_files` and never re-inserted here — so
+    // the resolver's import bindings and the classifier's per-file signals equal a full index's.
+    // A full index copies nothing (`copied_file_uids` is empty) and reads nothing.
+    for chunk in copied_file_uids.chunks(COPIED_SIGNALS_READ_CHUNK) {
+        all_signals.extend(storage.query_file_signals_batch(snap_uid, chunk)?);
+    }
 
     // Build import bindings by file for call resolution.
     let import_bindings_by_file = build_import_bindings_map(&all_signals);
@@ -1858,7 +1873,7 @@ pub fn refresh_repo<
             from_snapshot_uid: parent.snapshot_uid.clone(),
             to_snapshot_uid: snap_uid.clone(),
             repo_uid: repo_uid.into(),
-            file_uids: copy_file_uids,
+            file_uids: copy_file_uids.clone(),
         })
         .map_err(IndexError::Storage)?;
 
@@ -2000,6 +2015,7 @@ pub fn refresh_repo<
         &options.c_include_roots,
         &options.declared_modules,
         options.basis_diagnostic.as_ref(),
+        &copy_file_uids,
     ) {
         Ok(mut result) => {
             // Adjust node count to include copied nodes (which
@@ -2299,6 +2315,10 @@ mod tests {
         /// `set_edge_type_only` — recorded verbatim so a test can assert the conjunctive module-edge
         /// aggregate reaches storage.
         edge_type_only_updates: Vec<(String, TypeOnlyDisposition)>,
+        /// PYTHON-SUBMODULE-IMPORT-1 (D-PSI-REFRESH-SIGNALS-1): the `(snapshot_uid, file_uids)`
+        /// arguments of every `query_file_signals_batch` call, in call order, so a test can assert
+        /// a refresh reads exactly the copied-forward files' signals of the refresh snapshot.
+        file_signals_batch_calls: std::cell::RefCell<Vec<(String, Vec<String>)>>,
     }
 
     impl SnapshotLifecyclePort for MockStorage {
@@ -2533,10 +2553,19 @@ mod tests {
         }
         fn query_file_signals_batch(
             &self,
-            _: &str,
-            _: &[String],
+            snapshot_uid: &str,
+            file_uids: &[String],
         ) -> Result<Vec<FileSignalRow>, String> {
-            Ok(self.file_signals.clone())
+            self.file_signals_batch_calls
+                .borrow_mut()
+                .push((snapshot_uid.to_string(), file_uids.to_vec()));
+            // The storage adapter's contract: the rows of THIS snapshot for THESE files.
+            Ok(self
+                .file_signals
+                .iter()
+                .filter(|s| s.snapshot_uid == snapshot_uid && file_uids.contains(&s.file_uid))
+                .cloned()
+                .collect())
         }
     }
 
@@ -2544,8 +2573,24 @@ mod tests {
         type Error = String;
         fn copy_forward_unchanged_files(
             &mut self,
-            _input: &crate::storage_port::CopyForwardInput,
+            input: &crate::storage_port::CopyForwardInput,
         ) -> Result<crate::storage_port::CopyForwardResult, String> {
+            // Copy the unchanged files' `file_signals` rows into the child snapshot, as the storage
+            // adapter does ("3. Copy file_signals."). Nodes and extraction edges stay
+            // snapshot-agnostic in this mock (its node/edge queries ignore the snapshot).
+            let copied: Vec<FileSignalRow> = self
+                .file_signals
+                .iter()
+                .filter(|s| {
+                    s.snapshot_uid == input.from_snapshot_uid
+                        && input.file_uids.contains(&s.file_uid)
+                })
+                .map(|s| FileSignalRow {
+                    snapshot_uid: input.to_snapshot_uid.clone(),
+                    ..s.clone()
+                })
+                .collect();
+            self.file_signals.extend(copied);
             Ok(crate::storage_port::CopyForwardResult::default())
         }
     }
@@ -4340,15 +4385,255 @@ mod tests {
         };
         let (mut a, mut b, mut c) = (named("ts-core:0.2.0"), named("c-core:0.1.0"), named("z:9"));
         let ports: Vec<&mut dyn ExtractorPort> = vec![&mut c, &mut a, &mut b];
-        assert_eq!(INDEXER_VERSION, "indexer:1.0.0");
+        assert_eq!(INDEXER_VERSION, "indexer:1.1.0");
         assert_eq!(
             build_toolchain_json(&ports),
-            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.0.0"}"#
+            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.1.0"}"#
         );
         let none: Vec<&mut dyn ExtractorPort> = Vec::new();
         assert_eq!(
             build_toolchain_json(&none),
-            r#"{"extractors":[],"indexer":"indexer:1.0.0"}"#
+            r#"{"extractors":[],"indexer":"indexer:1.1.0"}"#
         );
+    }
+
+    // ── PYTHON-SUBMODULE-IMPORT-1: a refresh resolves with the copied-forward files' signals ──
+
+    /// A Python-named test extractor for `pkg/__init__.py` (binds `Y` from `.other`), `pkg/Y.py`
+    /// and `app.py` (`from pkg import Y`). Emits a FILE node per file, the init's import binding,
+    /// and app.py's IMPORTS edge exactly as the Python extractor shapes a from-import.
+    struct PySubmoduleExtractor {
+        langs: Vec<String>,
+        builtins: RuntimeBuiltinsSet,
+    }
+
+    impl ExtractorPort for PySubmoduleExtractor {
+        fn name(&self) -> &str {
+            "python-core:0.1.0"
+        }
+        fn languages(&self) -> &[String] {
+            &self.langs
+        }
+        fn runtime_builtins(&self) -> &RuntimeBuiltinsSet {
+            &self.builtins
+        }
+        fn initialize(&mut self) -> Result<(), ExtractorError> {
+            Ok(())
+        }
+        fn extract(
+            &self,
+            _source: &str,
+            file_path: &str,
+            file_uid: &str,
+            repo_uid: &str,
+            snapshot_uid: &str,
+        ) -> Result<ExtractionResult, ExtractorError> {
+            let file_node_uid = format!("{}_node", file_uid);
+            let file_node = ExtractedNode {
+                node_uid: file_node_uid.clone(),
+                snapshot_uid: snapshot_uid.into(),
+                repo_uid: repo_uid.into(),
+                stable_key: format!("{}:FILE", file_uid),
+                kind: NodeKind::File,
+                subtype: None,
+                name: file_path.rsplit('/').next().unwrap_or(file_path).into(),
+                qualified_name: Some(file_path.into()),
+                file_uid: Some(file_uid.into()),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            };
+            let binding = |identifier: &str, specifier: &str| {
+                repo_graph_classification::types::ImportBinding {
+                    identifier: identifier.into(),
+                    specifier: specifier.into(),
+                    is_relative: specifier.starts_with('.'),
+                    location: None,
+                    is_type_only: false,
+                    imported_name: Some(identifier.into()),
+                    kind: repo_graph_classification::types::ImportKind::Named,
+                }
+            };
+            let (edges, import_bindings) = match file_path {
+                "pkg/__init__.py" => (vec![], vec![binding("Y", ".other")]),
+                "app.py" => (
+                    vec![ExtractedEdge {
+                        edge_uid: format!("{}:{}:imports-Y", snapshot_uid, file_uid),
+                        snapshot_uid: snapshot_uid.into(),
+                        repo_uid: repo_uid.into(),
+                        source_node_uid: file_node_uid,
+                        target_key: "pkg".into(),
+                        edge_type: EdgeType::Imports,
+                        resolution: Resolution::Static,
+                        extractor: "python-core:0.1.0".into(),
+                        location: None,
+                        metadata_json: Some(
+                            r#"{"specifier":"pkg","identifier":"Y","importedName":"Y"}"#.into(),
+                        ),
+                    }],
+                    vec![binding("Y", "pkg")],
+                ),
+                _ => (vec![], vec![]),
+            };
+            Ok(ExtractionResult {
+                nodes: vec![file_node],
+                edges,
+                metrics: BTreeMap::new(),
+                import_bindings,
+                resolved_callsites: vec![],
+                import_observations: vec![],
+            })
+        }
+    }
+
+    fn py_file(rel_path: &str, hash: &str) -> FileInput {
+        FileInput {
+            rel_path: rel_path.into(),
+            content: format!("# {hash}"),
+            content_hash: hash.into(),
+            size_bytes: 10,
+            line_count: 1,
+            package_dependencies: None,
+            tsconfig_aliases: None,
+        }
+    }
+
+    /// The resolved `app.py` IMPORTS edge of `snapshot_uid`: (target node uid, resolution, metadata).
+    fn app_import_of(
+        storage: &MockStorage,
+        snapshot_uid: &str,
+    ) -> (String, Resolution, serde_json::Value) {
+        let found: Vec<_> = storage
+            .resolved_edges
+            .iter()
+            .filter(|e| {
+                e.snapshot_uid == snapshot_uid
+                    && e.edge_type == EdgeType::Imports
+                    && e.source_node_uid == "r1:app.py_node"
+            })
+            .collect();
+        assert_eq!(
+            found.len(),
+            1,
+            "one app.py import in {snapshot_uid}: {found:?}"
+        );
+        let e = found[0];
+        (
+            e.target_node_uid.clone(),
+            e.resolution,
+            serde_json::from_str(e.metadata_json.as_deref().unwrap()).unwrap(),
+        )
+    }
+
+    #[test]
+    fn refresh_loads_copied_forward_import_bindings_for_resolution() {
+        let new_ext = || PySubmoduleExtractor {
+            langs: vec!["python".into()],
+            builtins: RuntimeBuiltinsSet {
+                identifiers: vec![],
+                module_specifiers: vec![],
+            },
+        };
+        let v1 = vec![
+            py_file("pkg/__init__.py", "h_init"),
+            py_file("pkg/Y.py", "h_y"),
+            py_file("app.py", "h_app"),
+        ];
+
+        // The full-index answer on a fresh store: the init binds `Y` from `.other`, so Python
+        // takes the init's attribute — the edge keeps the init, `static`, no alternate.
+        let mut fresh = MockStorage::default();
+        let mut ext = new_ext();
+        let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ext];
+        let full = index_repo(
+            &mut fresh,
+            &mut extractors,
+            "r1",
+            &v1,
+            &[],
+            &mut IndexOptions::default(),
+            None,
+        )
+        .unwrap();
+        let (full_target, full_resolution, full_meta) = app_import_of(&fresh, &full.snapshot_uid);
+        assert_eq!(full_target, "r1:pkg/__init__.py_node");
+        assert_eq!(full_resolution, Resolution::Static);
+        assert!(full_meta.get("alternateTarget").is_none(), "{full_meta}");
+        assert!(
+            fresh.file_signals_batch_calls.borrow().is_empty(),
+            "a full index copies nothing and reads no copied signals"
+        );
+
+        // A refresh that changes only app.py: the init and pkg/Y.py are copied forward.
+        let mut storage = MockStorage::default();
+        let mut ext = new_ext();
+        let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ext];
+        let parent = index_repo(
+            &mut storage,
+            &mut extractors,
+            "r1",
+            &v1,
+            &[],
+            &mut IndexOptions::default(),
+            None,
+        )
+        .unwrap();
+        let v2 = vec![
+            py_file("pkg/__init__.py", "h_init"),
+            py_file("pkg/Y.py", "h_y"),
+            py_file("app.py", "h_app_changed"),
+        ];
+        let refreshed = refresh_repo(
+            &mut storage,
+            &mut extractors,
+            "r1",
+            &v2,
+            &[],
+            &[],
+            &mut IndexOptions::default(),
+            None,
+        )
+        .unwrap();
+        let refresh_snap = storage.snapshots.last().unwrap().clone();
+        assert_eq!(refresh_snap.kind, SnapshotKind::Refresh);
+        assert_eq!(
+            refresh_snap.parent_snapshot_uid,
+            Some(parent.snapshot_uid.clone())
+        );
+        assert_eq!(refreshed.snapshot_uid, refresh_snap.snapshot_uid);
+
+        // Exactly one read, of the refresh snapshot, for exactly the copied-forward files.
+        let calls = storage.file_signals_batch_calls.borrow().clone();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert_eq!(calls[0].0, refresh_snap.snapshot_uid);
+        let mut read: Vec<String> = calls[0].1.clone();
+        read.sort();
+        assert_eq!(
+            read,
+            vec!["r1:pkg/Y.py".to_string(), "r1:pkg/__init__.py".to_string()]
+        );
+
+        // The copied signals are never re-inserted: the refresh snapshot holds the init's row once
+        // (copied forward) and app.py's row once (freshly extracted).
+        let refresh_rows: Vec<&str> = storage
+            .file_signals
+            .iter()
+            .filter(|s| s.snapshot_uid == refresh_snap.snapshot_uid)
+            .map(|s| s.file_uid.as_str())
+            .collect();
+        let mut sorted_rows = refresh_rows.clone();
+        sorted_rows.sort();
+        assert_eq!(sorted_rows, vec!["r1:app.py", "r1:pkg/__init__.py"]);
+
+        // The refresh resolves app.py's import as the full index does — the init, `static`, no
+        // alternate. Without the copied init's bindings the Python submodule stage would see no
+        // binding of `Y` and land it on pkg/Y.py as inferred.
+        let (target, resolution, meta) = app_import_of(&storage, &refresh_snap.snapshot_uid);
+        assert_eq!(target, full_target);
+        assert_eq!(resolution, full_resolution);
+        assert_eq!(meta, full_meta);
     }
 }

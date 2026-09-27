@@ -46,6 +46,19 @@ const RUST_EXTRACTOR_PREFIX: &str = "rust-core:";
 /// crate; the string is the stable cross-boundary contract already on every extracted edge.
 const JAVA_EXTRACTOR_PREFIX: &str = "java-core:";
 
+/// Provenance prefix of the Python extractor (`ExtractedEdge.extractor`), whose value is
+/// `python-core:<version>` (see `python-extractor::EXTRACTOR_NAME`). The package-submodule import
+/// stage (PYTHON-SUBMODULE-IMPORT-1, RG-REQ-006-L04) is gated to edges carrying this prefix so a
+/// non-Python IMPORTS edge that happens to carry an `importedName` (a TS named import) never takes
+/// it. Prefix (not the exact version) so the gate survives extractor version bumps; the indexer
+/// does not depend on the python-extractor crate — the string is the stable cross-boundary
+/// provenance already on every extracted edge.
+const PYTHON_EXTRACTOR_PREFIX: &str = "python-core:";
+
+/// PYTHON-SUBMODULE-IMPORT-1: the `basis` stamped on an IMPORTS edge the Python submodule stage
+/// retargeted (D-CERTAINTY-MARK-1's word; the reason the edge is `inferred`, not `static`).
+pub const PYTHON_SUBMODULE_BASIS: &str = "python_submodule";
+
 /// Provenance prefixes of the C and C++ extractors (`ExtractedEdge.extractor`), whose
 /// values are `c-core:<version>` / `cpp-core:<version>` (see the two extractors'
 /// `EXTRACTOR_NAME`). CPP-DECLARATORS-1 §2.6 (operator ruling A, 2026-09-06): an
@@ -189,6 +202,23 @@ enum TargetResolution {
     /// edge's `metadata_json` and keeps the category (`calls_obj_method_needs_type_info`). The
     /// classifier reads `mroCandidates` and assigns the named basis `self_call_ambiguous_mro`.
     SelfCallAmbiguousMro(Vec<String>),
+    /// PYTHON-SUBMODULE-IMPORT-1 (RG-REQ-006-L04 Python clause; RG-REQ-002-L11): a Python
+    /// `from X import Y` whose package init shows no binding of `Y` while `X/Y/__init__.py` or
+    /// `X/Y.py` is indexed. Python binds `Y` at run time (the init runs first; only when it leaves
+    /// no attribute `Y` is the submodule loaded), and the extractor cannot see every way an init
+    /// binds a name (multi-target assignment, `__getattr__`, star imports) — so the edge lands on
+    /// the submodule file as INFERRED, never `static`, with the package init recorded as the
+    /// alternate candidate and the reason as `basis`. `resolve_edges` writes `resolution:
+    /// Inferred`, merges `alternateTarget`/`basis` into the edge's `metadata_json`, and does NOT
+    /// feed the edge to `resolved_import_pairs` (an inferred import is never a certain module edge).
+    InferredImport {
+        /// Node uid of the submodule FILE the edge now targets.
+        target_uid: String,
+        /// Stable key of the other candidate — the package init the ladder bound.
+        alternate_stable_key: String,
+        /// Why the edge is inferred (`PYTHON_SUBMODULE_BASIS`).
+        basis: &'static str,
+    },
 }
 
 // ── Resolver types ───────────────────────────────────────────────
@@ -477,6 +507,32 @@ pub fn resolve_edges(
                     source_file_uid,
                 });
             }
+            // PYTHON-SUBMODULE-IMPORT-1: an inferred import. Resolved to the submodule file, marked
+            // `inferred` with both candidates and the reason on the edge (RG-REQ-002-L11), and kept
+            // OUT of `resolved_import_pairs`, so the persisted MODULE→MODULE graph is fed only by
+            // certain imports.
+            TargetResolution::InferredImport {
+                target_uid,
+                alternate_stable_key,
+                basis,
+            } => {
+                resolved.push(ResolvedEdge {
+                    edge_uid: edge.edge_uid.clone(),
+                    snapshot_uid: edge.snapshot_uid.clone(),
+                    repo_uid: edge.repo_uid.clone(),
+                    source_node_uid: edge.source_node_uid.clone(),
+                    target_node_uid: target_uid,
+                    edge_type: edge.edge_type,
+                    resolution: Resolution::Inferred,
+                    extractor: edge.extractor.clone(),
+                    location: edge.location,
+                    metadata_json: Some(inject_inferred_import_candidates(
+                        edge.metadata_json.as_deref(),
+                        &alternate_stable_key,
+                        basis,
+                    )),
+                });
+            }
             TargetResolution::Unresolved => {
                 let category = categorize_unresolved_edge(edge);
                 let source_file_uid = index
@@ -508,73 +564,19 @@ fn resolve_target(
 ) -> TargetResolution {
     match edge.edge_type {
         EdgeType::Imports => {
-            let source_file_uid = index.node_uid_to_file_uid.get(&edge.source_node_uid);
-
-            // v1.1: Try new include resolver first for C/C++ includes.
-            if let Some(ref include_resolver) = index.include_resolver {
-                if let Some(fuid) = source_file_uid {
-                    // Extract file path from file UID (repo:path format).
-                    if let Some(colon_pos) = fuid.find(':') {
-                        let source_path = &fuid[colon_pos + 1..];
-                        // Detect system include: C extractor sets metadata_json=None for system includes.
-                        let is_system = edge.metadata_json.is_none();
-                        let resolution =
-                            include_resolver.resolve(source_path, &edge.target_key, is_system);
-                        match resolution.status {
-                            ResolutionStatus::Resolved => {
-                                if let Some(ref stable_key) = resolution.target_stable_key {
-                                    if let Some(node) = index.nodes_by_stable_key.get(stable_key) {
-                                        return TargetResolution::Resolved(node.node_uid.clone());
-                                    }
-                                }
-                            }
-                            ResolutionStatus::Ambiguous => {
-                                // Multiple exact matches — do not fall through.
-                                return TargetResolution::Ambiguous(resolution.candidates);
-                            }
-                            ResolutionStatus::Unresolved => {
-                                // Fall through to v1.0 stages.
-                            }
-                        }
-                    }
+            // PYTHON-SUBMODULE-IMPORT-1: a Python `from X import Y` may name a submodule of the
+            // package `X`. The stage runs BEFORE the ladder's Stage 2 (whose extensionless entry
+            // `X:FILE` is first-writer-wins and may name a same-named `X.py`): Python binds a
+            // package directory before a module file. It reads only inputs `resolve_edges`
+            // already has; when the stage does not apply the ladder runs exactly as before.
+            if edge.extractor.starts_with(PYTHON_EXTRACTOR_PREFIX) {
+                if let Some(inferred) =
+                    resolve_python_submodule_import(edge, index, import_bindings_by_file)
+                {
+                    return inferred;
                 }
             }
-
-            // Fallback: v1.0 same-directory resolution + other stages.
-            let tu_includes =
-                source_file_uid.and_then(|fuid| index.per_file_include_resolution.get(fuid));
-            // Gate the declared-Rust-crate stage (3.5) to edges emitted by the Rust
-            // extractor. In a hybrid repo a non-Rust IMPORTS edge (e.g. a TS
-            // `import cli from …` or a C++ `namespace::` reference) whose first segment
-            // happens to match a declared Cargo package name would otherwise resolve to
-            // that crate's `.rs` file, changing non-Rust extractor behaviour and
-            // violating the frozen byte-stability invariant. `ExtractedEdge.extractor`
-            // is the existing provenance fact; the Rust family is `rust-core:<ver>`.
-            let is_rust_import = edge.extractor.starts_with(RUST_EXTRACTOR_PREFIX);
-            match resolve_import_target(
-                &edge.target_key,
-                &index.nodes_by_stable_key,
-                &index.file_resolution,
-                &edge.repo_uid,
-                tu_includes,
-                &index.rust_crate_roots,
-                is_rust_import,
-            ) {
-                Some(uid) => TargetResolution::Resolved(uid),
-                // Stage 5 (IMPORT-RESOLUTION-JAVA-1 §2.1): declared Java FQN import. Runs ONLY
-                // after stages 1-4 miss (a dotted FQN never keys a stable key / extensionless
-                // path / include / crate root) and ONLY for Java-extractor edges — a non-Java
-                // dotted specifier must never resolve to a `.java` file (frozen non-Java
-                // byte-stability invariant). Returns the NAMED wildcard / ambiguous-suffix bases
-                // directly so they are counted, not folded into `ImportsFileNotFound`.
-                None if edge.extractor.starts_with(JAVA_EXTRACTOR_PREFIX) => resolve_java_import(
-                    &edge.target_key,
-                    &index.java_suffix_index,
-                    &index.nodes_by_stable_key,
-                    &edge.repo_uid,
-                ),
-                None => TargetResolution::Unresolved,
-            }
+            resolve_import_ladder(edge, index)
         }
         EdgeType::Calls => resolve_call_target(
             &edge.target_key,
@@ -645,6 +647,79 @@ fn resolve_target(
             edge.edge_type,
             &edge.extractor,
         )),
+    }
+}
+
+/// The IMPORTS resolution ladder as it stood before PYTHON-SUBMODULE-IMPORT-1: the v1.1 C/C++
+/// include resolver, then stages 1–4 (stable key, extensionless, per-TU include, declared Rust
+/// crate, repo-prefix), then the declared-Java suffix stage. Extracted unchanged from
+/// `resolve_target`'s Imports arm so the Python submodule stage can run ahead of it and fall back
+/// to it unchanged on a miss.
+fn resolve_import_ladder(edge: &ExtractedEdge, index: &ResolverIndex) -> TargetResolution {
+    let source_file_uid = index.node_uid_to_file_uid.get(&edge.source_node_uid);
+
+    // v1.1: Try new include resolver first for C/C++ includes.
+    if let Some(ref include_resolver) = index.include_resolver {
+        if let Some(fuid) = source_file_uid {
+            // Extract file path from file UID (repo:path format).
+            if let Some(colon_pos) = fuid.find(':') {
+                let source_path = &fuid[colon_pos + 1..];
+                // Detect system include: C extractor sets metadata_json=None for system includes.
+                let is_system = edge.metadata_json.is_none();
+                let resolution = include_resolver.resolve(source_path, &edge.target_key, is_system);
+                match resolution.status {
+                    ResolutionStatus::Resolved => {
+                        if let Some(ref stable_key) = resolution.target_stable_key {
+                            if let Some(node) = index.nodes_by_stable_key.get(stable_key) {
+                                return TargetResolution::Resolved(node.node_uid.clone());
+                            }
+                        }
+                    }
+                    ResolutionStatus::Ambiguous => {
+                        // Multiple exact matches — do not fall through.
+                        return TargetResolution::Ambiguous(resolution.candidates);
+                    }
+                    ResolutionStatus::Unresolved => {
+                        // Fall through to v1.0 stages.
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: v1.0 same-directory resolution + other stages.
+    let tu_includes = source_file_uid.and_then(|fuid| index.per_file_include_resolution.get(fuid));
+    // Gate the declared-Rust-crate stage (3.5) to edges emitted by the Rust
+    // extractor. In a hybrid repo a non-Rust IMPORTS edge (e.g. a TS
+    // `import cli from …` or a C++ `namespace::` reference) whose first segment
+    // happens to match a declared Cargo package name would otherwise resolve to
+    // that crate's `.rs` file, changing non-Rust extractor behaviour and
+    // violating the frozen byte-stability invariant. `ExtractedEdge.extractor`
+    // is the existing provenance fact; the Rust family is `rust-core:<ver>`.
+    let is_rust_import = edge.extractor.starts_with(RUST_EXTRACTOR_PREFIX);
+    match resolve_import_target(
+        &edge.target_key,
+        &index.nodes_by_stable_key,
+        &index.file_resolution,
+        &edge.repo_uid,
+        tu_includes,
+        &index.rust_crate_roots,
+        is_rust_import,
+    ) {
+        Some(uid) => TargetResolution::Resolved(uid),
+        // Stage 5 (IMPORT-RESOLUTION-JAVA-1 §2.1): declared Java FQN import. Runs ONLY
+        // after stages 1-4 miss (a dotted FQN never keys a stable key / extensionless
+        // path / include / crate root) and ONLY for Java-extractor edges — a non-Java
+        // dotted specifier must never resolve to a `.java` file (frozen non-Java
+        // byte-stability invariant). Returns the NAMED wildcard / ambiguous-suffix bases
+        // directly so they are counted, not folded into `ImportsFileNotFound`.
+        None if edge.extractor.starts_with(JAVA_EXTRACTOR_PREFIX) => resolve_java_import(
+            &edge.target_key,
+            &index.java_suffix_index,
+            &index.nodes_by_stable_key,
+            &edge.repo_uid,
+        ),
+        None => TargetResolution::Unresolved,
     }
 }
 
@@ -788,6 +863,182 @@ fn resolve_rust_crate_import(
         }
         remaining = &remaining[..remaining.len() - 1];
     }
+}
+
+// ── Python package-submodule import inference (PYTHON-SUBMODULE-IMPORT-1) ──
+
+/// PYTHON-SUBMODULE-IMPORT-1 (RG-REQ-006-L04 Python clause; RG-REQ-002-L11): decide whether a
+/// Python `from X import Y` whose package `X` has an indexed init `X/__init__.py` names a
+/// submodule instead, and if so return the INFERRED outcome. Runs before the ladder's Stage 2, so
+/// a same-named module file `X.py` never pre-empts the package (Python's FileFinder order).
+///
+/// Python runs `X/__init__.py`, then takes its attribute `Y`; only when the init leaves no `Y` does
+/// it load the submodule — the package directory `X/Y/` before the module file `X/Y.py`. The
+/// index sees two kinds of evidence of the init binding `Y`: a module-level SYMBOL `Y` of the init
+/// (`qualified_name == Y`; a nested member such as `Thing.Y` is not a module attribute) and an
+/// import binding of `Y` in the init other than the submodule itself. Either keeps the init as the
+/// `static` target. Otherwise, when `X/Y/__init__.py` or `X/Y.py` is an indexed FILE
+/// (exact keys — never the extensionless map, so a non-Python file is never a target), the edge
+/// is retargeted as INFERRED with the init as its alternate: the extractor's blind spots
+/// (multi-target assignment, `__getattr__`, star imports) are why it is never `static`.
+///
+/// The stage APPLIES when the edge carries a plain-identifier `importedName`, the key's package
+/// directory has an indexed init, and a submodule file is indexed. RULE: once it applies, the
+/// stage decides the target itself — the submodule (INFERRED) or the init (`static`) — and never
+/// hands the choice to the ladder, whose extensionless `X:FILE` entry is first-writer-wins and may
+/// name a same-named `X.py`. The init is returned as a `static` target when the init binds `Y`, or
+/// when its file identity or its import bindings are unknown (no evidence that it leaves `Y`
+/// unbound). Returns `None` — the ladder's result stands, byte-identical to before — only when the
+/// stage does not apply. PURE: reads only the resolver index and the per-file import bindings
+/// `resolve_edges` already receives.
+fn resolve_python_submodule_import(
+    edge: &ExtractedEdge,
+    index: &ResolverIndex,
+    import_bindings_by_file: Option<&HashMap<String, Vec<ImportBinding>>>,
+) -> Option<TargetResolution> {
+    let imported_name = python_imported_name(edge.metadata_json.as_deref())?;
+    let package_dir = python_package_dir(&edge.target_key, &edge.repo_uid)?;
+
+    // The package `D` must have an indexed init `D/__init__.py` (a regular package).
+    let init_key = format!("{}:{}/__init__.py:FILE", edge.repo_uid, package_dir);
+    let init_node = index.nodes_by_stable_key.get(&init_key)?;
+
+    // The submodule file: the package directory first, then the module file (Python's FileFinder).
+    let target_uid = [
+        format!(
+            "{}:{}/{}/__init__.py:FILE",
+            edge.repo_uid, package_dir, imported_name
+        ),
+        format!(
+            "{}:{}/{}.py:FILE",
+            edge.repo_uid, package_dir, imported_name
+        ),
+    ]
+    .iter()
+    .find_map(|key| index.nodes_by_stable_key.get(key))
+    .map(|node| node.node_uid.clone())?;
+
+    // From here the stage applies and decides the target: the init, `static`, whenever the
+    // evidence keeps it; the submodule, INFERRED, otherwise. Never `None` (the ladder's pick).
+    let keep_init = || Some(TargetResolution::Resolved(init_node.node_uid.clone()));
+
+    // Without the init's file identity or the bindings map there is no evidence that the init
+    // leaves `Y` unbound — keep the init.
+    let Some(init_file_uid) = init_node
+        .file_uid
+        .as_ref()
+        .or_else(|| index.node_uid_to_file_uid.get(&init_node.node_uid))
+    else {
+        return keep_init();
+    };
+    let Some(bindings_by_file) = import_bindings_by_file else {
+        return keep_init();
+    };
+
+    let defines_name = index
+        .nodes_by_name
+        .get(imported_name.as_str())
+        .into_iter()
+        .flatten()
+        .any(|n| {
+            n.kind == "SYMBOL"
+                && n.qualified_name.as_deref() == Some(imported_name.as_str())
+                && index
+                    .node_uid_to_file_uid
+                    .get(&n.node_uid)
+                    .or(n.file_uid.as_ref())
+                    == Some(init_file_uid)
+        });
+    if defines_name {
+        return keep_init();
+    }
+
+    // An init with no signals row has no import bindings (the orchestrator writes a row whenever
+    // a file has one).
+    let package_dotted = package_dir.replace('/', ".");
+    let binds_name_elsewhere = bindings_by_file
+        .get(init_file_uid)
+        .into_iter()
+        .flatten()
+        .any(|b| {
+            b.identifier == imported_name
+                && !python_binding_is_the_submodule_itself(b, &package_dotted, &imported_name)
+        });
+    if binds_name_elsewhere {
+        return keep_init();
+    }
+
+    Some(TargetResolution::InferredImport {
+        target_uid,
+        alternate_stable_key: init_key,
+        basis: PYTHON_SUBMODULE_BASIS,
+    })
+}
+
+/// The `importedName` of a Python from-import edge (`from X import Y` → `Y`), when it is a plain
+/// identifier. `None` for a whole-module `import a.b` (no key), a wildcard, or a carrier that does
+/// not parse — the stage then does not apply and the ladder's result stands.
+fn python_imported_name(metadata_json: Option<&str>) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(metadata_json?).ok()?;
+    let name = value.get("importedName")?.as_str()?;
+    let mut chars = name.chars();
+    let first = chars.next()?;
+    let is_identifier =
+        (first.is_alphabetic() || first == '_') && chars.all(|c| c.is_alphanumeric() || c == '_');
+    is_identifier.then(|| name.to_string())
+}
+
+/// The repo-relative package directory a Python IMPORTS `target_key` names: the key itself for an
+/// absolute specifier (`django/core/handlers`, the extractor's `.`→`/` form), `<dir>` for a relative
+/// key `<repo>:<dir>:FILE`. `None` for an empty or otherwise-shaped key.
+fn python_package_dir<'a>(target_key: &'a str, repo_uid: &str) -> Option<&'a str> {
+    let dir = if target_key.contains(':') {
+        target_key
+            .strip_prefix(repo_uid)?
+            .strip_prefix(':')?
+            .strip_suffix(":FILE")?
+    } else {
+        target_key
+    };
+    (!dir.is_empty() && dir != "." && !dir.starts_with('/') && !dir.ends_with('/')).then_some(dir)
+}
+
+/// Is this import binding in the package init `D/__init__.py` the submodule `D.Y` itself? Exactly
+/// three forms: `from . import Y`, `from <D dotted> import Y` (the attribute `Y` of the package, which
+/// is the submodule once imported) and `import <D dotted>.Y as Y`. `from .Y import Y` binds the
+/// attribute `Y` OF the submodule — a different object — as does every aliased or foreign form.
+fn python_binding_is_the_submodule_itself(
+    binding: &ImportBinding,
+    package_dotted: &str,
+    name: &str,
+) -> bool {
+    match binding.imported_name.as_deref() {
+        Some(imported) => {
+            imported == name && (binding.specifier == "." || binding.specifier == package_dotted)
+        }
+        None => binding.specifier == format!("{package_dotted}.{name}"),
+    }
+}
+
+/// Add the other candidate (`alternateTarget`, the package init's stable key) and the reason
+/// (`basis`) to an inferred IMPORTS edge's `metadata_json`, preserving the extractor's keys
+/// (`specifier`, `identifier`, `importedName`, `isTypeOnly`). Only called on a carrier the stage
+/// already parsed (it read `importedName` from it); mirrors `inject_mro_candidates`.
+fn inject_inferred_import_candidates(
+    metadata_json: Option<&str>,
+    alternate_stable_key: &str,
+    basis: &str,
+) -> String {
+    let mut obj = metadata_json
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    obj.insert(
+        "alternateTarget".to_string(),
+        serde_json::json!(alternate_stable_key),
+    );
+    obj.insert("basis".to_string(), serde_json::json!(basis));
+    serde_json::Value::Object(obj).to_string()
 }
 
 // ── Java FQN import resolution (IMPORT-RESOLUTION-JAVA-1) ─────────
@@ -4005,5 +4256,402 @@ mod tests {
         // main.c is in src/, header is in include/ — should NOT resolve.
         // (No compile_commands.json integration in v1.)
         assert!(!map.contains_key("r1:src/main.c"));
+    }
+
+    // ── Python `from X import Y` submodule inference (PYTHON-SUBMODULE-IMPORT-1) ──
+
+    const PY_EXTRACTOR: &str = "python-core:0.1.0";
+
+    /// A FILE resolver node for `r1:<path>:FILE` whose uid is `n:<path>` and file uid `r1:<path>`.
+    fn py_file_node(path: &str) -> ResolverNode {
+        ResolverNode {
+            node_uid: format!("n:{path}"),
+            stable_key: format!("r1:{path}:FILE"),
+            name: path.rsplit('/').next().unwrap_or(path).into(),
+            qualified_name: Some(path.into()),
+            kind: "FILE".into(),
+            subtype: None,
+            file_uid: Some(format!("r1:{path}")),
+            forward_decl: false,
+            superclasses: Vec::new(),
+        }
+    }
+
+    /// A resolver index over the given repo-relative file paths plus the importing file
+    /// `consumer/app.py` (source node `src1`, the `make_edge` default): every file is a FILE
+    /// node in `nodes_by_stable_key`, `file_resolution` is the production map
+    /// (`build_file_resolution_map`, so `r1:pkg:FILE → r1:pkg/__init__.py:FILE`).
+    fn py_pkg_index(paths: &[&str]) -> ResolverIndex {
+        let mut index = empty_index();
+        let mut all: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
+        all.push("consumer/app.py".into());
+        index.file_resolution = build_file_resolution_map(&all, "r1");
+        for p in &all {
+            let node = py_file_node(p);
+            index
+                .node_uid_to_file_uid
+                .insert(node.node_uid.clone(), node.file_uid.clone().unwrap());
+            index
+                .nodes_by_uid
+                .insert(node.node_uid.clone(), node.clone());
+            index
+                .nodes_by_stable_key
+                .insert(node.stable_key.clone(), node);
+        }
+        index
+            .node_uid_to_file_uid
+            .insert("src1".into(), "r1:consumer/app.py".into());
+        index
+    }
+
+    /// Add a SYMBOL node named `name` with `qualified_name` to `pkg/__init__.py`.
+    fn add_init_symbol(index: &mut ResolverIndex, name: &str, qualified_name: &str) {
+        let node = ResolverNode {
+            node_uid: format!("sym:{qualified_name}"),
+            stable_key: format!("r1:pkg/__init__.py#{qualified_name}:SYMBOL"),
+            name: name.into(),
+            qualified_name: Some(qualified_name.into()),
+            kind: "SYMBOL".into(),
+            subtype: None,
+            file_uid: Some("r1:pkg/__init__.py".into()),
+            forward_decl: false,
+            superclasses: Vec::new(),
+        };
+        index
+            .node_uid_to_file_uid
+            .insert(node.node_uid.clone(), "r1:pkg/__init__.py".into());
+        index
+            .nodes_by_name
+            .entry(name.into())
+            .or_default()
+            .push(node);
+    }
+
+    fn py_binding(identifier: &str, specifier: &str, imported_name: Option<&str>) -> ImportBinding {
+        ImportBinding {
+            identifier: identifier.into(),
+            specifier: specifier.into(),
+            is_relative: specifier.starts_with('.'),
+            location: None,
+            is_type_only: false,
+            imported_name: imported_name.map(|s| s.into()),
+            kind: if imported_name.is_some() {
+                ImportKind::Named
+            } else {
+                ImportKind::Namespace
+            },
+        }
+    }
+
+    /// The init's import bindings, keyed by the init's file uid (the orchestrator's shape).
+    fn init_bindings(bindings: Vec<ImportBinding>) -> HashMap<String, Vec<ImportBinding>> {
+        let mut m = HashMap::new();
+        if !bindings.is_empty() {
+            m.insert("r1:pkg/__init__.py".to_string(), bindings);
+        }
+        m
+    }
+
+    /// Edge (E): `from pkg import <name>` as the Python extractor emits it.
+    fn py_from_import(uid: &str, target_key: &str, specifier: &str, name: &str) -> ExtractedEdge {
+        let mut e = make_edge(uid, target_key, EdgeType::Imports);
+        e.extractor = PY_EXTRACTOR.into();
+        e.metadata_json = Some(
+            serde_json::json!({"specifier": specifier, "identifier": name, "importedName": name})
+                .to_string(),
+        );
+        e
+    }
+
+    fn meta(edge: &ResolvedEdge) -> serde_json::Value {
+        serde_json::from_str(edge.metadata_json.as_deref().expect("metadata")).unwrap()
+    }
+
+    /// Assert the edge was retargeted to `target` as INFERRED with the package init as the
+    /// alternate candidate, `basis: python_submodule`, and the extractor's keys preserved.
+    fn assert_inferred(result: &ResolutionResult, target: &str, input: &ExtractedEdge) {
+        assert_eq!(result.resolved.len(), 1, "{:?}", result.still_unresolved);
+        let r = &result.resolved[0];
+        assert_eq!(r.target_node_uid, format!("n:{target}"));
+        assert_eq!(r.resolution, Resolution::Inferred);
+        let mut want: serde_json::Value =
+            serde_json::from_str(input.metadata_json.as_deref().unwrap()).unwrap();
+        want["alternateTarget"] = serde_json::json!("r1:pkg/__init__.py:FILE");
+        want["basis"] = serde_json::json!("python_submodule");
+        assert_eq!(meta(r), want);
+    }
+
+    /// Assert the edge kept today's result: the package init, `static`, metadata byte-identical.
+    fn assert_init_static(result: &ResolutionResult, input: &ExtractedEdge) {
+        assert_eq!(result.resolved.len(), 1, "{:?}", result.still_unresolved);
+        let r = &result.resolved[0];
+        assert_eq!(r.target_node_uid, "n:pkg/__init__.py");
+        assert_eq!(r.resolution, Resolution::Static);
+        assert_eq!(r.metadata_json, input.metadata_json);
+    }
+
+    #[test]
+    fn python_from_package_import_of_a_sibling_module_resolves_inferred_to_the_module_file_with_the_init_as_alternate(
+    ) {
+        let index = py_pkg_index(&["pkg/__init__.py", "pkg/base.py"]);
+        let e = py_from_import("e1", "pkg", "pkg", "base");
+        let result = resolve_edges(
+            std::slice::from_ref(&e),
+            &index,
+            Some(&init_bindings(vec![])),
+        );
+        assert_inferred(&result, "pkg/base.py", &e);
+    }
+
+    #[test]
+    fn python_from_package_import_of_a_subpackage_resolves_inferred_to_its_init_with_the_package_init_as_alternate(
+    ) {
+        let index = py_pkg_index(&["pkg/__init__.py", "pkg/models/__init__.py"]);
+        let e = py_from_import("e1", "pkg", "pkg", "models");
+        let result = resolve_edges(
+            std::slice::from_ref(&e),
+            &index,
+            Some(&init_bindings(vec![])),
+        );
+        assert_inferred(&result, "pkg/models/__init__.py", &e);
+    }
+
+    #[test]
+    fn python_from_package_import_prefers_the_subpackage_over_a_same_named_module_file() {
+        let index = py_pkg_index(&["pkg/__init__.py", "pkg/base.py", "pkg/base/__init__.py"]);
+        let e = py_from_import("e1", "pkg", "pkg", "base");
+        let result = resolve_edges(
+            std::slice::from_ref(&e),
+            &index,
+            Some(&init_bindings(vec![])),
+        );
+        assert_inferred(&result, "pkg/base/__init__.py", &e);
+    }
+
+    /// F-PSI-01: the stage runs BEFORE Stage 2. With both `pkg.py` and `pkg/__init__.py` indexed,
+    /// Stage 2's extensionless entry `r1:pkg:FILE` is first-writer-wins and may name `pkg.py`; the
+    /// Python rule (the package directory wins, as Python's FileFinder) must still apply, in either
+    /// file-list order — and on a miss the old ladder's result stands.
+    #[test]
+    fn python_from_package_import_applies_before_stage_two_when_a_same_named_module_file_exists() {
+        for order in [
+            ["pkg.py", "pkg/__init__.py", "pkg/base.py"],
+            ["pkg/__init__.py", "pkg.py", "pkg/base.py"],
+        ] {
+            let index = py_pkg_index(&order);
+            let e = py_from_import("e1", "pkg", "pkg", "base");
+            let result = resolve_edges(
+                std::slice::from_ref(&e),
+                &index,
+                Some(&init_bindings(vec![])),
+            );
+            assert_inferred(&result, "pkg/base.py", &e);
+
+            // A miss (a symbol import) takes the old ladder unchanged, whatever Stage 2 picks.
+            let sym = py_from_import("e2", "pkg", "pkg", "Thing");
+            let ladder = resolve_import_ladder(&sym, &index);
+            let result = resolve_edges(
+                std::slice::from_ref(&sym),
+                &index,
+                Some(&init_bindings(vec![])),
+            );
+            let TargetResolution::Resolved(ladder_uid) = ladder else {
+                panic!("the ladder resolves `pkg` in order {order:?}");
+            };
+            assert_eq!(result.resolved.len(), 1);
+            assert_eq!(result.resolved[0].target_node_uid, ladder_uid, "{order:?}");
+            assert_eq!(result.resolved[0].resolution, Resolution::Static);
+            assert_eq!(result.resolved[0].metadata_json, sym.metadata_json);
+        }
+    }
+
+    /// F-PSI-01 (review 1): when the stage applies (init + submodule indexed) it decides the
+    /// target itself. An init whose extracted facts bind `Y` — a module-level symbol `Y`, or an
+    /// import of `Y` from elsewhere — keeps the INIT as the `static` target even when a same-named
+    /// `pkg.py` is indexed, in either file-list order (Stage 2's extensionless `r1:pkg:FILE` entry
+    /// is first-writer-wins and names `pkg.py` when it comes first). With no bindings map at all
+    /// there is no evidence that the init leaves `Y` unbound: the init, `static`, too.
+    #[test]
+    fn python_from_package_import_keeps_the_init_over_a_same_named_module_file_when_the_init_binds_the_name(
+    ) {
+        for order in [
+            ["pkg.py", "pkg/__init__.py", "pkg/base.py", "pkg/other.py"],
+            ["pkg/__init__.py", "pkg.py", "pkg/base.py", "pkg/other.py"],
+        ] {
+            // The competing file is really competing in the first order.
+            if order[0] == "pkg.py" {
+                let index = py_pkg_index(&order);
+                let probe = py_from_import("e0", "pkg", "pkg", "Thing");
+                assert!(
+                    matches!(
+                        resolve_import_ladder(&probe, &index),
+                        TargetResolution::Resolved(ref uid) if uid == "n:pkg.py"
+                    ),
+                    "the ladder picks the module file in order {order:?}"
+                );
+            }
+
+            // (a) a module-level symbol `base` of the init.
+            let mut index = py_pkg_index(&order);
+            add_init_symbol(&mut index, "base", "base");
+            let e = py_from_import("e1", "pkg", "pkg", "base");
+            let result = resolve_edges(
+                std::slice::from_ref(&e),
+                &index,
+                Some(&init_bindings(vec![])),
+            );
+            assert_init_static(&result, &e);
+            assert_eq!(result.resolved_import_pairs.len(), 1, "{order:?}");
+
+            // (b) the init imports `base` from elsewhere.
+            let index = py_pkg_index(&order);
+            let bindings = init_bindings(vec![py_binding("base", ".other", Some("base"))]);
+            let result = resolve_edges(std::slice::from_ref(&e), &index, Some(&bindings));
+            assert_init_static(&result, &e);
+
+            // (c) no bindings map: no evidence the init leaves `base` unbound.
+            let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+            assert_init_static(&result, &e);
+        }
+    }
+
+    #[test]
+    fn python_from_package_import_of_a_symbol_keeps_the_package_init_as_a_static_target() {
+        let index = py_pkg_index(&["pkg/__init__.py", "pkg/base.py"]);
+        let e = py_from_import("e1", "pkg", "pkg", "Thing");
+        let result = resolve_edges(
+            std::slice::from_ref(&e),
+            &index,
+            Some(&init_bindings(vec![])),
+        );
+        assert_init_static(&result, &e);
+    }
+
+    #[test]
+    fn python_from_package_import_never_retargets_to_a_non_python_file() {
+        let index = py_pkg_index(&["pkg/__init__.py", "pkg/base.json"]);
+        let e = py_from_import("e1", "pkg", "pkg", "base");
+        let result = resolve_edges(
+            std::slice::from_ref(&e),
+            &index,
+            Some(&init_bindings(vec![])),
+        );
+        assert_init_static(&result, &e);
+    }
+
+    #[test]
+    fn python_from_package_import_keeps_the_init_when_the_init_defines_the_name() {
+        let mut index = py_pkg_index(&["pkg/__init__.py", "pkg/base.py"]);
+        add_init_symbol(&mut index, "base", "base");
+        let e = py_from_import("e1", "pkg", "pkg", "base");
+        let result = resolve_edges(
+            std::slice::from_ref(&e),
+            &index,
+            Some(&init_bindings(vec![])),
+        );
+        assert_init_static(&result, &e);
+    }
+
+    #[test]
+    fn python_from_package_import_ignores_a_nested_member_named_like_the_submodule() {
+        let mut index = py_pkg_index(&["pkg/__init__.py", "pkg/base.py"]);
+        add_init_symbol(&mut index, "base", "Thing.base");
+        let e = py_from_import("e1", "pkg", "pkg", "base");
+        let result = resolve_edges(
+            std::slice::from_ref(&e),
+            &index,
+            Some(&init_bindings(vec![])),
+        );
+        assert_inferred(&result, "pkg/base.py", &e);
+    }
+
+    #[test]
+    fn python_from_package_import_keeps_the_init_when_the_init_imports_the_name_from_elsewhere() {
+        let index = py_pkg_index(&["pkg/__init__.py", "pkg/base.py", "pkg/other.py"]);
+        let bindings = init_bindings(vec![py_binding("base", ".other", Some("base"))]);
+        let e = py_from_import("e1", "pkg", "pkg", "base");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, Some(&bindings));
+        assert_init_static(&result, &e);
+    }
+
+    #[test]
+    fn python_from_package_import_keeps_the_init_when_the_init_binds_the_name_to_an_attribute_of_the_submodule(
+    ) {
+        let index = py_pkg_index(&["pkg/__init__.py", "pkg/base.py"]);
+        let bindings = init_bindings(vec![py_binding("base", ".base", Some("base"))]);
+        let e = py_from_import("e1", "pkg", "pkg", "base");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, Some(&bindings));
+        assert_init_static(&result, &e);
+    }
+
+    #[test]
+    fn python_from_package_import_still_retargets_when_the_init_imports_the_submodule_itself() {
+        let index = py_pkg_index(&["pkg/__init__.py", "pkg/base.py"]);
+        for binding in [
+            py_binding("base", ".", Some("base")),
+            py_binding("base", "pkg", Some("base")),
+            py_binding("base", "pkg.base", None),
+        ] {
+            let bindings = init_bindings(vec![binding.clone()]);
+            let e = py_from_import("e1", "pkg", "pkg", "base");
+            let result = resolve_edges(std::slice::from_ref(&e), &index, Some(&bindings));
+            assert_inferred(&result, "pkg/base.py", &e);
+        }
+    }
+
+    #[test]
+    fn python_relative_from_dot_import_of_a_sibling_module_resolves_inferred_to_the_module_file() {
+        let index = py_pkg_index(&["pkg/__init__.py", "pkg/base.py"]);
+        let e = py_from_import("e1", "r1:pkg:FILE", ".", "base");
+        let result = resolve_edges(
+            std::slice::from_ref(&e),
+            &index,
+            Some(&init_bindings(vec![])),
+        );
+        assert_inferred(&result, "pkg/base.py", &e);
+    }
+
+    #[test]
+    fn python_inferred_import_never_feeds_the_module_edge_pairs() {
+        let index = py_pkg_index(&["pkg/__init__.py", "pkg/base.py"]);
+        let inferred = py_from_import("e1", "pkg", "pkg", "base");
+        let certain = py_from_import("e2", "pkg", "pkg", "Thing");
+        let result = resolve_edges(&[inferred, certain], &index, Some(&init_bindings(vec![])));
+        assert_eq!(result.resolved.len(), 2);
+        let by_uid = |uid: &str| result.resolved.iter().find(|r| r.edge_uid == uid).unwrap();
+        assert_eq!(by_uid("e1").resolution, Resolution::Inferred);
+        assert_eq!(by_uid("e2").resolution, Resolution::Static);
+        // Only the static import reaches the module-edge derivation.
+        assert_eq!(result.resolved_import_pairs.len(), 1);
+        assert_eq!(result.resolved_import_pairs[0].0, "src1");
+        assert_eq!(result.resolved_import_pairs[0].1, "n:pkg/__init__.py");
+    }
+
+    #[test]
+    fn python_from_import_without_an_imported_name_carrier_takes_the_old_ladder() {
+        let index = py_pkg_index(&["pkg/__init__.py", "pkg/base.py"]);
+        let mut e = py_from_import("e1", "pkg", "pkg", "base");
+        e.metadata_json = None;
+        let result = resolve_edges(
+            std::slice::from_ref(&e),
+            &index,
+            Some(&init_bindings(vec![])),
+        );
+        assert_init_static(&result, &e);
+        assert_eq!(result.resolved_import_pairs.len(), 1);
+    }
+
+    #[test]
+    fn non_python_import_with_an_imported_name_never_takes_the_python_stage() {
+        let index = py_pkg_index(&["pkg/__init__.py", "pkg/base.py"]);
+        let mut e = py_from_import("e1", "pkg", "pkg", "base");
+        e.extractor = "ts-core:0.2.0".into();
+        let result = resolve_edges(
+            std::slice::from_ref(&e),
+            &index,
+            Some(&init_bindings(vec![])),
+        );
+        assert_init_static(&result, &e);
+        assert_eq!(result.resolved_import_pairs.len(), 1);
     }
 }

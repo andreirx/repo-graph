@@ -1334,3 +1334,91 @@ fn index_python_imports_resolve() {
         "expected tests/test_service.py FILE node"
     );
 }
+
+// ── PYTHON-SUBMODULE-IMPORT-1 (RG-REQ-006-L04 Python clause; RG-REQ-002-L11) ──
+
+fn python_package_import_fixture_path() -> PathBuf {
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    manifest
+        .join("tests")
+        .join("fixtures")
+        .join("python")
+        .join("package-import")
+}
+
+#[test]
+fn index_python_from_package_import_resolves_inferred_to_the_submodule_file() {
+    // consumer/app.py:
+    //   from pkg import base     → pkg/base.py            inferred, alternate pkg/__init__.py
+    //   from pkg import models   → pkg/models/__init__.py inferred, alternate pkg/__init__.py
+    //   from pkg import Thing    → pkg/__init__.py        static (the init defines `Thing = 1`)
+    let repo_path = python_package_import_fixture_path();
+    assert!(
+        repo_path.join("pkg/__init__.py").exists(),
+        "fixture at {repo_path:?}"
+    );
+    let mut storage = StorageConnection::open_in_memory().unwrap();
+    let result = index_into_storage(
+        &repo_path,
+        &mut storage,
+        "py-pkg",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(snap_status(&storage, &result.snapshot_uid), "ready");
+
+    // One row per from-import of consumer/app.py: target path | resolution | basis | alternateTarget.
+    let import_of = |name: &str| -> String {
+        storage
+            .query_scalar::<String>(&format!(
+                "SELECT group_concat(tf.path || '|' || e.resolution || '|' || \
+                        COALESCE(json_extract(e.metadata_json, '$.basis'), '-') || '|' || \
+                        COALESCE(json_extract(e.metadata_json, '$.alternateTarget'), '-'), ';') \
+                 FROM edges e \
+                 JOIN nodes sn ON sn.node_uid = e.source_node_uid \
+                 JOIN files sf ON sf.file_uid = sn.file_uid \
+                 JOIN nodes tn ON tn.node_uid = e.target_node_uid \
+                 JOIN files tf ON tf.file_uid = tn.file_uid \
+                 WHERE e.snapshot_uid = '{}' AND e.type = 'IMPORTS' \
+                   AND sf.path = 'consumer/app.py' \
+                   AND json_extract(e.metadata_json, '$.importedName') = '{name}'",
+                result.snapshot_uid
+            ))
+            .unwrap()
+    };
+    assert_eq!(
+        import_of("base"),
+        "pkg/base.py|inferred|python_submodule|py-pkg:pkg/__init__.py:FILE"
+    );
+    assert_eq!(
+        import_of("models"),
+        "pkg/models/__init__.py|inferred|python_submodule|py-pkg:pkg/__init__.py:FILE"
+    );
+    assert_eq!(import_of("Thing"), "pkg/__init__.py|static|-|-");
+
+    // Nothing else is inferred, and no import of the fixture went unresolved.
+    let inferred: i64 = storage
+        .query_scalar(&format!(
+            "SELECT count(*) FROM edges WHERE snapshot_uid = '{}' AND resolution = 'inferred'",
+            result.snapshot_uid
+        ))
+        .unwrap();
+    assert_eq!(inferred, 2);
+
+    // The persisted module graph is fed by certain imports only: consumer → pkg (via the static
+    // `Thing` import) and NOT consumer → pkg/models (fed only by an inferred import).
+    let module_edges: String = storage
+        .query_scalar(&format!(
+            "SELECT COALESCE(group_concat(pair, ','), '') FROM ( \
+               SELECT a.qualified_name || '->' || b.qualified_name AS pair \
+               FROM edges e \
+               JOIN nodes a ON a.node_uid = e.source_node_uid \
+               JOIN nodes b ON b.node_uid = e.target_node_uid \
+               WHERE e.snapshot_uid = '{}' AND e.type = 'IMPORTS' \
+                 AND a.kind = 'MODULE' AND b.kind = 'MODULE' \
+               ORDER BY pair)",
+            result.snapshot_uid
+        ))
+        .unwrap();
+    assert_eq!(module_edges, "consumer->pkg");
+}

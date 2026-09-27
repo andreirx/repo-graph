@@ -1,0 +1,661 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-PYTHON-SUBMODULE-IMPORT-1-0",
+  "workItemId": "PYTHON-SUBMODULE-IMPORT-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/PYTHON-SUBMODULE-IMPORT-1-INPUT-3.json",
+    "sha256": "sha256:921dca5bf96958f6accd563f68a71f1d37e7d8dbf7e776ddcd35b3062afd8fa7"
+  },
+  "allocation": {
+    "path": "docs/slices/python-submodule-import-1.md",
+    "sha256": "sha256:00e116c7ed489ffe6114790aad8e526d2cd6534555b6079f7888c0cad53ce87a"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "a715462044a1ca58b1c620ff8ade476241bfd67d",
+    "entries": [
+      {
+        "path": "rust/crates/agent/src/dto/signal.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:f8fead843a27870924901ce4189d6c9fdeed50be5335a52168a22615939d4f1d",
+          "byteLength": 99718
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:6b766335236d4da02aed70d4251b311bc38ade3c264e5380079225c1639e477f",
+          "byteLength": 101450
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/explain/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:5c7176a9f14ff625e9e22cd3d043e677ba9ae2eef19b14db8a6fe29b2baa2b12",
+          "byteLength": 53061
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:8e8e7c4782ca6f170ba47be04e37c3ab90edfd2e8a706233f1b176f42c777bf7",
+          "byteLength": 56383
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/storage_port.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:522c56217aa695b8457e975468de961d84ecabc49cf723e36c479f5117400272",
+          "byteLength": 62917
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:8e576f76664934e3fd132aa7ca0d9dbc818131dcf599aacd679988523b167657",
+          "byteLength": 63688
+        }
+      },
+      {
+        "path": "rust/crates/agent/tests/explain_symbol.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:3e7db413ccc3e27c195a254ac2dfea0b3b5343644f44427911f327120f22e702",
+          "byteLength": 26994
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:20dfdf405b36d25fd172189022dfeb6ae0b10adadc20016485e109627d61c2b8",
+          "byteLength": 32183
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:04a45c979732331a1a8ce241c57693fa301ec0a646b9c00212398558dbea980f",
+          "byteLength": 45543
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f85713e7944e81f25c2a07fa2288518520e06f1d36d57651fdae48977e6d1484",
+          "byteLength": 45541
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/orchestrator.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:879a039eb5d1eefa42441388e19f2bc9d478156f55ab1b1322f0287dafae7275",
+          "byteLength": 177597
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:146ed244778e3abd02e2fdc22a87395879b3a7dad9bead84bb2234ff31f0facb",
+          "byteLength": 189488
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/resolver.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:b24c5a001516e7563b58696873346d0a3548c974144c1067ec6edb6a42fa4e5d",
+          "byteLength": 180781
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:e6ecf914499885cc00b5e81922a1c9c7fd7b4267e547969946e5287d2bdb1eeb",
+          "byteLength": 210512
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/tests/fixtures/python/package-import/consumer/app.py",
+        "porcelainStatus": "A ",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:2fa9d9c06569ed8369021386eef2db5588f54c2dd155b92bf9642508879c0670",
+          "byteLength": 137
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2fa9d9c06569ed8369021386eef2db5588f54c2dd155b92bf9642508879c0670",
+          "byteLength": 137
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/tests/fixtures/python/package-import/pkg/__init__.py",
+        "porcelainStatus": "A ",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:11299e41c2fcb9694093ca20b76cc62f98373fadaf78336cd3fe25a4cfbfa56c",
+          "byteLength": 96
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:11299e41c2fcb9694093ca20b76cc62f98373fadaf78336cd3fe25a4cfbfa56c",
+          "byteLength": 96
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/tests/fixtures/python/package-import/pkg/base.py",
+        "porcelainStatus": "A ",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:c15ddbc0e00e06299be6e6bb519f4bce18225db1664deb59e001d421f90021c7",
+          "byteLength": 28
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:c15ddbc0e00e06299be6e6bb519f4bce18225db1664deb59e001d421f90021c7",
+          "byteLength": 28
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/tests/fixtures/python/package-import/pkg/models/__init__.py",
+        "porcelainStatus": "A ",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:06b6b8232e4c24cd8835b7eabe1988b94b1e520d34be26278b1ce1fe3c26dfd2",
+          "byteLength": 20
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:06b6b8232e4c24cd8835b7eabe1988b94b1e520d34be26278b1ce1fe3c26dfd2",
+          "byteLength": 20
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/tests/integration.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d820082e74eca47922ddc7e7ad34ccebfb8fb39121efe75fe6b4b90e04cd6cb1",
+          "byteLength": 49806
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:c822e79921183899e3099f5256c7438c579b9f362fc540200a6ea644ba4a6da8",
+          "byteLength": 53561
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/explain.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:58e6078de969b89e82b882beb33938eadba63142f60e21f99907393821f01e96",
+          "byteLength": 85572
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:e8ac5bbe96653ebbbda971108ff70d043a312b03b33b2ff4b08a10dbef7f0dea",
+          "byteLength": 96830
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/explain_sections.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:82522244538684440cad8dff019069a670d14b951ea9e4707a3a09185a21976b",
+          "byteLength": 35656
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b799cce109ed71ab02bdc507c2acde10b5043c2c4778664c86561c5bc7505b84",
+          "byteLength": 40527
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/agent_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:f49451b8ffda11f1d55410152e9969f1d135fe9e25a780fd537a25d67dd97da5",
+          "byteLength": 100752
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f9d9c866893119e6ebccf93341bc0fcee1712ca0f45e8bb919d8d3886ff33dbb",
+          "byteLength": 107280
+        }
+      },
+      {
+        "path": "rust/crates/storage/tests/agent_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:eea949da68329a4f4096fc5840d964b7dbca1f1f98d6fb02b7a8c849b6abca50",
+          "byteLength": 71902
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2a26f217fcd7abc6da42e2cbc47f1f0666a1d817bf45c48051e57bdff9b39cc6",
+          "byteLength": 79260
+        }
+      }
+    ],
+    "sha256": "sha256:f9dfb049fb7dfc308fe76455351771a9fd3cef010fb294b93eecf76d9a4f5b8e"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-PYTHON-SUBMODULE-IMPORT-1-0"
+  },
+  "checks": [
+    {
+      "checkId": "PSI-C01",
+      "obligationIds": [
+        "RG-REQ-006-L04",
+        "RG-REQ-002-L11",
+        "RG-REQ-001-L06",
+        "RG-REQ-001-L09",
+        "RG-REQ-006-L01",
+        "RG-REQ-006-L02",
+        "RG-REQ-006-L03",
+        "P-PSI-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "git cat-file -e HEAD:docs/assurance/TOOLCHAIN-STALENESS-1/implementation-review.json && git show HEAD:docs/assurance/TOOLCHAIN-STALENESS-1/implementation-review.json | python3 -c \"import json,sys; d=json.load(sys.stdin); sys.exit(0 if (d.get('workItemId'), d.get('result')) == ('TOOLCHAIN-STALENESS-1', 'accepted') else 1)\" && cargo test -p repo-graph-indexer --lib resolver 2>&1 | tee /tmp/psi-c01.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/psi-c01.txt && for t in python_from_package_import_of_a_sibling_module_resolves_inferred_to_the_module_file_with_the_init_as_alternate python_from_package_import_of_a_subpackage_resolves_inferred_to_its_init_with_the_package_init_as_alternate python_from_package_import_prefers_the_subpackage_over_a_same_named_module_file python_from_package_import_of_a_symbol_keeps_the_package_init_as_a_static_target python_from_package_import_never_retargets_to_a_non_python_file python_from_package_import_keeps_the_init_when_the_init_defines_the_name python_from_package_import_ignores_a_nested_member_named_like_the_submodule python_from_package_import_keeps_the_init_when_the_init_imports_the_name_from_elsewhere python_from_package_import_keeps_the_init_when_the_init_binds_the_name_to_an_attribute_of_the_submodule python_from_package_import_still_retargets_when_the_init_imports_the_submodule_itself python_relative_from_dot_import_of_a_sibling_module_resolves_inferred_to_the_module_file python_inferred_import_never_feeds_the_module_edge_pairs python_from_import_without_an_imported_name_carrier_takes_the_old_ladder non_python_import_with_an_imported_name_never_takes_the_python_stage file_resolution_python_extensionless file_resolution_python_init_shortcut resolve_import_by_stable_key resolve_import_via_extensionless_file_resolution resolve_import_via_per_tu_include resolve_import_via_repo_prefix_fallback java_import_resolves_to_file_node java_import_wildcard_is_named_basis rust_crate_import_leaf_module_file rust_crate_import_bare_crate_hits_lib_rs rust_crate_import_unknown_crate_is_none rust_crate_import_empty_catalog_is_noop aliased_named_import_uses_imported_name_for_lookup namespace_import_member_resolves_to_target_module default_import_member_does_not_resolve_by_bare_method_name; do grep -qE \"^test .*$t .* ok$\" /tmp/psi-c01.txt || { echo \"MISSING $t\"; exit 1; }; done && git diff --quiet HEAD -- crates/python-extractor crates/ts-extractor crates/java-extractor crates/rust-extractor crates/c-extractor crates/cpp-extractor crates/indexer/src/types.rs crates/indexer/src/include_resolver.rs && cargo test -p repo-graph-indexer --lib orchestrator 2>&1 | tee /tmp/psi-c01b.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/psi-c01b.txt && for t in refresh_loads_copied_forward_import_bindings_for_resolution refresh_creates_refresh_snapshot_with_copy_forward refresh_falls_back_to_full_index_when_no_parent abort_before_snapshot_creation_prevents_db_mutation build_toolchain_json_lists_extractor_names_in_order_then_the_indexer_version; do grep -qE \"^test .*$t .* ok$\" /tmp/psi-c01b.txt || { echo \"MISSING $t\"; exit 1; }; done && python3 - <<'PY'\nimport re, subprocess\ndef sh(*a): return subprocess.run(a, capture_output=True, text=True, check=True).stdout\ndef ver(src):\n    m = re.findall(r'^pub const INDEXER_VERSION: &str = \"(indexer:(\\d+)\\.(\\d+)\\.(\\d+))\";$', src, re.M)\n    assert len(m) == 1, (\"exactly one INDEXER_VERSION declaration\", m)\n    return m[0][0], tuple(int(x) for x in m[0][1:])\nORCH, COMP = \"crates/indexer/src/orchestrator.rs\", \"crates/repo-index/src/compose.rs\"\nhead_orch = sh(\"git\", \"show\", \"HEAD:./\" + ORCH)\nH, hv = ver(head_orch)\nC, cv = ver(open(ORCH, encoding=\"utf-8\").read())\nassert cv == (hv[0], hv[1] + 1, 0), (\"INDEXER_VERSION moves up exactly one minor from HEAD's\", H, C)\ndef changed(p): return [l for l in sh(\"git\", \"diff\", \"-U0\", \"HEAD\", \"--\", p).splitlines() if l[:1] in \"+-\" and not l.startswith((\"+++\", \"---\"))]\nassert [l for l in changed(ORCH) if \"INDEXER_VERSION: &str\" in l] == ['-pub const INDEXER_VERSION: &str = \"%s\";' % H, '+pub const INDEXER_VERSION: &str = \"%s\";' % C], changed(ORCH)\nassert changed(COMP) == [] and re.findall(r\"^    let extractor = orchestrator::INDEXER_VERSION;$\", open(COMP, encoding=\"utf-8\").read(), re.M) == [\"    let extractor = orchestrator::INDEXER_VERSION;\"], (\"compose.rs reads INDEXER_VERSION by name and is unchanged\", changed(COMP))\ndef grep_counts(lit, *rev):\n    out = subprocess.run([\"git\", \"grep\", \"-c\", \"-F\", lit, *rev, \"--\", \"*.rs\"], capture_output=True, text=True).stdout\n    return {l.rsplit(\":\", 1)[0][len(rev[0]) + 1 if rev else 0:]: int(l.rsplit(\":\", 1)[1]) for l in out.splitlines()}\ndef outside(counts): return {p: n for p, n in counts.items() if p != ORCH and n}\nhc, wc = grep_counts(H, \"HEAD\"), grep_counts(H)\nassert wc.get(ORCH, 0) == 0, (\"the old literal leaves the orchestrator: its declaration and the test that pins its value\", wc.get(ORCH))\nassert outside(wc) == outside(hc), (\"the old literal moves nowhere else (its other occurrences are stamp test data)\", hc, wc)\nassert outside(grep_counts(C)) == outside(grep_counts(C, \"HEAD\")), (\"the new literal is added nowhere outside the orchestrator\", grep_counts(C, \"HEAD\"), grep_counts(C))\ndef prod(src):\n    i = src.find(\"\\n#[cfg(test)]\\nmod tests {\")\n    assert i > 0, \"orchestrator test-module marker\"\n    return src[:i]\ncur, head = prod(open(ORCH, encoding=\"utf-8\").read()), prod(head_orch)\nassert re.search(r\"\\.query_file_signals_batch\\(\", cur), \"refresh does not load the copied-forward signals through the existing port\"\nassert len(re.findall(r\"\\.insert_file_signals\\(\", cur)) == len(re.findall(r\"\\.insert_file_signals\\(\", head)) == 1, \"a new file-signals write site: copied-forward rows must never be re-inserted\"\nassert len(re.findall(r'^const PYTHON_EXTRACTOR_PREFIX: &str = \"python-core:\";$', open(\"crates/indexer/src/resolver.rs\", encoding=\"utf-8\").read(), re.M)) == 1, \"PYTHON_EXTRACTOR_PREFIX\"\nprint(\"PSI-C01 source assertions ok:\", H, \"->\", C, \"| old-literal occurrences at HEAD:\", hc)\nPY",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "GATE first (D-REFRESH-STALE-1: TOOLCHAIN-STALENESS-1 ships before every resolver/indexer slice): HEAD carries TOOLCHAIN-STALENESS-1's committed implementation-review record with `workItemId` TOOLCHAIN-STALENESS-1 and `result` accepted — absent on ec19a165; present with `result` accepted at HEAD e3359966 (OBSERVED 2026-09-27). Then every resolver-filter test (`--lib resolver` selects 122 tests today: the whole `resolver::tests` module (86), `include_resolver::tests` (33) and three `orchestrator::tests` whose names contain `resolver`; the fifteen OLD names bound here stay green verbatim) plus fourteen NEW `resolver::tests` built with `make_node`/`make_edge` over a `ResolverIndex` whose `nodes_by_stable_key`/`file_resolution` hold the fixture files (`r1:pkg/__init__.py:FILE`, `r1:pkg/base.py:FILE`, …, and the package-dir entry `r1:pkg:FILE → r1:pkg/__init__.py:FILE`), whose `nodes_by_name`/`node_uid_to_file_uid` hold the init's SYMBOL nodes, and with the `import_bindings_by_file` map passed to `resolve_edges` holding the init's own bindings (keyed by the init's file uid). Edge (E): extractor `python-core:0.1.0`, `target_key` `pkg`, `metadata_json` `{\"specifier\":\"pkg\",\"identifier\":\"base\",\"importedName\":\"base\"}`, `resolution: Static`. (1) `pkg/base.py` present, init defines and binds no `base` → RESOLVED to `pkg/base.py` with `resolution: Inferred`, `metadata_json` = the extractor's keys plus `alternateTarget: \"r1:pkg/__init__.py:FILE\"` and `basis: \"python_submodule\"` (today `resolve_edges` copies `edge.resolution` into every `ResolvedEdge`, resolver.rs:409-420); (2) `importedName` `models` with only `pkg/models/__init__.py` → that init, Inferred, alternate `pkg/__init__.py`; (3) both `pkg/base.py` and `pkg/base/__init__.py` → the subpackage init (Python's FileFinder checks the package directory first); (4) `importedName` `Thing`, no `pkg/Thing*` file → `pkg/__init__.py`, `Static`, `metadata_json` byte-identical to the input (today's result); (5) only `pkg/base.json` indexed → the init, Static (the probe is the two exact keys `<dir>/Y/__init__.py`, `<dir>/Y.py` in `nodes_by_stable_key`, never the extensionless `file_resolution` entry); (6) the init has a module-level SYMBOL `base` (`qualified_name == \"base\"`) → the init, Static; (7) the init's only `base` is a METHOD `Thing.base` (`qualified_name \"Thing.base\"`) → retargets, Inferred (a nested member is not a module attribute); (8) the init binds `base` from elsewhere (`from .other import base`: `{identifier base, specifier \".other\", importedName base}`) → the init, Static; (9) the init binds `from .base import base` (`specifier \".base\"`, `importedName base` — the attribute `base` OF the submodule) → the init, Static; (10) the init's only bindings of `base` are the submodule itself — each of `from . import base` (`specifier \".\"`, `importedName base`), `from pkg import base` (`specifier \"pkg\"`, `importedName base`), `import pkg.base as base` (`specifier \"pkg.base\"`, no `importedName`) → retargets, Inferred; (11) the relative form `target_key` `r1:pkg:FILE` + `importedName` `base` → `pkg/base.py`, Inferred; (12) for (1), `ResolutionResult.resolved_import_pairs` does NOT contain the edge (an inferred import never feeds `create_module_edges`, orchestrator.rs:1407-1450, which persists `static` MODULE→MODULE IMPORTS) while the Static edge of (4) is in it; (13) `metadata_json: None` → old ladder; (14) edge (E) with `extractor: \"ts-core:0.2.0\"` → old ladder (gated like the Rust stage on its prefix, resolver.rs:38/:553). The stage runs BEFORE Stage 2 for such edges, reads only inputs the resolver already has at `resolve_edges` (no new `ResolverIndex` field, no I/O). VERSION (D-REFRESH-STALE-1 = B; RG-REQ-001-L06): `INDEXER_VERSION` moves up exactly one minor from HEAD's value — `indexer:1.0.0` → `indexer:1.1.0` at HEAD e3359966; derived from HEAD by the command, never hard-coded. Since TOOLCHAIN-STALENESS-1 (23d12a9b) the declaration is `pub const INDEXER_VERSION` (orchestrator.rs:60 at e3359966) and its readers take it by name — `repo-index/src/compose.rs:1647` `let extractor = orchestrator::INDEXER_VERSION;` (the Spring-inference provenance stamp; no literal copy any more, so compose.rs is unchanged and asserted so) and `repo-index/src/toolchain.rs` (the running stamp the daemon compares) — while the orchestrator test `build_toolchain_json_lists_extractor_names_in_order_then_the_indexer_version` (:4333) pins the value, so its expected value moves to the new version and it stays green. The old literal leaves the orchestrator entirely (declaration and pinning test); its other occurrences under rust/ (at e3359966: `agent/src/dto/toolchain_staleness.rs`, a doc comment and stamp test data) stay exactly as at HEAD; the new literal is added nowhere outside the orchestrator (at step 0 the builder lists HEAD's occurrences and STOPS on any production copy of the constant outside the orchestrator's declaration). The version reaches `snapshots.toolchain_json.indexer` (`build_toolchain_json`, orchestrator.rs:1460) and the orchestrator-derived OWNS and MODULE→MODULE edges' `extractor` (:1392/:1446). REFRESH DATA PATH (D-PSI-REFRESH-SIGNALS-1 = A; RG-REQ-001-L09): `run_pipeline` (orchestrator.rs:462) builds the resolver's `import_bindings_by_file` (:1007 `let import_bindings_by_file = build_import_bindings_map(&all_signals);`) and the classifier's per-file signals (:1098 `build_file_signals_for_edge`) from `all_signals`, which holds only the freshly extracted files' rows (:521/:702; written at :833 `storage.insert_file_signals(&all_signals)?;`); `refresh_repo` (:1673) passes only `files_to_extract` to it, while `copy_forward_unchanged_files` has already copied the unchanged files' `file_signals` rows into the child snapshot (storage `indexer_impl.rs:1050`, \"3. Copy file_signals.\") and every copied-forward extraction edge is re-resolved. The copied-forward files' signals — the plan's `files_to_copy`, the same file-uid list passed to `copy_forward_unchanged_files` — are loaded through the EXISTING port `query_file_signals_batch(<refresh snapshot uid>, <copied file uids>)` (indexer/src/storage_port.rs:469) and joined to the rows the resolver and the classifier read AFTER `insert_file_signals` (:833) and BEFORE `build_import_bindings_map` (:1007) — never re-inserted (the production code keeps exactly its one `insert_file_signals` call) — so a refresh's resolver and classifier inputs equal a full index's; a full index copies nothing and its inputs remain exactly as before. ONE new orchestrator test `refresh_loads_copied_forward_import_bindings_for_resolution`: a test extractor named `python-core:0.1.0` indexes `pkg/__init__.py` (import binding `{identifier Y, specifier \".other\", importedName Y}` — the init binds `Y` from elsewhere), `pkg/Y.py` and `app.py` (`from pkg import Y`: target key `pkg`, `importedName` `Y`); a refresh changes only `app.py`, so `pkg/__init__.py` is copied forward; the MockStorage records the arguments of every `query_file_signals_batch` call (today it ignores them, orchestrator.rs:2531) and the test asserts exactly one call with the refresh snapshot's uid and exactly the copied-forward file uids, and that the refresh snapshot's resolved `app.py` import lands on `pkg/__init__.py` as `static` with no `alternateTarget` — the target and resolution a full index of the same files gives on a fresh MockStorage (asserted in the same test) — where without the load it would land on `pkg/Y.py` as inferred. The three existing orchestrator tests named stay green, and so does `build_toolchain_json_lists_extractor_names_in_order_then_the_indexer_version` with its expected value moved to the new version (VERSION above)."
+      },
+      "expected": "exit 0 (gate satisfied first): a Python `from X import Y` binds to `X/Y/__init__.py` or `X/Y.py` as INFERRED with the package init recorded as its alternate candidate and `basis: python_submodule` when the init's extracted facts show no module-level symbol `Y` and no binding of `Y` other than the submodule itself, keeps the package init as its static target otherwise, never retargets to a non-Python file, and never feeds the persisted module graph — the amended RG-REQ-006-L04 Python clause, and RG-REQ-002-L11's store part for this import case; every Rust, Java, C/C++ and TypeScript import stage and every existing resolver test remain exactly as before (no behavior change); the extractors are untouched; compose.rs is unchanged (it reads the constant by name), and the orchestrator differs by its version line, the version-pinning test's expected value, the refresh signals load and its test; `INDEXER_VERSION` is exactly one minor above HEAD's, the old literal leaves the orchestrator and moves nowhere else, and the new literal is added nowhere outside it (RG-REQ-001-L06's trigger); on a delta refresh the resolver and the classifier read the copied-forward files' signals through the existing port and nothing is re-inserted, so a refresh resolves an unchanged init's bindings as a full index does (RG-REQ-001-L09); a full index's resolver inputs remain exactly as before (no behavior change)",
+      "candidateSha256": "sha256:f9dfb049fb7dfc308fe76455351771a9fd3cef010fb294b93eecf76d9a4f5b8e",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED, exit 0. The gate record at HEAD reads TOOLCHAIN-STALENESS-1 accepted. The resolver filter ran 138 tests and all passed (137 before this revision, plus the new F-PSI-01 test), and every named test is ok. The orchestrator filter ran 21 tests and all passed, including refresh_loads_copied_forward_import_bindings_for_resolution and the version-pinning test. The extractors, types.rs and include_resolver.rs are unchanged. The command printed: `PSI-C01 source assertions ok: indexer:1.0.0 -> indexer:1.1.0 | old-literal occurrences at HEAD: {'crates/agent/src/dto/toolchain_staleness.rs': 13, 'crates/indexer/src/orchestrator.rs': 4}`",
+        "supportingEvidence": [
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/PSI-C01.out",
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/psi-c01.txt",
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/psi-c01b.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "PSI-C02",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-006-L04",
+        "RG-REQ-006-L12",
+        "P-PSI-02",
+        "RG-REQ-006-L06",
+        "RG-REQ-006-L07",
+        "RG-REQ-006-L08",
+        "RG-REQ-006-L09",
+        "RG-REQ-006-L10",
+        "RG-REQ-006-L11",
+        "RG-REQ-006-L13",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L05",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L07",
+        "RG-REQ-002-L08",
+        "RG-REQ-002-L09",
+        "RG-REQ-002-L10"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-storage --test agent_impl find_file_importers 2>&1 | tee /tmp/psi-c02a.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/psi-c02a.txt && for t in find_file_importers_lists_importing_files_with_owning_module find_file_importers_is_empty_for_a_file_nobody_imports find_file_importers_carries_each_edge_resolution_basis_and_alternate_path find_file_importers_fails_loudly_on_an_inferred_edge_with_an_unreadable_carrier; do grep -qE \"^test .*$t .* ok$\" /tmp/psi-c02a.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-agent --test explain_symbol 2>&1 | tee /tmp/psi-c02b.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/psi-c02b.txt && for t in explain_type_focus_emits_members_and_referenced_by explain_referenced_by_partitions_inferred_importers_with_their_alternate explain_referenced_by_counts_a_file_with_any_certain_edge_as_certain_only; do grep -qE \"^test .*$t .* ok$\" /tmp/psi-c02b.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-rgr --lib presentation::explain 2>&1 | tee /tmp/psi-c02c.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/psi-c02c.txt && for t in referenced_by_heading_states_the_inferred_remainder_and_rows_name_the_alternate referenced_by_with_no_inferred_rows_renders_exactly_as_before referenced_by_with_malformed_inferred_rows_renders_the_unreadable_line; do grep -qE \"^test .*$t .* ok$\" /tmp/psi-c02c.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-repo-index --test integration python 2>&1 | tee /tmp/psi-c02d.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/psi-c02d.txt && for t in index_python_from_package_import_resolves_inferred_to_the_submodule_file index_python_imports_resolve index_python_extracts_symbols; do grep -qE \"^test .*$t .* ok$\" /tmp/psi-c02d.txt || { echo \"MISSING $t\"; exit 1; }; done && test -f crates/repo-index/tests/fixtures/python/package-import/pkg/__init__.py && test -f crates/repo-index/tests/fixtures/python/package-import/pkg/base.py && test -f crates/repo-index/tests/fixtures/python/package-import/pkg/models/__init__.py && test -f crates/repo-index/tests/fixtures/python/package-import/consumer/app.py && git diff --quiet HEAD -- crates/classification crates/module-queries crates/trust crates/repo-graph-livegraph crates/rgr/src/commands crates/rgr/src/presentation/imports.rs crates/storage/src/queries.rs crates/storage/src/trust_impl.rs crates/storage/src/crud crates/repo-index/src crates/repo-index/tests/fixtures/python/simple-app && test \"$(git diff --name-only HEAD -- crates/daemon-runtime)\" = rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs && test -z \"$(git ls-files --others --exclude-standard -- crates/daemon-runtime)\" && git diff -U0 HEAD -- crates/daemon-runtime > /tmp/psi-c02-dr.diff && test \"$(grep -c '^@@ ' /tmp/psi-c02-dr.diff)\" = 1 && grep -qE '^@@ -907 \\+907 @@' /tmp/psi-c02-dr.diff && test \"$(grep -E '^[-+]' /tmp/psi-c02-dr.diff | grep -vE '^(\\+\\+\\+|---) ')\" = \"$(printf '%s\\n%s' '-            resolution: \"resolved\".into(),' '+            resolution: \"static\".into(),')\" && ( set -o pipefail; cargo test -p repo-graph-daemon-runtime --lib 2>&1 | tee /tmp/psi-c02e.txt ) && grep -qE '^test result: ok\\.' /tmp/psi-c02e.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/psi-c02e.txt && test \"$(sed -nE 's/^test result: ok\\. ([0-9]+) passed;.*/\\1/p' /tmp/psi-c02e.txt)\" -ge 788 && grep -qE '^test .*type_focus_members_and_referenced_by_are_sqlite_delegated_on_green .* ok$' /tmp/psi-c02e.txt",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "The vertical from the store to the reader. Storage `find_file_importers` (agent_impl.rs:1601-1639) additionally selects `e.resolution`, `json_extract(e.metadata_json,'$.basis')` and the alternate's PATH (a join of `json_extract(e.metadata_json,'$.alternateTarget')` to `nodes.stable_key` → `files.path` in the same snapshot) into `AgentFileImporter {file, module_path, resolution, basis, alternate_path}`; an `inferred` row whose `basis` is not a string, or whose `alternateTarget` is present but is not a string or names no FILE node of the snapshot, or whose `basis` is `python_submodule` without an alternate, is a named storage error at the read — never a coerced row (the `forward_decl` precedent; RG-REQ-002-L04). `agent/src/explain/mod.rs` (:588-606) partitions the importers by file: a file with at least one `static`/`dynamic` edge to the target is a certain importer (in `ExplainReferencedByEvidence.items`, `count` and `top_modules`, exactly as today); a file whose every edge to the target is `inferred` goes to NEW `inferred_items` ({file, module, basis, alternate}) and `inferred_count` (serde-skipped when empty/zero, so a type with no inferred importer serializes byte-identically). rgr renders the heading `Referenced by (N files, +M inferred — investigate)` when M > 0 (unchanged `Referenced by (N files)` otherwise), the certain rows as today, then each inferred row `  - <path>  (inferred: python submodule — alternate <init path>)` (a basis other than `python_submodule` renders `  - <path>  (inferred — alternate <path>)`, never the raw code — RG-REQ-002-L08); a malformed `inferred_items`/`inferred_count` → the existing single `referenced-by unreadable on this snapshot` line. `imports <file>` (queries `find_imports`, rgr presentation/imports.rs:92-99) prints the edge's `resolution` verbatim already (`  <target>  depth=1  inferred`) — no code change, pinned by the live capture in PSI-C04 (RG-REQ-006-L12). ONE new end-to-end test over the NEW fixture `rust/crates/repo-index/tests/fixtures/python/package-import/` (four files: `pkg/__init__.py` (a docstring + `Thing = 1`), `pkg/base.py` (`class BaseHandler: pass`), `pkg/models/__init__.py` (a docstring), `consumer/app.py` with `from pkg import base`, `from pkg import models`, `from pkg import Thing`) asserting the three targets, each edge's `resolution` (inferred/inferred/static), `basis` and `alternateTarget`, and that the persisted MODULE→MODULE IMPORTS edges hold `consumer → pkg` (fed by the static `Thing` import) and NOT `consumer → pkg/models` (fed only by an inferred import); `index_python_imports_resolve` and `index_python_extracts_symbols` stay green; the `simple-app` fixture untouched. Byte-identity (git diff --quiet) of classification (the unresolved classifier — RG-REQ-006-L05), module-queries, trust, LiveGraph, storage's `queries.rs`/`trust_impl.rs`/`crud` (module edges, cycles, `path`, `map`, stats, deps reads), rgr's command layer and imports renderer, and repo-index's src, compose.rs included (at HEAD it reads `INDEXER_VERSION` by name, so the bump leaves it unchanged — PSI-C01). Every RG-REQ-002 L01–L10 honesty obligation and RG-REQ-006-L06..L11/L13 are PRESERVED by leaving their machinery untouched; the new Referenced-by field follows the unreadable-line pattern (L04); a type with no inferred importer serializes byte-identically (L02). ALLOCATION AMENDMENT A-1 (D-PSI-R1-VOCAB, operator): the explain importer read accepts only `static`/`dynamic`/`inferred` and renders any other stored value unreadable (RG-REQ-002-L04/L11); the one daemon-runtime fixture that seeds an IMPORTS edge with the non-canonical `\"resolved\"` — the edge helper at `daemon-runtime/src/explain_serve_tests/mod.rs:907` — is corrected to `\"static\"` (a one-token change, the only edit permitted in that file and in daemon-runtime). The command asserts it and nothing else: `git diff --name-only HEAD -- crates/daemon-runtime` names exactly `rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs`, no untracked file exists under the crate, and `git diff -U0 HEAD -- crates/daemon-runtime` holds exactly one hunk `@@ -907 +907 @@` whose only removed and added lines are `-            resolution: \"resolved\".into(),` and `+            resolution: \"static\".into(),` — so daemon-runtime's production code (payloads are serde of the DTOs) stays byte-identical. Then daemon-runtime's whole library suite runs in the fail-closed cargo form (`set -o pipefail`; `test result: ok.` required; no FAILED test, panic, FAILED result or compile error) with a floor of 788 passed: `cargo test -p repo-graph-daemon-runtime --lib -- --list` at HEAD 3318be11 lists 789 tests, one of them `#[ignore]`d (`seed::local_engine::tests::live_load_and_embed_produces_pinned_dim_unit_vectors`, network), so 788 run, and A-1 adds none; the fixture's consumer `explain_serve_tests::type_focus_members_and_referenced_by_are_sqlite_delegated_on_green` is bound green by name."
+      },
+      "expected": "exit 0: an inferred import reaches the agent on `explain`'s Referenced-by as an inferred remainder with its basis and alternate, a file with any certain edge stays a certain importer, a type with no inferred importer renders exactly as before, a malformed carrier fails loudly at the read or renders the unreadable line and is never coerced; on the fixture the inferred imports feed no module edge; the unresolved contract, classification, module-edge, cycle, `path`, `map`, stats and deps machinery remain exactly as before (no behavior change in their code); every RG-REQ-002 L01–L10 rule and every deps/imports surface remain exactly as before (no behavior change outside the inferred rows); daemon-runtime differs from HEAD by exactly its one test-fixture token (`\"resolved\"` → `\"static\"` at `explain_serve_tests/mod.rs:907`, A-1), its production code byte-identical (no behavior change), and its whole library suite passes with at least 788 tests",
+      "candidateSha256": "sha256:f9dfb049fb7dfc308fe76455351771a9fd3cef010fb294b93eecf76d9a4f5b8e",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED, exit 0. Suites: storage find_file_importers 5 passed; agent explain_symbol 20 passed; rgr presentation::explain 51 passed; repo-index integration python 5 passed. All four fixture files exist. The no-diff set is byte-identical. The daemon-runtime guard passed: exactly one changed file with one hunk `@@ -907 +907 @@`, `resolution: \"resolved\"` → `\"static\"`, and no untracked files. The daemon-runtime --lib suite ran 788 tests, all passed, 1 ignored, and type_focus_members_and_referenced_by_are_sqlite_delegated_on_green is ok.",
+        "supportingEvidence": [
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/PSI-C02.out",
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/psi-c02a.txt … psi-c02e.txt",
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/psi-c02-dr.diff"
+        ]
+      }
+    },
+    {
+      "checkId": "PSI-C03",
+      "obligationIds": [
+        "P-PSI-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo fmt --check -p repo-graph-indexer -p repo-graph-repo-index -p repo-graph-storage -p repo-graph-agent -p repo-graph-rgr -p repo-graph-daemon-runtime && { cargo clippy -p repo-graph-indexer -p repo-graph-repo-index -p repo-graph-storage -p repo-graph-agent -p repo-graph-rgr -p repo-graph-daemon-runtime --all-targets -- -D warnings > /tmp/psi-c03.txt 2>&1; rc=$?; tail -3 /tmp/psi-c03.txt; test $rc -eq 0; }",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "rustfmt and clippy (deny warnings, all targets) over the six touched crates — daemon-runtime touched only by A-1's one test-fixture token"
+      },
+      "expected": "exit 0: no formatting or lint debt enters with the candidate",
+      "candidateSha256": "sha256:f9dfb049fb7dfc308fe76455351771a9fd3cef010fb294b93eecf76d9a4f5b8e",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED, exit 0: `cargo fmt --check` and `clippy --all-targets -D warnings` over indexer, repo-index, storage, agent, rgr and daemon-runtime.",
+        "supportingEvidence": [
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/PSI-C03.out"
+        ]
+      }
+    },
+    {
+      "checkId": "PSI-C04",
+      "obligationIds": [
+        "RG-REQ-006-L04",
+        "RG-REQ-002-L11",
+        "RG-REQ-006-L05",
+        "RG-REQ-006-L12",
+        "P-PSI-01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "(cd rust && cargo build --release --bin rmap --bin rmapd > /tmp/psi-build.txt 2>&1; rc=$?; tail -1 /tmp/psi-build.txt; exit $rc) && test ! -e /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after && mkdir -p /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/psi-dj-index.txt 2> /tmp/psi-dj-index.txt.err; echo $? > /tmp/psi-dj-index.txt.rc ) && test \"$(cat /tmp/psi-dj-index.txt.rc)\" = 0 && test ! -e /private/tmp/PYTHON-SUBMODULE-IMPORT-1-fraktag-after && mkdir -p /private/tmp/PYTHON-SUBMODULE-IMPORT-1-fraktag-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-fraktag-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-fraktag-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" index > /tmp/psi-fr-index.txt 2> /tmp/psi-fr-index.txt.err; echo $? > /tmp/psi-fr-index.txt.rc ) && test \"$(cat /tmp/psi-fr-index.txt.rc)\" = 0 && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" explain 'BaseHandler' > /tmp/psi-dj-explain.txt 2> /tmp/psi-dj-explain.txt.err; echo $? > /tmp/psi-dj-explain.txt.rc ) && test \"$(cat /tmp/psi-dj-explain.txt.rc)\" = 0 && grep -qE '^Referenced by \\(1 files, \\+2 inferred — investigate\\)$' /tmp/psi-dj-explain.txt && grep -qE '^  - django/test/client\\.py$' /tmp/psi-dj-explain.txt && grep -qE '^  - django/core/handlers/wsgi\\.py  \\(inferred: python submodule — alternate django/core/handlers/__init__\\.py\\)$' /tmp/psi-dj-explain.txt && grep -qE '^  - django/core/handlers/asgi\\.py  \\(inferred: python submodule — alternate django/core/handlers/__init__\\.py\\)$' /tmp/psi-dj-explain.txt && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" imports django/core/handlers/wsgi.py > /tmp/psi-dj-imports.txt 2> /tmp/psi-dj-imports.txt.err; echo $? > /tmp/psi-dj-imports.txt.rc ) && test \"$(cat /tmp/psi-dj-imports.txt.rc)\" = 0 && grep -qE '^  django/core/handlers/base\\.py  depth=1  inferred$' /tmp/psi-dj-imports.txt && ! grep -q 'django/core/handlers/__init__.py' /tmp/psi-dj-imports.txt && python3 - <<'PY'\nimport sqlite3, json, os, re, collections\ndef db(root, frozen):\n    p = json.load(open(root + \"/registry.json\"))[\"repos\"][0][\"db_path\"]\n    if frozen:\n        w = p + \"-wal\"\n        assert not os.path.exists(w) or os.path.getsize(w) == 0, (\"manager root WAL not empty\", w)\n        return sqlite3.connect(\"file:\" + p + \"?immutable=1\", uri=True)\n    return sqlite3.connect(\"file:\" + p + \"?mode=ro\", uri=True)\ndef one(c, q, *a): return c.execute(q, a).fetchone()[0]\ndef normalizer(c):\n    [ru] = [r[0] for r in c.execute(\"select distinct repo_uid from snapshots\")]\n    def n(v):\n        if isinstance(v, str):\n            v = v.replace(ru, \"<repo>\")\n            if re.fullmatch(r\"indexer:[0-9]+\\.[0-9]+\\.[0-9]+\", v): v = \"<indexer>\"\n        return v\n    return lambda row: tuple(n(v) for v in row)\ndef same(label, x, y):\n    if x != y:\n        sx, sy = set(x), set(y)\n        raise AssertionError((label, len(x), len(y), \"before-only\", [r for r in x if r not in sy][:3], \"after-only\", [r for r in y if r not in sx][:3]))\n# Schema audit (RULE: every persisted column of a compared table is either compared or named here as excluded; a\n# reference column is compared THROUGH the referenced row's stable key or path). A schema-change TRIPWIRE: it fails when the\n# store's schema differs from this declaration; it does not by itself prove that each partitioned query exercises every\n# declared column — the queries below are written to (NODE_ROW, EDGE_ROW/OTHER, UNRES_ROW, and Q for the from-import edges).\nSCHEMA = {\n    \"nodes\": ({\"stable_key\", \"kind\", \"subtype\", \"name\", \"qualified_name\", \"file_uid\", \"parent_node_uid\", \"line_start\", \"col_start\", \"line_end\", \"col_end\", \"signature\", \"visibility\", \"doc_comment\", \"metadata_json\"}, {\"node_uid\", \"snapshot_uid\", \"repo_uid\"}),\n    \"edges\": ({\"source_node_uid\", \"target_node_uid\", \"type\", \"resolution\", \"extractor\", \"line_start\", \"col_start\", \"line_end\", \"col_end\", \"metadata_json\", \"is_type_only\"}, {\"edge_uid\", \"snapshot_uid\", \"repo_uid\"}),\n    \"unresolved_edges\": ({\"source_node_uid\", \"target_key\", \"type\", \"resolution\", \"extractor\", \"category\", \"classification\", \"classifier_version\", \"basis_code\", \"line_start\", \"col_start\", \"line_end\", \"col_end\", \"metadata_json\"}, {\"edge_uid\", \"snapshot_uid\", \"repo_uid\", \"observed_at\"}),\n}\ndef audit(c, schema):\n    for tname, (cmp, excl) in schema.items():\n        cols = {r[1] for r in c.execute(\"pragma table_info(%s)\" % tname)}\n        assert cols == cmp | excl and not cmp & excl, (\"schema audit: a column is neither compared nor declared excluded\", tname, sorted(cols ^ (cmp | excl)))\nNODE_ROW = \"select n.stable_key, f.path, n.kind, n.subtype, n.name, n.qualified_name, p.stable_key, n.parent_node_uid is not null, n.line_start, n.col_start, n.line_end, n.col_end, n.signature, n.visibility, n.doc_comment, n.metadata_json from nodes n left join files f on f.file_uid=n.file_uid left join nodes p on p.node_uid=n.parent_node_uid\"\nEDGE_ROW = \"select sn.stable_key, tn.stable_key, e.type, e.resolution, e.extractor, e.line_start, e.col_start, e.line_end, e.col_end, e.metadata_json, e.is_type_only from edges e join nodes sn on sn.node_uid=e.source_node_uid join nodes tn on tn.node_uid=e.target_node_uid\"\nUNRES_ROW = \"select sn.stable_key, u.target_key, u.type, u.resolution, u.extractor, u.category, u.classification, u.classifier_version, u.basis_code, u.line_start, u.col_start, u.line_end, u.col_end, u.metadata_json from unresolved_edges u join nodes sn on sn.node_uid=u.source_node_uid\"\ndef rows(c, q): n = normalizer(c); return sorted((n(r) for r in c.execute(q)), key=repr)\nB = db(\"/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before\", True)\nA = db(\"/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after\", False)\nQ = \"\"\"select sf.path, e.line_start, e.col_start, json_extract(e.metadata_json,'$.specifier'), json_extract(e.metadata_json,'$.importedName'), json_extract(e.metadata_json,'$.identifier'), sn.stable_key, tf.path, tn.stable_key, e.resolution, json_extract(e.metadata_json,'$.basis'), json_extract(e.metadata_json,'$.alternateTarget'), e.metadata_json, e.extractor, e.line_end, e.col_end, e.is_type_only from edges e join nodes sn on sn.node_uid=e.source_node_uid join files sf on sf.file_uid=sn.file_uid join nodes tn on tn.node_uid=e.target_node_uid join files tf on tf.file_uid=tn.file_uid where e.type='IMPORTS' and json_extract(e.metadata_json,'$.importedName') is not null\"\"\"\ndef edges(c):\n    n = normalizer(c); out, meta, fixed = {}, {}, {}\n    for sp, ln, col, spec, name, ident, ssk, tp, tsk, res, basis, alt, mj, ext, le, ce, ito in c.execute(Q):\n        k = (sp, ln, col, spec, name, ident, n((ssk,))[0]); assert k not in out, (\"edge identity not unique\", k); out[k] = (tp, n((tsk,))[0], res, basis, alt); meta[k] = json.loads(mj); fixed[k] = n((ext, le, ce, ito))\n    return out, meta, fixed\n# the amended RG-REQ-006-L04 rule, recomputed on the BEFORE store (SLICE_DOC 2.1 step 1)\npaths = set(r[0] for r in B.execute(\"select path from files\"))\ndefs = collections.defaultdict(set)\nfor name, path in B.execute(\"select n.name, f.path from nodes n join files f on f.file_uid=n.file_uid where n.kind='SYMBOL' and n.qualified_name=n.name\"): defs[path].add(name)\nbinds = {p: json.loads(j) for p, j in B.execute(\"select f.path, s.import_bindings_json from file_signals s join files f on f.file_uid=s.file_uid where s.import_bindings_json is not null\")}\ndef submodule_itself(b, d, y):\n    spec, imp = b.get(\"specifier\", \"\"), b.get(\"importedName\")\n    if imp is not None: return imp == y and spec in (\".\", d.replace(\"/\", \".\"))\n    return spec == d.replace(\"/\", \".\") + \".\" + y\ndef rule(tp, y):\n    if not tp.endswith(\"/__init__.py\"): return None\n    d = tp[:-len(\"/__init__.py\")]\n    sub = next((p for p in (d + \"/\" + y + \"/__init__.py\", d + \"/\" + y + \".py\") if p in paths), None)\n    if sub is None: return (tp, \"symbol\")\n    if y in defs.get(tp, ()): return (tp, \"init-defines\")\n    ys = [b for b in binds.get(tp, []) if b.get(\"identifier\") == y]\n    if any(not submodule_itself(b, d, y) for b in ys): return (tp, \"init-binds-other\")\n    return (sub, \"submodule-itself\" if ys else \"submodule\")\nassert one(B, \"select count(*) from snapshots\") == 1 and one(A, \"select count(*) from snapshots\") == 1, \"one snapshot per django store (PSI-C04 runs before PSI-C06's refresh)\"\naudit(B, SCHEMA); audit(A, SCHEMA)\n(EB, MB, XB), (EA, MA, XA) = edges(B), edges(A)\nassert set(EB) == set(EA), (\"from-import edge identities differ\", len(set(EB) ^ set(EA)))\nkinds = collections.Counter(); movers = {}\nfor k, (tp, tsk, res, basis, alt) in EB.items():\n    r = rule(tp, k[4])\n    if r is None: continue\n    kinds[r[1]] += 1\n    if r[0] != tp: movers[k] = (r[0], tp)\nprint(\"rule on the before-store:\", dict(kinds), \"| movers:\", len(movers), \"| from-import edges:\", len(EB))\nassert len(movers) == 1440, (\"before-root sanity: movers\", len(movers))\nsk = dict(A.execute(\"select f.path, n.stable_key from nodes n join files f on f.file_uid=n.file_uid where n.kind='FILE'\"))\nnA = normalizer(A); nsk = {p: nA((v,))[0] for p, v in sk.items()}\nbad = []\nfor k, got in EA.items():\n    if k in movers:\n        want = (movers[k][0], nsk[movers[k][0]], \"inferred\", \"python_submodule\", sk[movers[k][1]])\n    else:\n        want = (EB[k][0], EB[k][1], EB[k][2], None, None)\n    if got != want: bad.append((k, got, want))\nassert not bad, (\"edges not where the rule puts them\", len(bad), bad[:5])\nbad_fixed = [k for k in EB if XA[k] != XB[k]]\nassert not bad_fixed, (\"a from-import edge's extractor, line_end, col_end or is_type_only changed (only target, resolution and the two metadata keys may move)\", len(bad_fixed), [(k, XB[k], XA[k]) for k in bad_fixed[:3]])\nbad_meta = [k for k in EB if {x: y for x, y in MA[k].items() if x not in (\"alternateTarget\", \"basis\")} != MB[k] or (k in movers) != (\"alternateTarget\" in MA[k] and \"basis\" in MA[k]) or \"basis\" in MB[k] or \"alternateTarget\" in MB[k]]\nassert not bad_meta, (\"a from-import edge's metadata changed beyond the two added keys\", len(bad_meta), [(k, MB[k], MA[k]) for k in bad_meta[:3]])\nfor sp, ln in ((\"django/core/handlers/wsgi.py\", 5), (\"django/shortcuts.py\", 13)):\n    for k in EB:\n        if k[0] == sp and k[1] == ln: print(\"code-under-analysis\", sp + \":\" + str(ln), \"before\", EB[k], \"after\", EA[k])\ndef by_type(c): return sorted(c.execute(\"select e.type, e.resolution, count(*) from edges e join nodes a on a.node_uid=e.source_node_uid where not (e.type='IMPORTS' and a.kind='MODULE') group by 1,2\").fetchall())\ntb, ta = by_type(B), by_type(A)\nprint(\"edges by type/resolution (MODULE->MODULE excluded) before\", tb, \"after\", ta)\nwant_a = sorted([(t, r, n - (1440 if (t, r) == (\"IMPORTS\", \"static\") else 0)) for t, r, n in tb] + [(\"IMPORTS\", \"inferred\", 1440)])\nassert ta == want_a, (\"only the 1440 movers change certainty; no other edge moves\", ta, want_a)\nsame(\"an unresolved row changed (RG-REQ-006-L05)\", rows(B, UNRES_ROW), rows(A, UNRES_ROW))\nsame(\"a node changed (P-PSI-01)\", rows(B, NODE_ROW), rows(A, NODE_ROW))\nOTHER = EDGE_ROW + \" where not (e.type='IMPORTS' and (sn.kind='MODULE' or json_extract(e.metadata_json,'$.importedName') is not null))\"\nsame(\"an edge outside the from-imports and the persisted module graph changed (P-PSI-01)\", rows(B, OTHER), rows(A, OTHER))\ndef own(c): return dict(c.execute(\"select f.path, mn.qualified_name from edges e join nodes mn on mn.node_uid=e.source_node_uid join nodes fn on fn.node_uid=e.target_node_uid join files f on f.file_uid=fn.file_uid where e.type='OWNS' and mn.kind='MODULE'\"))\ndef derived(c):\n    o = own(c); s = set()\n    for sp, tp, res in c.execute(\"select sf.path, tf.path, e.resolution from edges e join nodes a on a.node_uid=e.source_node_uid join files sf on sf.file_uid=a.file_uid join nodes b on b.node_uid=e.target_node_uid join files tf on tf.file_uid=b.file_uid where e.type='IMPORTS' and a.kind='FILE' and b.kind='FILE'\"):\n        if res == \"inferred\": continue\n        m1, m2 = o.get(sp), o.get(tp)\n        if m1 and m2 and m1 != m2: s.add((m1, m2))\n    return s\ndef stored(c): return c.execute(\"select a.qualified_name, b.qualified_name from edges e join nodes a on a.node_uid=e.source_node_uid join nodes b on b.node_uid=e.target_node_uid where e.type='IMPORTS' and a.kind='MODULE' and b.kind='MODULE'\").fetchall()\nsb, sa = stored(B), stored(A)\nassert len(sb) == len(set(sb)) == 2451 and set(sb) == derived(B), \"before-root sanity: persisted module edges\"\nassert len(sa) == len(set(sa)) and set(sa) == derived(A), \"an inferred import fed the persisted module graph (RG-REQ-002-L11)\"\nprint(\"persisted MODULE->MODULE IMPORTS before\", len(sb), \"after\", len(sa), \"| lost\", len(set(sb) - set(sa)), \"gained\", len(set(sa) - set(sb)))\nassert set(sa) <= set(sb), \"a module pair appeared that no certain import supports\"\ndef importers(c, p): return sorted(set(c.execute(\"select sf.path, e.resolution from edges e join nodes tn on tn.node_uid=e.target_node_uid join files tf on tf.file_uid=tn.file_uid join nodes sn on sn.node_uid=e.source_node_uid join files sf on sf.file_uid=sn.file_uid where e.type='IMPORTS' and tf.path=?\", (p,))))\nprint(\"base.py importers before\", importers(B, \"django/core/handlers/base.py\"), \"after\", importers(A, \"django/core/handlers/base.py\"))\nassert importers(A, \"django/core/handlers/base.py\") == [(\"django/core/handlers/asgi.py\", \"inferred\"), (\"django/core/handlers/wsgi.py\", \"inferred\"), (\"django/test/client.py\", \"static\")]\nfor label, c in ((\"django before\", B), (\"django after\", A)):\n    print(label, \"nodes\", one(c, \"select count(*) from nodes\"), \"edges\", one(c, \"select count(*) from edges\"), \"unresolved\", one(c, \"select count(*) from unresolved_edges\"), \"toolchain\", one(c, \"select toolchain_json from snapshots\"))\ndef dump(c): return rows(c, NODE_ROW), rows(c, EDGE_ROW), rows(c, UNRES_ROW)\nFB, FA = db(\"/private/tmp/PYTHON-SUBMODULE-IMPORT-1-fraktag-before\", True), db(\"/private/tmp/PYTHON-SUBMODULE-IMPORT-1-fraktag-after\", False)\nassert one(FB, \"select count(*) from snapshots\") == 1 and one(FA, \"select count(*) from snapshots\") == 1, \"one snapshot per FRAKTAG store\"\naudit(FB, SCHEMA); audit(FA, SCHEMA)\nnb_, eb_, ub_ = dump(FB); na_, ea_, ua_ = dump(FA)\nprint(\"fraktag before nodes/edges/unresolved\", len(nb_), len(eb_), len(ub_), \"after\", len(na_), len(ea_), len(ua_))\nsame(\"FRAKTAG nodes differ - the Python stage leaked\", nb_, na_)\nsame(\"FRAKTAG edges differ - the Python stage leaked\", eb_, ea_)\nsame(\"FRAKTAG unresolved rows differ - the Python stage leaked\", ub_, ua_)\nprint(\"PSI-C04 store oracles ok\")\nPY",
+        "cwd": ".",
+        "environment": "the candidate binary indexes /Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django (4d455ae) and /Users/apple/Documents/APLICATII BIJUTERIE/FRAKTAG into NEW isolated `-after` roots, each created only when absent (never an unconditional delete), under RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off (builder-owned, deleted in PSI-C05); the manager's `-before` roots /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before and /private/tmp/PYTHON-SUBMODULE-IMPORT-1-fraktag-before (re-captured 2026-09-27 by the release binary of HEAD e3359966 after the 2026-09-23 captures were lost to a /private/tmp purge — OC-1; every literal below re-measured on the re-captured stores, unchanged) are READ with sqlite3 only, `immutable=1` after asserting their WAL empty, located through their own registry.json, never served, never reindexed; the oracle recomputes the amended L04 rule on the BEFORE store and checks every from-import edge landed where the rule puts it",
+        "inputs": "BEFORE (measured 2026-09-23; re-measured 2026-09-27 on the re-captured /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before, `immutable=1`, every figure unchanged): 17,614 IMPORTS edges (15,163 FILE→FILE + 2,451 persisted MODULE→MODULE), no `inferred` edge of any type, 3,056 unresolved IMPORTS; 15,068 from-import edges (unique by source path, line, column, specifier, importedName, identifier), 6,770 of them landing on an `__init__.py`; the rule computed on the before-store: 5,330 name a symbol (no `X/Y/__init__.py` or `X/Y.py`), 0 have an init that defines `Y`, 0 an init that binds `Y` to anything but the submodule, 1,424 an init with no binding of `Y`, 16 an init whose only bindings of `Y` are the submodule itself (`django/db/models/__init__.py:2` `from django.db.models import signals` ×10 importers; `django/conf/__init__.py` `global_settings` ×2; `django/template/__init__.py` `autoreload` ×2; `django/tasks/__init__.py` `checks`, `signals` ×1 each) — so exactly 1,440 movers, 985 of them onto a subpackage init (`django/db/__init__.py` loses 709, mostly `from django.db import models`); `django/core/handlers/wsgi.py:5` `from django.core.handlers import base` → `django/core/handlers/__init__.py` static; `django/shortcuts.py:13` `from django.template import loader` → `django/template/__init__.py` static; `django/core/handlers/base.py` is imported by ONE file (`django/test/client.py`, static); `explain BaseHandler` `Referenced by (1 files)` and `imports django/core/handlers/wsgi.py` listing `django/core/handlers/__init__.py  depth=1  static` (the manager's 2026-09-23 captures on the before-root; not re-taken — the store facts behind them re-measured unchanged 2026-09-27). AFTER (predicted; the product is the truth — a differing literal is a STOP-and-report naming the import line, its init's facts and the probed keys): every from-import edge where the rule puts it — the 1,440 movers on `X/Y/__init__.py` / `X/Y.py` with `resolution: inferred`, `basis: python_submodule`, `alternateTarget` = the init's stable key; every other from-import edge with its before target and resolution and neither key; exactly 1,440 `inferred` edges in the store, all IMPORTS; every other edge type/resolution count unchanged; ROW-LEVEL multisets unchanged (the repository uid normalized to `<repo>` and an `indexer:x.y.z` value to `<indexer>`, because the two roots carry different repo uids and the orchestrator-derived edges carry the bumped indexer version by design; only row identity columns — `node_uid`, `edge_uid`, `snapshot_uid`, `file_uid` — and the freshness field `observed_at` are excluded): every unresolved row (source node's stable key, target key, type, resolution, extractor, category, classification, classifier version, basis, span, metadata), every node (stable key, file path, kind, subtype, name, qualified name, parent node's stable key and whether a parent is recorded, span, signature, visibility, doc comment, metadata), every edge that is neither a from-import nor a persisted MODULE→MODULE import (source and target nodes' stable keys, type, resolution, extractor, span, metadata, `is_type_only`), and every from-import edge — identified by its source file, span, specifier, imported name, identifier AND source node's stable key — with its target file and target node's stable key, its extractor, `line_end`, `col_end` and `is_type_only` unchanged, and its metadata except the two added keys (`alternateTarget`, `basis` present exactly on the movers); a schema-change tripwire asserts, on all four stores, that every persisted column of `nodes`, `edges` and `unresolved_edges` is declared either compared (a reference column through the referenced row's stable key or path) or excluded (`node_uid`, `edge_uid`, `snapshot_uid`, `repo_uid`, `observed_at`), so a store with an undeclared column stops the check — it checks the declaration, not that each query exercises every declared column; the queries are written to (NODE_ROW, EDGE_ROW/OTHER, UNRES_ROW, and Q for the from-import edges); the persisted MODULE→MODULE IMPORTS edges equal the pairs derived from the store's own non-inferred FILE→FILE imports and ownership (RG-REQ-002-L11: an inferred import is never a certain module edge) — REPORTED count, predicted 2,451 → 2,084 (367 module pairs were fed only by movers; the stored edge total 84,985 → 84,618 accordingly) and no new pair; `base.py`'s importers exactly {asgi.py inferred, wsgi.py inferred, client.py static}; `explain BaseHandler` `Referenced by (1 files, +2 inferred — investigate)` with `django/test/client.py` and then the two inferred rows naming the alternate `django/core/handlers/__init__.py`; `imports django/core/handlers/wsgi.py` lists `django/core/handlers/base.py  depth=1  inferred` and no longer the init. FRAKTAG (TypeScript/JavaScript plus four Python files, none in a package — no `__init__.py`, so the stage has no input): node, edge and unresolved row multisets identical under the same row-level rule and normalization (1,402 / 801 / 1,970 rows on the before-store)."
+      },
+      "expected": "exit 0: on the corpus that motivated RC-7 every from-package import of a module file lands on that file as an inferred, investigable fact with the package init named as its alternate, every init that binds the name keeps its static target, no inferred import enters the persisted module graph (the module-pair count falls — stated, not hidden), `explain`'s Referenced-by and `imports <file>` show the certainty, every unresolved row, every node and every edge outside the from-imports and the derived module graph remain exactly as before row by row (no behavior change), and a corpus with no Python package is identical row by row (no behavior change)",
+      "candidateSha256": "sha256:f9dfb049fb7dfc308fe76455351771a9fd3cef010fb294b93eecf76d9a4f5b8e",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED, exit 0. The rule recomputed on the before-store gives symbol 5330, submodule 1424, submodule-itself 16: 1440 movers out of 15068 from-import edges. IMPORTS went from 15163 static to 13723 static plus 1440 inferred; every other type/resolution count is unchanged. Persisted MODULE→MODULE edges went from 2451 to 2084 (367 lost, none gained). Every unresolved row, every node and every other edge is unchanged row by row. base.py importers are now {asgi.py inferred, wsgi.py inferred, client.py static}. The explain and imports captures match the expected literals. FRAKTAG is identical (1402 nodes, 801 edges, 1970 unresolved). The command printed `PSI-C04 store oracles ok`.",
+        "supportingEvidence": [
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/PSI-C04.out",
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/psi-dj-explain.txt",
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/psi-dj-imports.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "PSI-C06",
+      "obligationIds": [
+        "RG-REQ-001-L09",
+        "RG-REQ-006-L04",
+        "RG-REQ-002-L11"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "test -x rust/target/release/rmap && test -d /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" refresh > /tmp/psi-dj-refresh.txt 2> /tmp/psi-dj-refresh.txt.err; echo $? > /tmp/psi-dj-refresh.txt.rc ) && test \"$(cat /tmp/psi-dj-refresh.txt.rc)\" = 0 && python3 - <<'PY'\nimport sqlite3, json\np = json.load(open(\"/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after/registry.json\"))[\"repos\"][0][\"db_path\"]\nassert p.startswith(\"/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after/\"), (\"after-root registry points outside the after-root\", p)\nc = sqlite3.connect(\"file:\" + p + \"?mode=ro\", uri=True)\nsnaps = c.execute(\"select snapshot_uid, kind, parent_snapshot_uid, status from snapshots order by created_at\").fetchall()\nassert len(snaps) == 2 and snaps[0][1] == \"full\" and snaps[1][1] == \"refresh\" and snaps[1][2] == snaps[0][0] and all(s[3] == \"ready\" for s in snaps), (\"one full index, then one delta refresh of it\", snaps)\nF, R = snaps[0][0], snaps[1][0]\nSCHEMA = {\n    \"file_versions\": ({\"file_uid\", \"content_hash\", \"ast_hash\", \"extractor\", \"parse_status\", \"size_bytes\", \"line_count\"}, {\"snapshot_uid\", \"indexed_at\"}),\n    \"file_signals\": ({\"file_uid\", \"import_bindings_json\", \"package_dependencies_json\", \"tsconfig_aliases_json\"}, {\"snapshot_uid\"}),\n    \"edges\": ({\"source_node_uid\", \"target_node_uid\", \"type\", \"resolution\", \"extractor\", \"line_start\", \"col_start\", \"line_end\", \"col_end\", \"metadata_json\", \"is_type_only\"}, {\"edge_uid\", \"snapshot_uid\", \"repo_uid\"}),\n    \"unresolved_edges\": ({\"source_node_uid\", \"target_key\", \"type\", \"resolution\", \"extractor\", \"category\", \"classification\", \"classifier_version\", \"basis_code\", \"line_start\", \"col_start\", \"line_end\", \"col_end\", \"metadata_json\"}, {\"edge_uid\", \"snapshot_uid\", \"repo_uid\", \"observed_at\"}),\n    \"nodes\": ({\"stable_key\", \"kind\", \"subtype\", \"name\", \"qualified_name\", \"file_uid\", \"parent_node_uid\", \"line_start\", \"col_start\", \"line_end\", \"col_end\", \"signature\", \"visibility\", \"doc_comment\", \"metadata_json\"}, {\"node_uid\", \"snapshot_uid\", \"repo_uid\"}),\n}\nfor tname, (cmp, excl) in SCHEMA.items():\n    cols = {r[1] for r in c.execute(\"pragma table_info(%s)\" % tname)}\n    assert cols == cmp | excl and not cmp & excl, (\"schema audit: a column is neither compared nor declared excluded\", tname, sorted(cols ^ (cmp | excl)))\ndef rows(q, u): return sorted(c.execute(q, (u,)).fetchall(), key=repr)\ndef same(label, q):\n    x, y = rows(q, F), rows(q, R)\n    if x != y:\n        sx, sy = set(x), set(y)\n        raise AssertionError((label, len(x), len(y), \"full-only\", [r for r in x if r not in sy][:3], \"refresh-only\", [r for r in y if r not in sx][:3]))\n    return len(x)\nn_files = same(\"file versions differ: the tree changed or copy-forward altered a file (not a no-change refresh)\", \"select v.file_uid, v.content_hash, v.ast_hash, v.extractor, v.parse_status, v.size_bytes, v.line_count from file_versions v where v.snapshot_uid = ?\")\nn_sig = same(\"file_signals differ: the resolver and classifier inputs are not the full index's\", \"select s.file_uid, s.import_bindings_json, s.package_dependencies_json, s.tsconfig_aliases_json from file_signals s where s.snapshot_uid = ?\")\nn_edges = same(\"IMPORTS/CALLS edges differ between the full index and the refresh\", \"select s.stable_key, t.stable_key, e.type, e.resolution, e.extractor, e.line_start, e.col_start, e.line_end, e.col_end, e.metadata_json, e.is_type_only from edges e join nodes s on s.node_uid = e.source_node_uid join nodes t on t.node_uid = e.target_node_uid where e.snapshot_uid = ? and e.type in ('IMPORTS', 'CALLS')\")\nn_unres = same(\"unresolved rows differ between the full index and the refresh\", \"select s.stable_key, u.target_key, u.type, u.resolution, u.extractor, u.category, u.classification, u.classifier_version, u.basis_code, u.line_start, u.col_start, u.line_end, u.col_end, u.metadata_json from unresolved_edges u join nodes s on s.node_uid = u.source_node_uid where u.snapshot_uid = ?\")\ninf = c.execute(\"select count(*) from edges where snapshot_uid = ? and resolution = 'inferred'\", (R,)).fetchone()[0]\ndef rep_rows(q): return rows(q, F) == rows(q, R)\nprint(\"REPORTED (not asserted; outside D-PSI-REFRESH-SIGNALS-1's IMPORTS/CALLS scope): nodes equal\", rep_rows(\"select n.stable_key, n.file_uid, n.kind, n.subtype, n.name, n.qualified_name, p.stable_key, n.parent_node_uid is not null, n.line_start, n.col_start, n.line_end, n.col_end, n.signature, n.visibility, n.doc_comment, n.metadata_json from nodes n left join nodes p on p.node_uid = n.parent_node_uid where n.snapshot_uid = ?\"), \"| other edge types equal\", rep_rows(\"select s.stable_key, t.stable_key, e.type, e.resolution, e.extractor, e.line_start, e.col_start, e.line_end, e.col_end, e.metadata_json, e.is_type_only from edges e join nodes s on s.node_uid = e.source_node_uid join nodes t on t.node_uid = e.target_node_uid where e.snapshot_uid = ? and e.type not in ('IMPORTS', 'CALLS')\"))\nprint(\"PSI-C06 OK refresh parity:\", n_files, \"file versions,\", n_sig, \"file_signals rows,\", n_edges, \"IMPORTS+CALLS edges (\", inf, \"inferred ),\", n_unres, \"unresolved rows\")\nPY",
+        "cwd": ".",
+        "environment": "the django after-root /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after created by PSI-C04 (candidate binary, stdio, enrichment and retention off), refreshed once with no working-tree change; its store is located through its own registry.json and read `mode=ro` after the stdio daemon exits (never `immutable=1`: a just-served store may hold WAL pages)",
+        "inputs": "REFRESH PARITY (D-PSI-REFRESH-SIGNALS-1 = A; RG-REQ-001-L09): after PSI-C04's full index of django, `rmap refresh` with no change takes the delta path (a `refresh` snapshot whose parent is the full one; every file copied forward — orchestrator.rs falls back to a full index only when nothing is copied, :1758) and re-resolves every copied-forward extraction edge. Compared between the two snapshots, each as a row-level multiset (only row identity — `node_uid`, `edge_uid`, `snapshot_uid` — and the freshness fields `indexed_at`/`observed_at` excluded; same root, so no normalization): the INPUTS — every file version (file uid, content hash, AST hash, extractor, parse status, size, line count: proves the tree did not change and nothing was re-extracted differently) and every `file_signals` row with all its payload columns (file uid, import bindings, package dependencies, tsconfig aliases: proves the copied signals are the full index's, neither substituted nor duplicated); the OUTPUTS — every IMPORTS and CALLS edge (source and target stable keys, type, resolution, extractor, span, metadata incl. `basis`/`alternateTarget`, `is_type_only`) and every unresolved row (source stable key, target key, type, resolution, extractor, category, classification, classifier version, basis, span, metadata incl. any candidate evidence). An executable schema audit asserts that every persisted column of `file_versions`, `file_signals`, `edges`, `unresolved_edges` and `nodes` is compared (a reference column through the referenced row's stable key) or one of the declared exclusions (`snapshot_uid`, `repo_uid`, `node_uid`, `edge_uid`, `indexed_at`, `observed_at`). Node parity (stable key, file, parent node's stable key, span, signature, metadata …) and other-edge-type parity are REPORTED, not asserted (outside the record's IMPORTS/CALLS scope; a difference there is stated in the report, not hidden). The oracle discriminates: without the load a no-change refresh resolves every file with an EMPTY `import_bindings_by_file` and classifies with empty per-file signals (orchestrator.rs:1007/:1098; the bindings drive the namespace- and named-import CALLS stages, resolver.rs:935/:1127) — INFERRED from the source, not run on HEAD (no rmap on a HEAD binary in this item). On the Python rule itself django has no init that binds a submodule's name to something else (0 on the before-store, PSI-C04), so the rule's refresh discrimination is the orchestrator test of PSI-C01; this check proves the real SQLite copy-forward and read path end to end."
+      },
+      "expected": "exit 0 and `PSI-C06 OK`: a no-change delta refresh of django starts from the same inputs as its full index (identical file versions and identical `file_signals` rows, payloads included) and yields the same IMPORTS and CALLS edges (endpoints, type, resolution, extractor, span, metadata including every inferred edge's `basis` and `alternateTarget`) and the same unresolved rows (category, classification, basis, span and metadata) row by row — for these facts a refresh yields what a full index yields (RG-REQ-001-L09), and the inferred submodule imports keep their certainty and alternate across a refresh (RG-REQ-002-L11)",
+      "candidateSha256": "sha256:f9dfb049fb7dfc308fe76455351771a9fd3cef010fb294b93eecf76d9a4f5b8e",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED, exit 0. The command printed `PSI-C06 OK refresh parity: 3019 file versions, 3015 file_signals rows, 81601 IMPORTS+CALLS edges ( 1440 inferred ), 90640 unresolved rows`. REPORTED, not asserted: nodes are equal, and the other edge types are equal.",
+        "supportingEvidence": [
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/PSI-C06.out"
+        ]
+      }
+    },
+    {
+      "checkId": "PSI-C07",
+      "obligationIds": [
+        "RG-REQ-001-L06",
+        "RG-REQ-011-L06",
+        "P-PSI-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "git cat-file -e HEAD:docs/assurance/TOOLCHAIN-STALENESS-1/implementation-review.json && git show HEAD:docs/assurance/TOOLCHAIN-STALENESS-1/implementation-review.json | python3 -c \"import json,sys; d=json.load(sys.stdin); sys.exit(0 if (d.get('workItemId'), d.get('result')) == ('TOOLCHAIN-STALENESS-1', 'accepted') else 1)\" && test -x rust/target/release/rmap && test -d /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after && test ! -e /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale && M0=\"$(shasum -a 256 /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before/registry.json /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before/databases/*)\" && cp -R /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale && sed -i '' 's#/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before/#/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale/#g' /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale/registry.json && ! grep -q '/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before' /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale/registry.json && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale RMAP_SOCKET_PATH=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" orient > /tmp/psi-stale-orient.txt 2> /tmp/psi-stale-orient.txt.err; echo $? > /tmp/psi-stale-orient.txt.rc ) && test \"$(cat /tmp/psi-stale-orient.txt.rc)\" = 0 && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale RMAP_SOCKET_PATH=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" check > /tmp/psi-stale-check.txt 2> /tmp/psi-stale-check.txt.err; echo $? > /tmp/psi-stale-check.txt.rc ) && echo \"REPORTED stale-root check exit $(cat /tmp/psi-stale-check.txt.rc)\" && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale RMAP_SOCKET_PATH=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" check --json > /tmp/psi-stale-check.json 2> /tmp/psi-stale-check.json.err; echo $? > /tmp/psi-stale-check.json.rc ) && echo \"REPORTED stale-root check --json exit $(cat /tmp/psi-stale-check.json.rc)\" && ( cd '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django' && export RMAP_STATE_ROOT=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after RMAP_SOCKET_PATH=/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after/d.sock RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off && PATH=\"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release:$PATH\" \"/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap\" check --json > /tmp/psi-after-check.json 2> /tmp/psi-after-check.json.err; echo $? > /tmp/psi-after-check.json.rc ) && echo \"REPORTED after-root check exit $(cat /tmp/psi-after-check.json.rc)\" && test \"$M0\" = \"$(shasum -a 256 /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before/registry.json /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before/databases/*)\" && rm -rf /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale && test ! -e /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale && python3 - <<'PY'\nimport json, os, re, sqlite3\nsrc = open(\"rust/crates/indexer/src/orchestrator.rs\", encoding=\"utf-8\").read()\n[C] = re.findall(r'^pub const INDEXER_VERSION: &str = \"(indexer:[0-9]+\\.[0-9]+\\.[0-9]+)\";$', src, re.M)\ndef ready_stamp(root, frozen):\n    p = json.load(open(root + \"/registry.json\"))[\"repos\"][0][\"db_path\"]\n    assert p.startswith(root + \"/\"), (\"the registry points outside its root\", root, p)\n    if frozen:\n        w = p + \"-wal\"\n        assert not os.path.exists(w) or os.path.getsize(w) == 0, (\"manager root WAL not empty: an immutable read would miss it\", w)\n    c = sqlite3.connect(\"file:\" + p + (\"?immutable=1\" if frozen else \"?mode=ro\"), uri=True)\n    return json.loads(c.execute(\"select toolchain_json from snapshots where status='ready' order by created_at desc, snapshot_uid desc limit 1\").fetchone()[0])\nfresh = json.load(open(\"/tmp/psi-after-check.json\"))[\"value\"][\"toolchain_staleness\"]\nassert fresh == {\"state\": \"current\"}, (\"the candidate's own full index and refresh must read current\", fresh)\nold = ready_stamp(\"/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before\", True)\nnew = ready_stamp(\"/private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after\", False)\nassert old[\"indexer\"] == \"indexer:1.0.0\" and new[\"indexer\"] == C != old[\"indexer\"], (\"the before-store is stamped indexer:1.0.0 and the candidate's store carries the candidate's INDEXER_VERSION\", old, new, C)\ndef comps(st): return [tuple(e.split(\":\", 1)) for e in st[\"extractors\"] + [st[\"indexer\"]]]\nov, nv = dict(comps(old)), dict(comps(new))\n# the differences the shipped comparison (agent/src/dto/toolchain_staleness.rs compare_toolchain_stamps) yields for these two stamps:\n# running components in stamp order whose version differs, then stamp-only components\nwant = [{\"component\": n, \"snapshot_version\": ov.get(n), \"current_version\": v} for n, v in comps(new) if ov.get(n) != v] + [{\"component\": n, \"snapshot_version\": v, \"current_version\": None} for n, v in comps(old) if n not in nv]\niv = C.split(\":\", 1)[1]\nassert {\"component\": \"indexer\", \"snapshot_version\": \"1.0.0\", \"current_version\": iv} in want, (\"the indexer difference\", want)\nprint(\"REPORTED differences other than the indexer (the before-store's stamp vs the candidate's; PSI-C01 freezes the extractors, so non-empty only if HEAD moved an extractor after the 2026-09-27 capture):\", [x for x in want if x[\"component\"] != \"indexer\"])\nside = lambda v: \"absent\" if v is None else v\nline = \"index toolchain differs from running rmap (\" + \", \".join(\"%s %s → %s\" % (x[\"component\"], side(x[\"snapshot_version\"]), side(x[\"current_version\"])) for x in want) + \") — run rmap repo rebuild \"\nfor f in (\"/tmp/psi-stale-orient.txt\", \"/tmp/psi-stale-check.txt\"):\n    text = open(f, encoding=\"utf-8\").read()\n    assert re.search(re.escape(line) + r\"\\S.*$\", text, re.M), (\"the RG-REQ-001-L06 toolchain line (disabled form) is missing\", f, line, text[-800:])\ndef walk(v):\n    if isinstance(v, dict):\n        yield v\n        for x in v.values(): yield from walk(x)\n    elif isinstance(v, list):\n        for x in v: yield from walk(x)\nenv = json.load(open(\"/tmp/psi-stale-check.json\"))\nts = env[\"value\"][\"toolchain_staleness\"]\nassert ts.get(\"state\") == \"stale\" and ts.get(\"differences\") == want, (\"the copied store's toolchain_staleness\", ts, want)\nassert ts.get(\"reindex\") == \"disabled\" and ts.get(\"reindex_disabled_reason\") and \"reindex_failure\" not in ts, (\"stdio with RMAP_AUTO_REINDEX=off reports disabled with its reason\", ts)\nconds = [x for x in walk(env) if x.get(\"code\") == \"TOOLCHAIN_STALENESS\"]\nassert not conds, (\"the signal is verdict-neutral: no TOOLCHAIN_STALENESS condition\", conds)\nrc_h, rc_j = open(\"/tmp/psi-stale-check.txt.rc\").read().strip(), open(\"/tmp/psi-stale-check.json.rc\").read().strip()\nassert rc_h == rc_j, (\"the human and JSON check exits agree\", rc_h, rc_j)\nprint(\"PSI-C07 OK stale:\", ts[\"differences\"], \"| reindex\", ts[\"reindex\"], \"(\" + ts[\"reindex_disabled_reason\"] + \") | check exit\", rc_h, \"| after-root:\", fresh)\nPY",
+        "cwd": ".",
+        "environment": "a builder-owned `cp -R` copy /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale of the manager's django before-root /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before (re-captured 2026-09-27 by the release binary of HEAD e3359966 — OC-1), its registry `db_path` rewritten to the copy (the CAM-A04 shape; the manager's root's registry and database digests asserted unchanged afterwards; the copy deleted by this check and again by PSI-C05 if this check stopped early), served by the candidate under stdio with enrichment, automatic re-index and retention off; plus `check --json` on the builder's django after-root (after PSI-C06's refresh); the two roots' ready-snapshot stamps read with sqlite3 (the manager's root `immutable=1` after asserting its WAL empty, the after-root `mode=ro`); gated on TOOLCHAIN-STALENESS-1's accepted implementation-review record at HEAD",
+        "inputs": "TOOLCHAIN LINE (RG-REQ-001-L06 as amended by RG-BOOTSTRAP-INPUT-10 and shipped by TOOLCHAIN-STALENESS-1, 23d12a9b; D-STALE-SIGNAL-1; OC-2): the before-store has one `full` snapshot stamped `{\"extractors\":[\"ts-core:0.2.0\",\"c-core:0.1.0\",\"cpp-core:0.2.0\",\"java-core:0.1.0\",\"python-core:0.1.0\",\"rust-core:0.2.0\"],\"indexer\":\"indexer:1.0.0\"}` (OBSERVED 2026-09-27, `immutable=1`). This slice owns the `INDEXER_VERSION` bump (PSI-C01); what an existing store then shows and does is TOOLCHAIN-STALENESS-1's under RG-REQ-001-L06 and is not restated. This check proves one case — the copy served by the candidate over stdio with `RMAP_AUTO_REINDEX=off`: `orient` (exit 0) and `check` render `index toolchain differs from running rmap (indexer 1.0.0 → 1.1.0) — run rmap repo rebuild <path>` (the renderer's form, rgr/src/presentation/toolchain_staleness.rs: `<component> <snapshot version> → <current version>`, versions without the `indexer:` prefix; `1.1.0` stands for the candidate's constant; the `<path>` slot matched as any non-empty text), where the component list is the one the shipped comparison yields for the before-store's stamp and the candidate's — read from the builder's after-root, whose `check --json` must read `{\"state\":\"current\"}` — so with the extractors frozen by PSI-C01 it is the `indexer` alone, and any other difference (possible only if HEAD moved an extractor after the 2026-09-27 capture) is REPORTED by name and asserted equal to the two stamps' difference; `check --json`'s `value.toolchain_staleness` has `state` `stale`, `differences` exactly that list (so it contains `{\"component\":\"indexer\",\"snapshot_version\":\"1.0.0\",\"current_version\":\"1.1.0\"}`), `reindex` `disabled` with its `reindex_disabled_reason` and no `reindex_failure`; NO `TOOLCHAIN_STALENESS` condition anywhere in the envelope (the signal is verdict-neutral); the `check` and `check --json` exits are REPORTED and must agree. Control: the builder's own after-root (PSI-C04's full index then PSI-C06's refresh, both by the candidate) reads `{\"state\":\"current\"}`."
+      },
+      "expected": "exit 0 and `PSI-C07 OK`: an existing store written by the previous indexer, served by the candidate with the automatic re-index disabled, states on `orient` and `check` that its index toolchain differs from the running rmap (`indexer 1.0.0 → ` the candidate's version) and names the rebuild, and `check --json` carries the same differences with `reindex` disabled — without changing `check`'s verdict or exit code (no `TOOLCHAIN_STALENESS` condition; the human and JSON exits agree): RG-REQ-001-L06 as amended by RG-BOOTSTRAP-INPUT-10, the observable consequence of this slice's version bump; a store written by the candidate reads current; the manager's before-root is byte-identical afterwards and the copy is gone (RG-REQ-011-L06)",
+      "candidateSha256": "sha256:f9dfb049fb7dfc308fe76455351771a9fd3cef010fb294b93eecf76d9a4f5b8e",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED, exit 0. On the stale copy, orient and check both render `index toolchain differs from running rmap (indexer 1.0.0 → 1.1.0) — run rmap repo rebuild '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django'`. check --json gives state stale with differences [indexer 1.0.0→1.1.0] and reindex disabled (RMAP_AUTO_REINDEX=off), with no TOOLCHAIN_STALENESS condition. check and check --json both exit 0. The after-root reads {state: current}. The manager's before-root digests are unchanged, and the copy was removed. The command printed `PSI-C07 OK`.",
+        "supportingEvidence": [
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/PSI-C07.out",
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/psi-stale-orient.txt",
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/psi-stale-check.json"
+        ]
+      }
+    },
+    {
+      "checkId": "PSI-C05",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "P-PSI-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "test \"$(grep -E '^registry-before [0-9a-f]{64}$' .agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/build-progress.md | tail -1 | cut -d' ' -f2)\" = \"$(shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -d' ' -f1)\" && { PIDS=$(pgrep -x rmapd | paste -sd, -); [ -z \"$PIDS\" ] || ! ps -o command= -p \"$PIDS\" | grep -v '/\\.local/bin/rmapd' | grep -q .; } && rm -rf /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after /private/tmp/PYTHON-SUBMODULE-IMPORT-1-fraktag-after /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale && ! test -e /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-after && ! test -e /private/tmp/PYTHON-SUBMODULE-IMPORT-1-fraktag-after && ! test -e /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-stale && ls -d /private/tmp/PYTHON-SUBMODULE-IMPORT-1-django-before /private/tmp/PYTHON-SUBMODULE-IMPORT-1-fraktag-before >/dev/null && ! git status --short | grep -vE '^[ MA?][ MA?] (rust/crates/indexer/src/resolver\\.rs|rust/crates/indexer/src/orchestrator\\.rs|rust/crates/repo\\-index/src/compose\\.rs|rust/crates/repo\\-index/tests/integration\\.rs|rust/crates/repo\\-index/tests/fixtures/python/package\\-import/pkg/__init__\\.py|rust/crates/repo\\-index/tests/fixtures/python/package\\-import/pkg/base\\.py|rust/crates/repo\\-index/tests/fixtures/python/package\\-import/pkg/models/__init__\\.py|rust/crates/repo\\-index/tests/fixtures/python/package\\-import/consumer/app\\.py|rust/crates/storage/src/agent_impl\\.rs|rust/crates/storage/tests/agent_impl\\.rs|rust/crates/agent/src/storage_port\\.rs|rust/crates/agent/src/dto/signal\\.rs|rust/crates/agent/src/explain/mod\\.rs|rust/crates/agent/tests/explain_symbol\\.rs|rust/crates/rgr/src/presentation/explain_sections\\.rs|rust/crates/rgr/src/presentation/explain\\.rs|rust/crates/daemon\\-runtime/src/explain_serve_tests/mod\\.rs)$' | grep -q . && git diff --check",
+        "cwd": ".",
+        "environment": "candidate tree, after every other check",
+        "inputs": "the full sha256 of the operator registry recorded as `registry-before <digest>` in build-progress.md at step 0 equals the current one; no stray isolated daemon; the builder-owned `-after` roots and the `-stale` copy removed; the two manager-owned `-before` roots kept; `git status --short` names only the seventeen candidate paths (the seventeenth, `rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs`, by A-1) (the four fixture files `git add`ed, never `git add -N`); no trailing whitespace; every step is fail-closed: the registry-digest equality is the first link of one `&&` chain, so a mismatch exits non-zero before the daemon probe and before any deletion (the rule for every check: no `;` outside a compound command — `( … )`, `{ …; }` or `for … done` — so each step is one link of the `&&` chain)"
+      },
+      "expected": "exit 0: every proof was isolated (the operator's registry byte-identical — no behavior change outside the isolated roots), the tree holds only the allocated paths",
+      "candidateSha256": "sha256:f9dfb049fb7dfc308fe76455351771a9fd3cef010fb294b93eecf76d9a4f5b8e",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED, exit 0. The operator registry sha256 is 4762fd948a05b208f1eda8e8e026f63715f0d98630023ba28a48b831a879d64c, the same before and after. No stray rmapd is running. Both -after roots and the -stale copy are removed, and both -before roots are kept. git status shows only the 16 changed candidate paths (compose.rs is unchanged; the fixtures show as `A`). git diff --check is clean.",
+        "supportingEvidence": [
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/PSI-C05.out",
+          ".agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/build-progress.md"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/agent/src/dto/signal.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L02"
+      ],
+      "summary": "Adds `inferred_items`, `inferred_count` and `inferred_items_omitted_count`. All three are skipped in serialization when empty, so the output is byte-identical when there is no inferred importer."
+    },
+    {
+      "path": "rust/crates/agent/src/explain/mod.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L01"
+      ],
+      "summary": "Referenced-by is partitioned by file. A file with any static or dynamic edge counts as certain; a file whose edges are all inferred goes to the remainder. Closing F-PSI-02, any other value is an error and is never counted as certain."
+    },
+    {
+      "path": "rust/crates/agent/src/storage_port.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11"
+      ],
+      "summary": "`AgentFileImporter` gains resolution, basis and alternate_path."
+    },
+    {
+      "path": "rust/crates/agent/tests/explain_symbol.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L04"
+      ],
+      "summary": "Tests: the partition with the alternate; a file with any certain edge counts as certain only; an unknown resolution fails."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_serve_tests/mod.rs",
+      "obligationIds": [
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L11",
+        "P-PSI-02"
+      ],
+      "summary": "A-1 (D-PSI-R1-VOCAB = A): a one-token fixture correction at :907, `\"resolved\"` → `\"static\"`, so the fixture models a canonical store."
+    },
+    {
+      "path": "rust/crates/indexer/src/orchestrator.rs",
+      "obligationIds": [
+        "RG-REQ-001-L06",
+        "RG-REQ-001-L09",
+        "P-PSI-02"
+      ],
+      "summary": "Bumps `INDEXER_VERSION` from indexer:1.0.0 to 1.1.0 and moves the pinning test's expected value with it. Adds the refresh load of the copied-forward signals through `query_file_signals_batch`; the single `insert_file_signals` site is unchanged. Adds refresh_loads_copied_forward_import_bindings_for_resolution."
+    },
+    {
+      "path": "rust/crates/indexer/src/resolver.rs",
+      "obligationIds": [
+        "RG-REQ-006-L04",
+        "RG-REQ-002-L11",
+        "RG-REQ-006-L01",
+        "RG-REQ-006-L02",
+        "RG-REQ-006-L03",
+        "P-PSI-02"
+      ],
+      "summary": "Adds the Python submodule stage: `PYTHON_EXTRACTOR_PREFIX`, the `InferredImport` outcome, and the `alternateTarget`/`basis` carrier. The inferred edge is kept out of `resolved_import_pairs`. This revision closes F-PSI-01: once the stage applies, it returns either the init (static) or the submodule (inferred) and never hands the choice back to the ladder. Tests are included."
+    },
+    {
+      "path": "rust/crates/repo-index/tests/fixtures/python/package-import/consumer/app.py",
+      "obligationIds": [
+        "RG-REQ-006-L04",
+        "RG-REQ-002-L11"
+      ],
+      "summary": "Fixture consumer with three from-imports: base, models and Thing."
+    },
+    {
+      "path": "rust/crates/repo-index/tests/fixtures/python/package-import/pkg/__init__.py",
+      "obligationIds": [
+        "RG-REQ-006-L04"
+      ],
+      "summary": "Fixture package init (`Thing = 1`). Staged with `git add`."
+    },
+    {
+      "path": "rust/crates/repo-index/tests/fixtures/python/package-import/pkg/base.py",
+      "obligationIds": [
+        "RG-REQ-006-L04"
+      ],
+      "summary": "Fixture sibling module (`class BaseHandler`)."
+    },
+    {
+      "path": "rust/crates/repo-index/tests/fixtures/python/package-import/pkg/models/__init__.py",
+      "obligationIds": [
+        "RG-REQ-006-L04"
+      ],
+      "summary": "Fixture subpackage init."
+    },
+    {
+      "path": "rust/crates/repo-index/tests/integration.rs",
+      "obligationIds": [
+        "RG-REQ-006-L04",
+        "RG-REQ-002-L11"
+      ],
+      "summary": "Adds the end-to-end test index_python_from_package_import_resolves_inferred_to_the_submodule_file. It checks the three targets, each edge's resolution, basis and alternate, the kept `consumer → pkg` module edge and the absent `consumer → pkg/models` edge."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L04"
+      ],
+      "summary": "Renderer tests, including the new overflow counterexamples: a `u64::MAX` count with `u64::MAX` omitted, and 17 rows plus `u64::MAX - 1` omitted."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain_sections.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L08"
+      ],
+      "summary": "Renders the heading `+M inferred — investigate` and inferred rows that name the alternate. Malformed or unsupported counts render as the unreadable line. Closing F-PSI-03, every sum over carried counts is checked and an overflow renders unreadable."
+    },
+    {
+      "path": "rust/crates/storage/src/agent_impl.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L01"
+      ],
+      "summary": "`find_file_importers` now carries resolution, basis and the alternate's path. It returns a named error for an unreadable inferred carrier and, closing F-PSI-02, for any resolution outside static|dynamic|inferred."
+    },
+    {
+      "path": "rust/crates/storage/tests/agent_impl.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L04"
+      ],
+      "summary": "Importer tests for resolution, basis and alternate; a malformed carrier; and an unknown resolution (`resolved`, the empty string, `Static`)."
+    }
+  ],
+  "completedAt": "2026-09-27T00:52:18.354Z",
+  "limitations": [
+    "RG-REQ-002-L11 is PARTIAL, as the slice allocates it. `cycles`, `path`, `map`, boundary, trust and module-surface reads still show inferred imports unmarked. No release may be cut until TEST-EDGE-SCOPE-1B is accepted (D-PSI-RELEASE-GATE-1). `imports <file>` shows `inferred` but not the alternate.",
+    "The packet is stale in places, and the SLICE_DOC (INPUT-3) governs: `git diff --stat b372172e HEAD -- rust` is not empty, because TOOLCHAIN-STALENESS-1 and CPP-ATTRIBUTE-MACRO-1A landed; the packet names 'fourteen candidate paths', keys `alternate_target`/`inference`, and a compose.rs literal copy. The SLICE_DOC names 17 paths, the camelCase `alternateTarget`/`basis`, and compose.rs unchanged.",
+    "Adjacent pre-existing behaviour, reported and not changed: when `X.py` and `X/__init__.py` are both indexed and `from X import Thing` names no submodule, the stage does not apply, and the ladder's first-writer-wins entry may pick `X.py` where Python binds the package. The slice requires that case to keep today's ladder result.",
+    "One field goes beyond the spec, carried over from iteration 0: `inferred_items_omitted_count`, so a budget cut on inferred rows is stated rather than dropped.",
+    "The before-captures of `explain BaseHandler` and `imports …/wsgi.py` are the manager's 2026-09-23 captures and were not re-taken here. The store facts behind them were re-measured by PSI-C04.",
+    "NOT RUN, because they are the operator's gate after acceptance: `cargo test --workspace`, the smoke scripts, and the dogfood."
+  ],
+  "report": "All seven checks pass on the INPUT-3 candidate, and all three findings from review 1 are closed. Candidate: HEAD a7154620 plus 16 uncommitted paths (+2068/−95); nothing is committed. Evidence is in .agent-manager/slices/PYTHON-SUBMODULE-IMPORT-1/evidence-2/ and build-progress.md.\n\nFINDINGS CLOSED (each by a rule over its class):\n- F-PSI-01. Rule: once the Python stage applies (an indexed init and an indexed submodule), it decides the target itself — the init as static or the submodule as inferred — and never returns to the ladder. In the competing case, the init binds `Y` or the evidence is missing, so the init is now the static target even when `X.py` is indexed.\n  - New test: python_from_package_import_keeps_the_init_over_a_same_named_module_file_when_the_init_binds_the_name. It covers a module-level symbol, a foreign import and no bindings map, in both file-list orders.\n  - Fail-first, EXECUTED: `left \"n:pkg.py\" right \"n:pkg/__init__.py\"`.\n- F-PSI-02. Applied the saved strict-vocabulary patch: storage and agent accept only static, dynamic and inferred. Also applied A-1's token at :907. daemon-runtime --lib passes 788 tests.\n- F-PSI-03. Rule: every sum over carried wire counts is checked, and an overflow renders the unreadable line.\n  - Two counterexamples, both fail-first EXECUTED, `attempt to add with overflow` at explain_sections.rs:333 and :556.\n\nCODE UNDER ANALYSIS (django 4d455ae, quoted from the checkout):\n1. `django/core/handlers/wsgi.py:5` `from django.core.handlers import base`, used at `:113` `class WSGIHandler(base.BaseHandler):`.\n   - Before: django/core/handlers/__init__.py, static.\n   - After: django/core/handlers/base.py, inferred, basis python_submodule, alternateTarget `<repo>:django/core/handlers/__init__.py:FILE`.\n2. `explain BaseHandler`.\n   - Before (manager capture): `Referenced by (1 files)`.\n   - After:\n     `Referenced by (1 files, +2 inferred — investigate)` / `  - django/test/client.py` / `  - django/core/handlers/asgi.py  (inferred: python submodule — alternate django/core/handlers/__init__.py)` / `  - django/core/handlers/wsgi.py  (inferred: python submodule — alternate django/core/handlers/__init__.py)`.\n3. `imports django/core/handlers/wsgi.py`.\n   - Before: `django/core/handlers/__init__.py  depth=1  static`.\n   - After: `  django/core/handlers/base.py  depth=1  inferred`, and no __init__.py row.\n4. `django/shortcuts.py:13` `from django.template import loader`.\n   - Before: django/template/__init__.py, static.\n   - After: django/template/loader.py, inferred, alternate django/template/__init__.py.\n5. Rule counts on the before-store: symbol 5330, submodule 1424, submodule-itself 16. No init defines or foreign-binds the name.\n6. Totals.\n   - django: nodes 81934 → 81934, edges 84985 → 84618, unresolved 90640 → 90640; module pairs 2451 → 2084, an honest fall under RG-REQ-002-L10.\n   - FRAKTAG: 1402/801/1970, identical row by row.\n- Residual example: `django/db/models/__init__.py:2` `from django.db.models import signals`. That init binding is the submodule itself, so its importers retarget.\n\nREFRESH:\n- orchestrator.rs:833 `storage.insert_file_signals(&all_signals)?;` and :1007 `let import_bindings_by_file = build_import_bindings_map(&all_signals);`: on a refresh, :1007 is now also fed the copied-forward files' signals, loaded through `query_file_signals_batch`.\n- PSI-C06: `PSI-C06 OK refresh parity: 3019 file versions, 3015 file_signals rows, 81601 IMPORTS+CALLS edges ( 1440 inferred ), 90640 unresolved rows`.\n\nTOOLCHAIN LINE (PSI-C07): `index toolchain differs from running rmap (indexer 1.0.0 → 1.1.0) — run rmap repo rebuild '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django'`. check exits 0 for both the human and the JSON form.\n\nSUPPLEMENTARY whole --lib suites, all passing: indexer 452, repo-index 244, storage 683 (3 ignored), agent 325, rgr 1285; storage --test agent_impl 28.\n\nCLEANUP: the operator registry digest is unchanged. I removed the -after roots, the -stale copy and my /private/tmp/PYTHON-SUBMODULE-IMPORT-1-checks directory. The manager's -before roots are kept."
+}

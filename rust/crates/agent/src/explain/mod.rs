@@ -595,22 +595,81 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
         }
         if let Some(ref file_path) = context.file_path {
             let importers = storage.find_file_importers(snapshot_uid, file_path)?;
-            let count = importers.len() as u64;
-            let top_modules = group_by_module(importers.iter().map(|i| i.module_path.as_deref()));
-            let mut items: Vec<ExplainReferencedByItem> = importers
+            // PYTHON-SUBMODULE-IMPORT-1 (RG-REQ-002-L11): partition by file. A file with at least
+            // one certain (non-`inferred`) edge to the target is a certain importer — counted once,
+            // exactly as before; a file whose every edge is `inferred` is the inferred remainder,
+            // stated beside the certain facts, never counted among them.
+            // The certainty discriminator is closed: `static`/`dynamic` are certain, `inferred` is
+            // the remainder, anything else is a broken read — never counted as certain.
+            let mut certain_files: std::collections::BTreeSet<&str> = Default::default();
+            for i in &importers {
+                match i.resolution.as_str() {
+                    "static" | "dynamic" => {
+                        certain_files.insert(i.file.as_str());
+                    }
+                    "inferred" => {}
+                    other => {
+                        return Err(AgentStorageError::new(
+                            "find_file_importers",
+                            format!(
+                                "importer row for {} has resolution {other:?}, not one of \
+                                 static | dynamic | inferred",
+                                i.file
+                            ),
+                        )
+                        .into());
+                    }
+                }
+            }
+            let mut certain: Vec<(String, Option<String>)> = Vec::new();
+            // Distinct (file, module) rows, exactly the pre-slice `SELECT DISTINCT` shape.
+            let mut certain_seen: std::collections::BTreeSet<(&str, Option<&str>)> =
+                Default::default();
+            let mut inferred_items: Vec<ExplainReferencedByInferredItem> = Vec::new();
+            let mut inferred_files: std::collections::BTreeSet<String> = Default::default();
+            for i in &importers {
+                if certain_files.contains(i.file.as_str()) {
+                    if i.resolution != "inferred"
+                        && certain_seen.insert((i.file.as_str(), i.module_path.as_deref()))
+                    {
+                        certain.push((i.file.clone(), i.module_path.clone()));
+                    }
+                } else {
+                    // The storage adapter guarantees a basis on every inferred row; a row without
+                    // one is a broken read, never silently dropped.
+                    let basis = i.basis.clone().ok_or_else(|| {
+                        AgentStorageError::new(
+                            "find_file_importers",
+                            format!("inferred importer row for {} carries no basis", i.file),
+                        )
+                    })?;
+                    inferred_files.insert(i.file.clone());
+                    inferred_items.push(ExplainReferencedByInferredItem {
+                        file: i.file.clone(),
+                        module: i.module_path.clone(),
+                        basis,
+                        alternate: i.alternate_path.clone(),
+                    });
+                }
+            }
+            let count = certain.len() as u64;
+            let top_modules = group_by_module(certain.iter().map(|(_, m)| m.as_deref()));
+            let mut items: Vec<ExplainReferencedByItem> = certain
                 .into_iter()
-                .map(|i| ExplainReferencedByItem {
-                    file: i.file,
-                    module: i.module_path,
-                })
+                .map(|(file, module)| ExplainReferencedByItem { file, module })
                 .collect();
             let (trunc, omitted) = truncate_items(&mut items, cap);
+            let inferred_count = inferred_files.len() as u64;
+            let (_, inferred_omitted) = truncate_items(&mut inferred_items, cap);
             signals.push(Signal::explain_referenced_by(ExplainReferencedByEvidence {
                 count,
                 top_modules,
                 items,
                 items_truncated: trunc,
                 items_omitted_count: omitted,
+                inferred_items,
+                inferred_count,
+                inferred_items_omitted_count: inferred_omitted,
             }));
         }
     }

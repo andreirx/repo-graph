@@ -535,6 +535,9 @@ fn explain_type_focus_emits_members_and_referenced_by() {
         vec![AgentFileImporter {
             file: "src/main.ts".into(),
             module_path: Some("src".into()),
+            resolution: "static".into(),
+            basis: None,
+            alternate_path: None,
         }],
     );
 
@@ -552,6 +555,136 @@ fn explain_type_focus_emits_members_and_referenced_by() {
     assert_eq!(refs.top_modules.len(), 1);
     assert_eq!(refs.top_modules[0].module, "src");
     assert_eq!(refs.top_modules[0].count, 1);
+}
+
+// ── PYTHON-SUBMODULE-IMPORT-1 (RG-REQ-002-L11): Referenced-by partitions inferred importers ──
+
+fn importer(
+    file: &str,
+    module: &str,
+    resolution: &str,
+    alternate: Option<&str>,
+) -> AgentFileImporter {
+    let inferred = resolution == "inferred";
+    AgentFileImporter {
+        file: file.into(),
+        module_path: Some(module.into()),
+        resolution: resolution.into(),
+        basis: inferred.then(|| "python_submodule".to_string()),
+        alternate_path: alternate.map(|a| a.to_string()),
+    }
+}
+
+#[test]
+fn explain_referenced_by_partitions_inferred_importers_with_their_alternate() {
+    let mut fake = FakeAgentStorage::new();
+    seed_symbol_repo(&mut fake);
+    // The django `BaseHandler` shape: one certain importer, two inferred ones naming the init.
+    fake.file_importers.insert(
+        ("snap1".into(), "src/service.ts".into()),
+        vec![
+            importer("src/asgi.py", "src", "inferred", Some("src/__init__.py")),
+            importer("src/client.py", "test", "static", None),
+            importer("src/wsgi.py", "src", "inferred", Some("src/__init__.py")),
+        ],
+    );
+
+    let result = run_explain(&fake, "r1", "MyService", Budget::Medium, TEST_NOW).unwrap();
+    let refs = referenced_by_evidence(&result).expect("type focus emits EXPLAIN_REFERENCED_BY");
+
+    // Certain facts only in count / items / top_modules.
+    assert_eq!(refs.count, 1);
+    assert_eq!(refs.items.len(), 1);
+    assert_eq!(refs.items[0].file, "src/client.py");
+    assert_eq!(refs.top_modules.len(), 1);
+    assert_eq!(refs.top_modules[0].module, "test");
+    assert_eq!(refs.top_modules[0].count, 1);
+
+    // The inferred remainder, with the reason and the other candidate.
+    assert_eq!(refs.inferred_count, 2);
+    let inferred: Vec<(&str, &str, Option<&str>)> = refs
+        .inferred_items
+        .iter()
+        .map(|i| (i.file.as_str(), i.basis.as_str(), i.alternate.as_deref()))
+        .collect();
+    assert_eq!(
+        inferred,
+        vec![
+            ("src/asgi.py", "python_submodule", Some("src/__init__.py")),
+            ("src/wsgi.py", "python_submodule", Some("src/__init__.py")),
+        ]
+    );
+    assert_eq!(refs.inferred_items_omitted_count, None);
+
+    // JSON consumers see the partition.
+    let json = serde_json::to_value(&refs).unwrap();
+    assert_eq!(json["inferred_count"], 2);
+    assert_eq!(json["inferred_items"][0]["alternate"], "src/__init__.py");
+    assert_eq!(json["inferred_items"][0]["basis"], "python_submodule");
+}
+
+#[test]
+fn explain_referenced_by_counts_a_file_with_any_certain_edge_as_certain_only() {
+    let mut fake = FakeAgentStorage::new();
+    seed_symbol_repo(&mut fake);
+    // mixed.py imports the file through one inferred and one static edge (and one dynamic);
+    // plain.py through a static edge only.
+    fake.file_importers.insert(
+        ("snap1".into(), "src/service.ts".into()),
+        vec![
+            importer("src/mixed.py", "src", "dynamic", None),
+            importer("src/mixed.py", "src", "inferred", Some("src/__init__.py")),
+            importer("src/mixed.py", "src", "static", None),
+            importer("src/plain.py", "src", "static", None),
+        ],
+    );
+
+    let result = run_explain(&fake, "r1", "MyService", Budget::Medium, TEST_NOW).unwrap();
+    let refs = referenced_by_evidence(&result).expect("type focus emits EXPLAIN_REFERENCED_BY");
+    assert_eq!(refs.count, 2, "each certain file counted once");
+    let files: Vec<&str> = refs.items.iter().map(|i| i.file.as_str()).collect();
+    assert_eq!(files, vec!["src/mixed.py", "src/plain.py"]);
+    assert_eq!(refs.top_modules[0].count, 2);
+    assert_eq!(
+        refs.inferred_count, 0,
+        "a file with any certain edge is never inferred"
+    );
+    assert!(refs.inferred_items.is_empty());
+
+    // With no inferred importer the JSON carries none of the inferred keys (byte-identical shape).
+    let json = serde_json::to_value(&refs).unwrap();
+    let keys: Vec<&str> = json
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
+    assert!(
+        !keys.iter().any(|k| k.starts_with("inferred")),
+        "no inferred key when there is no inferred importer: {keys:?}"
+    );
+}
+
+#[test]
+fn explain_referenced_by_fails_on_an_unknown_resolution() {
+    // F-PSI-02: an importer row whose resolution is outside static | dynamic | inferred is a broken
+    // read — the explain fails loudly, never counting the file as a certain importer.
+    let mut fake = FakeAgentStorage::new();
+    seed_symbol_repo(&mut fake);
+    fake.file_importers.insert(
+        ("snap1".into(), "src/service.ts".into()),
+        vec![
+            importer("src/a.py", "src", "static", None),
+            importer("src/b.py", "src", "resolved", None),
+        ],
+    );
+    let err = run_explain(&fake, "r1", "MyService", Budget::Medium, TEST_NOW)
+        .expect_err("an unknown resolution is not a certain importer");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("src/b.py") && msg.contains("resolved"),
+        "{msg}"
+    );
 }
 
 #[test]

@@ -1820,6 +1820,256 @@ mod tests {
         assert!(out.contains("- client/y.cpp"), "file row:\n{out}");
     }
 
+    // ── PYTHON-SUBMODULE-IMPORT-1 (RG-REQ-002-L11): the inferred remainder of Referenced by ──
+
+    /// The django `explain BaseHandler` evidence shape: one certain importer, two inferred ones.
+    fn base_handler_referenced_by() -> serde_json::Value {
+        serde_json::json!({
+            "count": 1,
+            "top_modules": [{"module": "django/test", "count": 1}],
+            "items": [{"file": "django/test/client.py", "module": "django/test"}],
+            "inferred_count": 2,
+            "inferred_items": [
+                {"file": "django/core/handlers/asgi.py", "module": "django/core", "basis": "python_submodule",
+                 "alternate": "django/core/handlers/__init__.py"},
+                {"file": "django/core/handlers/wsgi.py", "module": "django/core", "basis": "python_submodule",
+                 "alternate": "django/core/handlers/__init__.py"}
+            ]
+        })
+    }
+
+    #[test]
+    fn referenced_by_heading_states_the_inferred_remainder_and_rows_name_the_alternate() {
+        let r = typed_response(
+            "CLASS",
+            vec![referenced_by_evidence(base_handler_referenced_by())],
+        );
+        let out = r.render_human(false);
+        let lines: Vec<&str> = out.lines().collect();
+        let head = lines
+            .iter()
+            .position(|l| l.starts_with("Referenced by"))
+            .expect("section heading");
+        assert_eq!(
+            &lines[head..head + 5],
+            &[
+                "Referenced by (1 files, +2 inferred — investigate)",
+                "  top modules: django/test (1)",
+                "  - django/test/client.py",
+                "  - django/core/handlers/asgi.py  (inferred: python submodule — alternate django/core/handlers/__init__.py)",
+                "  - django/core/handlers/wsgi.py  (inferred: python submodule — alternate django/core/handlers/__init__.py)",
+            ],
+            "{out}"
+        );
+        assert!(
+            !out.contains("python_submodule"),
+            "never the raw basis code:\n{out}"
+        );
+
+        // A basis other than python_submodule renders without its code; a budget-cut remainder
+        // is stated, never silently dropped.
+        let other = typed_response(
+            "CLASS",
+            vec![referenced_by_evidence(serde_json::json!({
+                "count": 0,
+                "top_modules": [],
+                "items": [],
+                "inferred_count": 3,
+                "inferred_items": [
+                    {"file": "a.c", "basis": "unique_basename", "alternate": "b.h"},
+                    {"file": "c.c", "basis": "unique_basename"}
+                ],
+                "inferred_items_omitted_count": 1
+            }))],
+        );
+        let out = other.render_human(false);
+        assert!(
+            out.contains("Referenced by (0 files, +3 inferred — investigate)"),
+            "{out}"
+        );
+        assert!(
+            out.contains("  - a.c  (inferred — alternate b.h)\n"),
+            "{out}"
+        );
+        assert!(out.contains("  - c.c  (inferred)\n"), "{out}");
+        assert!(out.lines().any(|l| l == "  ... (1 more inferred)"), "{out}");
+        assert!(!out.contains("unique_basename"), "{out}");
+
+        // One file carried twice (two alternates) is ONE inferred file: the count is the distinct
+        // files, and both rows render.
+        let one_file_two_rows = typed_response(
+            "CLASS",
+            vec![referenced_by_evidence(serde_json::json!({
+                "count": 0,
+                "top_modules": [],
+                "items": [],
+                "inferred_count": 1,
+                "inferred_items": [
+                    {"file": "a.py", "basis": "python_submodule", "alternate": "p/__init__.py"},
+                    {"file": "a.py", "basis": "python_submodule", "alternate": "q/__init__.py"}
+                ]
+            }))],
+        );
+        let out = one_file_two_rows.render_human(false);
+        assert!(
+            out.contains("Referenced by (0 files, +1 inferred — investigate)"),
+            "{out}"
+        );
+        assert!(
+            out.contains("  - a.py  (inferred: python submodule — alternate q/__init__.py)"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn referenced_by_with_no_inferred_rows_renders_exactly_as_before() {
+        let evidence = serde_json::json!({
+            "count": 2,
+            "top_modules": [{"module": "lib", "count": 1}, {"module": "client", "count": 1}],
+            "items": [{"file": "lib/x.cpp", "module": "lib"}, {"file": "client/y.cpp", "module": "client"}]
+        });
+        let out =
+            typed_response("CLASS", vec![referenced_by_evidence(evidence)]).render_human(false);
+        let lines: Vec<&str> = out.lines().collect();
+        let head = lines
+            .iter()
+            .position(|l| l.starts_with("Referenced by"))
+            .expect("section heading");
+        assert_eq!(
+            &lines[head..head + 4],
+            &[
+                "Referenced by (2 files)",
+                "  top modules: lib (1), client (1)",
+                "  - lib/x.cpp",
+                "  - client/y.cpp",
+            ],
+            "{out}"
+        );
+        assert!(!out.contains("inferred"), "{out}");
+    }
+
+    #[test]
+    fn referenced_by_with_malformed_inferred_rows_renders_the_unreadable_line() {
+        let malformed = [
+            (
+                "inferred_count not a number",
+                serde_json::json!({"inferred_count": "2"}),
+            ),
+            (
+                "inferred_items not an array",
+                serde_json::json!({"inferred_count": 1, "inferred_items": {}}),
+            ),
+            (
+                "row without a file",
+                serde_json::json!({"inferred_count": 1, "inferred_items": [{"basis": "python_submodule", "alternate": "p/__init__.py"}]}),
+            ),
+            (
+                "row without a basis",
+                serde_json::json!({"inferred_count": 1, "inferred_items": [{"file": "a.py", "alternate": "p/__init__.py"}]}),
+            ),
+            (
+                "python submodule without its alternate",
+                serde_json::json!({"inferred_count": 1, "inferred_items": [{"file": "a.py", "basis": "python_submodule"}]}),
+            ),
+            (
+                "non-string alternate",
+                serde_json::json!({"inferred_count": 1, "inferred_items": [{"file": "a.py", "basis": "python_submodule", "alternate": 3}]}),
+            ),
+            (
+                "count without rows",
+                serde_json::json!({"inferred_count": 2, "inferred_items": []}),
+            ),
+            (
+                "rows without a count",
+                serde_json::json!({"inferred_items": [{"file": "a.py", "basis": "python_submodule", "alternate": "p/__init__.py"}]}),
+            ),
+            // F-PSI-03: a count the carried rows do not support.
+            (
+                "count 99 over one uncut file",
+                serde_json::json!({"inferred_count": 99, "inferred_items": [{"file": "a.py", "basis": "python_submodule", "alternate": "p/__init__.py"}]}),
+            ),
+            (
+                "count below the distinct carried files",
+                serde_json::json!({"inferred_count": 1, "inferred_items": [
+                    {"file": "a.py", "basis": "python_submodule", "alternate": "p/__init__.py"},
+                    {"file": "b.py", "basis": "python_submodule", "alternate": "p/__init__.py"}]}),
+            ),
+            (
+                "count above the distinct files plus the cut rows",
+                serde_json::json!({"inferred_count": 5, "inferred_items_omitted_count": 1, "inferred_items": [
+                    {"file": "a.py", "basis": "python_submodule", "alternate": "p/__init__.py"}]}),
+            ),
+            (
+                "cut rows with no carried row",
+                serde_json::json!({"inferred_count": 1, "inferred_items_omitted_count": 1, "inferred_items": []}),
+            ),
+            // F-PSI-03: a PRESENT null is malformed, never a known zero or an absent value.
+            (
+                "null inferred_count",
+                serde_json::json!({"inferred_count": null}),
+            ),
+            (
+                "null inferred_items",
+                serde_json::json!({"inferred_count": 1, "inferred_items": null}),
+            ),
+            (
+                "null inferred_items_omitted_count",
+                serde_json::json!({"inferred_count": 1, "inferred_items_omitted_count": null, "inferred_items": [
+                    {"file": "a.py", "basis": "python_submodule", "alternate": "p/__init__.py"}]}),
+            ),
+            (
+                "null alternate",
+                serde_json::json!({"inferred_count": 1, "inferred_items": [{"file": "a.py", "basis": "unique_basename", "alternate": null}]}),
+            ),
+            (
+                "null module",
+                serde_json::json!({"inferred_count": 1, "inferred_items": [{"file": "a.py", "module": null, "basis": "python_submodule", "alternate": "p/__init__.py"}]}),
+            ),
+            // F-PSI-03 (review 1): a carried total that overflows `u64` is malformed, never a
+            // panic or a wrap — the distinct-plus-cut bound ...
+            (
+                "u64::MAX cut rows over the count bound",
+                serde_json::json!({"inferred_count": u64::MAX, "inferred_items_omitted_count": u64::MAX, "inferred_items": [
+                    {"file": "a.py", "basis": "python_submodule", "alternate": "p/__init__.py"}]}),
+            ),
+            // ... and the carried-plus-cut row total the `... (N more inferred)` line sums:
+            // seventeen rows of one file (two past the display cap) with `u64::MAX - 1` cut rows,
+            // where the distinct-plus-cut bound (1 + u64::MAX - 1) does not overflow but the
+            // line's `2 + u64::MAX - 1` would.
+            (
+                "carried rows plus u64::MAX - 1 cut rows",
+                serde_json::json!({"inferred_count": 1, "inferred_items_omitted_count": u64::MAX - 1, "inferred_items":
+                    vec![serde_json::json!({"file": "a.py", "basis": "python_submodule", "alternate": "p/__init__.py"}); 17]}),
+            ),
+        ];
+        for (label, extra) in malformed {
+            let mut evidence = serde_json::json!({
+                "count": 1,
+                "top_modules": [{"module": "lib", "count": 1}],
+                "items": [{"file": "lib/x.py", "module": "lib"}]
+            });
+            for (k, v) in extra.as_object().unwrap() {
+                evidence[k] = v.clone();
+            }
+            let out =
+                typed_response("CLASS", vec![referenced_by_evidence(evidence)]).render_human(false);
+            assert!(
+                out.contains(
+                    "Referenced by (1 files)\n  - referenced-by unreadable on this snapshot"
+                ),
+                "{label}:\n{out}"
+            );
+            assert!(
+                !out.contains("- lib/x.py"),
+                "{label}: no partial rows:\n{out}"
+            );
+            assert!(
+                !out.contains("inferred"),
+                "{label}: no partial remainder:\n{out}"
+            );
+        }
+    }
+
     #[test]
     fn explain_type_zero_callers_line_says_a_type_is_not_called() {
         let r = typed_response(

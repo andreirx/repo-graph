@@ -1849,6 +1849,218 @@ fn find_file_importers_is_empty_for_a_file_nobody_imports() {
     );
 }
 
+// ── PYTHON-SUBMODULE-IMPORT-1 (RG-REQ-002-L11): importer rows carry their certainty ──
+
+/// A FILE node `n<file_uid>` for `path` (stable key `r1:<path>:FILE`), its file row seeded.
+fn seed_py_file_node(
+    storage: &mut StorageConnection,
+    snapshot_uid: &str,
+    file_uid: &str,
+    path: &str,
+) {
+    seed_file(storage, snapshot_uid, file_uid, path);
+    storage
+        .insert_nodes(&[GraphNode {
+            node_uid: format!("n{file_uid}"),
+            snapshot_uid: snapshot_uid.into(),
+            repo_uid: "r1".into(),
+            stable_key: format!("r1:{path}:FILE"),
+            kind: "FILE".into(),
+            subtype: None,
+            name: path.rsplit('/').next().unwrap().into(),
+            qualified_name: None,
+            file_uid: Some(file_uid.into()),
+            parent_node_uid: None,
+            location: None,
+            signature: None,
+            visibility: None,
+            doc_comment: None,
+            metadata_json: None,
+        }])
+        .unwrap();
+}
+
+fn py_import_edge(
+    snapshot_uid: &str,
+    uid: &str,
+    source_file_uid: &str,
+    resolution: &str,
+    metadata_json: Option<&str>,
+) -> GraphEdge {
+    GraphEdge {
+        edge_uid: uid.into(),
+        snapshot_uid: snapshot_uid.into(),
+        repo_uid: "r1".into(),
+        source_node_uid: format!("n{source_file_uid}"),
+        target_node_uid: "nft".into(),
+        edge_type: "IMPORTS".into(),
+        resolution: resolution.into(),
+        extractor: "python-core:0.1.0".into(),
+        location: None,
+        metadata_json: metadata_json.map(|m| m.into()),
+    }
+}
+
+const INFERRED_CARRIER: &str = r#"{"specifier":"pkg","identifier":"base","importedName":"base","alternateTarget":"r1:pkg/__init__.py:FILE","basis":"python_submodule"}"#;
+
+/// The target `pkg/base.py` (`nft`), its package init, and importers a/b/c.
+fn seed_python_package(storage: &mut StorageConnection, snapshot_uid: &str) {
+    seed_py_file_node(storage, snapshot_uid, "ft", "pkg/base.py");
+    seed_py_file_node(storage, snapshot_uid, "fi", "pkg/__init__.py");
+    seed_py_file_node(storage, snapshot_uid, "fa", "a.py");
+    seed_py_file_node(storage, snapshot_uid, "fb", "b.py");
+    seed_py_file_node(storage, snapshot_uid, "fc", "c.py");
+}
+
+#[test]
+fn find_file_importers_carries_each_edge_resolution_basis_and_alternate_path() {
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    seed_python_package(&mut storage, &snapshot_uid);
+    storage
+        .insert_edges(&[
+            // a.py: only an inferred import (the submodule rule), the init as alternate.
+            py_import_edge(
+                &snapshot_uid,
+                "ea",
+                "fa",
+                "inferred",
+                Some(INFERRED_CARRIER),
+            ),
+            // b.py: a certain import — its carrier is never read (even when it is not JSON).
+            py_import_edge(&snapshot_uid, "eb", "fb", "static", Some("not json")),
+            // c.py: one certain and one inferred edge to the same target.
+            py_import_edge(&snapshot_uid, "ec1", "fc", "static", None),
+            py_import_edge(
+                &snapshot_uid,
+                "ec2",
+                "fc",
+                "inferred",
+                Some(INFERRED_CARRIER),
+            ),
+        ])
+        .unwrap();
+
+    let importers = <StorageConnection as AgentStorageRead>::find_file_importers(
+        &storage,
+        &snapshot_uid,
+        "pkg/base.py",
+    )
+    .unwrap();
+    let rows: Vec<(&str, &str, Option<&str>, Option<&str>)> = importers
+        .iter()
+        .map(|i| {
+            (
+                i.file.as_str(),
+                i.resolution.as_str(),
+                i.basis.as_deref(),
+                i.alternate_path.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            (
+                "a.py",
+                "inferred",
+                Some("python_submodule"),
+                Some("pkg/__init__.py")
+            ),
+            ("b.py", "static", None, None),
+            (
+                "c.py",
+                "inferred",
+                Some("python_submodule"),
+                Some("pkg/__init__.py")
+            ),
+            ("c.py", "static", None, None),
+        ]
+    );
+    assert!(
+        importers.iter().all(|i| i.module_path.is_none()),
+        "no OWNS edge ⇒ no module"
+    );
+}
+
+#[test]
+fn find_file_importers_fails_loudly_on_an_inferred_edge_with_an_unreadable_carrier() {
+    let cases: [(&str, Option<&str>); 7] = [
+        ("no carrier", None),
+        ("not JSON", Some("{not json")),
+        (
+            "no basis",
+            Some(r#"{"alternateTarget":"r1:pkg/__init__.py:FILE"}"#),
+        ),
+        (
+            "non-string basis",
+            Some(r#"{"basis":1,"alternateTarget":"r1:pkg/__init__.py:FILE"}"#),
+        ),
+        (
+            "non-string alternate",
+            Some(r#"{"basis":"python_submodule","alternateTarget":7}"#),
+        ),
+        (
+            "alternate naming no FILE node",
+            Some(r#"{"basis":"python_submodule","alternateTarget":"r1:nowhere.py:FILE"}"#),
+        ),
+        (
+            "python_submodule without an alternate",
+            Some(r#"{"basis":"python_submodule"}"#),
+        ),
+    ];
+    for (label, carrier) in cases {
+        let (_tmp, mut storage) = open_temp_storage();
+        insert_repo(&storage, "r1", "my-repo");
+        let snapshot_uid = create_ready_snapshot(&storage, "r1");
+        seed_python_package(&mut storage, &snapshot_uid);
+        storage
+            .insert_edges(&[
+                py_import_edge(&snapshot_uid, "eb", "fb", "static", None),
+                py_import_edge(&snapshot_uid, "ea", "fa", "inferred", carrier),
+            ])
+            .unwrap();
+        let result = <StorageConnection as AgentStorageRead>::find_file_importers(
+            &storage,
+            &snapshot_uid,
+            "pkg/base.py",
+        );
+        let err = result.expect_err(label);
+        assert_eq!(err.operation, "find_file_importers", "{label}");
+        assert!(
+            err.message.contains("a.py"),
+            "{label}: the error names the importer: {err}"
+        );
+    }
+}
+
+#[test]
+fn find_file_importers_fails_loudly_on_an_unknown_resolution() {
+    // F-PSI-02: the certainty discriminator is closed — a value outside static | dynamic | inferred
+    // is a named error, never read as a certain importer.
+    for unknown in ["resolved", "", "Static"] {
+        let (_tmp, mut storage) = open_temp_storage();
+        insert_repo(&storage, "r1", "my-repo");
+        let snapshot_uid = create_ready_snapshot(&storage, "r1");
+        seed_python_package(&mut storage, &snapshot_uid);
+        storage
+            .insert_edges(&[
+                py_import_edge(&snapshot_uid, "eb", "fb", "static", None),
+                py_import_edge(&snapshot_uid, "ea", "fa", unknown, None),
+            ])
+            .unwrap();
+        let err = <StorageConnection as AgentStorageRead>::find_file_importers(
+            &storage,
+            &snapshot_uid,
+            "pkg/base.py",
+        )
+        .expect_err(unknown);
+        assert_eq!(err.operation, "find_file_importers");
+        assert!(err.message.contains("a.py"), "{unknown:?}: {err}");
+    }
+}
+
 // ── COMPLEXITY-SCOPE-1 (RG-REQ-009-L01): the complexity read carries file flags ──
 
 #[test]

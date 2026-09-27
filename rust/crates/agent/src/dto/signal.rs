@@ -975,9 +975,30 @@ pub struct ExplainReferencedByItem {
     pub module: Option<String>,
 }
 
+/// PYTHON-SUBMODULE-IMPORT-1 (RG-REQ-002-L11): one file whose EVERY import of the focused type's
+/// file is `inferred` — a relationship the index could not determine, handed to the agent to
+/// investigate with its reason and the other candidate. One item per distinct (file, basis,
+/// alternate).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainReferencedByInferredItem {
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    /// Why the import is inferred (the stored `basis`, e.g. `python_submodule`).
+    pub basis: String,
+    /// Repo path of the other candidate target (the package init for `python_submodule`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alternate: Option<String>,
+}
+
+fn is_zero_u64(n: &u64) -> bool {
+    *n == 0
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExplainReferencedByEvidence {
-    /// The PRE-truncation total count of distinct referencing files.
+    /// The PRE-truncation total count of distinct referencing files with at least one CERTAIN
+    /// (`static`/`dynamic`) import of the focused file. Inferred-only files are not counted here.
     pub count: u64,
     /// Top owning modules of the referencing files (grouped exactly as `EXPLAIN_CALLERS` groups
     /// its `top_modules`, via the shared `group_by_module`).
@@ -987,6 +1008,17 @@ pub struct ExplainReferencedByEvidence {
     pub items_truncated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items_omitted_count: Option<u64>,
+    /// PYTHON-SUBMODULE-IMPORT-1 (RG-REQ-002-L11): the inferred remainder — files whose every
+    /// import of the focused file is `inferred`, with basis and alternate. Budget-capped like
+    /// `items`; absent when empty, so a type with no inferred importer serializes as before.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub inferred_items: Vec<ExplainReferencedByInferredItem>,
+    /// PRE-truncation count of distinct inferred-only referencing FILES; absent when zero.
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub inferred_count: u64,
+    /// Inferred rows the budget cut from `inferred_items`; absent when nothing was cut.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inferred_items_omitted_count: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -263,6 +263,86 @@ fn referenced_by_unreadable(count: Option<u64>) -> String {
     out
 }
 
+/// PYTHON-SUBMODULE-IMPORT-1: the validated inferred remainder of a `Referenced by` section.
+struct InferredReferencedBy {
+    /// Distinct inferred-only referencing files (the heading's `+M inferred`).
+    count: u64,
+    /// Rendered rows, one per carried inferred item, in carried order.
+    rows: Vec<String>,
+    /// Inferred rows the budget cut before the wire.
+    omitted: u64,
+}
+
+/// Read the optional inferred fields of an `EXPLAIN_REFERENCED_BY` evidence object. An ABSENT field
+/// means no inferred importer (the pre-slice shape renders exactly as before). `None` = the carried
+/// remainder cannot be trusted, and the caller renders the unreadable line (RG-REQ-002-L04), never
+/// a partial list or an unsupported count:
+/// - a PRESENT field that is mistyped — including JSON `null` — is malformed (never a known zero);
+/// - `inferred_count` must be supported by the carried rows (RG-REQ-002-L02): with no rows cut
+///   (`inferred_items_omitted_count` absent or 0) it equals the number of distinct files among the
+///   rows; with rows cut, at least one row is carried and the count lies between the distinct
+///   carried files and that number plus the cut rows.
+///
+/// A basis renders in the reader's words (`python submodule`); an unknown basis renders without its
+/// code (RG-REQ-002-L08).
+fn read_inferred_referenced_by(evidence: &serde_json::Value) -> Option<InferredReferencedBy> {
+    let read_u64 = |key: &str| match evidence.get(key) {
+        None => Some(0),
+        Some(v) => v.as_u64(),
+    };
+    let count = read_u64("inferred_count")?;
+    let omitted = read_u64("inferred_items_omitted_count")?;
+    let items: &[serde_json::Value] = match evidence.get("inferred_items") {
+        None => &[],
+        Some(serde_json::Value::Array(items)) => items,
+        Some(_) => return None,
+    };
+    let optional_str = |item: &serde_json::Value, key: &str| -> Option<Option<String>> {
+        match item.get(key) {
+            None => Some(None),
+            Some(v) => v.as_str().map(|s| Some(s.to_string())),
+        }
+    };
+    let mut rows = Vec::with_capacity(items.len());
+    let mut files = std::collections::BTreeSet::new();
+    for item in items {
+        let file = item.get("file")?.as_str()?;
+        optional_str(item, "module")?;
+        let basis = item.get("basis")?.as_str().filter(|b| !b.is_empty())?;
+        let alternate = optional_str(item, "alternate")?;
+        let row = match (basis, alternate) {
+            ("python_submodule", Some(alt)) => {
+                format!("{file}  (inferred: python submodule — alternate {alt})")
+            }
+            // A python-submodule inference always names its alternate (the package init).
+            ("python_submodule", None) => return None,
+            (_, Some(alt)) => format!("{file}  (inferred — alternate {alt})"),
+            (_, None) => format!("{file}  (inferred)"),
+        };
+        files.insert(file);
+        rows.push(row);
+    }
+    let distinct = files.len() as u64;
+    // Every sum over carried wire counts is checked: a carried total that overflows `u64` cannot be
+    // supported by any rows, so it is malformed (the unreadable line), never a panic or a wrap. The
+    // carried-plus-cut row total bounds the renderer's `... (N more inferred)` sum, and `distinct`
+    // never exceeds the carried rows, so this one check covers both sums.
+    (rows.len() as u64).checked_add(omitted)?;
+    let supported = if omitted == 0 {
+        count == distinct
+    } else {
+        !rows.is_empty() && distinct <= count && count <= distinct.checked_add(omitted)?
+    };
+    if !supported {
+        return None;
+    }
+    Some(InferredReferencedBy {
+        count,
+        rows,
+        omitted,
+    })
+}
+
 impl ExplainResponse {
     /// Render a single signal's section. `full` lifts the per-section display cap (see the module doc):
     /// it is the `--full` flag, threaded so the human render is uncapped for grep.
@@ -436,7 +516,20 @@ impl ExplainResponse {
             rows.push(file.to_string());
         }
 
-        let mut out = heading(&format!("Referenced by ({count} files)"));
+        // PYTHON-SUBMODULE-IMPORT-1 (RG-REQ-002-L11): the inferred remainder, validated as a whole
+        // before anything renders — any malformed inferred field makes the section unreadable.
+        let Some(inferred) = read_inferred_referenced_by(evidence) else {
+            return referenced_by_unreadable(Some(count));
+        };
+
+        let mut out = if inferred.count > 0 {
+            heading(&format!(
+                "Referenced by ({count} files, +{} inferred — investigate)",
+                inferred.count
+            ))
+        } else {
+            heading(&format!("Referenced by ({count} files)"))
+        };
         if !top_parts.is_empty() {
             out.push_str(&format!("  top modules: {}\n", top_parts.join(", ")));
         }
@@ -451,6 +544,19 @@ impl ExplainResponse {
         let remaining = count.saturating_sub(shown as u64);
         if remaining > 0 {
             out.push_str(&format!("  ... ({} more)\n", remaining));
+        }
+        let inferred_shown = if full {
+            inferred.rows.len()
+        } else {
+            inferred.rows.len().min(DISPLAY_CAP)
+        };
+        for row in inferred.rows.iter().take(inferred_shown) {
+            out.push_str(&bullet(row));
+        }
+        // Cannot overflow: `read_inferred_referenced_by` checked `rows.len() + omitted`.
+        let inferred_remaining = (inferred.rows.len() - inferred_shown) as u64 + inferred.omitted;
+        if inferred_remaining > 0 {
+            out.push_str(&format!("  ... ({inferred_remaining} more inferred)\n"));
         }
         out
     }
