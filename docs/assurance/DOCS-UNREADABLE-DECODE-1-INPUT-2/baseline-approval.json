@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DOCS-UNREADABLE-DECODE-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DOCS-UNREADABLE-DECODE-1-INPUT-2.json",
+    "sha256": "sha256:c9260da21565922c26bc820ebcb9243dc6e1edffeecb6410c00abac36998514b"
+  },
+  "review": {
+    "path": "docs/assurance/DOCS-UNREADABLE-DECODE-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:2c0af11b204e35d0582203cd674a4227e7ffeab836962a0e7ce6ae5aac252ca3"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-DU-CC10",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DU-CC10.md",
+        "sha256": "sha256:88ff0bc17769d3101471ad66eccd7b90a66361eb87679f6728d1e774cd17b5b8"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-27T02:38:53.878Z",
+  "rationale": "Rebase INPUT-2 accepted at DOCS-UNREADABLE-DECODE-1-PREP-5 cycle 1 (claude-opus-5-5 / gpt-6-sol / gpt-6-luna): re-pinned after RG-BOOTSTRAP-INPUT-10; OC-1 (RMAP_AUTO_REINDEX=off), OC-2 (literals re-verified on the re-captured before-roots), OC-3 (DU-C04 serves COPIES of the manager's before-roots, registry redirected; DU-C05 asserts the copies are removed \u2014 review-0 F-RG-REQ-011-L06)."
+}
