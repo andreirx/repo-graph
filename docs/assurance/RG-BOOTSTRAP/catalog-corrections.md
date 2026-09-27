@@ -51,3 +51,11 @@ A catalog edit invalidates the bootstrap baseline and every not-yet-approved sli
 ## CC-18 (2026-09-26) — RG-REQ-001-L07 endorsed the routing path conventions and forbade filename evidence in one sentence → the conventions are enumerated as evidence (`testsuite/` added) and a test-word path matching none is marked UNDETERMINED with "can't determine — open it and look inside" (human ruling, D-TEST-UNDETERMINED-1; INPUT-10). RG-REQ-010-L06's "names are never the basis" aligned to "a symbol's name alone is never the basis" with L07's conventions counting (INPUT-10 review pass 1).
 
 ## CC-19 (2026-09-26) — RG-REQ-006-L04's TS clause named an open ruling on npm workspace members → resolved INFERRED to the indexed source entry with both candidates (human, option A of D-TS-WORKSPACE-1, superseding IMPORTS-WORKSPACE-PACKAGE-EDGE-1's no-go; INPUT-10).
+
+## CC-20 (2026-09-27) — RG-REQ-005-L09 required the incoming "calls that name this symbol" count on `callees` too; a callee list's zero is answered by the calls the symbol itself makes → the direction is stated per list (operator, text-only; INPUT-11)
+
+`docs/requirements/rg-req-005-symbol-relationship-discovery.md` L09 read: "where `callers`/`callees`/`explain` render a zero, the count of unresolved calls that name this symbol's short name shall be stated with its categories". Found by the standalone review of RG-BOOTSTRAP-INPUT-11, pass 1 (codex gpt-6-sol): the shipped contract (`docs/cli/rmap-contracts.md:215-216`, PYTHON-RECEIVER-BINDING-1 `dac37a98`, implementation-reviewed) gives `callers` `unresolved_naming` ("U unresolved calls name `<name>`") and `callees` `unresolved_from` ("U unresolved calls from this symbol").
+- **Why the text was wrong:** incoming calls naming X do not answer "what does X call".
+- **Correction:** a caller list (`callers`, `explain`'s Callers) states the naming count; a callee list (`callees`, `explain`'s Callees) states the count of unresolved calls the symbol makes. The example and the rest of L09 are unchanged.
+- **Approver:** in-place-manager (operator); the human may override.
+- **File digests:** before/after sha256:c21d46b71b86b5fcaa28af4696a661000ffba1dd067b63714dc95427fc1121e9 sha256:38bad9918eef743b889c9887a359bd12d468315ca04909ee1dcd11ed63589d9e.

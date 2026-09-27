@@ -110,7 +110,7 @@ Types and in-class method prototypes shall carry `metadata_json.forward_decl`; a
 
 ### RG-REQ-005-L09 — Unresolved calls are classified, counted, and visible beside a zero
 
-Each unresolved call shall carry a named category and basis; where `callers`/`callees`/`explain` render a zero, the count of unresolved calls that name this symbol's short name shall be stated with its categories ("0 resolved callers; 2 unresolved calls name `Recover` (ambiguous: 2)"), so a zero never reads as absence.
+Each unresolved call shall carry a named category and basis; where a caller list (`callers`, `explain`'s Callers) renders a zero, the count of unresolved calls that name this symbol's short name shall be stated with its categories ("0 resolved callers; 2 unresolved calls name `Recover` (ambiguous: 2)"), and where a callee list (`callees`, `explain`'s Callees) renders a zero, the count of unresolved calls the symbol itself makes shall be stated with its categories, so a zero never reads as absence.
 
 **Verification criterion:** `indexer/src/resolver.rs` categorize tests (`categorize_calls_this_method`, `categorize_calls_obj_method`, `categorize_calls_function`, `java_import_wildcard_is_named_basis`); a render test for the zero-state count (to be added); field: `explain BaseHandler.get_response` before L03 ships reads the unresolved count beside Callers (0).
 

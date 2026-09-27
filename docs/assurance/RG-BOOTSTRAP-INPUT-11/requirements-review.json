@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-11-2",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-11.json",
+    "sha256": "sha256:23e4d48054222f3f6dd8acc04a9cae476bad3d7de8d1b17a1995f49bcd26452b"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-11"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-11-2"
+  },
+  "result": "accepted",
+  "completedAt": "2026-09-27T14:10:00.000Z",
+  "report": "Standalone read-only review (codex exec --sandbox read-only, gpt-6-sol, high), two passes over self-contained prompts with the diffs inlined.\n\nPASS 1 (session 01a0e2b2-e035-7252-9f02-8c26d81ed4d7), subject = INPUT-10 with the docs/cli/rmap-contracts.md re-pin only:\nRESULT: refinement-required\n\n**Finding — `callees` uses a different unresolved-call count from the one RG-REQ-005-L09 requires.**\n\n- `docs/requirements/rg-req-005-symbol-relationship-discovery.md:113`: “where `callers`/`callees`/`explain` render a zero, the count of unresolved calls that name this symbol's short name shall be stated with its categories”\n- `docs/cli/rmap-contracts.md:215`: “`unresolved_naming` | callers | … unresolved calls whose target's last `.`/`::` segment is the symbol's name.”\n- `docs/cli/rmap-contracts.md:216`: “`unresolved_from` | callees | … unresolved calls made by the symbol.”\n\nIncoming calls that *name* a symbol and outgoing calls *made by* it are different sets. The new contract assigns the former only to `callers`, while L09 explicitly requires it for `callees` too. Refine L09 to state the intended direction for each surface, or change the contract to supply the L09 count.\n\n**Review scope:** I read RG-REQ-002 and RG-REQ-005 locally and checked the supplied source diff against their certainty, relationship, and call-site-anchor requirements; I found no other conflict. The requirement lines supplied as citing `rmap-contracts.md` do not become false from this change. The supplied manifest diff shows exactly the two stated line changes, but I **did not independently compare the two manifest files or verify their digests**.\n\nOperator resolution: catalog correction CC-20 (docs/assurance/RG-BOOTSTRAP/catalog-corrections.md), text-only, RG-REQ-005-L09 direction per list.\n\nPASS 2 (session 01a0e2b5-9795-77c1-8aea-d0c40f9ba94b), subject = this manifest (re-pin + CC-20):\nRESULT: accepted\n\nNo findings.\n\nCC-20 closes the pass-1 directionality finding: the incoming count belongs beside `callers` and explain’s Callers; calls the symbol makes belong beside `callees` and explain’s Callees. That matches the contract’s `unresolved_naming` / `unresolved_from` rows and its two human-line forms. The diff changes only L09’s directional wording; its example, verification criterion, and other requirement lines are unchanged.\n\nMy pass-1 conclusion on the source diff still holds. Nothing in the supplied source diff makes the listed citations of `docs/cli/rmap-contracts.md` false. The supplied manifest diff has exactly the three stated changes: `baselineId` and two digests.\n\n**Evidence limit:** I read and compared the inline diffs and citations. I did not open the manifests or independently verify their file contents, digests, commit history, or implementation gates."
+}
