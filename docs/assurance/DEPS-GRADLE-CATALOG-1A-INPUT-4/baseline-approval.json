@@ -1,0 +1,69 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DEPS-GRADLE-CATALOG-1A-BASELINE-APPROVAL-4",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DEPS-GRADLE-CATALOG-1A-INPUT-4.json",
+    "sha256": "sha256:9bc1415b7ed87b269b5cff3e6d937f12cb641d20e966284979dc3dd50415352c"
+  },
+  "review": {
+    "path": "docs/assurance/DEPS-GRADLE-CATALOG-1A-INPUT-4/requirements-review.json",
+    "sha256": "sha256:2d225a907e0cbfb4eebfef56b8d6e0747500097e1716f3e40302191b5d33ff27"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-GRADLE-DECLARED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+        "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-DGC-CONDITIONAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-CONDITIONAL-1.md",
+        "sha256": "sha256:240e67c53adcd3f4daf09233d8bdbd003d5acaa61a300230977af94da4bfa3f0"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-DGC-ATTRIBUTION-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-ATTRIBUTION-1.md",
+        "sha256": "sha256:c0dd3ff3220f38fc273398376dac6c52bcdb1b2645559ec7a2edda295d5c2d77"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-27T19:39:58.020Z",
+  "rationale": "Document item DEPS-GRADLE-CATALOG-1A-PREP-6 accepted at cycle 2 (codex gpt-6-sol): A-1 binds D-DGC-ATTRIBUTION-1 (operator; human may override) \u2014 a Gradle file reached by no ancestor script is DECLARED, UNDETERMINED with the block located, or (unknown build) a FAILED record, never a certain empty set; a provenance failure wins over parsed; a file in no Gradle build keeps the empty set. Five new tests and two existing ones bound in DGC-A01; DGC-A06 at the deps list boundary."
+}
