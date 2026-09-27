@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "PORTABLE-TMP-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/PORTABLE-TMP-1-INPUT-1.json",
+    "sha256": "sha256:f9d201dfde9c75a173da201ecebc4214b92d9238f7c1b55667a5f7b180f3669b"
+  },
+  "review": {
+    "path": "docs/assurance/PORTABLE-TMP-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:199cad62844b7ecab9771b6afb5160ce5b436833ae50a5ebcd71f525319c824c"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-PTMP-ROOT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PTMP-ROOT-1.md",
+        "sha256": "sha256:a35ccddbd5ff5ff197a4800aa5c5252417252002b0711fedf4d54b64bfc63e4f"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-27T13:35:29.399Z",
+  "rationale": "Document item PORTABLE-TMP-1-PREP-1 accepted at cycle 4 (reviewer codex gpt-6-sol). Design per D-PTMP-ROOT-1 (operator; the human may override): one sandbox state root per OS owned by platform-paths (macOS /private/tmp unchanged, Linux /tmp). Field proof per the operator's cycle-2 ruling: isolated CLI proof + scratch-base creation test; real per-uid root creation and a Linux host run stay UNVERIFIED."
+}
