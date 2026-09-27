@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "PORTABLE-TMP-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/PORTABLE-TMP-1-INPUT-2.json",
+    "sha256": "sha256:f874427d4ece8950657164246e2f338beb88d92a405a464abacdebdf25a0804c"
+  },
+  "review": {
+    "path": "docs/assurance/PORTABLE-TMP-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:0834ed57964e50f6982586bfb104a19ddcde4e2e7a4d1e2a54cead869cd2204d"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-PTMP-ROOT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PTMP-ROOT-1.md",
+        "sha256": "sha256:a35ccddbd5ff5ff197a4800aa5c5252417252002b0711fedf4d54b64bfc63e4f"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-27T14:09:19.401Z",
+  "rationale": "Document item PORTABLE-TMP-1-PREP-2 accepted at cycle 2 (codex gpt-6-sol): OC-1 removes PT-C07's unreachable doctor state_root assertion and \u00a76's matching report line (implementation review-0 D-PT-C07-ORACLE = A, operator); follow-up DOCTOR-FALLBACK-STATE-ROOT-1. D-PTMP-ROADMAP = A (operator): the ROADMAP line was corrected to D-PTMP-ROOT-1 (044e0ebe)."
+}
