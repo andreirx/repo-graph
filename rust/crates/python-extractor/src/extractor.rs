@@ -15,7 +15,7 @@ use tree_sitter::{Node, Parser};
 use crate::builtins::python_runtime_builtins;
 
 /// Extractor name and version.
-const EXTRACTOR_NAME: &str = "python-core:0.1.0";
+const EXTRACTOR_NAME: &str = "python-core:0.2.0";
 
 /// The language identifier this extractor handles.
 const LANGUAGES: &[&str] = &["python"];
@@ -99,6 +99,11 @@ struct ExtractionCtx<'a> {
     emitted_stable_keys: HashSet<String>,
     /// Current class context for method qualified names.
     current_class: Option<String>,
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-CARRIER-1): the lexical facts of the method whose body is
+    /// being walked — set and restored by `extract_function` for a function directly in a class
+    /// body (the only functions extracted with `current_class` set), `None` otherwise. Read by the
+    /// self/cls call carrier to state whether its receiver is the method's first parameter.
+    current_method: Option<MethodReceiverFacts>,
     /// Resolved callsite facts for state-boundary integration (SB-7C).
     resolved_callsites: Vec<ResolvedCallsite>,
 }
@@ -225,6 +230,7 @@ impl ExtractorPort for PythonExtractor {
             metrics: BTreeMap::new(),
             emitted_stable_keys: HashSet::new(),
             current_class: None,
+            current_method: None,
             resolved_callsites: Vec::new(),
         };
 
@@ -947,8 +953,16 @@ fn extract_function(node: &Node, ctx: &mut ExtractionCtx) {
             },
         );
 
-        // Extract calls from function body
+        // Extract calls from function body. PYTHON-RECEIVER-BINDING-1: a method (a function
+        // directly in a class body) records its receiver facts for the self/cls call carrier;
+        // a module-level function records none (its calls carry no carrier).
+        let method_facts = ctx
+            .current_class
+            .is_some()
+            .then(|| method_receiver_facts(node, &body, ctx.source));
+        let old_method = std::mem::replace(&mut ctx.current_method, method_facts);
         extract_calls_from_node(&body, ctx, &graph_node.node_uid);
+        ctx.current_method = old_method;
 
         // Extract local variables from function body
         extract_local_variables(&body, ctx, &qualified_name);
@@ -1081,7 +1095,13 @@ fn emit_call_edge(node: &Node, ctx: &mut ExtractionCtx, caller_uid: &str) {
     // call inside class C. Pure binding EVIDENCE; the target key is NOT rewritten and every
     // other call (a chained attribute, a module-level self-call) carries nothing, byte-identical
     // to before.
-    let metadata_json = self_call_carrier(&target_key, ctx.current_class.as_deref());
+    let metadata_json = self_call_carrier(
+        &target_key,
+        ctx.current_class.as_deref(),
+        ctx.current_method.as_ref(),
+        node,
+        ctx.source,
+    );
 
     ctx.edges.push(ExtractedEdge {
         edge_uid: uuid::Uuid::new_v4().to_string(),
@@ -1099,24 +1119,370 @@ fn emit_call_edge(node: &Node, ctx: &mut ExtractionCtx, caller_uid: &str) {
 
 /// The self/cls call carrier for the resolver's class-hierarchy binding stage.
 ///
-/// Returns `{"selfCall":true,"enclosingClass":"C"}` ONLY when `target_key` is exactly
-/// `self.<m>` / `cls.<m>` — a single dot, `<m>` a plain identifier — AND the call is inside a
-/// class (`current_class == Some("C")`). A chained attribute (`self.extra.get` → three parts), a
-/// receiverless/module call, or a self-call outside any class carries `None` (byte-identical to
-/// the pre-slice behaviour). The carrier is EVIDENCE for the resolver (RG-REQ-005-L02); the
-/// target key is never rewritten (the resolver has no qualified-lookup to reach through a rewrite,
-/// so the TS `this.` rewrite buys nothing here).
-fn self_call_carrier(target_key: &str, current_class: Option<&str>) -> Option<String> {
+/// Returns `{"selfCall":true,"enclosingClass":"C","receiverBinding":<b>}` ONLY when `target_key`
+/// is exactly `self.<m>` / `cls.<m>` — a single dot, `<m>` a plain identifier — AND the call is
+/// inside a class (`current_class == Some("C")`). A chained attribute (`self.extra.get` → three
+/// parts), a receiverless/module call, or a self-call outside any class carries `None`. The
+/// carrier is EVIDENCE for the resolver (RG-REQ-005-L02); the target key is never rewritten.
+///
+/// PYTHON-RECEIVER-BINDING-1 (D-PRB-CARRIER-1 = C): the class context alone does not prove what
+/// the receiver identifier denotes, so the carrier states the receiver's LEXICAL binding:
+/// `"parameter"` only when the receiver is the enclosing method's first positional parameter and
+/// nothing rebinds it where the call is made ([`receiver_is_the_method_parameter`]); otherwise
+/// `"unproven"` — the resolver then binds it through neither its class hierarchy nor a same-named
+/// import alias.
+fn self_call_carrier(
+    target_key: &str,
+    current_class: Option<&str>,
+    method: Option<&MethodReceiverFacts>,
+    call: &Node,
+    source: &str,
+) -> Option<String> {
     let class = current_class?;
-    let (receiver, method) = target_key.split_once('.')?;
+    let (receiver, called) = target_key.split_once('.')?;
     if receiver != "self" && receiver != "cls" {
         return None;
     }
-    // Exactly two parts: a chained attribute (`self.extra.get`) leaves a dot in `method`.
-    if method.contains('.') || method.is_empty() {
+    // Exactly two parts: a chained attribute (`self.extra.get`) leaves a dot in `called`.
+    if called.contains('.') || called.is_empty() {
         return None;
     }
-    Some(serde_json::json!({ "selfCall": true, "enclosingClass": class }).to_string())
+    let binding = match method {
+        Some(facts) if receiver_is_the_method_parameter(receiver, facts, call, source) => {
+            RECEIVER_BINDING_PARAMETER
+        }
+        _ => RECEIVER_BINDING_UNPROVEN,
+    };
+    Some(
+        serde_json::json!({
+            "selfCall": true,
+            "enclosingClass": class,
+            "receiverBinding": binding,
+        })
+        .to_string(),
+    )
+}
+
+// -- Receiver binding (PYTHON-RECEIVER-BINDING-1, D-PRB-CARRIER-1) ----------
+
+/// `receiverBinding` value: the receiver is proven to be the enclosing method's first parameter.
+const RECEIVER_BINDING_PARAMETER: &str = "parameter";
+/// `receiverBinding` value: the extractor could not prove it.
+const RECEIVER_BINDING_UNPROVEN: &str = "unproven";
+
+/// The lexical facts of a method (a function directly in a class body) that decide whether a
+/// `self`/`cls` receiver in its body denotes its first parameter.
+#[derive(Debug, Clone)]
+struct MethodReceiverFacts {
+    /// The name of the first POSITIONAL parameter (`identifier`, `typed_parameter`,
+    /// `default_parameter`, `typed_default_parameter`); `None` when the list is empty or starts
+    /// with `*args`, `**kwargs`, a bare `*` or `/`.
+    first_positional_param: Option<String>,
+    /// The method is decorated `@staticmethod` (the identifier, or an attribute ending in it).
+    is_staticmethod: bool,
+    /// Every name the method's OWN scope binds other than by its parameters (its body outside
+    /// nested function and class bodies), plus every name a nested function or class declares
+    /// `nonlocal`.
+    rebound_names: HashSet<String>,
+}
+
+/// Read the receiver facts of `function` (a `function_definition` directly in a class body,
+/// possibly under a `decorated_definition`) whose body is `body`.
+fn method_receiver_facts(function: &Node, body: &Node, source: &str) -> MethodReceiverFacts {
+    let mut rebound_names = HashSet::new();
+    collect_own_scope_bindings(body, source, &mut rebound_names);
+    MethodReceiverFacts {
+        first_positional_param: first_positional_parameter(function, source),
+        is_staticmethod: is_decorated_staticmethod(function, source),
+        rebound_names,
+    }
+}
+
+/// The first positional parameter's name, or `None` (see [`MethodReceiverFacts`]).
+fn first_positional_parameter(function: &Node, source: &str) -> Option<String> {
+    let params = function.child_by_field_name("parameters")?;
+    let mut cursor = params.walk();
+    let first = params
+        .named_children(&mut cursor)
+        .find(|c| c.kind() != "comment")?;
+    let name_node = match first.kind() {
+        "identifier" => first,
+        "typed_parameter" => first.named_child(0).filter(|n| n.kind() == "identifier")?,
+        "default_parameter" | "typed_default_parameter" => first.child_by_field_name("name")?,
+        _ => return None,
+    };
+    Some(node_text(&name_node, source).to_string())
+}
+
+/// Is `function` decorated `@staticmethod` (or `@<x>.staticmethod`)?
+fn is_decorated_staticmethod(function: &Node, source: &str) -> bool {
+    let Some(parent) = function.parent() else {
+        return false;
+    };
+    if parent.kind() != "decorated_definition" {
+        return false;
+    }
+    let mut cursor = parent.walk();
+    let found = parent
+        .children(&mut cursor)
+        .filter(|c| c.kind() == "decorator")
+        .any(|decorator| {
+            let Some(expr) = decorator.named_child(0) else {
+                return false;
+            };
+            match expr.kind() {
+                "identifier" => node_text(&expr, source) == "staticmethod",
+                "attribute" => expr
+                    .child_by_field_name("attribute")
+                    .is_some_and(|a| node_text(&a, source) == "staticmethod"),
+                _ => false,
+            }
+        });
+    found
+}
+
+/// Collect the names bound in a method's own scope (condition (c) of the rule): assignment,
+/// augmented and annotated assignment targets; `for`, `with … as`, `except … as` targets; walrus
+/// names; `del` targets; `global`/`nonlocal` names; `import` names; nested `def`/`class` names;
+/// `match` captures. Nested function and class bodies are other scopes, except that a `nonlocal`
+/// declared anywhere inside them rebinds the method's name. A lambda is its own scope. A
+/// comprehension's `for` targets bind in the comprehension's scope, not the method's (a walrus
+/// inside it still binds the method's).
+fn collect_own_scope_bindings(node: &Node, source: &str, out: &mut HashSet<String>) {
+    match node.kind() {
+        "function_definition" | "class_definition" => {
+            if let Some(name) = node.child_by_field_name("name") {
+                out.insert(node_text(&name, source).to_string());
+            }
+            collect_nested_nonlocals(node, source, out);
+            return;
+        }
+        "lambda" => return,
+        "assignment" | "augmented_assignment" => {
+            if let Some(left) = node.child_by_field_name("left") {
+                collect_target_names(&left, source, out);
+            }
+        }
+        "for_statement" => {
+            if let Some(left) = node.child_by_field_name("left") {
+                collect_target_names(&left, source, out);
+            }
+        }
+        "as_pattern" => {
+            // `with x as T` and `except E as T` (the alias is an `as_pattern_target`); a
+            // `case … as name` capture carries the name directly.
+            if let Some(alias) = node.child_by_field_name("alias") {
+                collect_target_names(&alias, source, out);
+            } else if let Some(last) = node.named_child(node.named_child_count().saturating_sub(1))
+            {
+                if last.kind() == "identifier" {
+                    out.insert(node_text(&last, source).to_string());
+                }
+            }
+        }
+        "named_expression" => {
+            if let Some(name) = node.child_by_field_name("name") {
+                out.insert(node_text(&name, source).to_string());
+            }
+        }
+        "delete_statement" => {
+            let mut cursor = node.walk();
+            for target in node.named_children(&mut cursor) {
+                collect_target_names(&target, source, out);
+            }
+            return;
+        }
+        "global_statement" | "nonlocal_statement" => {
+            let mut cursor = node.walk();
+            for name in node.named_children(&mut cursor) {
+                if name.kind() == "identifier" {
+                    out.insert(node_text(&name, source).to_string());
+                }
+            }
+            return;
+        }
+        "import_statement" | "import_from_statement" => {
+            let mut cursor = node.walk();
+            for (i, child) in node.children(&mut cursor).enumerate() {
+                if node.field_name_for_child(i as u32) != Some("name") {
+                    continue;
+                }
+                let bound = match child.kind() {
+                    // `import a.b` binds `a`; `from m import a` binds `a`.
+                    "dotted_name" => child.named_child(0),
+                    "aliased_import" => child.child_by_field_name("alias"),
+                    _ => None,
+                };
+                if let Some(b) = bound {
+                    out.insert(node_text(&b, source).to_string());
+                }
+            }
+            return;
+        }
+        "case_pattern" => {
+            collect_match_captures(node, source, out);
+        }
+        "for_in_clause" => {
+            // The comprehension's own targets are not the method's; its iterables may hold a
+            // walrus that is.
+            if let Some(right) = node.child_by_field_name("right") {
+                collect_own_scope_bindings(&right, source, out);
+            }
+            return;
+        }
+        _ => {}
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_own_scope_bindings(&child, source, out);
+    }
+}
+
+/// The names an assignment-like target binds: identifiers, through tuples, lists, parentheses
+/// and starred targets — never the object of an attribute (`self.x = …`) or a subscript
+/// (`self[0] = …`), which bind nothing.
+fn collect_target_names(target: &Node, source: &str, out: &mut HashSet<String>) {
+    match target.kind() {
+        "identifier" => {
+            out.insert(node_text(target, source).to_string());
+        }
+        "attribute" | "subscript" => {}
+        _ => {
+            let mut cursor = target.walk();
+            for child in target.named_children(&mut cursor) {
+                collect_target_names(&child, source, out);
+            }
+        }
+    }
+}
+
+/// The capture names inside a `case` pattern: a single-identifier `dotted_name` in a pattern or
+/// keyword-value position (`case [x]`, `case {"k": x}`, `case P(k=x)`), a star capture
+/// (`case [*x]`) and an `as` capture. A dotted value pattern (`case self.X`) binds nothing.
+fn collect_match_captures(node: &Node, source: &str, out: &mut HashSet<String>) {
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            "dotted_name"
+                if matches!(node.kind(), "case_pattern" | "keyword_pattern")
+                    && child.named_child_count() == 1 =>
+            {
+                if let Some(id) = child.named_child(0) {
+                    out.insert(node_text(&id, source).to_string());
+                }
+            }
+            "identifier" if matches!(node.kind(), "splat_pattern" | "as_pattern") => {
+                out.insert(node_text(&child, source).to_string());
+            }
+            "dotted_name" => {}
+            _ => collect_match_captures(&child, source, out),
+        }
+    }
+}
+
+/// Every name a `nonlocal` statement inside a nested function or class declares (at any depth):
+/// such a name rebinds the method's own variable.
+fn collect_nested_nonlocals(node: &Node, source: &str, out: &mut HashSet<String>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "nonlocal_statement" {
+            let mut names = child.walk();
+            for name in child.named_children(&mut names) {
+                if name.kind() == "identifier" {
+                    out.insert(node_text(&name, source).to_string());
+                }
+            }
+        } else {
+            collect_nested_nonlocals(&child, source, out);
+        }
+    }
+}
+
+/// Condition (a)–(d) of D-PRB-CARRIER-1's rule as read lexically: the method is not a
+/// `@staticmethod`; its first positional parameter is named `receiver`; its own scope does not
+/// rebind that name; and no enclosing `lambda` parameter or comprehension `for` target binds it
+/// where `call` is made.
+fn receiver_is_the_method_parameter(
+    receiver: &str,
+    facts: &MethodReceiverFacts,
+    call: &Node,
+    source: &str,
+) -> bool {
+    !facts.is_staticmethod
+        && facts.first_positional_param.as_deref() == Some(receiver)
+        && !facts.rebound_names.contains(receiver)
+        && !bound_by_an_enclosing_lambda_or_comprehension(receiver, call, source)
+}
+
+/// Does a `lambda` parameter, or the `for` target of a comprehension, bind `name` at `call`?
+/// Walks up from the call to its enclosing function definition.
+fn bound_by_an_enclosing_lambda_or_comprehension(name: &str, call: &Node, source: &str) -> bool {
+    let mut child = *call;
+    while let Some(parent) = child.parent() {
+        match parent.kind() {
+            "function_definition" | "class_definition" => return false,
+            "lambda" => {
+                let in_body = parent
+                    .child_by_field_name("body")
+                    .is_some_and(|b| b.id() == child.id());
+                if in_body {
+                    if let Some(params) = parent.child_by_field_name("parameters") {
+                        let mut bound = HashSet::new();
+                        collect_parameter_names(&params, source, &mut bound);
+                        if bound.contains(name) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            "list_comprehension"
+            | "set_comprehension"
+            | "dictionary_comprehension"
+            | "generator_expression" => {
+                // The first clause's iterable is evaluated in the enclosing scope.
+                let mut cursor = parent.walk();
+                let first_clause = parent
+                    .named_children(&mut cursor)
+                    .find(|c| c.kind() == "for_in_clause");
+                let in_first_iterable = first_clause.is_some_and(|c| c.id() == child.id());
+                if !in_first_iterable {
+                    let mut bound = HashSet::new();
+                    let mut cursor = parent.walk();
+                    for clause in parent.named_children(&mut cursor) {
+                        if clause.kind() == "for_in_clause" {
+                            if let Some(left) = clause.child_by_field_name("left") {
+                                collect_target_names(&left, source, &mut bound);
+                            }
+                        }
+                    }
+                    if bound.contains(name) {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+        child = parent;
+    }
+    false
+}
+
+/// The names a `lambda_parameters` list binds.
+fn collect_parameter_names(params: &Node, source: &str, out: &mut HashSet<String>) {
+    let mut cursor = params.walk();
+    for p in params.named_children(&mut cursor) {
+        let name = match p.kind() {
+            "identifier" => Some(p),
+            "default_parameter" | "typed_default_parameter" => p.child_by_field_name("name"),
+            "typed_parameter" | "list_splat_pattern" | "dictionary_splat_pattern" => {
+                p.named_child(0).filter(|n| n.kind() == "identifier")
+            }
+            _ => None,
+        };
+        if let Some(n) = name {
+            out.insert(node_text(&n, source).to_string());
+        }
+    }
 }
 
 /// Extract call target name from a function node.
@@ -2246,6 +2612,430 @@ def callee():
         );
         let edge = find_call_edge(&result, "self.bar");
         assert!(edge.metadata_json.is_none());
+    }
+
+    // -- Receiver binding (PYTHON-RECEIVER-BINDING-1, D-PRB-CARRIER-1) --
+    //
+    // ONE RULE (F-PRB-LEXICAL-ORACLES): every test naming a `receiverBinding` value asserts BOTH
+    // the carrier's value AND the real resolver's disposition of that same extraction.
+
+    use repo_graph_indexer::resolver::{
+        metadata_forward_decl, resolve_edges, superclasses_from_metadata, ResolutionResult,
+        ResolverIndex, ResolverNode,
+    };
+    use std::collections::HashMap;
+
+    /// Build a `ResolverIndex` from the extraction's nodes (name, qualified name, kind, subtype,
+    /// file uid, forward-decl flag, `superclasses_from_metadata`) and run the real
+    /// `repo_graph_indexer::resolver::resolve_edges` over its edges with the file's import
+    /// bindings.
+    fn resolve_through_the_indexer_resolver(result: &ExtractionResult) -> ResolutionResult {
+        let wire = |v: serde_json::Value| v.as_str().map(|s| s.to_string());
+        let mut index = ResolverIndex {
+            nodes_by_stable_key: HashMap::new(),
+            nodes_by_name: HashMap::new(),
+            nodes_by_qualified_name: HashMap::new(),
+            nodes_by_uid: HashMap::new(),
+            node_uid_to_file_uid: HashMap::new(),
+            file_resolution: HashMap::new(),
+            per_file_include_resolution: HashMap::new(),
+            stable_key_to_uid: HashMap::new(),
+            file_to_module: HashMap::new(),
+            include_resolver: None,
+            rust_crate_roots: HashMap::new(),
+            java_suffix_index: HashMap::new(),
+        };
+        for n in &result.nodes {
+            let node = ResolverNode {
+                node_uid: n.node_uid.clone(),
+                stable_key: n.stable_key.clone(),
+                name: n.name.clone(),
+                qualified_name: n.qualified_name.clone(),
+                kind: wire(serde_json::to_value(n.kind).unwrap()).unwrap(),
+                subtype: n
+                    .subtype
+                    .and_then(|st| wire(serde_json::to_value(st).unwrap())),
+                file_uid: n.file_uid.clone(),
+                forward_decl: metadata_forward_decl(n.metadata_json.as_deref()),
+                superclasses: superclasses_from_metadata(n.metadata_json.as_deref()),
+            };
+            index
+                .nodes_by_name
+                .entry(node.name.clone())
+                .or_default()
+                .push(node.clone());
+            if let Some(qn) = &node.qualified_name {
+                index
+                    .nodes_by_qualified_name
+                    .entry(qn.clone())
+                    .or_default()
+                    .push(node.clone());
+            }
+            if let Some(f) = &node.file_uid {
+                index
+                    .node_uid_to_file_uid
+                    .insert(node.node_uid.clone(), f.clone());
+            }
+            index
+                .stable_key_to_uid
+                .insert(node.stable_key.clone(), node.node_uid.clone());
+            index
+                .nodes_by_stable_key
+                .insert(node.stable_key.clone(), node.clone());
+            index.nodes_by_uid.insert(node.node_uid.clone(), node);
+        }
+        let bindings: HashMap<String, Vec<ImportBinding>> = [(
+            "test:src/app.py".to_string(),
+            result.import_bindings.clone(),
+        )]
+        .into_iter()
+        .collect();
+        resolve_edges(&result.edges, &index, Some(&bindings))
+    }
+
+    /// Every CALLS extraction edge with `target_key`, in source order.
+    fn calls_with_key<'a>(
+        result: &'a ExtractionResult,
+        target_key: &str,
+    ) -> Vec<&'a ExtractedEdge> {
+        let mut edges: Vec<&ExtractedEdge> = result
+            .edges
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Calls && e.target_key == target_key)
+            .collect();
+        edges.sort_by_key(|e| e.location.map(|l| (l.line_start, l.col_start)));
+        edges
+    }
+
+    fn receiver_binding_of(edge: &ExtractedEdge) -> String {
+        let meta: serde_json::Value =
+            serde_json::from_str(edge.metadata_json.as_deref().expect("carrier present")).unwrap();
+        assert_eq!(meta["selfCall"], serde_json::json!(true));
+        meta["receiverBinding"]
+            .as_str()
+            .expect("receiverBinding is a string")
+            .to_string()
+    }
+
+    fn node_uid_by_qn(result: &ExtractionResult, qn: &str) -> String {
+        result
+            .nodes
+            .iter()
+            .find(|n| n.qualified_name.as_deref() == Some(qn) && n.kind == NodeKind::Symbol)
+            .unwrap_or_else(|| panic!("no node {qn}"))
+            .node_uid
+            .clone()
+    }
+
+    /// The carrier call `edge` records `parameter` and the resolver binds it `static` to
+    /// `target_qn`, with no unresolved row for it.
+    fn assert_parameter(
+        result: &ExtractionResult,
+        resolved: &ResolutionResult,
+        edge: &ExtractedEdge,
+        target_qn: &str,
+    ) {
+        assert_eq!(receiver_binding_of(edge), "parameter");
+        let target = node_uid_by_qn(result, target_qn);
+        let hits: Vec<_> = resolved
+            .resolved
+            .iter()
+            .filter(|r| r.edge_uid == edge.edge_uid)
+            .collect();
+        assert_eq!(hits.len(), 1, "one CALLS edge for the call");
+        assert_eq!(hits[0].target_node_uid, target, "bound to {target_qn}");
+        assert_eq!(hits[0].source_node_uid, edge.source_node_uid);
+        assert_eq!(hits[0].resolution, Resolution::Static);
+        assert!(
+            !resolved
+                .still_unresolved
+                .iter()
+                .any(|u| u.edge.edge_uid == edge.edge_uid),
+            "no unresolved row for the call"
+        );
+    }
+
+    /// The carrier call `edge` records `unproven`; the resolver leaves it unresolved with
+    /// `self_call_receiver_unproven` and a sorted pool containing `candidate_qn`.
+    fn assert_unproven(resolved: &ResolutionResult, edge: &ExtractedEdge, candidate_qn: &str) {
+        assert_eq!(receiver_binding_of(edge), "unproven");
+        assert!(
+            !resolved
+                .resolved
+                .iter()
+                .any(|r| r.edge_uid == edge.edge_uid),
+            "no CALLS edge for the call"
+        );
+        let rows: Vec<_> = resolved
+            .still_unresolved
+            .iter()
+            .filter(|u| u.edge.edge_uid == edge.edge_uid)
+            .collect();
+        assert_eq!(rows.len(), 1, "one unresolved row for the call");
+        let meta: serde_json::Value =
+            serde_json::from_str(rows[0].edge.metadata_json.as_deref().unwrap()).unwrap();
+        assert_eq!(meta["nameOnlyReason"], "self_call_receiver_unproven");
+        let pool: Vec<String> = meta["nameOnlyCandidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        let mut sorted = pool.clone();
+        sorted.sort();
+        assert_eq!(pool, sorted, "the pool is sorted");
+        assert!(
+            pool.iter().any(|c| c == candidate_qn),
+            "pool {pool:?} holds {candidate_qn}"
+        );
+    }
+
+    /// One `parameter` fixture: extract, resolve, and assert every `self.m()` carrier call.
+    fn assert_every_self_m_is_parameter(source: &str) {
+        let result = extract_test(source);
+        let resolved = resolve_through_the_indexer_resolver(&result);
+        let calls = calls_with_key(&result, "self.m");
+        assert!(!calls.is_empty());
+        for edge in calls {
+            assert_parameter(&result, &resolved, edge, "C.m");
+        }
+    }
+
+    /// One `unproven` fixture for a binding form: a method `f(self, other)` whose body holds
+    /// `form` and then `return self.m()`.
+    fn assert_binding_form_is_unproven(form: &str) {
+        let body: String = form.lines().map(|l| format!("        {l}\n")).collect();
+        let source = format!(
+            "class C:\n    def m(self):\n        pass\n\n    def f(self, other):\n{body}        return self.m()\n"
+        );
+        let result = extract_test(&source);
+        let resolved = resolve_through_the_indexer_resolver(&result);
+        let calls = calls_with_key(&result, "self.m");
+        assert_eq!(calls.len(), 1, "{source}");
+        assert_unproven(&resolved, calls[0], "C.m");
+    }
+
+    #[test]
+    fn self_call_on_the_first_parameter_records_receiver_binding_parameter_and_binds_to_the_class_method(
+    ) {
+        assert_every_self_m_is_parameter(
+            "class C:\n    def m(self):\n        pass\n\n    def f(self):\n        return self.m()\n",
+        );
+    }
+
+    #[test]
+    fn cls_call_on_the_first_parameter_of_a_classmethod_records_receiver_binding_parameter_and_binds_to_the_class_method(
+    ) {
+        let result = extract_test(
+            "class C:\n    @classmethod\n    def m(cls):\n        pass\n\n    @classmethod\n    def f(cls):\n        return cls.m()\n",
+        );
+        let resolved = resolve_through_the_indexer_resolver(&result);
+        let calls = calls_with_key(&result, "cls.m");
+        assert_eq!(calls.len(), 1);
+        assert_parameter(&result, &resolved, calls[0], "C.m");
+    }
+
+    #[test]
+    fn typed_or_defaulted_first_parameter_records_receiver_binding_parameter_and_binds_to_the_class_method(
+    ) {
+        let result = extract_test(
+            "class C:\n    def m(self):\n        pass\n\n    def f(self: \"C\", x=None):\n        return self.m()\n\n    def g(self=None):\n        return self.m()\n",
+        );
+        let resolved = resolve_through_the_indexer_resolver(&result);
+        let calls = calls_with_key(&result, "self.m");
+        assert_eq!(calls.len(), 2);
+        for edge in calls {
+            assert_parameter(&result, &resolved, edge, "C.m");
+        }
+    }
+
+    #[test]
+    fn attribute_assignment_on_the_receiver_is_not_a_rebinding_and_binds_to_the_class_method() {
+        assert_every_self_m_is_parameter(
+            "class C:\n    def m(self):\n        pass\n\n    def f(self):\n        self.x = 1\n        self[0] = 2\n        return self.m()\n",
+        );
+    }
+
+    #[test]
+    fn assignment_inside_a_nested_function_is_not_a_rebinding_and_binds_to_the_class_method() {
+        assert_every_self_m_is_parameter(
+            "class C:\n    def m(self):\n        pass\n\n    def f(self):\n        def g():\n            self = 1\n            return self\n        return self.m()\n",
+        );
+    }
+
+    #[test]
+    fn self_call_in_a_staticmethod_records_receiver_binding_unproven_and_stays_unresolved() {
+        for decorator in ["staticmethod", "builtins.staticmethod"] {
+            let source = format!(
+                "class C:\n    def m(self):\n        pass\n\n    @{decorator}\n    def f(self):\n        return self.m()\n"
+            );
+            let result = extract_test(&source);
+            let resolved = resolve_through_the_indexer_resolver(&result);
+            let calls = calls_with_key(&result, "self.m");
+            assert_eq!(calls.len(), 1, "{decorator}");
+            assert_unproven(&resolved, calls[0], "C.m");
+        }
+    }
+
+    #[test]
+    fn self_call_whose_receiver_is_not_the_first_parameter_records_receiver_binding_unproven_and_stays_unresolved(
+    ) {
+        // The test_base.py:190 shape (`cls = SimpleView; cls.as_view()` in a method taking
+        // `self`), and a method whose first parameter is `self_`.
+        let result = extract_test(
+            "class C:\n    def m(self):\n        pass\n\n    def f(self):\n        cls = X\n        return cls.m()\n\n    def g(self_):\n        return self.m()\n",
+        );
+        let resolved = resolve_through_the_indexer_resolver(&result);
+        let cls_calls = calls_with_key(&result, "cls.m");
+        assert_eq!(cls_calls.len(), 1);
+        assert_unproven(&resolved, cls_calls[0], "C.m");
+        let self_calls = calls_with_key(&result, "self.m");
+        assert_eq!(self_calls.len(), 1);
+        assert_unproven(&resolved, self_calls[0], "C.m");
+    }
+
+    #[test]
+    fn self_call_in_a_parameterless_method_records_receiver_binding_unproven_and_stays_unresolved()
+    {
+        // The review's executed counterexample: `self` is the module alias (Python returns 2.0).
+        let result = extract_test(
+            "import math as self\n\nclass C:\n    def sqrt(self, x):\n        return x\n\n    def caller():\n        return self.sqrt(4)\n",
+        );
+        let resolved = resolve_through_the_indexer_resolver(&result);
+        let calls = calls_with_key(&result, "self.sqrt");
+        assert_eq!(calls.len(), 1);
+        assert_unproven(&resolved, calls[0], "C.sqrt");
+    }
+
+    #[test]
+    fn receiver_rebound_by_plain_assignment_records_receiver_binding_unproven_and_stays_unresolved()
+    {
+        assert_binding_form_is_unproven("self = other");
+    }
+
+    #[test]
+    fn receiver_rebound_by_augmented_assignment_records_receiver_binding_unproven_and_stays_unresolved(
+    ) {
+        assert_binding_form_is_unproven("self += other");
+    }
+
+    #[test]
+    fn receiver_rebound_by_annotated_assignment_records_receiver_binding_unproven_and_stays_unresolved(
+    ) {
+        assert_binding_form_is_unproven("self: C = other");
+    }
+
+    #[test]
+    fn receiver_rebound_by_a_for_target_records_receiver_binding_unproven_and_stays_unresolved() {
+        assert_binding_form_is_unproven("for self in other:\n    pass");
+    }
+
+    #[test]
+    fn receiver_rebound_by_a_with_target_records_receiver_binding_unproven_and_stays_unresolved() {
+        assert_binding_form_is_unproven("with other as self:\n    pass");
+    }
+
+    #[test]
+    fn receiver_rebound_by_an_except_target_records_receiver_binding_unproven_and_stays_unresolved()
+    {
+        assert_binding_form_is_unproven("try:\n    pass\nexcept Exception as self:\n    pass");
+    }
+
+    #[test]
+    fn receiver_rebound_by_a_walrus_records_receiver_binding_unproven_and_stays_unresolved() {
+        assert_binding_form_is_unproven("if (self := other):\n    pass");
+    }
+
+    #[test]
+    fn receiver_deleted_by_del_records_receiver_binding_unproven_and_stays_unresolved() {
+        assert_binding_form_is_unproven("del self");
+    }
+
+    #[test]
+    fn receiver_declared_global_in_the_method_records_receiver_binding_unproven_and_stays_unresolved(
+    ) {
+        // CPython rejects `global` of a parameter name at compile time; tree-sitter parses it.
+        // A form the language refuses is never `parameter`.
+        assert_binding_form_is_unproven("global self");
+    }
+
+    #[test]
+    fn receiver_declared_nonlocal_in_the_method_records_receiver_binding_unproven_and_stays_unresolved(
+    ) {
+        assert_binding_form_is_unproven("nonlocal self");
+    }
+
+    #[test]
+    fn receiver_declared_nonlocal_in_a_nested_function_records_receiver_binding_unproven_and_stays_unresolved(
+    ) {
+        assert_binding_form_is_unproven("def g():\n    nonlocal self\n    self = other\ng()");
+    }
+
+    #[test]
+    fn receiver_rebound_by_an_import_records_receiver_binding_unproven_and_stays_unresolved() {
+        assert_binding_form_is_unproven("import os as self");
+    }
+
+    #[test]
+    fn receiver_rebound_by_a_nested_def_records_receiver_binding_unproven_and_stays_unresolved() {
+        assert_binding_form_is_unproven("def self():\n    pass");
+    }
+
+    #[test]
+    fn receiver_rebound_by_a_nested_class_records_receiver_binding_unproven_and_stays_unresolved() {
+        assert_binding_form_is_unproven("class self:\n    pass");
+    }
+
+    #[test]
+    fn receiver_rebound_by_a_match_capture_records_receiver_binding_unproven_and_stays_unresolved()
+    {
+        assert_binding_form_is_unproven("match other:\n    case [self]:\n        pass");
+    }
+
+    #[test]
+    fn self_call_inside_a_comprehension_that_binds_the_receiver_records_receiver_binding_unproven_and_stays_unresolved(
+    ) {
+        let result = extract_test(
+            "class C:\n    def m(self):\n        pass\n\n    def f(self, other):\n        return [self.m() for self in other]\n",
+        );
+        let resolved = resolve_through_the_indexer_resolver(&result);
+        let calls = calls_with_key(&result, "self.m");
+        assert_eq!(calls.len(), 1);
+        assert_unproven(&resolved, calls[0], "C.m");
+    }
+
+    #[test]
+    fn self_call_inside_a_lambda_that_binds_the_receiver_records_receiver_binding_unproven_and_stays_unresolved(
+    ) {
+        // The call inside the lambda is `unproven`; a second carrier call outside that lambda in
+        // the same method is `parameter` and binds to `C.m`.
+        let result = extract_test(
+            "class C:\n    def m(self):\n        pass\n\n    def f(self, other):\n        g = lambda self: self.m()\n        return self.m()\n",
+        );
+        let resolved = resolve_through_the_indexer_resolver(&result);
+        let calls = calls_with_key(&result, "self.m");
+        assert_eq!(calls.len(), 2);
+        assert_unproven(&resolved, calls[0], "C.m");
+        assert_parameter(&result, &resolved, calls[1], "C.m");
+    }
+
+    #[test]
+    fn self_call_inside_a_nested_function_emits_no_call_edge() {
+        // A call inside a nested function or class emits no CALLS extraction edge (unchanged):
+        // no carrier and no disposition exist for it.
+        let result = extract_test(
+            "class C:\n    def m(self):\n        pass\n\n    def f(self):\n        def view(request):\n            self.m()\n        class Inner:\n            def h(self):\n                self.m()\n        return view\n",
+        );
+        assert!(calls_with_key(&result, "self.m").is_empty());
+        let resolved = resolve_through_the_indexer_resolver(&result);
+        assert!(!resolved
+            .still_unresolved
+            .iter()
+            .any(|u| u.edge.target_key == "self.m"));
+        assert!(result
+            .edges
+            .iter()
+            .all(|e| e.extractor == "python-core:0.2.0"));
     }
 
     #[test]

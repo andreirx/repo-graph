@@ -55,6 +55,27 @@ const JAVA_EXTRACTOR_PREFIX: &str = "java-core:";
 /// provenance already on every extracted edge.
 const PYTHON_EXTRACTOR_PREFIX: &str = "python-core:";
 
+/// PYTHON-RECEIVER-BINDING-1 (D-PRB-CARRIER-1 as corrected 2026-09-24): the exact extractor
+/// version that wrote self/cls call carriers WITHOUT the `receiverBinding` key. A carrier lacking
+/// the key is read on the legacy path (HEAD's stage order, terminal hierarchy miss) ONLY when its
+/// edge was written by exactly this writer — every pre-slice Python snapshot, copied forward by a
+/// delta refresh. A missing key from any other writer (the current extractor always writes it) is
+/// unproven. Compared EXACTLY, never by prefix.
+const PYTHON_EXTRACTOR_BEFORE_RECEIVER_BINDING: &str = "python-core:0.1.0";
+
+/// PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L02, RG-REQ-002-L11): the `basis` stamped on a Python
+/// CALLS edge bound by its method name alone on an untyped receiver — the reason it is `inferred`.
+pub const RECEIVER_UNTYPED_NAME_ONLY_BASIS: &str = "receiver_untyped_name_only";
+
+/// PYTHON-RECEIVER-BINDING-1: the `nameOnlyReason` values the resolver writes beside a declined
+/// candidate pool (`nameOnlyCandidates`) on an unresolved CALLS row. The classifier reads the three
+/// self/cls reasons to assign their basis; `ambiguous_name` keeps the row's existing verdict.
+pub const NAME_ONLY_REASON_AMBIGUOUS: &str = "ambiguous_name";
+pub const NAME_ONLY_REASON_SELF_CALL_HIERARCHY_MISS: &str = "self_call_hierarchy_miss";
+pub const NAME_ONLY_REASON_SELF_CALL_WITHOUT_CLASS_CONTEXT: &str =
+    "self_call_without_class_context";
+pub const NAME_ONLY_REASON_SELF_CALL_RECEIVER_UNPROVEN: &str = "self_call_receiver_unproven";
+
 /// PYTHON-SUBMODULE-IMPORT-1: the `basis` stamped on an IMPORTS edge the Python submodule stage
 /// retargeted (D-CERTAINTY-MARK-1's word; the reason the edge is `inferred`, not `static`).
 pub const PYTHON_SUBMODULE_BASIS: &str = "python_submodule";
@@ -219,6 +240,38 @@ enum TargetResolution {
         /// Why the edge is inferred (`PYTHON_SUBMODULE_BASIS`).
         basis: &'static str,
     },
+    /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L02 / RG-REQ-002-L11): a Python `obj.m()` on an
+    /// untyped receiver whose method name has exactly ONE candidate. The name alone is not
+    /// evidence, so the edge is written `resolution: inferred` with its basis, its receiver text and
+    /// its pool of one — never `static`.
+    InferredNameOnly {
+        /// Node uid of the single candidate.
+        uid: String,
+        /// The receiver expression (the key minus its last `.`-segment).
+        receiver: String,
+        /// The candidate's qualified name (the recorded pool of one).
+        candidate: String,
+    },
+    /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11): a Python `obj.m()` on an untyped receiver whose
+    /// method name has TWO OR MORE candidates. Unresolved; every candidate is recorded with the
+    /// reason `ambiguous_name`; the category and the classifier's verdict are unchanged.
+    AmbiguousNameOnly(Vec<String>),
+    /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L03, D-PRB-SCOPE-1 amendment 2): a `self.`/`cls.` call
+    /// whose class-hierarchy walk found no declaration of the method (or whose own class is not
+    /// unique in the caller's file). TERMINAL — never the bare-name fallback; the bare-name pool is
+    /// recorded as `nameOnlyCandidates` with the reason `self_call_hierarchy_miss`.
+    SelfCallHierarchyMiss(Vec<String>),
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-CARRIER-1): a class-contained `self.`/`cls.` call whose
+    /// receiver the extractor could not prove to be the method's first parameter (or whose proof is
+    /// unreadable, or whose missing proof comes from a writer other than `python-core:0.1.0`).
+    /// Neither the namespace nor the hierarchy stage binds it; every candidate is recorded with the
+    /// reason `self_call_receiver_unproven`.
+    SelfCallReceiverUnproven(Vec<String>),
+    /// PYTHON-RECEIVER-BINDING-1 (F-PRB-SELF-NOCARRIER): a Python `self.`/`cls.` call with no
+    /// readable self-call carrier (a `self` parameter of a module-level function; a malformed
+    /// carrier) that no file-level namespace alias binds. No class could be walked, so the
+    /// bare-name pool is not evidence; recorded with the reason `self_call_without_class_context`.
+    SelfCallWithoutClassContext(Vec<String>),
 }
 
 // ── Resolver types ───────────────────────────────────────────────
@@ -532,6 +585,64 @@ pub fn resolve_edges(
                         basis,
                     )),
                 });
+            }
+            // PYTHON-RECEIVER-BINDING-1: a name-only binding on an untyped receiver. Resolved to
+            // the single candidate but marked INFERRED with its basis, receiver and pool of one
+            // (RG-REQ-005-L02, RG-REQ-002-L11) — overriding the extractor's `static`.
+            TargetResolution::InferredNameOnly {
+                uid,
+                receiver,
+                candidate,
+            } => {
+                resolved.push(ResolvedEdge {
+                    edge_uid: edge.edge_uid.clone(),
+                    snapshot_uid: edge.snapshot_uid.clone(),
+                    repo_uid: edge.repo_uid.clone(),
+                    source_node_uid: edge.source_node_uid.clone(),
+                    target_node_uid: uid,
+                    edge_type: edge.edge_type,
+                    resolution: Resolution::Inferred,
+                    extractor: edge.extractor.clone(),
+                    location: edge.location,
+                    metadata_json: Some(inject_name_only_binding(
+                        edge.metadata_json.as_deref(),
+                        &receiver,
+                        &candidate,
+                    )),
+                });
+            }
+            // PYTHON-RECEIVER-BINDING-1: every declined candidate pool rides into the unresolved
+            // row as `nameOnlyCandidates` with its `nameOnlyReason` (ONE recording rule). The
+            // category stays `categorize_unresolved_edge`'s.
+            TargetResolution::AmbiguousNameOnly(pool) => still_unresolved.push(declined_pool_row(
+                edge,
+                index,
+                &pool,
+                NAME_ONLY_REASON_AMBIGUOUS,
+            )),
+            TargetResolution::SelfCallHierarchyMiss(pool) => {
+                still_unresolved.push(declined_pool_row(
+                    edge,
+                    index,
+                    &pool,
+                    NAME_ONLY_REASON_SELF_CALL_HIERARCHY_MISS,
+                ))
+            }
+            TargetResolution::SelfCallReceiverUnproven(pool) => {
+                still_unresolved.push(declined_pool_row(
+                    edge,
+                    index,
+                    &pool,
+                    NAME_ONLY_REASON_SELF_CALL_RECEIVER_UNPROVEN,
+                ))
+            }
+            TargetResolution::SelfCallWithoutClassContext(pool) => {
+                still_unresolved.push(declined_pool_row(
+                    edge,
+                    index,
+                    &pool,
+                    NAME_ONLY_REASON_SELF_CALL_WITHOUT_CLASS_CONTEXT,
+                ))
             }
             TargetResolution::Unresolved => {
                 let category = categorize_unresolved_edge(edge);
@@ -1179,85 +1290,41 @@ fn resolve_call_target(
     // never as a fact that could exist beside a non-indirect receiver. Every field is absent for a
     // non-C++ call (only the C++ extractor emits them), so this is a no-op for other languages.
     let receiver_disposition = call_receiver_info(metadata_json);
-    // ── Namespace import resolution ───────────────────────────────────
-    // For calls like `fs.readFile()` where `fs` is a namespace import,
-    // extract the member name and look it up in the imported module.
-    if target_key.contains('.') {
-        if let Some(bindings_map) = import_bindings_by_file {
-            if let Some(source_file_uid) = node_uid_to_file_uid.get(source_node_uid) {
-                if let Some(bindings) = bindings_map.get(source_file_uid) {
-                    // Extract potential namespace prefix and member
-                    let parts: Vec<&str> = target_key.splitn(2, '.').collect();
-                    if parts.len() == 2 {
-                        let prefix = parts[0];
-                        let member = parts[1];
+    let is_python = extractor.starts_with(PYTHON_EXTRACTOR_PREFIX);
 
-                        // Check if prefix matches a namespace import
-                        if let Some(binding) = bindings
-                            .iter()
-                            .find(|b| b.identifier == prefix && b.kind == ImportKind::Namespace)
-                        {
-                            if let Some(resolved_file_uid) = resolve_import_specifier_to_file(
-                                &binding.specifier,
-                                source_file_uid,
-                                file_resolution,
-                            ) {
-                                // For nested member access like `fs.promises.readFile`,
-                                // we only handle the immediate member for now.
-                                // Extract the first part of the member (before any dot).
-                                let immediate_member = member.split('.').next().unwrap_or(member);
-
-                                if let Some(candidates) = nodes_by_name.get(immediate_member) {
-                                    let in_file: Vec<ResolverNode> = candidates
-                                        .iter()
-                                        .filter(|n| {
-                                            n.file_uid.as_deref()
-                                                == Some(resolved_file_uid.as_str())
-                                        })
-                                        .cloned()
-                                        .collect();
-                                    if let Some(uid) =
-                                        pick_unambiguous(Some(&in_file), EdgeType::Calls, false)
-                                    {
-                                        return TargetResolution::Resolved(uid);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+    // ── Python self/cls calls (PYTHON-RECEIVER-BINDING-1, R1) ─────────
+    // The WHOLE two-part `self.<m>` / `cls.<m>` case of a Python edge is decided here and is
+    // TERMINAL: it never reaches the dotted-name fallback, whose bare-name pool is not evidence
+    // for a receiver the enclosing class types (RG-REQ-005-L03; D-PRB-SCOPE-1 amendment 2).
+    if is_python {
+        if let Some(method) = python_self_call_method(target_key) {
+            return resolve_python_self_call(
+                target_key,
+                method,
+                source_node_uid,
+                extractor,
+                metadata_json,
+                nodes_by_name,
+                nodes_by_qualified_name,
+                file_resolution,
+                import_bindings_by_file,
+                node_uid_to_file_uid,
+            );
         }
     }
 
-    // ── Python self/cls call binding through the class hierarchy ──────
-    // PYTHON-SELF-BINDING-1 (RG-REQ-005-L03/L02): gated ONLY on the self-call carrier the Python
-    // extractor stamps (`{"selfCall":true,"enclosingClass":"C"}`) — a no-op for every other
-    // language (no carrier). Runs BEFORE the dotted fallback so a `self.<m>()` / `cls.<m>()` binds
-    // on hierarchy EVIDENCE (the caller's own class node and its stored superclass facts), not on a
-    // bare-name coincidence. A malformed carrier yields no enclosing class → the stage does not run
-    // and the edge follows today's path (never a binding on unreadable evidence — Q1's rule).
-    if let Some(enclosing_class) = self_call_enclosing_class(metadata_json) {
-        if let Some((_receiver, method)) = target_key.split_once('.') {
-            if let Some(caller_file) = node_uid_to_file_uid.get(source_node_uid) {
-                match resolve_self_call(
-                    &enclosing_class,
-                    method,
-                    caller_file,
-                    nodes_by_name,
-                    nodes_by_qualified_name,
-                ) {
-                    SelfCallResolution::Resolved(uid) => return TargetResolution::Resolved(uid),
-                    SelfCallResolution::AmbiguousMro(candidates) => {
-                        return TargetResolution::SelfCallAmbiguousMro(candidates)
-                    }
-                    // No hit anywhere in the hierarchy → fall through to today's fallbacks
-                    // unchanged (a self-call whose method name is globally unique still binds by
-                    // the bare-name rule below, exactly as before this slice).
-                    SelfCallResolution::NoHit => {}
-                }
-            }
-        }
+    // ── Namespace import resolution ───────────────────────────────────
+    // For calls like `fs.readFile()` where `fs` is a namespace import,
+    // extract the member name and look it up in the imported module.
+    if let Some(uid) = resolve_namespace_member(
+        target_key,
+        source_node_uid,
+        nodes_by_name,
+        file_resolution,
+        import_bindings_by_file,
+        node_uid_to_file_uid,
+    ) {
+        return TargetResolution::Resolved(uid);
     }
 
     // ── Dotted name fallback ──────────────────────────────────────────
@@ -1292,6 +1359,32 @@ fn resolve_call_target(
         if prefix_is_default_import {
             // Conservative: default-import member access is not resolved.
             // Fall through to return None.
+        } else if is_python {
+            // PYTHON-RECEIVER-BINDING-1 (R2/R2b; RG-REQ-005-L02, RG-REQ-002-L11): a Python
+            // receiver other than a two-part `self`/`cls` carries no type evidence the index
+            // holds (a local, a parameter, a chain, an unresolvable alias, a name spelled like a
+            // class — amendment 1: no class-name rule). The method name alone is not evidence: a
+            // pool of one is INFERRED with its pool; two or more stay unresolved with every
+            // candidate; an empty pool keeps today's path and records nothing. Both fallback
+            // branches (`this.`-prefixed and `obj.m`) share this rule.
+            let pool = name_only_pool(nodes_by_name.get(method_name));
+            match pool.len() {
+                0 => {}
+                1 => {
+                    let receiver = target_key
+                        .rsplit_once('.')
+                        .map(|(r, _)| r)
+                        .unwrap_or(prefix);
+                    return TargetResolution::InferredNameOnly {
+                        uid: pool[0].node_uid.clone(),
+                        receiver: receiver.to_string(),
+                        candidate: candidate_label(pool[0]),
+                    };
+                }
+                _ => {
+                    return TargetResolution::AmbiguousNameOnly(sorted_candidate_labels(&pool));
+                }
+            }
         } else {
             // "this.repo.findById" style (3+ parts starting with "this")
             if prefix == "this" && parts.len() >= 3 {
@@ -1411,6 +1504,252 @@ fn resolve_call_target(
     TargetResolution::Unresolved
 }
 
+/// The namespace-import stage of CALLS resolution: `ns.member()` where `ns` is a file-level
+/// namespace import of a module this snapshot resolves — the unique `member` declared in that
+/// module's file. Extracted unchanged from `resolve_call_target` (PYTHON-RECEIVER-BINDING-1) so the
+/// Python self/cls path can place it by the carrier's receiver-binding state; every other call
+/// meets it first, exactly as before.
+fn resolve_namespace_member(
+    target_key: &str,
+    source_node_uid: &str,
+    nodes_by_name: &HashMap<String, Vec<ResolverNode>>,
+    file_resolution: &HashMap<String, String>,
+    import_bindings_by_file: Option<&HashMap<String, Vec<ImportBinding>>>,
+    node_uid_to_file_uid: &HashMap<String, String>,
+) -> Option<String> {
+    if !target_key.contains('.') {
+        return None;
+    }
+    let bindings_map = import_bindings_by_file?;
+    let source_file_uid = node_uid_to_file_uid.get(source_node_uid)?;
+    let bindings = bindings_map.get(source_file_uid)?;
+    // Extract potential namespace prefix and member
+    let (prefix, member) = target_key.split_once('.')?;
+    // Check if prefix matches a namespace import
+    let binding = bindings
+        .iter()
+        .find(|b| b.identifier == prefix && b.kind == ImportKind::Namespace)?;
+    let resolved_file_uid =
+        resolve_import_specifier_to_file(&binding.specifier, source_file_uid, file_resolution)?;
+    // For nested member access like `fs.promises.readFile`, we only handle the immediate member
+    // for now. Extract the first part of the member (before any dot).
+    let immediate_member = member.split('.').next().unwrap_or(member);
+    let candidates = nodes_by_name.get(immediate_member)?;
+    let in_file: Vec<ResolverNode> = candidates
+        .iter()
+        .filter(|n| n.file_uid.as_deref() == Some(resolved_file_uid.as_str()))
+        .cloned()
+        .collect();
+    pick_unambiguous(Some(&in_file), EdgeType::Calls, false)
+}
+
+// ── Python receiver certainty (PYTHON-RECEIVER-BINDING-1) ─────────
+
+/// The method name of a Python two-part `self.<m>` / `cls.<m>` call key (`<m>` a non-empty name
+/// with no further dot), or `None` for any other key.
+fn python_self_call_method(target_key: &str) -> Option<&str> {
+    let (receiver, method) = target_key.split_once('.')?;
+    if (receiver == "self" || receiver == "cls") && !method.is_empty() && !method.contains('.') {
+        Some(method)
+    } else {
+        None
+    }
+}
+
+/// The self/cls carrier's `receiverBinding` — the extractor's lexical fact (D-PRB-CARRIER-1) — in
+/// its evidence states. Absent and unreadable are DISTINCT: an absent key is decided by the edge's
+/// writer, an unreadable one is never read as proof.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReceiverBindingRead {
+    /// `"parameter"`: the receiver is the enclosing method's first positional parameter.
+    Parameter,
+    /// `"unproven"`: the extractor could not prove it.
+    Unproven,
+    /// The key is not on the carrier (an older writer, or a writer that omitted it).
+    Absent,
+    /// The key is present but is neither of the two strings (a non-string, an unknown string).
+    Unreadable,
+}
+
+/// Read the carrier's `receiverBinding` key. Only called on a carrier `self_call_enclosing_class`
+/// already accepted (so the metadata parses as a JSON object).
+fn self_call_receiver_binding(metadata_json: Option<&str>) -> ReceiverBindingRead {
+    let Some(value) =
+        metadata_json.and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+    else {
+        return ReceiverBindingRead::Unreadable;
+    };
+    match value.get("receiverBinding") {
+        None => ReceiverBindingRead::Absent,
+        Some(serde_json::Value::String(s)) if s == "parameter" => ReceiverBindingRead::Parameter,
+        Some(serde_json::Value::String(s)) if s == "unproven" => ReceiverBindingRead::Unproven,
+        Some(_) => ReceiverBindingRead::Unreadable,
+    }
+}
+
+/// R1 (D-PRB-CARRIER-1 as corrected; D-PRB-SCOPE-1 amendment 2): decide a Python two-part
+/// `self.<m>` / `cls.<m>` call. Every outcome is terminal.
+///
+/// - valid carrier, receiver proven a parameter → the class hierarchy alone (hit `static`, MRO
+///   collision declined, miss unresolved `self_call_hierarchy_miss`); the namespace stage is never
+///   consulted (the parameter shadows a file-level alias of that name);
+/// - valid carrier without the key, written by exactly `python-core:0.1.0` → HEAD's order: the
+///   namespace stage, then the hierarchy, with a TERMINAL miss;
+/// - valid carrier whose receiver is unproven, unreadable, or whose missing key comes from any other
+///   writer → neither stage; unresolved `self_call_receiver_unproven` with every candidate;
+/// - no valid carrier → the namespace stage as today, else unresolved
+///   `self_call_without_class_context`.
+#[allow(clippy::too_many_arguments)] // threads the same index maps `resolve_call_target` holds
+fn resolve_python_self_call(
+    target_key: &str,
+    method: &str,
+    source_node_uid: &str,
+    extractor: &str,
+    metadata_json: Option<&str>,
+    nodes_by_name: &HashMap<String, Vec<ResolverNode>>,
+    nodes_by_qualified_name: &HashMap<String, Vec<ResolverNode>>,
+    file_resolution: &HashMap<String, String>,
+    import_bindings_by_file: Option<&HashMap<String, Vec<ImportBinding>>>,
+    node_uid_to_file_uid: &HashMap<String, String>,
+) -> TargetResolution {
+    let pool = || sorted_candidate_labels(&name_only_pool(nodes_by_name.get(method)));
+    let namespace = || {
+        resolve_namespace_member(
+            target_key,
+            source_node_uid,
+            nodes_by_name,
+            file_resolution,
+            import_bindings_by_file,
+            node_uid_to_file_uid,
+        )
+    };
+    let hierarchy = |enclosing_class: &str| -> TargetResolution {
+        let outcome = match node_uid_to_file_uid.get(source_node_uid) {
+            Some(caller_file) => resolve_self_call(
+                enclosing_class,
+                method,
+                caller_file,
+                nodes_by_name,
+                nodes_by_qualified_name,
+            ),
+            None => SelfCallResolution::NoHit,
+        };
+        match outcome {
+            SelfCallResolution::Resolved(uid) => TargetResolution::Resolved(uid),
+            SelfCallResolution::AmbiguousMro(candidates) => {
+                TargetResolution::SelfCallAmbiguousMro(candidates)
+            }
+            SelfCallResolution::NoHit => TargetResolution::SelfCallHierarchyMiss(pool()),
+        }
+    };
+
+    let Some(enclosing_class) = self_call_enclosing_class(metadata_json) else {
+        // R1b: no class could be walked. A file-level namespace alias of that name is the only
+        // binding the index records for it (unchanged); otherwise unresolved with the pool.
+        return match namespace() {
+            Some(uid) => TargetResolution::Resolved(uid),
+            None => TargetResolution::SelfCallWithoutClassContext(pool()),
+        };
+    };
+    match self_call_receiver_binding(metadata_json) {
+        ReceiverBindingRead::Parameter => hierarchy(&enclosing_class),
+        ReceiverBindingRead::Absent if extractor == PYTHON_EXTRACTOR_BEFORE_RECEIVER_BINDING => {
+            match namespace() {
+                Some(uid) => TargetResolution::Resolved(uid),
+                None => hierarchy(&enclosing_class),
+            }
+        }
+        ReceiverBindingRead::Absent
+        | ReceiverBindingRead::Unproven
+        | ReceiverBindingRead::Unreadable => TargetResolution::SelfCallReceiverUnproven(pool()),
+    }
+}
+
+/// The candidate pool a bare-name match of `method` would use (affinity- and declaration-filtered,
+/// `resolution_pool`) — recorded as evidence when the resolver declines to bind by it.
+fn name_only_pool(candidates: Option<&Vec<ResolverNode>>) -> Vec<&ResolverNode> {
+    match candidates {
+        Some(c) if !c.is_empty() => resolution_pool(c, EdgeType::Calls, false),
+        _ => Vec::new(),
+    }
+}
+
+/// A candidate's recorded label: its qualified name, or its name when none is stored.
+fn candidate_label(node: &ResolverNode) -> String {
+    node.qualified_name
+        .clone()
+        .unwrap_or_else(|| node.name.clone())
+}
+
+/// Every candidate's label, sorted (never deduplicated, never capped).
+fn sorted_candidate_labels(pool: &[&ResolverNode]) -> Vec<String> {
+    let mut labels: Vec<String> = pool.iter().map(|n| candidate_label(n)).collect();
+    labels.sort();
+    labels
+}
+
+/// The unresolved row of a call the resolver declined to bind by its name: the category stays
+/// `categorize_unresolved_edge`'s; `nameOnlyCandidates` (every candidate, sorted) and
+/// `nameOnlyReason` are merged into its `metadata_json`, the extractor's keys preserved.
+fn declined_pool_row(
+    edge: &ExtractedEdge,
+    index: &ResolverIndex,
+    pool: &[String],
+    reason: &str,
+) -> CategorizedUnresolvedEdge {
+    let mut unresolved_edge = edge.clone();
+    unresolved_edge.metadata_json = Some(merge_metadata(
+        edge.metadata_json.as_deref(),
+        [
+            ("nameOnlyCandidates", serde_json::json!(pool)),
+            ("nameOnlyReason", serde_json::json!(reason)),
+        ],
+    ));
+    let category = categorize_unresolved_edge(&unresolved_edge);
+    CategorizedUnresolvedEdge {
+        edge: unresolved_edge,
+        category,
+        source_file_uid: index
+            .node_uid_to_file_uid
+            .get(&edge.source_node_uid)
+            .cloned(),
+    }
+}
+
+/// The metadata of an inferred name-only binding: `basis`, `receiver` and the pool of one.
+fn inject_name_only_binding(
+    metadata_json: Option<&str>,
+    receiver: &str,
+    candidate: &str,
+) -> String {
+    merge_metadata(
+        metadata_json,
+        [
+            ("basis", serde_json::json!(RECEIVER_UNTYPED_NAME_ONLY_BASIS)),
+            ("receiver", serde_json::json!(receiver)),
+            ("candidates", serde_json::json!([candidate])),
+        ],
+    )
+}
+
+/// Additive merge of resolver-written keys into an edge's `metadata_json` object (the
+/// `inject_mro_candidates` shape): the extractor's keys are preserved. A carrier that is absent
+/// or not a JSON object contributes no keys (the edge's own evidence was already read — or found
+/// absent — by the stage that decided it).
+fn merge_metadata<const N: usize>(
+    metadata_json: Option<&str>,
+    keys: [(&str, serde_json::Value); N],
+) -> String {
+    let mut obj = metadata_json
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    for (k, v) in keys {
+        obj.insert(k.to_string(), v);
+    }
+    serde_json::Value::Object(obj).to_string()
+}
+
 // ── Python self/cls call hierarchy binding (PYTHON-SELF-BINDING-1) ─
 
 /// Outcome of the Python self-call hierarchy walk.
@@ -1420,8 +1759,9 @@ enum SelfCallResolution {
     /// Two or more ancestors at ONE depth declare `<m>` — a genuine MRO ambiguity. Carries the
     /// sorted candidate `<Class>.<method>` labels (persisted as evidence, never silently picked).
     AmbiguousMro(Vec<String>),
-    /// The method is not declared anywhere in the caller's own-class superclass closure — the
-    /// caller falls through to the shared fallbacks unchanged.
+    /// The method is not declared anywhere in the caller's own-class superclass closure (or the
+    /// own class is not unique in the caller's file). PYTHON-RECEIVER-BINDING-1: terminal — the
+    /// caller records `SelfCallHierarchyMiss` with the bare-name pool, never the fallback.
     NoHit,
 }
 
@@ -1429,10 +1769,10 @@ enum SelfCallResolution {
 ///
 /// `Some("C")` ONLY when the carrier has `selfCall == true` (a real boolean) AND `enclosingClass`
 /// is a non-empty string. `None` for an absent carrier OR any malformed shape (a non-boolean
-/// `selfCall`, a missing/non-string/empty `enclosingClass`): a malformed carrier never binds — the
-/// stage does not run and the edge follows the shared fallbacks (Q1's honesty rule). This gates
-/// only WHETHER a resolution stage runs; it records no classified fact, so absent and malformed
-/// collapse to the same "do not run" without loss.
+/// `selfCall`, a missing/non-string/empty `enclosingClass`): a malformed carrier never binds
+/// through the hierarchy (Q1's honesty rule). PYTHON-RECEIVER-BINDING-1: both are the "no class
+/// context" state of R1b — the call meets the namespace stage, else stays unresolved with its pool
+/// (`self_call_without_class_context`); absent and malformed are the same evidence state there.
 fn self_call_enclosing_class(metadata_json: Option<&str>) -> Option<String> {
     let raw = metadata_json?;
     let value: serde_json::Value = serde_json::from_str(raw).ok()?;
@@ -3108,9 +3448,12 @@ mod tests {
     }
 
     #[test]
-    fn self_call_with_no_defining_ancestor_falls_through_unchanged() {
+    fn self_call_with_no_defining_ancestor_stays_unresolved_with_its_name_only_pool() {
         // `helper` is a module-level function, globally unique, NOT in C's hierarchy. The walk
-        // finds no hit and the call binds by the SAME bare-name fallback as before this slice.
+        // finds no hit; PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L03, D-PRB-SCOPE-1 amendment 2):
+        // the miss is TERMINAL — the call stays unresolved with the bare-name pool recorded as
+        // evidence, never bound by that name. (The helper stamps `python-core:0.1.0` without a
+        // `receiverBinding` key: the legacy path, whose miss is the same terminal row.)
         let index = py_index(&[
             py_class("c", "C", "r:f.py", &[]),
             py_method("caller", "C", "f", "r:f.py"),
@@ -3118,12 +3461,23 @@ mod tests {
         ]);
         let edge = self_call_edge("e1", "caller", "self.helper", "C");
         let result = resolve_edges(&[edge], &index, None);
-        assert_eq!(
-            result.resolved.len(),
-            1,
-            "fall-through bare-name bind unchanged"
+        assert!(
+            result.resolved.is_empty(),
+            "a hierarchy miss never binds by bare name"
         );
-        assert_eq!(result.resolved[0].target_node_uid, "helper");
+        assert_eq!(result.still_unresolved.len(), 1);
+        let meta = unresolved_meta(&result, 0);
+        assert_eq!(meta["nameOnlyCandidates"], serde_json::json!(["helper"]));
+        assert_eq!(meta["nameOnlyReason"], "self_call_hierarchy_miss");
+        assert_eq!(
+            meta["selfCall"],
+            serde_json::json!(true),
+            "carrier preserved"
+        );
+        assert_eq!(
+            result.still_unresolved[0].category,
+            UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo
+        );
     }
 
     #[test]
@@ -3194,6 +3548,604 @@ mod tests {
         let result = resolve_edges(&[edge], &index, None);
         assert_eq!(result.resolved.len(), 1, "cls-call binds like self");
         assert_eq!(result.resolved[0].target_node_uid, "c_build");
+    }
+
+    // ── Python receiver certainty (PYTHON-RECEIVER-BINDING-1) ──
+
+    /// The parsed `metadata_json` of the `i`-th unresolved row.
+    fn unresolved_meta(result: &ResolutionResult, i: usize) -> serde_json::Value {
+        serde_json::from_str(
+            result.still_unresolved[i]
+                .edge
+                .metadata_json
+                .as_deref()
+                .expect("unresolved row carries metadata"),
+        )
+        .unwrap()
+    }
+
+    /// A Python CALLS edge without any carrier.
+    fn py_call_edge(uid: &str, caller_uid: &str, target_key: &str) -> ExtractedEdge {
+        let mut e = make_edge(uid, target_key, EdgeType::Calls);
+        e.extractor = "python-core:0.2.0".into();
+        e.source_node_uid = caller_uid.into();
+        e
+    }
+
+    /// A self/cls carrier edge written by `writer`, with `receiverBinding` set to `binding`
+    /// (omitted when `None`).
+    fn carrier_edge(
+        uid: &str,
+        caller_uid: &str,
+        target_key: &str,
+        enclosing_class: &str,
+        writer: &str,
+        binding: Option<serde_json::Value>,
+    ) -> ExtractedEdge {
+        let mut e = self_call_edge(uid, caller_uid, target_key, enclosing_class);
+        e.extractor = writer.into();
+        if let Some(b) = binding {
+            let mut meta: serde_json::Value =
+                serde_json::from_str(e.metadata_json.as_deref().unwrap()).unwrap();
+            meta["receiverBinding"] = b;
+            e.metadata_json = Some(meta.to_string());
+        }
+        e
+    }
+
+    /// The alias fixture: `a.py` holds `import helper as self` (a Namespace binding that resolves
+    /// to `helper.py`, whose unique function is `run`) and class `C` with method `caller`; `C`
+    /// declares `run` iff `c_declares_run`.
+    fn alias_fixture(c_declares_run: bool) -> (ResolverIndex, HashMap<String, Vec<ImportBinding>>) {
+        let mut nodes = vec![
+            py_class("c", "C", "r:a.py", &[]),
+            py_method("caller", "C", "caller", "r:a.py"),
+            py_symbol("helper_run", "run", "run", "FUNCTION", "r:helper.py"),
+        ];
+        if c_declares_run {
+            nodes.push(py_method("c_run", "C", "run", "r:a.py"));
+        }
+        let mut index = py_index(&nodes);
+        index
+            .file_resolution
+            .insert("r:helper:FILE".into(), "r:helper.py:FILE".into());
+        let bindings: HashMap<String, Vec<ImportBinding>> = [(
+            "r:a.py".to_string(),
+            vec![ImportBinding {
+                identifier: "self".into(),
+                specifier: "./helper".into(),
+                is_relative: true,
+                location: None,
+                is_type_only: false,
+                imported_name: None,
+                kind: ImportKind::Namespace,
+            }],
+        )]
+        .into_iter()
+        .collect();
+        (index, bindings)
+    }
+
+    #[test]
+    fn python_untyped_receiver_unique_name_binds_inferred_with_its_pool() {
+        // `dependencies.extend(...)` — a local list; `extend` names one indexed method.
+        let index = py_index(&[
+            py_symbol("f", "f", "f", "FUNCTION", "r:a.py"),
+            py_method("ext", "ListMixin", "extend", "r:m.py"),
+        ]);
+        let result = resolve_edges(
+            &[py_call_edge("e1", "f", "dependencies.extend")],
+            &index,
+            None,
+        );
+        assert_eq!(result.resolved.len(), 1);
+        let r = &result.resolved[0];
+        assert_eq!(r.target_node_uid, "ext");
+        assert_eq!(r.resolution, Resolution::Inferred, "never static");
+        let meta: serde_json::Value =
+            serde_json::from_str(r.metadata_json.as_deref().unwrap()).unwrap();
+        assert_eq!(meta["basis"], "receiver_untyped_name_only");
+        assert_eq!(meta["receiver"], "dependencies");
+        assert_eq!(meta["candidates"], serde_json::json!(["ListMixin.extend"]));
+        assert!(result.still_unresolved.is_empty());
+    }
+
+    #[test]
+    fn python_chained_receiver_unique_name_binds_inferred_with_the_whole_receiver() {
+        let index = py_index(&[
+            py_symbol("f", "f", "f", "FUNCTION", "r:a.py"),
+            py_method("proc", "UserService", "process", "r:s.py"),
+        ]);
+        let result = resolve_edges(
+            &[py_call_edge("e1", "f", "self._service.process")],
+            &index,
+            None,
+        );
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].resolution, Resolution::Inferred);
+        let meta: serde_json::Value =
+            serde_json::from_str(result.resolved[0].metadata_json.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            meta["receiver"], "self._service",
+            "the whole receiver, minus the method"
+        );
+        assert_eq!(
+            meta["candidates"],
+            serde_json::json!(["UserService.process"])
+        );
+    }
+
+    #[test]
+    fn python_untyped_receiver_ambiguous_name_stays_unresolved_with_every_candidate_and_its_reason()
+    {
+        let index = py_index(&[
+            py_symbol("f", "f", "f", "FUNCTION", "r:a.py"),
+            py_method("qs", "QuerySet", "values", "r:q.py"),
+            py_method("mv", "MultiValueDict", "values", "r:d.py"),
+        ]);
+        let result = resolve_edges(&[py_call_edge("e1", "f", "fields.values")], &index, None);
+        assert!(result.resolved.is_empty(), "no candidate is bound");
+        assert_eq!(result.still_unresolved.len(), 1);
+        let meta = unresolved_meta(&result, 0);
+        assert_eq!(
+            meta["nameOnlyCandidates"],
+            serde_json::json!(["MultiValueDict.values", "QuerySet.values"]),
+            "the full pool, sorted"
+        );
+        assert_eq!(meta["nameOnlyReason"], "ambiguous_name");
+        assert_eq!(
+            result.still_unresolved[0].category,
+            UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+            "category unchanged"
+        );
+    }
+
+    #[test]
+    fn python_untyped_receiver_with_no_candidate_is_unchanged() {
+        let index = py_index(&[py_symbol("f", "f", "f", "FUNCTION", "r:a.py")]);
+        let edge = py_call_edge("e1", "f", "os.getcwd");
+        let result = resolve_edges(std::slice::from_ref(&edge), &index, None);
+        assert!(result.resolved.is_empty());
+        assert_eq!(result.still_unresolved.len(), 1);
+        assert_eq!(
+            result.still_unresolved[0].edge.metadata_json, edge.metadata_json,
+            "no pool and no reason are recorded (nothing to lose)"
+        );
+        assert_eq!(
+            result.still_unresolved[0].category,
+            UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo
+        );
+    }
+
+    #[test]
+    fn python_class_named_receiver_binds_inferred_never_static() {
+        // `GEOSGeometry._from_wkt(wkt)`, the class declared in the caller's own file: the
+        // receiver's spelling is not proof it IS the class (amendment 1 — no class-name rule).
+        let index = py_index(&[
+            py_class(
+                "geo",
+                "GEOSGeometry",
+                "r:geometry.py",
+                &["GEOSGeometryBase"],
+            ),
+            py_method("caller", "GEOSGeometryBase", "from_ewkt", "r:geometry.py"),
+            py_method("fw", "GEOSGeometryBase", "_from_wkt", "r:geometry.py"),
+        ]);
+        let result = resolve_edges(
+            &[py_call_edge("e1", "caller", "GEOSGeometry._from_wkt")],
+            &index,
+            None,
+        );
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].target_node_uid, "fw");
+        assert_eq!(result.resolved[0].resolution, Resolution::Inferred);
+        let meta: serde_json::Value =
+            serde_json::from_str(result.resolved[0].metadata_json.as_deref().unwrap()).unwrap();
+        assert_eq!(meta["receiver"], "GEOSGeometry");
+    }
+
+    #[test]
+    fn python_parameter_shadowing_a_class_name_binds_inferred() {
+        // `class X: def run(self)` and `def caller(X): X.run()` — the parameter shadows the class.
+        let index = py_index(&[
+            py_class("x", "X", "r:a.py", &[]),
+            py_method("x_run", "X", "run", "r:a.py"),
+            py_symbol("caller", "caller", "caller", "FUNCTION", "r:a.py"),
+        ]);
+        let result = resolve_edges(&[py_call_edge("e1", "caller", "X.run")], &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].resolution, Resolution::Inferred);
+    }
+
+    #[test]
+    fn python_self_receiver_without_a_carrier_stays_unresolved_with_its_name_only_pool() {
+        // A module-level `def natural_key_serializer_test(self, format)` calling
+        // `self.assertEqual(...)`: no carrier, no alias named `self`; the unique name is not
+        // evidence for a receiver no class types.
+        let index = py_index(&[
+            py_symbol("t", "t", "t", "FUNCTION", "r:test_natural.py"),
+            py_symbol(
+                "ae",
+                "assertEqual",
+                "WidgetTest.check_html.assertEqual",
+                "VARIABLE",
+                "r:base.py",
+            ),
+        ]);
+        let result = resolve_edges(&[py_call_edge("e1", "t", "self.assertEqual")], &index, None);
+        assert!(result.resolved.is_empty(), "never bound by name");
+        assert_eq!(result.still_unresolved.len(), 1);
+        let meta = unresolved_meta(&result, 0);
+        assert_eq!(
+            meta["nameOnlyCandidates"],
+            serde_json::json!(["WidgetTest.check_html.assertEqual"])
+        );
+        assert_eq!(meta["nameOnlyReason"], "self_call_without_class_context");
+    }
+
+    #[test]
+    fn python_cls_receiver_with_a_malformed_carrier_stays_unresolved_with_its_name_only_pool() {
+        let index = py_index(&[
+            py_class("c", "C", "r:f.py", &[]),
+            py_method("caller", "C", "make", "r:f.py"),
+            py_method("c_build", "C", "build", "r:f.py"),
+        ]);
+        let mut e = py_call_edge("e1", "caller", "cls.build");
+        e.metadata_json = Some(r#"{"selfCall":"yes","enclosingClass":"C"}"#.into());
+        let result = resolve_edges(&[e], &index, None);
+        assert!(
+            result.resolved.is_empty(),
+            "a malformed carrier never binds"
+        );
+        let meta = unresolved_meta(&result, 0);
+        assert_eq!(meta["nameOnlyCandidates"], serde_json::json!(["C.build"]));
+        assert_eq!(meta["nameOnlyReason"], "self_call_without_class_context");
+        assert_eq!(
+            meta["selfCall"], "yes",
+            "the extractor's keys are preserved"
+        );
+    }
+
+    #[test]
+    fn python_this_prefixed_dotted_key_binds_inferred_not_static() {
+        // The fallback's `this.`-prefixed branch shares the Python rule.
+        let index = py_index(&[
+            py_symbol("f", "f", "f", "FUNCTION", "r:a.py"),
+            py_method("fb", "Repo", "find_by_id", "r:repo.py"),
+        ]);
+        let result = resolve_edges(
+            &[py_call_edge("e1", "f", "this.repo.find_by_id")],
+            &index,
+            None,
+        );
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].resolution, Resolution::Inferred);
+        let meta: serde_json::Value =
+            serde_json::from_str(result.resolved[0].metadata_json.as_deref().unwrap()).unwrap();
+        assert_eq!(meta["receiver"], "this.repo");
+    }
+
+    #[test]
+    fn python_unresolvable_namespace_alias_member_binds_inferred() {
+        // `import datetime` (a non-relative specifier the namespace stage cannot resolve) and
+        // `datetime.timedelta(...)`: the indexed `timedelta` elsewhere is a name-only candidate.
+        let index = py_index(&[
+            py_symbol("f", "f", "f", "FUNCTION", "r:dates.py"),
+            py_symbol(
+                "td",
+                "timedelta",
+                "test_x.timedelta",
+                "FUNCTION",
+                "r:tests/t.py",
+            ),
+        ]);
+        let bindings: HashMap<String, Vec<ImportBinding>> = [(
+            "r:dates.py".to_string(),
+            vec![ImportBinding {
+                identifier: "datetime".into(),
+                specifier: "datetime".into(),
+                is_relative: false,
+                location: None,
+                is_type_only: false,
+                imported_name: None,
+                kind: ImportKind::Namespace,
+            }],
+        )]
+        .into_iter()
+        .collect();
+        let result = resolve_edges(
+            &[py_call_edge("e1", "f", "datetime.timedelta")],
+            &index,
+            Some(&bindings),
+        );
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].resolution, Resolution::Inferred);
+        let meta: serde_json::Value =
+            serde_json::from_str(result.resolved[0].metadata_json.as_deref().unwrap()).unwrap();
+        assert_eq!(meta["receiver"], "datetime");
+    }
+
+    #[test]
+    fn typescript_and_c_family_calls_are_untouched_by_the_python_receiver_rule() {
+        let index = py_index(&[
+            py_symbol("f", "f", "f", "FUNCTION", "r:a.ts"),
+            py_method("save", "Repo", "save", "r:repo.ts"),
+        ]);
+        for writer in ["ts-core:0.2.0", "c-core:0.1.0", "cpp-core:0.2.0", "test:1"] {
+            for key in ["obj.save", "this.repo.save", "self.save"] {
+                let mut e = make_edge("e1", key, EdgeType::Calls);
+                e.extractor = writer.into();
+                e.source_node_uid = "f".into();
+                let result = resolve_edges(&[e], &index, None);
+                assert_eq!(result.resolved.len(), 1, "{writer} {key}: binds as before");
+                assert_eq!(
+                    result.resolved[0].resolution,
+                    Resolution::Static,
+                    "{writer} {key}"
+                );
+                assert_eq!(result.resolved[0].metadata_json, None, "{writer} {key}");
+            }
+        }
+    }
+
+    #[test]
+    fn self_call_hierarchy_miss_with_an_ambiguous_name_records_every_candidate() {
+        let index = py_index(&[
+            py_class("c", "C", "r:f.py", &[]),
+            py_method("caller", "C", "f", "r:f.py"),
+            py_method("d_g", "D", "g", "r:d.py"),
+            py_method("e_g", "E", "g", "r:e.py"),
+        ]);
+        let edge = carrier_edge(
+            "e1",
+            "caller",
+            "self.g",
+            "C",
+            "python-core:0.2.0",
+            Some("parameter".into()),
+        );
+        let result = resolve_edges(&[edge], &index, None);
+        assert!(result.resolved.is_empty());
+        let meta = unresolved_meta(&result, 0);
+        assert_eq!(
+            meta["nameOnlyCandidates"],
+            serde_json::json!(["D.g", "E.g"])
+        );
+        assert_eq!(meta["nameOnlyReason"], "self_call_hierarchy_miss");
+    }
+
+    #[test]
+    fn self_call_hierarchy_miss_with_no_candidate_records_an_empty_pool() {
+        let index = py_index(&[
+            py_class("c", "C", "r:f.py", &["TestCase"]),
+            py_method("caller", "C", "test_x", "r:f.py"),
+        ]);
+        let edge = carrier_edge(
+            "e1",
+            "caller",
+            "self.assertTrue",
+            "C",
+            "python-core:0.2.0",
+            Some("parameter".into()),
+        );
+        let result = resolve_edges(&[edge], &index, None);
+        assert!(result.resolved.is_empty());
+        let meta = unresolved_meta(&result, 0);
+        assert_eq!(meta["nameOnlyCandidates"], serde_json::json!([]));
+        assert_eq!(meta["nameOnlyReason"], "self_call_hierarchy_miss");
+    }
+
+    #[test]
+    fn self_call_whose_own_class_is_not_unique_in_its_file_stays_unresolved() {
+        // Two classes named `C` in the caller's file: the walk cannot start (NoHit). The unique
+        // `g` elsewhere is NOT bound by name.
+        let index = py_index(&[
+            py_class("c1", "C", "r:f.py", &[]),
+            py_class("c2", "C", "r:f.py", &[]),
+            py_method("caller", "C", "f", "r:f.py"),
+            py_method("d_g", "D", "g", "r:d.py"),
+        ]);
+        let edge = carrier_edge(
+            "e1",
+            "caller",
+            "self.g",
+            "C",
+            "python-core:0.2.0",
+            Some("parameter".into()),
+        );
+        let result = resolve_edges(&[edge], &index, None);
+        assert!(result.resolved.is_empty());
+        let meta = unresolved_meta(&result, 0);
+        assert_eq!(meta["nameOnlyCandidates"], serde_json::json!(["D.g"]));
+        assert_eq!(meta["nameOnlyReason"], "self_call_hierarchy_miss");
+    }
+
+    #[test]
+    fn python_parameter_bound_self_call_hierarchy_hit_binds_static_over_a_file_level_alias_named_self(
+    ) {
+        let (index, bindings) = alias_fixture(true);
+        let edge = carrier_edge(
+            "e1",
+            "caller",
+            "self.run",
+            "C",
+            "python-core:0.2.0",
+            Some("parameter".into()),
+        );
+        let result = resolve_edges(&[edge], &index, Some(&bindings));
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(
+            result.resolved[0].target_node_uid, "c_run",
+            "C.run, not helper's run"
+        );
+        assert_eq!(result.resolved[0].resolution, Resolution::Static);
+    }
+
+    #[test]
+    fn python_parameter_bound_self_call_hierarchy_miss_stays_unresolved_and_never_binds_through_a_file_level_alias_named_self(
+    ) {
+        let (index, bindings) = alias_fixture(false);
+        let edge = carrier_edge(
+            "e1",
+            "caller",
+            "self.run",
+            "C",
+            "python-core:0.2.0",
+            Some("parameter".into()),
+        );
+        let result = resolve_edges(&[edge], &index, Some(&bindings));
+        assert!(
+            result.resolved.is_empty(),
+            "the alias is never consulted for a parameter"
+        );
+        let meta = unresolved_meta(&result, 0);
+        assert_eq!(meta["nameOnlyReason"], "self_call_hierarchy_miss");
+        assert_eq!(
+            meta["nameOnlyCandidates"],
+            serde_json::json!(["run"]),
+            "helper's run is a candidate"
+        );
+    }
+
+    #[test]
+    fn python_unproven_self_call_with_a_colliding_alias_stays_unresolved_with_every_candidate() {
+        // The review's counterexample in the fixture's names: a parameterless class-body
+        // `caller()` calling `self.run()` beside `import helper as self`.
+        let (index, bindings) = alias_fixture(true);
+        let edge = carrier_edge(
+            "e1",
+            "caller",
+            "self.run",
+            "C",
+            "python-core:0.2.0",
+            Some("unproven".into()),
+        );
+        let result = resolve_edges(&[edge], &index, Some(&bindings));
+        assert!(result.resolved.is_empty(), "bound through neither stage");
+        let meta = unresolved_meta(&result, 0);
+        assert_eq!(meta["nameOnlyReason"], "self_call_receiver_unproven");
+        assert_eq!(
+            meta["nameOnlyCandidates"],
+            serde_json::json!(["C.run", "run"])
+        );
+    }
+
+    #[test]
+    fn python_carrier_without_a_receiver_binding_from_python_core_0_1_0_meets_the_namespace_stage_before_the_hierarchy_as_at_head(
+    ) {
+        let (index, bindings) = alias_fixture(true);
+        let edge = carrier_edge("e1", "caller", "self.run", "C", "python-core:0.1.0", None);
+        let result = resolve_edges(&[edge], &index, Some(&bindings));
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(
+            result.resolved[0].target_node_uid, "helper_run",
+            "HEAD's namespace-first result"
+        );
+        assert_eq!(result.resolved[0].resolution, Resolution::Static);
+    }
+
+    #[test]
+    fn python_carrier_without_a_receiver_binding_from_python_core_0_1_0_hierarchy_hit_binds_static()
+    {
+        let (index, _bindings) = alias_fixture(true);
+        let edge = carrier_edge("e1", "caller", "self.run", "C", "python-core:0.1.0", None);
+        let result = resolve_edges(&[edge], &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].target_node_uid, "c_run");
+        assert_eq!(result.resolved[0].resolution, Resolution::Static);
+    }
+
+    #[test]
+    fn python_carrier_without_a_receiver_binding_from_python_core_0_1_0_hierarchy_miss_is_terminal_never_the_bare_name(
+    ) {
+        // No alias; no `run` in C's hierarchy; a unique `run` elsewhere that HEAD bound by name.
+        let (index, _bindings) = alias_fixture(false);
+        let edge = carrier_edge("e1", "caller", "self.run", "C", "python-core:0.1.0", None);
+        let result = resolve_edges(&[edge], &index, None);
+        assert!(result.resolved.is_empty());
+        let meta = unresolved_meta(&result, 0);
+        assert_eq!(meta["nameOnlyReason"], "self_call_hierarchy_miss");
+        assert_eq!(meta["nameOnlyCandidates"], serde_json::json!(["run"]));
+    }
+
+    #[test]
+    fn python_carrier_without_a_receiver_binding_from_python_core_0_2_0_is_unproven() {
+        let (index, bindings) = alias_fixture(true);
+        let edge = carrier_edge("e1", "caller", "self.run", "C", "python-core:0.2.0", None);
+        let result = resolve_edges(&[edge], &index, Some(&bindings));
+        assert!(result.resolved.is_empty());
+        let meta = unresolved_meta(&result, 0);
+        assert_eq!(meta["nameOnlyReason"], "self_call_receiver_unproven");
+        assert_eq!(
+            meta["nameOnlyCandidates"],
+            serde_json::json!(["C.run", "run"])
+        );
+    }
+
+    #[test]
+    fn python_carrier_without_a_receiver_binding_from_an_unrecognized_writer_is_unproven() {
+        for writer in ["python-core:0.1.1", "python-core:9.0.0"] {
+            let (index, bindings) = alias_fixture(true);
+            let edge = carrier_edge("e1", "caller", "self.run", "C", writer, None);
+            let result = resolve_edges(&[edge], &index, Some(&bindings));
+            assert!(result.resolved.is_empty(), "{writer}: the match is exact");
+            let meta = unresolved_meta(&result, 0);
+            assert_eq!(
+                meta["nameOnlyReason"], "self_call_receiver_unproven",
+                "{writer}"
+            );
+            assert_eq!(
+                meta["nameOnlyCandidates"],
+                serde_json::json!(["C.run", "run"]),
+                "{writer}"
+            );
+        }
+    }
+
+    #[test]
+    fn python_self_call_carrier_with_an_unreadable_receiver_binding_stays_unresolved_with_its_pool()
+    {
+        for binding in [serde_json::json!(true), serde_json::json!("local")] {
+            let (index, bindings) = alias_fixture(true);
+            let edge = carrier_edge(
+                "e1",
+                "caller",
+                "self.run",
+                "C",
+                "python-core:0.2.0",
+                Some(binding.clone()),
+            );
+            let result = resolve_edges(&[edge], &index, Some(&bindings));
+            assert!(result.resolved.is_empty(), "{binding}: never read as proof");
+            let meta = unresolved_meta(&result, 0);
+            assert_eq!(
+                meta["nameOnlyReason"], "self_call_receiver_unproven",
+                "{binding}"
+            );
+            assert_eq!(
+                meta["nameOnlyCandidates"],
+                serde_json::json!(["C.run", "run"]),
+                "{binding}"
+            );
+        }
+    }
+
+    #[test]
+    fn python_self_key_without_a_carrier_binds_through_a_file_level_namespace_alias_as_today() {
+        let (mut index, bindings) = alias_fixture(true);
+        let module_fn = py_symbol("modfn", "modfn", "modfn", "FUNCTION", "r:a.py");
+        index.nodes_by_uid.insert("modfn".into(), module_fn.clone());
+        index
+            .node_uid_to_file_uid
+            .insert("modfn".into(), "r:a.py".into());
+        let result = resolve_edges(
+            &[py_call_edge("e1", "modfn", "self.run")],
+            &index,
+            Some(&bindings),
+        );
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].target_node_uid, "helper_run");
+        assert_eq!(result.resolved[0].resolution, Resolution::Static);
     }
 
     #[test]

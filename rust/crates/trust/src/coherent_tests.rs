@@ -44,6 +44,7 @@ fn report(diagnostics_available: bool) -> TrustReport {
         toolchain: None,
         diagnostics_version: if diagnostics_available { Some(1) } else { None },
         summary: TrustSummary {
+            inferred_calls: 0,
             edges_total: 100,
             edges_resolved: 100,
             unresolved_total: 20,
@@ -148,6 +149,24 @@ fn half_b_payloads_are_byte_identical_to_v1() {
     // onto the coherent resolution leaf (it is NOT on the v1 parity summary wire).
     assert_eq!(env.value.resolution.value.unresolved_calls_unknown, 6);
     assert_eq!(env.value.resolution.value.call_resolution_rate, 0.833);
+}
+
+// ── PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A) ─────────────────────────────────────────────────
+
+#[test]
+fn resolution_leaf_carries_the_inferred_count() {
+    let mut r = report(true);
+    r.summary.inferred_calls = 9;
+    let env = trust_to_coherent(r, fresh_posture_leaf(), false);
+    assert_eq!(env.value.resolution.value.inferred_calls, 9);
+    let json = serde_json::to_value(&env.value.resolution.value).unwrap();
+    assert_eq!(json["inferred_calls"], serde_json::json!(9));
+    let zero = trust_to_coherent(report(true), fresh_posture_leaf(), false);
+    let zjson = serde_json::to_value(&zero.value.resolution.value).unwrap();
+    assert!(
+        zjson.get("inferred_calls").is_none(),
+        "absent when zero (byte-stable)"
+    );
 }
 
 // ── P2: the dead_code axis stays internal (never on the wire) ────────────────────────────────────

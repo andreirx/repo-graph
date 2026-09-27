@@ -778,7 +778,7 @@ fn committed_fixture_reproduces_spike_7_0_2_9_and_records_all_references_kinds()
             source_node_uid: symbol_uid_of[src].clone(),
             target_node_uid: symbol_uid_of[dst].clone(),
             edge_type: "CALLS".into(),
-            resolution: "resolved".into(),
+            resolution: "static".into(),
             extractor: "test".into(),
             location: None,
             metadata_json: None,

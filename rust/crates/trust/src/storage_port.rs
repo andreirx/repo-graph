@@ -101,6 +101,16 @@ pub struct ResolvedCallAggregate {
     pub provenance: String,
 }
 
+/// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A; D-PSI-R1-VOCAB): the live CALLS-row count of a
+/// snapshot split by certainty. `certain` = resolution `static` or `dynamic`; `inferred` =
+/// resolution `inferred`. A row with any other value is in neither (it is outside the edge
+/// vocabulary and never read as certain).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallCertaintyCounts {
+    pub certain: u64,
+    pub inferred: u64,
+}
+
 /// One row from a classification-grouped unresolved-edge count.
 ///
 /// Uses `UnresolvedEdgeClassification` as the typed key instead
@@ -324,6 +334,16 @@ pub trait TrustStorageRead {
         &self,
         snapshot_uid: &str,
     ) -> Result<Option<ResolvedCallAggregate>, Self::Error>;
+
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the live CALLS rows of a snapshot split by
+    /// certainty. The trust live fallback: served only when the snapshot lacks the persisted
+    /// aggregate OR its diagnostics lack `inferred_calls` (a snapshot written before the
+    /// certainty rule, whose aggregate counts its inferred rows as resolved) — then BOTH figures
+    /// come from this one read, never a persisted aggregate beside a live inferred count.
+    fn count_call_edges_by_certainty(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<CallCertaintyCounts, Self::Error>;
 
     /// Count active declarations of a specific kind for a repo.
     fn count_active_declarations(&self, repo_uid: &str, kind: &str) -> Result<usize, Self::Error>;

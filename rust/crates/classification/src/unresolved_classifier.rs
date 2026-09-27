@@ -74,6 +74,16 @@ pub fn classify_unresolved_edge(
         return internal(UnresolvedEdgeBasisCode::SelfCallAmbiguousMro);
     }
 
+    // Rules 0b / 0c / 0d (PYTHON-RECEIVER-BINDING-1): a self/cls call the resolver declined to
+    // bind by name, recorded with its pool (`nameOnlyCandidates`, an array of strings of any
+    // length) and its reason (`nameOnlyReason`). The reason and the carrier's validity decide the
+    // named basis; the classification is `unknown` (the declined pool does not show where the
+    // method lives). `ambiguous_name` has NO rule — the rules below run and the row keeps its
+    // verdict. A malformed pool or an unknown/missing reason is ignored (the rules below run).
+    if let Some(basis) = self_call_pool_basis(edge.metadata_json.as_deref()) {
+        return unknown_with(basis);
+    }
+
     // Rule 1: `this`-receiver shortcut.
     if category == UnresolvedEdgeCategory::CallsThisMethodNeedsClassContext
         || category == UnresolvedEdgeCategory::CallsThisWildcardMethodNeedsTypeInfo
@@ -375,6 +385,36 @@ fn has_mro_candidates(metadata_json: Option<&str>) -> bool {
 
 // ── Verdict constructors ─────────────────────────────────────────
 
+/// Rules 0b–0d: the named basis of a declined self/cls pool, or `None` when the row carries no
+/// such evidence (no metadata, unparsable metadata, a malformed `nameOnlyCandidates`, an unknown
+/// or missing `nameOnlyReason`, or a reason whose carrier state does not match).
+///
+/// - `self_call_hierarchy_miss` with a VALID carrier → `SelfCallHierarchyMiss`;
+/// - `self_call_without_class_context` with NO valid carrier → `SelfCallWithoutClassContext`;
+/// - `self_call_receiver_unproven` with a VALID carrier → `SelfCallReceiverUnproven`.
+fn self_call_pool_basis(metadata_json: Option<&str>) -> Option<UnresolvedEdgeBasisCode> {
+    let value: serde_json::Value = serde_json::from_str(metadata_json?).ok()?;
+    match value.get("nameOnlyCandidates") {
+        Some(serde_json::Value::Array(items)) if items.iter().all(|i| i.is_string()) => {}
+        _ => return None,
+    }
+    let valid_carrier = value.get("selfCall") == Some(&serde_json::Value::Bool(true))
+        && value
+            .get("enclosingClass")
+            .and_then(|c| c.as_str())
+            .is_some_and(|c| !c.is_empty());
+    match (value.get("nameOnlyReason")?.as_str()?, valid_carrier) {
+        ("self_call_hierarchy_miss", true) => Some(UnresolvedEdgeBasisCode::SelfCallHierarchyMiss),
+        ("self_call_without_class_context", false) => {
+            Some(UnresolvedEdgeBasisCode::SelfCallWithoutClassContext)
+        }
+        ("self_call_receiver_unproven", true) => {
+            Some(UnresolvedEdgeBasisCode::SelfCallReceiverUnproven)
+        }
+        _ => None,
+    }
+}
+
 fn external(basis: UnresolvedEdgeBasisCode) -> ClassifierVerdict {
     ClassifierVerdict {
         classification: UnresolvedEdgeClassification::ExternalLibraryCandidate,
@@ -390,9 +430,15 @@ fn internal(basis: UnresolvedEdgeBasisCode) -> ClassifierVerdict {
 }
 
 fn unknown() -> ClassifierVerdict {
+    unknown_with(UnresolvedEdgeBasisCode::NoSupportingSignal)
+}
+
+/// An `unknown` verdict carrying a NAMED basis (PYTHON-RECEIVER-BINDING-1's self/cls pools);
+/// `unknown()` keeps `no_supporting_signal`.
+fn unknown_with(basis: UnresolvedEdgeBasisCode) -> ClassifierVerdict {
     ClassifierVerdict {
         classification: UnresolvedEdgeClassification::Unknown,
-        basis_code: UnresolvedEdgeBasisCode::NoSupportingSignal,
+        basis_code: basis,
     }
 }
 
@@ -748,6 +794,153 @@ mod tests {
         assert_eq!(wire, serde_json::json!("self_call_ambiguous_mro"));
         let parsed: UnresolvedEdgeBasisCode = serde_json::from_value(wire).unwrap();
         assert_eq!(parsed, UnresolvedEdgeBasisCode::SelfCallAmbiguousMro);
+    }
+
+    // ── PYTHON-RECEIVER-BINDING-1: declined self/cls pools ─────
+
+    fn classify_obj(
+        meta: &str,
+        file: &FileSignals,
+        snap: &SnapshotSignals,
+        key: &str,
+    ) -> ClassifierVerdict {
+        classify_unresolved_edge(
+            &edge_with_meta(key, meta),
+            UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+            snap,
+            file,
+        )
+    }
+
+    #[test]
+    fn name_only_candidates_carrier_yields_unknown_with_the_self_call_hierarchy_miss_basis() {
+        for pool in ["[]", r#"["ListMixin.extend"]"#, r#"["A.g","B.g"]"#] {
+            let meta = format!(
+                r#"{{"selfCall":true,"enclosingClass":"AdminErrorList","receiverBinding":"parameter","nameOnlyCandidates":{pool},"nameOnlyReason":"self_call_hierarchy_miss"}}"#
+            );
+            let v = classify_obj(&meta, &empty_file(), &empty_snapshot(), "self.extend");
+            assert_eq!(
+                v.classification,
+                UnresolvedEdgeClassification::Unknown,
+                "{pool}"
+            );
+            assert_eq!(
+                v.basis_code,
+                UnresolvedEdgeBasisCode::SelfCallHierarchyMiss,
+                "{pool}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_name_only_candidates_carrier_falls_through_to_the_existing_rules() {
+        for meta in [
+            r#"{"selfCall":true,"enclosingClass":"C","nameOnlyCandidates":"notarray","nameOnlyReason":"self_call_hierarchy_miss"}"#,
+            r#"{"selfCall":true,"enclosingClass":"C","nameOnlyCandidates":[1],"nameOnlyReason":"self_call_hierarchy_miss"}"#,
+            r#"{"selfCall":true,"enclosingClass":"C","nameOnlyCandidates":["C.m"],"nameOnlyReason":"mystery"}"#,
+            r#"{"selfCall":true,"enclosingClass":"C","nameOnlyCandidates":["C.m"]}"#,
+            // A hierarchy-miss reason without a valid carrier is not that basis.
+            r#"{"nameOnlyCandidates":["C.m"],"nameOnlyReason":"self_call_hierarchy_miss"}"#,
+            // A no-class-context reason beside a valid carrier is not that basis.
+            r#"{"selfCall":true,"enclosingClass":"C","nameOnlyCandidates":["C.m"],"nameOnlyReason":"self_call_without_class_context"}"#,
+        ] {
+            let v = classify_obj(meta, &empty_file(), &empty_snapshot(), "self.m");
+            assert_eq!(
+                v.basis_code,
+                UnresolvedEdgeBasisCode::NoSupportingSignal,
+                "{meta}"
+            );
+            assert_eq!(
+                v.classification,
+                UnresolvedEdgeClassification::Unknown,
+                "{meta}"
+            );
+        }
+    }
+
+    #[test]
+    fn basis_code_round_trips_self_call_hierarchy_miss() {
+        let wire = serde_json::to_value(UnresolvedEdgeBasisCode::SelfCallHierarchyMiss).unwrap();
+        assert_eq!(wire, serde_json::json!("self_call_hierarchy_miss"));
+        let parsed: UnresolvedEdgeBasisCode = serde_json::from_value(wire).unwrap();
+        assert_eq!(parsed, UnresolvedEdgeBasisCode::SelfCallHierarchyMiss);
+    }
+
+    #[test]
+    fn name_only_candidates_without_a_valid_carrier_yield_unknown_with_the_self_call_without_class_context_basis(
+    ) {
+        for meta in [
+            r#"{"nameOnlyCandidates":["WidgetTest.check_html.assertEqual"],"nameOnlyReason":"self_call_without_class_context"}"#,
+            r#"{"selfCall":"yes","enclosingClass":"C","nameOnlyCandidates":[],"nameOnlyReason":"self_call_without_class_context"}"#,
+        ] {
+            let v = classify_obj(meta, &empty_file(), &empty_snapshot(), "self.assertEqual");
+            assert_eq!(
+                v.classification,
+                UnresolvedEdgeClassification::Unknown,
+                "{meta}"
+            );
+            assert_eq!(
+                v.basis_code,
+                UnresolvedEdgeBasisCode::SelfCallWithoutClassContext,
+                "{meta}"
+            );
+        }
+    }
+
+    #[test]
+    fn basis_code_round_trips_self_call_without_class_context() {
+        let wire =
+            serde_json::to_value(UnresolvedEdgeBasisCode::SelfCallWithoutClassContext).unwrap();
+        assert_eq!(wire, serde_json::json!("self_call_without_class_context"));
+        let parsed: UnresolvedEdgeBasisCode = serde_json::from_value(wire).unwrap();
+        assert_eq!(parsed, UnresolvedEdgeBasisCode::SelfCallWithoutClassContext);
+    }
+
+    #[test]
+    fn name_only_candidates_with_an_unproven_receiver_yield_unknown_with_the_self_call_receiver_unproven_basis(
+    ) {
+        let meta = r#"{"selfCall":true,"enclosingClass":"ViewTest","receiverBinding":"unproven","nameOnlyCandidates":["HandlerView.as_view","View.as_view"],"nameOnlyReason":"self_call_receiver_unproven"}"#;
+        let v = classify_obj(meta, &empty_file(), &empty_snapshot(), "cls.as_view");
+        assert_eq!(v.classification, UnresolvedEdgeClassification::Unknown);
+        assert_eq!(
+            v.basis_code,
+            UnresolvedEdgeBasisCode::SelfCallReceiverUnproven
+        );
+    }
+
+    #[test]
+    fn basis_code_round_trips_self_call_receiver_unproven() {
+        let wire = serde_json::to_value(UnresolvedEdgeBasisCode::SelfCallReceiverUnproven).unwrap();
+        assert_eq!(wire, serde_json::json!("self_call_receiver_unproven"));
+        let parsed: UnresolvedEdgeBasisCode = serde_json::from_value(wire).unwrap();
+        assert_eq!(parsed, UnresolvedEdgeBasisCode::SelfCallReceiverUnproven);
+    }
+
+    #[test]
+    fn ambiguous_name_pool_keeps_the_existing_classification_and_basis() {
+        // An `unknown`/`no_supporting_signal` row keeps that verdict with its pool recorded.
+        let meta = r#"{"nameOnlyCandidates":["MultiValueDict.values","QuerySet.values"],"nameOnlyReason":"ambiguous_name"}"#;
+        let v = classify_obj(meta, &empty_file(), &empty_snapshot(), "fields.values");
+        assert_eq!(v.classification, UnresolvedEdgeClassification::Unknown);
+        assert_eq!(v.basis_code, UnresolvedEdgeBasisCode::NoSupportingSignal);
+        // An external-receiver row (the receiver imported from a declared package) keeps its
+        // external verdict — the pool is added evidence, never a reclassification.
+        let mut file = empty_file();
+        file.import_bindings = vec![binding("requests", "requests")];
+        file.package_dependencies = deps(&["requests"]);
+        let without = classify_unresolved_edge(
+            &edge("requests.get"),
+            UnresolvedEdgeCategory::CallsObjMethodNeedsTypeInfo,
+            &empty_snapshot(),
+            &file,
+        );
+        let meta = r#"{"nameOnlyCandidates":["Client.get","QueryDict.get"],"nameOnlyReason":"ambiguous_name"}"#;
+        let with = classify_obj(meta, &file, &empty_snapshot(), "requests.get");
+        assert_eq!(
+            with.classification,
+            UnresolvedEdgeClassification::ExternalLibraryCandidate
+        );
+        assert_eq!(with, without, "the verdict is today's");
     }
 
     // ── IMPORTS_FILE_NOT_FOUND ────────────────────────────────

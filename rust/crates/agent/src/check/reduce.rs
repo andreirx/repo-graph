@@ -69,6 +69,7 @@ mod tests {
     /// Helper: builds a CheckInput where everything is passing.
     fn all_pass_input() -> CheckInput {
         CheckInput {
+            inferred_calls: 0,
             snapshot_exists: true,
             files_total: 42,
             stale_file_count: 0,
@@ -136,6 +137,42 @@ mod tests {
             cg.summary
         );
         assert!(!cg.summary.contains("Call graph reliability"));
+    }
+
+    #[test]
+    fn call_graph_condition_states_the_inferred_calls_beside_the_rate() {
+        // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): 25 certain, 10 inferred, 65 internal-like →
+        // 25 / 100 = 25%; the inferred calls are stated beside the rate, never counted resolved.
+        let mut input = all_pass_input();
+        input.call_graph_reliability = Some(AgentReliabilityLevel::Low);
+        input.resolved_calls = 25;
+        input.inferred_calls = 10;
+        input.unresolved_calls_internal_like = 65;
+        input.unresolved_calls = 65;
+        let cg = check(&input)
+            .conditions
+            .into_iter()
+            .find(|c| matches!(c.code, ConditionCode::CallGraphReliability))
+            .expect("CALL_GRAPH_RELIABILITY condition present");
+        assert!(
+            cg.summary.starts_with(
+                "Your code's calls 25% resolved (LOW); +10 inferred calls not counted as resolved"
+            ),
+            "{}",
+            cg.summary
+        );
+        // Without inferred calls the summary carries no clause (byte-stable).
+        let mut plain = all_pass_input();
+        plain.call_graph_reliability = Some(AgentReliabilityLevel::Low);
+        plain.resolved_calls = 25;
+        plain.unresolved_calls_internal_like = 75;
+        plain.unresolved_calls = 75;
+        let cg = check(&plain)
+            .conditions
+            .into_iter()
+            .find(|c| matches!(c.code, ConditionCode::CallGraphReliability))
+            .unwrap();
+        assert!(!cg.summary.contains("inferred"), "{}", cg.summary);
     }
 
     // ── CHECK-LANG-SPLIT-1 (§2 + ruling A): the per-language breakdown rides any blended figure ──
@@ -663,6 +700,7 @@ mod tests {
     #[test]
     fn one_incomplete_no_snapshot() {
         let input = CheckInput {
+            inferred_calls: 0,
             snapshot_exists: false,
             files_total: 0,
             stale_file_count: 0,
@@ -857,6 +895,7 @@ mod tests {
     #[test]
     fn no_snapshot_only_evaluates_snapshot_exists() {
         let input = CheckInput {
+            inferred_calls: 0,
             snapshot_exists: false,
             files_total: 0,
             stale_file_count: 0,

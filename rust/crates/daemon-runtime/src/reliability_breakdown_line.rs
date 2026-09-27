@@ -90,7 +90,8 @@ pub(crate) fn reliability_by_language_line(
             {
                 for row in by_language.iter().filter(|r| r.key == token) {
                     resolved += row.counts.resolved;
-                    internal_like += row.counts.internal_like();
+                    // PYTHON-RECEIVER-BINDING-1: the non-resolved share keeps the inferred calls.
+                    internal_like += row.counts.in_scope_not_resolved();
                 }
             }
             repo_graph_agent::reliability::language_reliability_cell(
@@ -240,6 +241,7 @@ mod tests {
                 unresolved,
                 external: 0,
                 unknown: 0,
+                inferred: 0,
             },
         }
     }

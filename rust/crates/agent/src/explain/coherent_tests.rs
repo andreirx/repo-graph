@@ -52,6 +52,10 @@ pub(super) fn identity_symbol() -> Signal {
 
 pub(super) fn callers_signal() -> Signal {
     Signal::explain_callers(ExplainCallersEvidence {
+        inferred_by_basis: Default::default(),
+        inferred_count: 0,
+        inferred_items: Vec::new(),
+        unresolved_naming: None,
         count: 1,
         top_modules: Vec::new(),
         items: vec![ExplainCallerItem {
@@ -135,6 +139,7 @@ pub(super) fn trust_signal() -> Signal {
         // In-scope-or-unclassified counts consistent with the 0.9 rate (90 / 100).
         resolved_in_scope: 90,
         in_scope_or_unclassified_total: 100,
+        inferred_calls: 0,
     })
 }
 

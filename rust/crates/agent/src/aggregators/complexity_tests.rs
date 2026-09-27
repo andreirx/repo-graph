@@ -278,6 +278,15 @@ impl AgentStorageRead for FakeStorage {
         Ok(Vec::new())
     }
 
+    fn find_symbol_call_remainders(
+        &self,
+        _snapshot_uid: &str,
+        _symbol_stable_key: &str,
+        _symbol_name: &str,
+    ) -> Result<crate::AgentCallRemainders, AgentStorageError> {
+        Ok(crate::AgentCallRemainders::default())
+    }
+
     fn find_cycles_involving_module(
         &self,
         _snapshot_uid: &str,

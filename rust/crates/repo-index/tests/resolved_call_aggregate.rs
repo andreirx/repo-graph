@@ -40,10 +40,12 @@ fn make_calls_repo(dir: &Path) {
 }
 
 /// Assert persisted-aggregate ↔ live-COUNT parity for one snapshot and
-/// return the agreed count.
+/// return the agreed count. PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the live side is the
+/// CERTAIN CALLS count (`count_call_edges_by_certainty`) — the aggregate counts certain calls only.
 fn assert_parity(storage: &StorageConnection, snapshot_uid: &str, context: &str) -> u64 {
-    let live =
-        TrustStorageRead::count_edges_by_type(storage, snapshot_uid, "CALLS").expect("live COUNT");
+    let live = TrustStorageRead::count_call_edges_by_certainty(storage, snapshot_uid)
+        .expect("live certainty split")
+        .certain;
     let aggregate = TrustStorageRead::get_resolved_call_aggregate(storage, snapshot_uid)
         .expect("aggregate read")
         .unwrap_or_else(|| panic!("{context}: pipeline snapshot must carry a persisted aggregate"));
@@ -126,4 +128,64 @@ fn delta_refresh_recomputes_aggregate_with_copy_forward_exercised() {
     // rows remain readable by pinned uid — the W-B rule; the aggregate
     // stays parity-equal against them).
     assert_parity(&storage, &r1.snapshot_uid, "parent after refresh");
+}
+
+/// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): a Python repo whose UNCHANGED file holds an
+/// untyped-receiver call (inferred) beside a plain call (certain). Fresh index and delta refresh
+/// (copy-forward exercised) both keep aggregate = live certain CALLS and diagnostics
+/// `inferred_calls` = live inferred CALLS.
+#[test]
+fn delta_refresh_keeps_certain_aggregate_and_inferred_count_parity_over_a_python_copy_forward() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("util.py"),
+        "class Service:\n    def process(self):\n        return 1\n\n\n\
+         def helper():\n    return 2\n\n\n\
+         def caller(svc):\n    helper()\n    return svc.process()\n",
+    )
+    .unwrap();
+    fs::write(dir.path().join("other.py"), "def other():\n    return 2\n").unwrap();
+
+    let inferred_parity = |storage: &StorageConnection, snap: &str, ctx: &str| -> u64 {
+        let live = TrustStorageRead::count_call_edges_by_certainty(storage, snap)
+            .unwrap()
+            .inferred;
+        let diag: serde_json::Value = serde_json::from_str(
+            &TrustStorageRead::get_snapshot_extraction_diagnostics(storage, snap)
+                .unwrap()
+                .expect("diagnostics written"),
+        )
+        .unwrap();
+        assert_eq!(
+            diag["inferred_calls"],
+            serde_json::json!(live),
+            "{ctx}: inferred parity"
+        );
+        live
+    };
+
+    let mut storage = StorageConnection::open_in_memory().unwrap();
+    let r1 =
+        index_into_storage(dir.path(), &mut storage, "r1", &ComposeOptions::default()).unwrap();
+    let certain1 = assert_parity(&storage, &r1.snapshot_uid, "fresh index");
+    let inferred1 = inferred_parity(&storage, &r1.snapshot_uid, "fresh index");
+    assert!(
+        certain1 >= 1 && inferred1 >= 1,
+        "certain {certain1}, inferred {inferred1}"
+    );
+
+    fs::write(dir.path().join("other.py"), "def other():\n    return 3\n").unwrap();
+    let r2 =
+        refresh_into_storage(dir.path(), &mut storage, "r1", &ComposeOptions::default()).unwrap();
+    let snap2 = storage.get_snapshot(&r2.snapshot_uid).unwrap().unwrap();
+    assert_eq!(snap2.kind, "refresh", "delta path must be exercised");
+    assert_eq!(snap2.parent_snapshot_uid, Some(r1.snapshot_uid.clone()));
+    assert_eq!(
+        assert_parity(&storage, &r2.snapshot_uid, "delta refresh"),
+        certain1
+    );
+    assert_eq!(
+        inferred_parity(&storage, &r2.snapshot_uid, "delta refresh"),
+        inferred1
+    );
 }

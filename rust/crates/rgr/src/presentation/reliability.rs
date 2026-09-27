@@ -112,7 +112,23 @@ impl ReliabilityResponse {
 fn overall_line(row: &ResolutionScopeRow) -> String {
     match row.resolved_pct {
         None => format!("{} — {}", row.phrase, row_basis(row)),
-        Some(_) => format!("{}{} — {}", row.phrase, band_suffix(row), row_basis(row)),
+        // PYTHON-RECEIVER-BINDING-1: the band follows the rate, then the inferred clause.
+        Some(pct) => format!(
+            "{}{}{} — {}",
+            repo_graph_agent::reliability::resolved_phrase_pct(pct),
+            band_suffix(row),
+            inferred_suffix(row),
+            row_basis(row)
+        ),
+    }
+}
+
+/// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): `; +N inferred call(s) not counted as resolved`
+/// when the scope holds inferred calls (the one shared wording), else nothing.
+fn inferred_suffix(row: &ResolutionScopeRow) -> String {
+    match repo_graph_agent::reliability::inferred_calls_clause(row.inferred) {
+        Some(clause) => format!("; {clause}"),
+        None => String::new(),
     }
 }
 
@@ -163,10 +179,11 @@ fn scope_line(row: &ResolutionScopeRow) -> String {
     match row.resolved_pct {
         None => format!("{}: {} — {}", row.key, row.phrase, row_basis(row)),
         Some(pct) => format!(
-            "{}: {:.0}% resolved{} — {}",
+            "{}: {:.0}% resolved{}{} — {}",
             row.key,
             pct,
             band_suffix(row),
+            inferred_suffix(row),
             row_basis(row)
         ),
     }
@@ -232,6 +249,7 @@ mod tests {
         caveat: Option<&str>,
     ) -> ResolutionScopeRow {
         ResolutionScopeRow {
+            inferred: 0,
             key: key.to_string(),
             is_test,
             resolved,
@@ -408,5 +426,25 @@ mod tests {
         assert!(out.contains("java: 11% resolved (LOW)"), "{out}");
         assert!(out.contains("5 external"), "{out}");
         assert!(out.contains("88 unclassified"), "{out}");
+    }
+
+    #[test]
+    fn per_scope_row_states_the_inferred_calls_not_counted() {
+        // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): a scope holding inferred calls states them
+        // beside its rate (the one shared clause); the overall line too.
+        let mut r = resp();
+        r.by_language[0].inferred = 7;
+        r.total.inferred = 7;
+        let out = r.render_human(AxisFilter::from_flags(true, false));
+        assert!(
+            out.contains("java: 11% resolved (LOW); +7 inferred calls not counted as resolved — "),
+            "{out}"
+        );
+        assert!(
+            out.contains("(LOW); +7 inferred calls not counted as resolved — "),
+            "the overall line states them too: {out}"
+        );
+        // A scope without inferred calls is unchanged.
+        assert!(out.contains("jsx: 24% resolved (LOW) — "), "{out}");
     }
 }

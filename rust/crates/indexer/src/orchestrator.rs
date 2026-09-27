@@ -60,7 +60,7 @@ const COPIED_SIGNALS_READ_CHUNK: usize = 500;
 
 /// Indexer version string stamped on module-derived edges.
 /// Also the `indexer` component of every snapshot toolchain stamp ([`build_toolchain_json`]).
-pub const INDEXER_VERSION: &str = "indexer:1.1.0";
+pub const INDEXER_VERSION: &str = "indexer:1.2.0";
 
 // ── Error type ───────────────────────────────────────────────────
 
@@ -979,6 +979,10 @@ fn run_pipeline<S: IndexerStoragePort>(
     // CALLS-row drop (M-6) the `edges` table is a filtered subset, and
     // this stream-side count is the only honest full-stream accounting.
     let mut resolved_calls_total: u64 = 0;
+    // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the INFERRED CALLS results on the same
+    // stream. g1/g2/g3 count certain calls only (`static`/`dynamic`); the inferred tally is
+    // persisted beside them (diagnostics `inferred_calls`) so the rate keeps them in its universe.
+    let mut inferred_calls_total: u64 = 0;
     // EC-1 M-3a (g2/g3): the two sub-snapshot FC2a-agg families, tallied
     // from the SAME stream at the same point (before materialization,
     // same M-6 independence):
@@ -1056,20 +1060,23 @@ fn run_pipeline<S: IndexerStoragePort>(
 
         // Full-stream CALLS tally (M-3b): counted on the resolver output,
         // BEFORE the storage handoff below.
+        // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): ONE RULE — a certain-call tally never
+        // counts an inferred CALLS row; the inferred ones are tallied separately.
         resolved_calls_total += result
             .resolved
             .iter()
-            .filter(|e| e.edge_type == EdgeType::Calls)
+            .filter(|e| is_certain_call(e))
+            .count() as u64;
+        inferred_calls_total += result
+            .resolved
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Calls && e.resolution == Resolution::Inferred)
             .count() as u64;
 
         // M-3a g2/g3 tallies on the same stream (Phase-4 module edges are
         // OWNS / MODULE→MODULE IMPORTS only — never CALLS — so this loop
-        // covers the complete CALLS stream).
-        for e in result
-            .resolved
-            .iter()
-            .filter(|e| e.edge_type == EdgeType::Calls)
-        {
+        // covers the complete CALLS stream). Certain calls only (the same rule).
+        for e in result.resolved.iter().filter(|e| is_certain_call(e)) {
             *call_fan_in.entry(e.target_node_uid.clone()).or_insert(0) += 1;
             *call_fan_out.entry(e.source_node_uid.clone()).or_insert(0) += 1;
 
@@ -1230,6 +1237,7 @@ fn run_pipeline<S: IndexerStoragePort>(
         &unresolved_breakdown,
         skipped_oversized,
         files_read_failed,
+        inferred_calls_total,
     );
     // INDEX-BASIS-1 (RULING 4): merge the raw index-basis fragment into the SAME
     // diagnostics blob we write below, BEFORE the `Ready` flip — so a servable snapshot
@@ -1553,6 +1561,7 @@ fn build_extraction_diagnostics(
     unresolved_breakdown: &BTreeMap<String, u64>,
     skipped_oversized: u64,
     files_read_failed: u64,
+    inferred_calls: u64,
 ) -> serde_json::Value {
     serde_json::json!({
         "diagnostics_version": 1,
@@ -1561,7 +1570,19 @@ fn build_extraction_diagnostics(
         "unresolved_breakdown": unresolved_breakdown,
         "files_skipped_oversized": skipped_oversized,
         "files_read_failed": files_read_failed,
+        // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the inferred CALLS results of the full
+        // resolution stream — always present on a snapshot this binary writes (0 included), so
+        // a reader can tell "none" from "written before the certainty rule" (key absent).
+        "inferred_calls": inferred_calls,
     })
+}
+
+/// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A; D-PSI-R1-VOCAB): a CALLS result is CERTAIN only
+/// when its resolution is `static` or `dynamic`. The certain-call families (g1 aggregate, g2
+/// degrees, g3 file pairs) count only these.
+fn is_certain_call(edge: &crate::resolver::ResolvedEdge) -> bool {
+    edge.edge_type == EdgeType::Calls
+        && matches!(edge.resolution, Resolution::Static | Resolution::Dynamic)
 }
 
 // ── Java generated-code mapping (CS-2A) ──────────────────────────
@@ -4385,15 +4406,15 @@ mod tests {
         };
         let (mut a, mut b, mut c) = (named("ts-core:0.2.0"), named("c-core:0.1.0"), named("z:9"));
         let ports: Vec<&mut dyn ExtractorPort> = vec![&mut c, &mut a, &mut b];
-        assert_eq!(INDEXER_VERSION, "indexer:1.1.0");
+        assert_eq!(INDEXER_VERSION, "indexer:1.2.0");
         assert_eq!(
             build_toolchain_json(&ports),
-            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.1.0"}"#
+            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.2.0"}"#
         );
         let none: Vec<&mut dyn ExtractorPort> = Vec::new();
         assert_eq!(
             build_toolchain_json(&none),
-            r#"{"extractors":[],"indexer":"indexer:1.1.0"}"#
+            r#"{"extractors":[],"indexer":"indexer:1.2.0"}"#
         );
     }
 

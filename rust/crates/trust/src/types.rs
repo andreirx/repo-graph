@@ -65,6 +65,12 @@ pub struct ExtractionDiagnostics {
     ///   3. Natural serde — BTreeMap serializes as a JSON object
     ///      without custom serde machinery.
     pub unresolved_breakdown: BTreeMap<String, u64>,
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the INFERRED CALLS results of the full
+    /// resolution stream, written beside the certain-only resolved aggregate. `None` on a
+    /// snapshot written before the certainty rule (the key is absent) — never read as zero:
+    /// the service then serves both figures from the live certainty split.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inferred_calls: Option<u64>,
 }
 
 // ── Reliability ──────────────────────────────────────────────────
@@ -155,6 +161,13 @@ pub struct TrustSummary {
     pub unresolved_calls: u64,
     pub unresolved_calls_external: u64,
     pub unresolved_calls_internal_like: u64,
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): CALLS bound by a name-only (or otherwise
+    /// inferred) binding. Not counted in `resolved_calls`; kept in the rate's universe (the
+    /// denominator is `resolved_calls + inferred_calls + unresolved_calls_internal_like`).
+    /// Always measured; serialized only when positive, so a report without inferred calls is
+    /// byte-identical to before (the TS-parity fixtures).
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub inferred_calls: u64,
     pub call_resolution_rate: f64,
     pub reliability: TrustReliability,
     pub triggered_downgrades: TrustDowngrades,
@@ -253,7 +266,7 @@ pub struct TrustExternalDependencyAttribution {
 
 /// `skip_serializing_if` predicate for additive `u64` fields — keeps pre-slice coherent JSON
 /// byte-identical (the field is omitted when zero, exactly as it was absent before the slice).
-fn is_zero_u64(n: &u64) -> bool {
+pub(crate) fn is_zero_u64(n: &u64) -> bool {
     *n == 0
 }
 
@@ -469,6 +482,7 @@ mod tests {
         breakdown.insert("calls_obj_method_needs_type_info".into(), 15);
         breakdown.insert("imports_file_not_found".into(), 5);
         let diag = ExtractionDiagnostics {
+            inferred_calls: None,
             diagnostics_version: 1,
             edges_total: 100,
             unresolved_total: 20,

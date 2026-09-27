@@ -167,6 +167,7 @@ mod agent_orient_reads; // ORIENT-DENSITY-1: dense-orient discovery reads (modul
 pub use agent_orient_reads::manifest_for_module_key;
 mod boundary_interaction_impl; // Boundary interaction write storage (BI-1A)
 mod boundary_interaction_read_impl; // Boundary interaction read port (BI-1A)
+pub mod call_remainder_reads; // PYTHON-RECEIVER-BINDING-1: a symbol's call remainder (inferred rows, unresolved calls naming/leaving it)
 mod call_resolution_reads; // RESOLUTION-BREAKDOWN-CLI-1: per-language/module call-resolution grouping reads
 mod cargo_module_impl; // CargoModuleStorePort impl for StorageConnection (rust-module-parity Phase 1)
 pub mod connection;

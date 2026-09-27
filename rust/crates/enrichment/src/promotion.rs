@@ -37,14 +37,19 @@ use crate::contracts::{
 use crate::funnel::RejectionClass;
 use crate::status::PromotionReport;
 
-/// Version identifier for promoted edges.
-const PROMOTER_VERSION: &str = "compiler-promotion:0.1.0";
+/// Version identifier for promoted edges. PYTHON-RECEIVER-BINDING-1 (D-PRB-ENRICH-1): 0.2.0
+/// writes the promoted row `static` (0.1.0 wrote `inferred`); the version tells an old row from a
+/// new one.
+const PROMOTER_VERSION: &str = "compiler-promotion:0.2.0";
 
 /// Edge type for promoted edges (always CALLS).
 const EDGE_TYPE_CALLS: &str = "CALLS";
 
-/// Resolution method for promoted edges.
-const RESOLUTION_INFERRED: &str = "inferred";
+/// Resolution of a promoted edge. PYTHON-RECEIVER-BINDING-1 (D-PRB-ENRICH-1 = A): a promotion
+/// that passed the eight gates rests on a compiler-resolved receiver type selecting exactly one
+/// usable receiver type (a class or an enum) and exactly one method on it — receiver-type evidence
+/// that selects one candidate, a `static` binding under RG-REQ-005-L02.
+const RESOLUTION_STATIC: &str = "static";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Promotion Filter
@@ -338,7 +343,7 @@ pub fn promote_edges(candidates: &[PromotionCandidate], ctx: &PromotionContext) 
             source_node_uid: candidate.source_node_uid.clone(),
             target_node_uid: method.node_uid.clone(),
             edge_type: EDGE_TYPE_CALLS,
-            resolution: RESOLUTION_INFERRED,
+            resolution: RESOLUTION_STATIC,
             extractor: PROMOTER_VERSION.to_string(),
             location: build_location(candidate),
             metadata_json: serde_json::json!({
@@ -473,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn test_successful_promotion() {
+    fn successful_promotion_writes_a_compiler_proven_call_as_static() {
         let ctx = make_context();
         let candidate = make_candidate(
             "edge-1",
@@ -493,7 +498,17 @@ mod tests {
         assert_eq!(promoted.edge_uid, "promoted:edge-1");
         assert_eq!(promoted.target_node_uid, "method-1");
         assert_eq!(promoted.edge_type, "CALLS");
-        assert_eq!(promoted.resolution, "inferred");
+        // PYTHON-RECEIVER-BINDING-1 (D-PRB-ENRICH-1): a compiler-proven binding is certain.
+        assert_eq!(promoted.resolution, "static");
+        assert_eq!(promoted.extractor, "compiler-promotion:0.2.0");
+        // The provenance metadata is unchanged: exactly three keys (their names are pinned by the
+        // PRB-C11 source oracle against HEAD) carrying the candidate's edge, type and method.
+        let meta: serde_json::Value = serde_json::from_str(&promoted.metadata_json).unwrap();
+        let object = meta.as_object().expect("metadata is an object");
+        assert_eq!(object.len(), 3);
+        let mut values: Vec<&str> = object.values().filter_map(|v| v.as_str()).collect();
+        values.sort();
+        assert_eq!(values, vec!["MyClass", "doSomething", "edge-1"]);
     }
 
     #[test]

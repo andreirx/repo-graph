@@ -91,17 +91,23 @@ pub fn orient_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
         aggregators::trust::aggregate(storage, repo_uid, snapshot_uid, enrich_state_override)?;
     merge(&mut all_signals, &mut all_limits, trust_result.output);
 
+    // PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11): the inferred remainder beside the certain rows.
+    let remainders =
+        storage.find_symbol_call_remainders(snapshot_uid, symbol_stable_key, &context.name)?;
+
     // ── callers_summary ─────────────────────────────────────
+    // Emitted when certain OR inferred callers exist (the inferred remainder alone is still
+    // something to investigate — RG-REQ-002-L11).
     let callers = storage.find_symbol_callers(snapshot_uid, symbol_stable_key)?;
-    if !callers.is_empty() {
-        let evidence = build_callers_evidence(&callers);
+    if !callers.is_empty() || !remainders.inferred_callers.is_empty() {
+        let evidence = build_callers_evidence(&callers, &remainders.inferred_callers);
         all_signals.push(Signal::callers_summary(evidence));
     }
 
     // ── callees_summary ─────────────────────────────────────
     let callees = storage.find_symbol_callees(snapshot_uid, symbol_stable_key)?;
-    if !callees.is_empty() {
-        let evidence = build_callees_evidence(&callees);
+    if !callees.is_empty() || !remainders.inferred_callees.is_empty() {
+        let evidence = build_callees_evidence(&callees, &remainders.inferred_callees);
         all_signals.push(Signal::callees_summary(evidence));
     }
 
@@ -194,18 +200,36 @@ pub fn orient_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
 
 fn build_callers_evidence(
     callers: &[crate::storage_port::AgentCallerRow],
+    inferred: &[crate::storage_port::AgentInferredCallRow],
 ) -> CallersSummaryEvidence {
     let count = callers.len() as u64;
     let top_modules = group_by_module(callers.iter().map(|c| c.module_path.as_deref()));
-    CallersSummaryEvidence { count, top_modules }
+    CallersSummaryEvidence {
+        count,
+        top_modules,
+        inferred_count: inferred.len() as u64,
+        inferred_name_only: all_name_only(inferred),
+    }
 }
 
 fn build_callees_evidence(
     callees: &[crate::storage_port::AgentCalleeRow],
+    inferred: &[crate::storage_port::AgentInferredCallRow],
 ) -> CalleesSummaryEvidence {
     let count = callees.len() as u64;
     let top_modules = group_by_module(callees.iter().map(|c| c.module_path.as_deref()));
-    CalleesSummaryEvidence { count, top_modules }
+    CalleesSummaryEvidence {
+        count,
+        top_modules,
+        inferred_count: inferred.len() as u64,
+        inferred_name_only: all_name_only(inferred),
+    }
+}
+
+/// Every inferred row's basis is the name-only binding (the rgr rule for "(name-only)").
+fn all_name_only(rows: &[crate::storage_port::AgentInferredCallRow]) -> bool {
+    rows.iter()
+        .all(|r| r.basis == crate::reliability::NAME_ONLY_BASIS)
 }
 
 /// Group items by module_path, count occurrences, sort descending

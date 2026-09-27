@@ -52,6 +52,16 @@ fn union_degree_suffix(evidence: &serde_json::Value) -> String {
 /// earns the helper). The anchor is appended ONLY when BOTH `file` and `line` are present: they
 /// are a single SQLite pair (STANDING HONESTY RULE #2), and a missing line renders no anchor at
 /// all (byte-identical to the pre-anchor row), never a fabricated `:0`.
+/// Whether [`render_callgraph_item`] renders a `path:line` anchor for `item` (a file and a
+/// positive line; [`anchor`] omits a zero line).
+fn item_has_anchor(item: &serde_json::Value) -> bool {
+    item.get("file").and_then(|v| v.as_str()).is_some()
+        && item
+            .get("line")
+            .and_then(|v| v.as_u64())
+            .is_some_and(|l| l > 0)
+}
+
 fn render_callgraph_item(item: &serde_json::Value) -> String {
     let name = item
         .get("name")
@@ -388,9 +398,118 @@ impl ExplainResponse {
             if items.len() > shown {
                 out.push_str(&format!("  ... ({} more)\n", items.len() - shown));
             }
+            // PYTHON-RECEIVER-BINDING-1 review F-1 (RG-REQ-002-L02): these rows anchor each
+            // caller's DECLARATION (the LiveGraph-served rows can carry no call-site line), while
+            // `rmap callers` anchors the CALL SITE. The differing basis is stated inline, with the
+            // command that gives the call sites, whenever a row shows a line.
+            if items.iter().take(shown).any(item_has_anchor) {
+                let target = match self.focus_qualified_name() {
+                    Some(name) => name,
+                    None => "<symbol>".to_string(),
+                };
+                out.push_str(&bullet(&format!(
+                    "lines above are where each caller is defined — for the call sites run rmap callers {target}"
+                )));
+            }
         }
+        out.push_str(&self.render_call_remainder(evidence, "callers", "unresolved_naming", full));
 
         out
+    }
+
+    /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11, RG-REQ-005-L09): after the certain rows, the
+    /// inferred remainder with its next action (`+M inferred (name-only) — investigate with rmap
+    /// callers <name> --include-inferred`) and the unresolved calls bearing on the symbol; under
+    /// `--full` the carried inferred rows follow, each marked. Absent fields render nothing (an
+    /// explain without a remainder is byte-identical to before).
+    fn render_call_remainder(
+        &self,
+        evidence: &serde_json::Value,
+        command: &str,
+        unresolved_key: &str,
+        full: bool,
+    ) -> String {
+        let mut out = String::new();
+        // A PRESENT field that cannot be read renders unknown with its reason — never as if the
+        // field were absent (RG-REQ-002-L04); only an absent field renders nothing.
+        let unreadable = |what: &str| {
+            bullet(&format!(
+                "{what}: unknown — this answer's {what} field is unreadable"
+            ))
+        };
+        if let Some(v) = evidence.get("inferred_count") {
+            let Some(n) = v.as_u64() else {
+                out.push_str(&unreadable(&format!("inferred {command}")));
+                return out + &self.render_unresolved_remainder(evidence, unresolved_key);
+            };
+            // "(name-only)" only when the per-basis counts are readable AND all name-only; an
+            // absent or malformed map never earns the label.
+            let name_only = match evidence.get("inferred_by_basis") {
+                Some(v) => {
+                    match serde_json::from_value::<std::collections::BTreeMap<String, u64>>(
+                        v.clone(),
+                    ) {
+                        Ok(by_basis) => crate::presentation::graph_edges::all_name_only(&by_basis),
+                        Err(_) => false,
+                    }
+                }
+                None => false,
+            };
+            let label = repo_graph_agent::reliability::inferred_remainder_label(n, name_only);
+            let target = match self.focus_qualified_name() {
+                Some(name) => name,
+                None => "<symbol>".to_string(),
+            };
+            out.push_str(&bullet(&format!(
+                "+{label} — investigate with rmap {command} {target} --include-inferred"
+            )));
+            if full {
+                if let Some(v) = evidence.get("inferred_items") {
+                    let Some(items) = v.as_array() else {
+                        out.push_str(&unreadable(&format!("inferred {command} rows")));
+                        return out + &self.render_unresolved_remainder(evidence, unresolved_key);
+                    };
+                    for item in items {
+                        let marker = crate::presentation::graph_edges::inferred_row_marker(
+                            item.get("basis").and_then(|v| v.as_str()),
+                            item.get("extractor").and_then(|v| v.as_str()),
+                            None,
+                        );
+                        out.push_str(&bullet(&format!("{}{marker}", render_callgraph_item(item))));
+                    }
+                }
+            }
+        }
+        out + &self.render_unresolved_remainder(evidence, unresolved_key)
+    }
+
+    /// The unresolved calls bearing on the symbol (`unresolved_naming` / `unresolved_from`): the
+    /// count line with its reader classes; a present block whose count or classes cannot be read
+    /// renders unknown with its reason; an absent block renders nothing.
+    fn render_unresolved_remainder(
+        &self,
+        evidence: &serde_json::Value,
+        unresolved_key: &str,
+    ) -> String {
+        let Some(u) = evidence.get(unresolved_key) else {
+            return String::new();
+        };
+        let count = u.get("count").and_then(|v| v.as_u64());
+        let by_basis = u.get("by_basis").and_then(|v| {
+            serde_json::from_value::<std::collections::BTreeMap<String, u64>>(v.clone()).ok()
+        });
+        let name = match u.get("name") {
+            None => Some(None),
+            Some(v) => v.as_str().map(Some),
+        };
+        match (count, by_basis, name) {
+            (Some(count), Some(by_basis), Some(name)) => bullet(
+                &crate::presentation::graph_edges::unresolved_line(count, name, &by_basis),
+            ),
+            _ => bullet(
+                "unresolved calls: unknown — this answer's unresolved-call count is unreadable",
+            ),
+        }
     }
 
     fn render_callees(&self, evidence: &serde_json::Value, full: bool) -> String {
@@ -411,6 +530,7 @@ impl ExplainResponse {
                 out.push_str(&format!("  ... ({} more)\n", items.len() - shown));
             }
         }
+        out.push_str(&self.render_call_remainder(evidence, "callees", "unresolved_from", full));
 
         out
     }
@@ -779,10 +899,19 @@ impl ExplainResponse {
                     .get("in_scope_or_unclassified_total")
                     .and_then(|v| v.as_u64()),
             );
-        if let Some((resolved, total)) = counts {
+        // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the inferred calls inside the universe. The
+        // field is serialized only when positive, so ABSENT is the measured none; a PRESENT value
+        // that is not a count is unreadable — the counts path is not taken (never a guessed 0).
+        let inferred = match evidence.get("inferred_calls") {
+            None => Some(0),
+            Some(v) => v.as_u64(),
+        };
+        let counts = counts.zip(inferred);
+        if let Some(((resolved, total), inferred)) = counts {
             let view = reliability::CallReliabilityView::derive(
                 resolved,
-                total.saturating_sub(resolved),
+                total.saturating_sub(resolved).saturating_sub(inferred),
+                inferred,
                 0,
                 total,
                 Vec::new(),

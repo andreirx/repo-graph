@@ -1252,6 +1252,148 @@ mod tests {
         assert_promotion_parity(&storage, &snap, 2, "after re-promotion");
     }
 
+    // ── PYTHON-RECEIVER-BINDING-1 (D-PRB-ENRICH-1): the promoter's real write ──
+
+    /// Run the REAL 8-gate promoter over a resolved `engine.run()` receiver (the context build of
+    /// `rust_impl_method_receiver_promotes_end_to_end`) and return its promoted edges.
+    fn promote_engine_run(
+        storage: &StorageConnection,
+        snap: &str,
+    ) -> Vec<enrichment::PromotedEdge> {
+        use enrichment::{promote_edges, PromotionContext};
+        let mut ctx = PromotionContext::new();
+        let symbols =
+            EnrichmentStoragePort::load_symbols_by_names(storage, snap, &["Engine".to_string()])
+                .unwrap();
+        for sym in symbols {
+            let is_class = sym.subtype == SymbolSubtype::Class;
+            let key = sym.stable_key.clone();
+            ctx.add_symbol(sym);
+            if is_class {
+                for (mname, minfo) in
+                    EnrichmentStoragePort::load_class_methods(storage, snap, &key).unwrap()
+                {
+                    ctx.add_class_method(&key, &mname, minfo);
+                }
+            }
+        }
+        let candidate = PromotionCandidate {
+            edge_uid: "e1".to_string(),
+            snapshot_uid: snap.to_string(),
+            repo_uid: "r1".to_string(),
+            source_node_uid: "n-engine".to_string(),
+            target_key: "engine.run".to_string(),
+            line_start: Some(10),
+            col_start: Some(4),
+            line_end: Some(10),
+            col_end: Some(20),
+            category: UnresolvedCategory::CallsObjMethodNeedsTypeInfo,
+            enrichment: EnrichmentMetadata {
+                receiver_type: Some("Engine".to_string()),
+                type_display_name: Some("Engine".to_string()),
+                is_external_type: false,
+                origin: ReceiverTypeOrigin::Compiler,
+                failure_reason: None,
+            },
+        };
+        let result = promote_edges(&[candidate], &ctx);
+        assert_eq!(
+            result.promoted.len(),
+            1,
+            "skipped: {:?}",
+            result.skipped_reasons
+        );
+        result.promoted
+    }
+
+    /// The stored `(resolution, extractor, sorted metadata keys)` of one edge.
+    fn stored_row(storage: &StorageConnection, uid: &str) -> (String, String, Vec<String>) {
+        let (resolution, extractor, meta): (String, String, Option<String>) = storage
+            .connection()
+            .query_row(
+                "SELECT resolution, extractor, metadata_json FROM edges WHERE edge_uid = ?1",
+                rusqlite::params![uid],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(meta.as_deref().unwrap()).unwrap();
+        let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        (resolution, extractor, keys)
+    }
+
+    fn certain_parity(storage: &StorageConnection, snap: &str) -> (u64, u64, u64) {
+        use repo_graph_trust::TrustStorageRead;
+        let split = TrustStorageRead::count_call_edges_by_certainty(storage, snap).unwrap();
+        let aggregate = TrustStorageRead::get_resolved_call_aggregate(storage, snap)
+            .unwrap()
+            .expect("aggregate persisted")
+            .count;
+        (aggregate, split.certain, split.inferred)
+    }
+
+    #[test]
+    fn apply_promotion_persists_a_compiler_proven_call_static_and_counts_it_certain() {
+        let (storage, snap) = seed_promotion_baseline();
+        let promoted = promote_engine_run(&storage, &snap);
+        EnrichmentStoragePort::apply_promotion(&storage, &snap, &promoted).unwrap();
+        let (resolution, extractor, keys) = stored_row(&storage, "promoted:e1");
+        assert_eq!(resolution, "static", "a compiler-proven binding is certain");
+        assert_eq!(extractor, "compiler-promotion:0.2.0");
+        assert_eq!(keys, vec!["methodName", "promotedFrom", "receiverType"]);
+        let (aggregate, certain, inferred) = certain_parity(&storage, &snap);
+        assert_eq!(
+            (aggregate, certain, inferred),
+            (2, 2, 0),
+            "g1 aggregate == certain count"
+        );
+    }
+
+    #[test]
+    fn re_promotion_replaces_a_legacy_inferred_promoted_row_with_a_static_one_at_aggregate_parity()
+    {
+        let (storage, snap) = seed_promotion_baseline();
+        // The legacy row as the pre-slice binary left it: `inferred`, `compiler-promotion:0.1.0`,
+        // counted in the aggregate (measured: every v0.19.0 aggregate equals all CALLS rows).
+        let legacy = enrichment::PromotedEdge {
+            edge_uid: "promoted:e1".to_string(),
+            snapshot_uid: snap.clone(),
+            repo_uid: "r1".to_string(),
+            source_node_uid: "n-engine".to_string(),
+            target_node_uid: "n-engine-run".to_string(),
+            edge_type: "CALLS",
+            resolution: "inferred",
+            extractor: "compiler-promotion:0.1.0".to_string(),
+            location: None,
+            metadata_json: r#"{"promotedFrom":"e1","receiverType":"Engine","methodName":"run"}"#
+                .to_string(),
+        };
+        EnrichmentStoragePort::apply_promotion(&storage, &snap, &[legacy]).unwrap();
+        let (before_aggregate, _, before_inferred) = certain_parity(&storage, &snap);
+        assert_eq!(
+            (before_aggregate, before_inferred),
+            (2, 1),
+            "the legacy state"
+        );
+
+        // Re-promotion by the new promoter replaces the same uid.
+        let promoted = promote_engine_run(&storage, &snap);
+        assert_eq!(promoted[0].edge_uid, "promoted:e1");
+        EnrichmentStoragePort::apply_promotion(&storage, &snap, &promoted).unwrap();
+        let (resolution, extractor, _) = stored_row(&storage, "promoted:e1");
+        assert_eq!(
+            (resolution.as_str(), extractor.as_str()),
+            ("static", "compiler-promotion:0.2.0")
+        );
+        let (aggregate, certain, inferred) = certain_parity(&storage, &snap);
+        assert_eq!(aggregate, before_aggregate, "net aggregate delta 0");
+        assert_eq!(
+            (aggregate, certain, inferred),
+            (2, 2, 0),
+            "aggregate == certain; none inferred"
+        );
+    }
+
     /// review-0 item 2 (failure path): a hard failure AFTER rows were
     /// already mutated inside the promotion transaction must roll back
     /// EVERYTHING — rows and aggregate revert together; the aggregate is

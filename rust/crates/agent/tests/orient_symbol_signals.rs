@@ -434,3 +434,131 @@ fn module_summary_not_emitted_at_symbol_scope() {
         "MODULE_SUMMARY must not be emitted at symbol scope"
     );
 }
+
+// ── PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11): the inferred remainder on the symbol focus ──
+
+const DO_WORK: &str = "r1:src/core/service.ts:SYMBOL:doWork";
+
+fn inferred(key: &str, basis: &str) -> repo_graph_agent::AgentInferredCallRow {
+    repo_graph_agent::AgentInferredCallRow {
+        stable_key: key.into(),
+        name: key.into(),
+        qualified_name: None,
+        file: Some("src/x.py".into()),
+        line: Some(7),
+        module_path: Some("src".into()),
+        module_stable_key: None,
+        basis: basis.into(),
+        receiver: Some("obj".into()),
+        extractor: "python-core:0.2.0".into(),
+    }
+}
+
+fn caller(name: &str) -> AgentCallerRow {
+    AgentCallerRow {
+        stable_key: format!("r1:src/cli/{name}.ts:SYMBOL:{name}"),
+        name: name.into(),
+        file: Some(format!("src/cli/{name}.ts")),
+        line: None,
+        module_path: Some("src/cli".into()),
+        module_stable_key: None,
+    }
+}
+
+fn summary_of(fake: &FakeAgentStorage, code: SignalCode) -> Option<(String, serde_json::Value)> {
+    let result = orient(fake, "r1", Some("doWork"), Budget::Large, common::TEST_NOW).unwrap();
+    result.signals.iter().find(|s| s.code() == code).map(|s| {
+        (
+            s.summary().to_string(),
+            serde_json::to_value(s.evidence()).unwrap(),
+        )
+    })
+}
+
+#[test]
+fn orient_symbol_callers_summary_counts_certain_callers_and_states_the_inferred_remainder() {
+    let mut fake = seeded_symbol();
+    fake.symbol_callers.insert(
+        ("snap-1".into(), DO_WORK.into()),
+        vec![caller("main"), caller("setup")],
+    );
+    fake.symbol_call_remainders.insert(
+        ("snap-1".into(), DO_WORK.into()),
+        repo_graph_agent::AgentCallRemainders {
+            inferred_callers: vec![
+                inferred("a", "receiver_untyped_name_only"),
+                inferred("b", "receiver_untyped_name_only"),
+                inferred("c", "receiver_untyped_name_only"),
+            ],
+            ..Default::default()
+        },
+    );
+    let (summary, json) = summary_of(&fake, SignalCode::CallersSummary).expect("emitted");
+    assert_eq!(json["count"], 2, "certain callers only");
+    assert_eq!(json["inferred_count"], 3);
+    assert_eq!(
+        summary,
+        "2 direct callers across 1 module; 3 inferred (name-only) — investigate with rmap callers --include-inferred"
+    );
+}
+
+#[test]
+fn orient_symbol_emits_the_callers_summary_when_only_inferred_callers_exist() {
+    let mut fake = seeded_symbol();
+    fake.symbol_call_remainders.insert(
+        ("snap-1".into(), DO_WORK.into()),
+        repo_graph_agent::AgentCallRemainders {
+            // A legacy row (basis unrecorded) → the label drops "(name-only)".
+            inferred_callers: vec![inferred("a", "unrecorded")],
+            ..Default::default()
+        },
+    );
+    let (summary, json) = summary_of(&fake, SignalCode::CallersSummary).expect("emitted");
+    assert_eq!(json["count"], 0);
+    assert_eq!(json["inferred_count"], 1);
+    assert_eq!(
+        summary,
+        "0 direct callers across 0 modules; 1 inferred — investigate with rmap callers --include-inferred"
+    );
+    // Neither certain nor inferred → no summary (unchanged).
+    let plain = seeded_symbol();
+    assert!(summary_of(&plain, SignalCode::CallersSummary).is_none());
+}
+
+#[test]
+fn orient_symbol_callees_summary_states_the_inferred_remainder() {
+    let mut fake = seeded_symbol();
+    fake.symbol_callees.insert(
+        ("snap-1".into(), DO_WORK.into()),
+        vec![AgentCalleeRow {
+            stable_key: "r1:src/core/db.ts:SYMBOL:query".into(),
+            name: "query".into(),
+            file: Some("src/core/db.ts".into()),
+            line: None,
+            module_path: Some("src/core".into()),
+            module_stable_key: None,
+        }],
+    );
+    fake.symbol_call_remainders.insert(
+        ("snap-1".into(), DO_WORK.into()),
+        repo_graph_agent::AgentCallRemainders {
+            inferred_callees: vec![inferred("x", "receiver_untyped_name_only")],
+            ..Default::default()
+        },
+    );
+    let (summary, json) = summary_of(&fake, SignalCode::CalleesSummary).expect("emitted");
+    assert_eq!(json["count"], 1);
+    assert_eq!(json["inferred_count"], 1);
+    assert_eq!(
+        summary,
+        "1 direct callee across 1 module; 1 inferred (name-only) — investigate with rmap callees --include-inferred"
+    );
+    // A summary without inferred rows serializes without the field (byte-stable).
+    let mut plain = seeded_symbol();
+    plain
+        .symbol_callers
+        .insert(("snap-1".into(), DO_WORK.into()), vec![caller("main")]);
+    let (s, j) = summary_of(&plain, SignalCode::CallersSummary).unwrap();
+    assert_eq!(s, "1 direct caller across 1 module.");
+    assert!(j.get("inferred_count").is_none());
+}

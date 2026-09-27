@@ -51,6 +51,11 @@ pub struct CallCoverage {
     /// shared helper `trust`/`check` use. Additive; `#[serde(default)]` for older wire.
     #[serde(default)]
     pub unresolved_calls_unknown: u64,
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): inferred CALLS — not in `resolved_calls`,
+    /// in the rate's universe beside `unresolved_calls_internal_like`. Additive; serialized only
+    /// when positive; `#[serde(default)]` for older wire.
+    #[serde(default, skip_serializing_if = "crate::types::is_zero_u64")]
+    pub inferred_calls: u64,
     /// Top named external receiver targets — the trust service's `top_external_types`
     /// (external-FILTERED then truncated, review-3 §3), NOT `top_types` re-filtered, so a
     /// genuine top external is never dropped by the mixed top-15 cut. Absent when
@@ -159,6 +164,7 @@ impl TrustOverlaySummary {
             unresolved_calls_external: report.summary.unresolved_calls_external,
             unresolved_calls_internal_like: report.summary.unresolved_calls_internal_like,
             unresolved_calls_unknown: report.unresolved_calls_unknown,
+            inferred_calls: report.summary.inferred_calls,
             external_targets,
         });
 
@@ -363,6 +369,7 @@ mod tests {
             toolchain: None,
             diagnostics_version: None,
             summary: TrustSummary {
+                inferred_calls: 0,
                 edges_total: 100,
                 edges_resolved: 100,
                 unresolved_total: 0,
@@ -420,6 +427,28 @@ mod tests {
             enrichment_eligible_count: 0,
             unresolved_calls_unknown: 0,
         }
+    }
+
+    #[test]
+    fn call_coverage_carries_the_inferred_count() {
+        let mut report = minimal_report();
+        report.summary.inferred_calls = 7;
+        let overlay = TrustOverlaySummary::from_report(&report, "CALLS+IMPORTS");
+        let cov = overlay
+            .call_coverage
+            .as_ref()
+            .expect("call coverage projected");
+        assert_eq!(cov.inferred_calls, 7);
+        assert_eq!(cov.resolved_calls, 50);
+        let json = serde_json::to_value(cov).unwrap();
+        assert_eq!(json["inferred_calls"], serde_json::json!(7));
+        // Zero is omitted from the wire; an older payload reads 0.
+        report.summary.inferred_calls = 0;
+        let zero = TrustOverlaySummary::from_report(&report, "CALLS+IMPORTS");
+        let zjson = serde_json::to_value(zero.call_coverage.as_ref().unwrap()).unwrap();
+        assert!(zjson.get("inferred_calls").is_none());
+        let back: CallCoverage = serde_json::from_value(zjson).unwrap();
+        assert_eq!(back.inferred_calls, 0);
     }
 
     #[test]

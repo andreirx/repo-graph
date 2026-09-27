@@ -508,6 +508,7 @@ fn orient_renders_external_coverage_map_from_shared_view() {
         }),
         // 42 resolved / (42 + 58) in-scope = 42%; 100 external of 200 total calls = 50%.
         call_coverage: Some(repo_graph_trust::CallCoverage {
+            inferred_calls: 0,
             resolved_calls: 42,
             unresolved_calls: 158,
             unresolved_calls_external: 100,
@@ -590,6 +591,7 @@ fn orient_external_coverage_visible_when_call_graph_band_is_high() {
         }),
         // 90 resolved, 10 in-scope unresolved; 40 external of 140 total calls = 28.6% → 29%.
         call_coverage: Some(repo_graph_trust::CallCoverage {
+            inferred_calls: 0,
             resolved_calls: 90,
             unresolved_calls: 50,
             unresolved_calls_external: 40,
@@ -647,6 +649,7 @@ fn orient_zero_in_scope_calls_is_honest_no_fabricated_rate() {
         }),
         // 0 resolved, 0 in-scope unresolved — every call is external (50 of 50 = 100%).
         call_coverage: Some(repo_graph_trust::CallCoverage {
+            inferred_calls: 0,
             resolved_calls: 0,
             unresolved_calls: 50,
             unresolved_calls_external: 50,
@@ -706,6 +709,7 @@ fn orient_small_headline_carries_material_unclassified_caveat() {
         }),
         // in-scope = 42 / (42 + 58) = 42%; unclassified 30 of 100 in-scope = 30% ≥ 20% material.
         call_coverage: Some(repo_graph_trust::CallCoverage {
+            inferred_calls: 0,
             resolved_calls: 42,
             unresolved_calls: 158,
             unresolved_calls_external: 100,
@@ -732,6 +736,7 @@ fn orient_small_headline_carries_material_unclassified_caveat() {
     );
     // An IMMATERIAL unclassified share (< 20%) stays silent — the caveat is not noise.
     r.trust_briefing.as_mut().unwrap().call_coverage = Some(repo_graph_trust::CallCoverage {
+        inferred_calls: 0,
         resolved_calls: 42,
         unresolved_calls: 158,
         unresolved_calls_external: 100,
@@ -764,6 +769,7 @@ fn orient_small_headline_empty_call_graph_still_reads_no_in_scope_calls_measured
             change_impact: None,
         }),
         call_coverage: Some(repo_graph_trust::CallCoverage {
+            inferred_calls: 0,
             resolved_calls: 0,
             unresolved_calls: 0,
             unresolved_calls_external: 0,
@@ -806,6 +812,7 @@ fn orient_small_headline_zero_in_scope_reads_no_in_scope_calls_measured() {
             change_impact: None,
         }),
         call_coverage: Some(repo_graph_trust::CallCoverage {
+            inferred_calls: 0,
             resolved_calls: 0,
             unresolved_calls: 50,
             unresolved_calls_external: 50,
@@ -1839,6 +1846,7 @@ fn binding_report() -> repo_graph_trust::types::TrustReport {
         toolchain: None,
         diagnostics_version: Some(1),
         summary: TrustSummary {
+            inferred_calls: 0,
             edges_total: 200,
             edges_resolved: 200,
             unresolved_total: 158,
@@ -1908,6 +1916,7 @@ fn one_shared_projection_reaches_orient_trust_and_check() {
             change_impact: None,
         }),
         call_coverage: Some(repo_graph_trust::CallCoverage {
+            inferred_calls: 0,
             resolved_calls: 42,
             unresolved_calls: 158,
             unresolved_calls_external: 100,
@@ -1934,6 +1943,7 @@ fn one_shared_projection_reaches_orient_trust_and_check() {
 
     // ── check surface (same counts on CheckInput) ──
     let check_out = evaluate_conditions(&CheckInput {
+        inferred_calls: 0,
         snapshot_exists: true,
         files_total: 1,
         stale_file_count: 0,
@@ -2787,4 +2797,41 @@ fn orient_without_toolchain_staleness_is_byte_identical() {
             assert!(!head_shape.contains("toolchain"), "{depth:?}: {head_shape}");
         }
     }
+}
+
+#[test]
+fn small_reliability_states_the_inferred_calls_not_counted() {
+    // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): 25 certain, 10 inferred, 65 in-scope-or-
+    // unclassified unresolved → 25 / 100 = 25%, and the small headline states the inferred calls
+    // it did not count (the one shared clause).
+    let mut r = minimal_response();
+    r.trust_briefing = Some(TrustOverlay {
+        reliability: Some(ReliabilitySection {
+            call_graph: Some(ReliabilityAxis {
+                level: "LOW".to_string(),
+                reasons: vec!["call_resolution_rate=25.0%_below_50%".to_string()],
+            }),
+            import_graph: None,
+            change_impact: None,
+        }),
+        call_coverage: Some(repo_graph_trust::CallCoverage {
+            inferred_calls: 10,
+            resolved_calls: 25,
+            unresolved_calls: 65,
+            unresolved_calls_external: 0,
+            unresolved_calls_internal_like: 65,
+            unresolved_calls_unknown: 0,
+            external_targets: vec![],
+        }),
+        call_graph_reliability: None,
+        call_resolution_rate: None,
+        caveats: vec![],
+    });
+    let small = r.render_human(OrientDepth::Small);
+    assert!(
+        small.contains(
+            "Reliability: your code's calls 25% resolved (LOW); +10 inferred calls not counted as resolved"
+        ),
+        "{small}"
+    );
 }

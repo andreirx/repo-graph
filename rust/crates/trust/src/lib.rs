@@ -168,7 +168,7 @@ pub use service::{
     compute_trust_report_cancellable, TrustAssemblyError, TrustCancelCheck, TrustComputationInput,
     TrustReportOutcome,
 };
-pub use storage_port::TrustStorageRead;
+pub use storage_port::{CallCertaintyCounts, TrustStorageRead};
 
 // TRUST-LIVEGRAPH-IMPL: the coherent (hybrid-wrapped) trust report surface. The daemon adapter
 // (`daemon-runtime/src/trust_coherence.rs`) builds the Half-A `LiveGraphPosture` leaf from real LiveGraph

@@ -49,6 +49,8 @@
 pub mod activity;
 // TOOLCHAIN-STALENESS-1: lazy automatic background full re-index on first use after a toolchain change.
 pub mod auto_reindex;
+// PYTHON-RECEIVER-BINDING-1: certain call rows by default, the remainder stated beside them.
+pub(crate) mod call_certainty;
 pub mod callgraph_cert;
 pub mod cancel;
 pub mod check_coherence;

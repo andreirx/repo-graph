@@ -395,6 +395,7 @@ fn trust_low_resolution_emitted_below_threshold() {
     fake.trust_summaries.insert(
         "snap-1".into(),
         AgentTrustSummary {
+            inferred_calls: 0,
             call_resolution_rate: 0.10,
             resolved_calls: 1,
             unresolved_calls: 9,
@@ -437,6 +438,7 @@ fn trust_low_resolution_total_excludes_external_via_shared_view() {
     fake.trust_summaries.insert(
         "snap-1".into(),
         AgentTrustSummary {
+            inferred_calls: 0,
             call_resolution_rate: 0.10,
             resolved_calls: 1,
             unresolved_calls: 90,              // external-INCLUSIVE
@@ -541,6 +543,7 @@ fn trust_no_enrichment_emitted_when_state_not_run() {
     fake.trust_summaries.insert(
         "snap-1".into(),
         AgentTrustSummary {
+            inferred_calls: 0,
             call_resolution_rate: 0.70,
             resolved_calls: 70,
             unresolved_calls: 30,
@@ -582,6 +585,7 @@ fn trust_no_enrichment_suppressed_when_state_not_applicable() {
     fake.trust_summaries.insert(
         "snap-1".into(),
         AgentTrustSummary {
+            inferred_calls: 0,
             call_resolution_rate: 1.0,
             resolved_calls: 0,
             unresolved_calls: 0,

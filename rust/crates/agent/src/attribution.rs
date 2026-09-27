@@ -170,6 +170,13 @@ pub fn attribution_class(basis: UnresolvedEdgeBasisCode) -> AttributionClass {
         }
         // No classification signal matched.
         B::NoSupportingSignal => AttributionClass::Unattributed,
+        // PYTHON-RECEIVER-BINDING-1: a self/cls call the resolver declined to bind by name — the
+        // hierarchy walk missed, no class context was recorded, or the receiver is not proven to
+        // be the method's parameter. The index holds no fact saying where the method lives, so
+        // the reader reads "couldn't attribute" (never an own-code claim).
+        B::SelfCallHierarchyMiss | B::SelfCallWithoutClassContext | B::SelfCallReceiverUnproven => {
+            AttributionClass::Unattributed
+        }
     }
 }
 
@@ -616,16 +623,57 @@ mod tests {
             UnresolvedEdgeBasisCode::NoSupportingSignal,
             AttributionClass::Unattributed,
         ),
+        // PYTHON-RECEIVER-BINDING-1: the three declined self/cls pools.
+        (
+            UnresolvedEdgeBasisCode::SelfCallHierarchyMiss,
+            AttributionClass::Unattributed,
+        ),
+        (
+            UnresolvedEdgeBasisCode::SelfCallWithoutClassContext,
+            AttributionClass::Unattributed,
+        ),
+        (
+            UnresolvedEdgeBasisCode::SelfCallReceiverUnproven,
+            AttributionClass::Unattributed,
+        ),
     ];
 
     #[test]
     fn every_basis_code_maps_to_its_expected_reader_class() {
-        // 18 basis codes → 6 reader classes. The count pins that no variant was
-        // dropped from EXPECTED when the classifier vocabulary last changed.
-        assert_eq!(EXPECTED.len(), 18, "all 18 basis codes must be covered");
+        // 21 basis codes → 6 reader classes. The count pins that no variant was
+        // dropped from EXPECTED when the classifier vocabulary last changed
+        // (PYTHON-RECEIVER-BINDING-1: 18 → 21, the three declined self/cls pools).
+        assert_eq!(EXPECTED.len(), 21, "all 21 basis codes must be covered");
         for &(basis, expected) in EXPECTED {
             assert_eq!(attribution_class(basis), expected, "basis {basis:?}");
         }
+    }
+
+    #[test]
+    fn self_call_hierarchy_miss_is_unattributed() {
+        let class = attribution_class(UnresolvedEdgeBasisCode::SelfCallHierarchyMiss);
+        assert_eq!(class, AttributionClass::Unattributed);
+        assert_eq!(class.reader_label(), "couldn't attribute");
+    }
+
+    #[test]
+    fn self_call_without_class_context_is_unattributed() {
+        let class = attribution_class(UnresolvedEdgeBasisCode::SelfCallWithoutClassContext);
+        assert_eq!(class, AttributionClass::Unattributed);
+        assert_eq!(
+            parse_basis_code("self_call_without_class_context"),
+            Some(UnresolvedEdgeBasisCode::SelfCallWithoutClassContext)
+        );
+    }
+
+    #[test]
+    fn self_call_receiver_unproven_is_unattributed() {
+        let class = attribution_class(UnresolvedEdgeBasisCode::SelfCallReceiverUnproven);
+        assert_eq!(class, AttributionClass::Unattributed);
+        assert_eq!(
+            parse_basis_code("self_call_receiver_unproven"),
+            Some(UnresolvedEdgeBasisCode::SelfCallReceiverUnproven)
+        );
     }
 
     #[test]

@@ -196,6 +196,70 @@ fn no_eager_nodes_read_explain_symbol_serves_from_livegraph() {
     );
 }
 
+// ── PYTHON-RECEIVER-BINDING-1 (D-PRB-SCOPE-1 amendment 4): the remainder rides every engine ──
+
+#[test]
+fn call_remainders_are_sqlite_delegated_and_attached_on_green() {
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let target = test_fixture::callee_key();
+    // One inferred CALLS edge into the focus and one unresolved call naming it — SQLite facts the
+    // LiveGraph does not carry. The certain rows are unchanged, so the certificate stays GREEN.
+    storage
+        .execute_raw(&format!(
+            "INSERT INTO edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_node_uid, \
+               type, resolution, extractor, line_start, col_start, metadata_json) \
+             SELECT 'e_prb_inferred', snapshot_uid, repo_uid, node_uid, node_uid, 'CALLS', 'inferred', \
+               'python-core:0.2.0', 7, 1, \
+               '{{\"basis\":\"receiver_untyped_name_only\",\"receiver\":\"obj\",\"candidates\":[\"x\"]}}' \
+             FROM nodes WHERE stable_key = '{target}'"
+        ))
+        .unwrap();
+    storage
+        .execute_raw(&format!(
+            "INSERT INTO unresolved_edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key, \
+               type, resolution, extractor, line_start, col_start, metadata_json, category, \
+               classification, classifier_version, basis_code, observed_at) \
+             SELECT 'u_prb_naming', snapshot_uid, repo_uid, node_uid, 'obj.' || name, 'CALLS', 'static', \
+               't', 9, 0, NULL, 'calls_obj_method_needs_type_info', 'unknown', 6, \
+               'no_supporting_signal', 't' \
+             FROM nodes WHERE stable_key = '{target}'"
+        ))
+        .unwrap();
+    assert!(
+        orient_bounded_cert_is_green(&f.state, &f.snapshot_uid),
+        "certain rows unchanged → the bounded cert stays GREEN"
+    );
+
+    // PANIC on the six served (b) methods: the certain callers are LiveGraph-served; the remainder
+    // read is DELEGATED and recorded.
+    let spy = ServeSpy::panicking(&storage);
+    let served = {
+        let epoch = green_epoch(&f.state, &f.snapshot_uid, test_fixture::REPO);
+        let decorator = OrientServeDecorator::new(&f.state.livegraph, &spy, &epoch);
+        run_explain(&decorator, test_fixture::REPO, &target)
+    };
+    assert!(
+        spy.read_find_symbol_call_remainders.load(Ordering::Relaxed),
+        "find_symbol_call_remainders was SQLite-delegated (recorded) on the green path"
+    );
+    let callers = served
+        .signals
+        .iter()
+        .find(|s| s.code() == SignalCode::ExplainCallers)
+        .map(|s| serde_json::to_value(s.evidence()).unwrap())
+        .expect("EXPLAIN_CALLERS present");
+    assert_eq!(
+        callers["inferred_count"], 1,
+        "the inferred remainder reached the payload"
+    );
+    assert_eq!(callers["unresolved_naming"]["count"], 1);
+    assert_eq!(
+        callers["unresolved_naming"]["by_basis"]["no_supporting_signal"], 1,
+        "the unresolved call naming the symbol reached the payload"
+    );
+}
+
 // ── HONEST BOUND: explain FILE / PATH STILL read `nodes` (summaries/listings) on green ───────────
 
 #[test]

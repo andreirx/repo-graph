@@ -436,6 +436,16 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for PartialSpy<'_, S> {
         panic!("find_symbol_callees must be served from the LiveGraph on green")
     }
 
+    // PYTHON-RECEIVER-BINDING-1: the call remainder is DELEGATED on every path (an allowed read).
+    fn find_symbol_call_remainders(
+        &self,
+        s: &str,
+        k: &str,
+        n: &str,
+    ) -> Result<repo_graph_agent::AgentCallRemainders, AgentStorageError> {
+        self.0.find_symbol_call_remainders(s, k, n)
+    }
+
     // ── everything else: DELEGATED (allowed reads) ──
     fn get_repo(&self, repo_uid: &str) -> Result<Option<AgentRepo>, AgentStorageError> {
         self.0.get_repo(repo_uid)
@@ -1072,6 +1082,14 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for M2Spy<'_, S> {
         k: &str,
     ) -> Result<Vec<AgentCalleeRow>, AgentStorageError> {
         self.0.find_symbol_callees(s, k)
+    }
+    fn find_symbol_call_remainders(
+        &self,
+        s: &str,
+        k: &str,
+        n: &str,
+    ) -> Result<repo_graph_agent::AgentCallRemainders, AgentStorageError> {
+        self.0.find_symbol_call_remainders(s, k, n)
     }
     fn find_dead_nodes(
         &self,

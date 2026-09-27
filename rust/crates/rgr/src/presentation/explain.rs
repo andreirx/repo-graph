@@ -393,6 +393,27 @@ impl ExplainResponse {
     /// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): the ` — a type is not called; see Members /
     /// Referenced by` suffix appended to a `Callers (0)` / `Callees (0)` heading ONLY on a type focus.
     /// Empty for a function/method focus (byte-identical to before) and for any nonzero count.
+    /// PYTHON-RECEIVER-BINDING-1: the focus symbol's qualified name, for the `rmap callers <name>
+    /// --include-inferred` next action — read from the identity's stable key
+    /// (`<repo>:<path>#<qualified name>:SYMBOL:<SUBTYPE>`), else the identity's name.
+    pub(super) fn focus_qualified_name(&self) -> Option<String> {
+        let ev = self
+            .signals
+            .iter()
+            .find(|s| s.value.code == "EXPLAIN_IDENTITY")?
+            .value
+            .evidence
+            .as_ref()?;
+        let from_key = ev
+            .get("stable_key")
+            .and_then(|v| v.as_str())
+            .and_then(|k| k.split_once('#'))
+            .and_then(|(_, rest)| rest.split_once(":SYMBOL:"))
+            .map(|(qn, _)| qn.to_string())
+            .filter(|qn| !qn.is_empty());
+        from_key.or_else(|| ev.get("name").and_then(|v| v.as_str()).map(str::to_string))
+    }
+
     pub(super) fn type_not_called_suffix(&self, count: u64) -> String {
         if count == 0 && self.focus_is_type() {
             " — a type is not called; see Members / Referenced by".to_string()
@@ -2273,6 +2294,199 @@ mod tests {
         assert!(
             out.contains("referenced-by unreadable on this snapshot"),
             "malformed referenced-by file row → unreadable:\n{out}"
+        );
+    }
+
+    // ── PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11, RG-REQ-005-L09) ──
+
+    /// A resolved method-focus response (stable key `r:m.py#ListMixin.extend:SYMBOL:METHOD`).
+    fn method_response(sections: Vec<ExplainSignal>) -> ExplainResponse {
+        let mut r = minimal_response();
+        let mut signals = vec![ExplainSignal {
+            code: "EXPLAIN_IDENTITY".to_string(),
+            summary: "Identity: symbol target.".to_string(),
+            evidence: Some(serde_json::json!({
+                "name": "extend",
+                "subtype": "METHOD",
+                "stable_key": "r:django/contrib/gis/geos/mutable_list.py#ListMixin.extend:SYMBOL:METHOD"
+            })),
+        }];
+        signals.extend(sections);
+        r.signals = signals.into_iter().map(leaf).collect();
+        r
+    }
+
+    fn remainder_callers() -> ExplainSignal {
+        ExplainSignal {
+            code: "EXPLAIN_CALLERS".to_string(),
+            summary: "2 direct callers.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 2,
+                "items": [
+                    {"name": "__iadd__", "module": "django/contrib/gis/geos", "file": "django/contrib/gis/geos/mutable_list.py", "line": 123},
+                    {"name": "__imul__", "module": "django/contrib/gis/geos", "file": "django/contrib/gis/geos/mutable_list.py", "line": 141}
+                ],
+                "inferred_count": 266,
+                "inferred_by_basis": {"receiver_untyped_name_only": 266},
+                "inferred_items": [
+                    {"stable_key": "k", "name": "_get_dependencies_for_model", "module": "django/db/migrations",
+                     "file": "django/db/migrations/autodetector.py", "line": 1737,
+                     "basis": "receiver_untyped_name_only", "receiver": "dependencies", "extractor": "python-core:0.2.0"}
+                ],
+                "unresolved_naming": {"name": "extend", "count": 3, "by_basis": {"self_call_hierarchy_miss": 3}}
+            })),
+        }
+    }
+
+    #[test]
+    fn explain_callers_render_the_inferred_and_unresolved_remainder_lines() {
+        let out = method_response(vec![remainder_callers()]).render_human(false);
+        assert!(out.contains("Callers (2)"), "{out}");
+        assert!(
+            out.contains("+266 inferred (name-only) — investigate with rmap callers ListMixin.extend --include-inferred"),
+            "{out}"
+        );
+        assert!(
+            out.contains("3 unresolved calls name `extend` (couldn't attribute: 3)"),
+            "{out}"
+        );
+        assert!(
+            !out.contains("autodetector.py:1737"),
+            "the inferred rows are listed only under --full:\n{out}"
+        );
+    }
+
+    /// Review F-1 (RG-REQ-002-L02): explain's caller rows anchor each caller's declaration, while
+    /// `rmap callers` anchors the call site — the differing basis is stated inline with the command
+    /// that gives the call sites; rows without a line state nothing.
+    #[test]
+    fn explain_callers_state_that_their_lines_are_declarations_and_name_the_call_site_command() {
+        let out = method_response(vec![remainder_callers()]).render_human(false);
+        assert!(
+            out.contains("lines above are where each caller is defined — for the call sites run rmap callers ListMixin.extend"),
+            "{out}"
+        );
+        let lineless = ExplainSignal {
+            code: "EXPLAIN_CALLERS".to_string(),
+            summary: "1 direct caller.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 1,
+                "items": [{"name": "__iadd__", "module": "django/contrib/gis/geos"}]
+            })),
+        };
+        let out = method_response(vec![lineless]).render_human(false);
+        assert!(!out.contains("lines above"), "{out}");
+    }
+
+    /// Review F-2 (RG-REQ-002-L04): a remainder field that is PRESENT but unreadable renders
+    /// unknown with its reason — never as if it were absent; an absent field renders nothing.
+    #[test]
+    fn explain_remainder_field_present_but_unreadable_renders_unknown_never_absent() {
+        let malformed = ExplainSignal {
+            code: "EXPLAIN_CALLERS".to_string(),
+            summary: "2 direct callers.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 0,
+                "items": [],
+                "inferred_count": "266",
+                "unresolved_naming": {"name": "extend", "count": "3", "by_basis": {"self_call_hierarchy_miss": 3}}
+            })),
+        };
+        let out = method_response(vec![malformed]).render_human(false);
+        assert!(
+            out.contains(
+                "inferred callers: unknown — this answer's inferred callers field is unreadable"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains(
+                "unresolved calls: unknown — this answer's unresolved-call count is unreadable"
+            ),
+            "{out}"
+        );
+        let rows_malformed = ExplainSignal {
+            code: "EXPLAIN_CALLERS".to_string(),
+            summary: "0 direct callers.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 0,
+                "items": [],
+                "inferred_count": 1,
+                "inferred_items": {"not": "a list"}
+            })),
+        };
+        let out = method_response(vec![rows_malformed]).render_human(true);
+        assert!(
+            out.contains("inferred callers rows: unknown — this answer's inferred callers rows field is unreadable"),
+            "{out}"
+        );
+        let absent = ExplainSignal {
+            code: "EXPLAIN_CALLERS".to_string(),
+            summary: "0 direct callers.".to_string(),
+            evidence: Some(serde_json::json!({ "count": 0, "items": [] })),
+        };
+        let out = method_response(vec![absent]).render_human(true);
+        assert!(
+            !out.contains("unknown —"),
+            "an absent field renders nothing:\n{out}"
+        );
+    }
+
+    #[test]
+    fn explain_callees_render_the_inferred_and_unresolved_remainder_lines() {
+        let callees = ExplainSignal {
+            code: "EXPLAIN_CALLEES".to_string(),
+            summary: "1 direct callee.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 1,
+                "items": [{"name": "_get_dependencies_for_foreign_key", "module": "django/db/migrations"}],
+                "inferred_count": 1,
+                "inferred_by_basis": {"receiver_untyped_name_only": 1},
+                "unresolved_from": {"count": 1, "by_basis": {"no_supporting_signal": 1}}
+            })),
+        };
+        let out = method_response(vec![callees]).render_human(false);
+        assert!(out.contains("Callees (1)"), "{out}");
+        assert!(
+            out.contains("+1 inferred (name-only) — investigate with rmap callees ListMixin.extend --include-inferred"),
+            "{out}"
+        );
+        assert!(
+            out.contains("1 unresolved call from this symbol (couldn't attribute: 1)"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn explain_full_lists_inferred_callers_marked() {
+        let out = method_response(vec![remainder_callers()]).render_human(true);
+        assert!(
+            out.contains("_get_dependencies_for_model (django/db/migrations)  django/db/migrations/autodetector.py:1737 (inferred: name-only binding — investigate)"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn render_trust_states_the_inferred_calls_not_counted() {
+        let mut r = minimal_response();
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_TRUST".to_string(),
+            summary: "Trust info.".to_string(),
+            evidence: Some(serde_json::json!({
+                "call_resolution_rate": 0.25,
+                "call_graph_reliability": "low",
+                "enrichment_state": "not_applicable",
+                "resolved_in_scope": 25,
+                "in_scope_or_unclassified_total": 100,
+                "inferred_calls": 10
+            })),
+        })];
+        let out = r.render_human(false);
+        assert!(
+            out.contains(
+                "your code's calls 25% resolved (LOW); +10 inferred calls not counted as resolved"
+            ),
+            "{out}"
         );
     }
 }

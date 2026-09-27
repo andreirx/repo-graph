@@ -14,7 +14,7 @@
 
 use std::path::PathBuf;
 
-use repo_graph_repo_index::compose::{index_into_storage, ComposeOptions};
+use repo_graph_repo_index::compose::{index_into_storage, refresh_into_storage, ComposeOptions};
 use repo_graph_storage::StorageConnection;
 
 fn fixture_path() -> PathBuf {
@@ -1215,10 +1215,11 @@ fn index_python_binds_a_self_call_to_the_own_class_method() {
         "self._process_user() binds to the own-class method"
     );
 
-    // The 3-part attribute chain `self._service.process` carries NO self-call carrier, so the new
-    // hierarchy stage never fires for it: it is NEVER bound to the own-class private method, and
-    // it resolves exactly as before this slice — by the pre-existing unique bare-name fallback,
-    // to UserService.process (the sole method named `process`).
+    // The 3-part attribute chain `self._service.process` carries NO self-call carrier, so the
+    // hierarchy stage never fires for it: it is NEVER bound to the own-class private method.
+    // PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L02 as amended; a changed expectation): its receiver
+    // `self._service` is untyped, so the unique name `process` is not evidence — the edge to
+    // UserService.process is INFERRED with its basis, never `static`.
     let chain_to_process = |storage: &StorageConnection, target: &str| -> i64 {
         storage
             .query_scalar(&format!(
@@ -1238,7 +1239,20 @@ fn index_python_binds_a_self_call_to_the_own_class_method() {
     assert_eq!(
         chain_to_process(&storage, "UserService.process"),
         1,
-        "the chain resolves by the pre-existing bare-name fallback, unchanged"
+        "the chain binds to the sole `process` by name"
+    );
+    let chain_resolution: String = storage
+        .query_scalar(
+            "SELECT e.resolution || '|' || json_extract(e.metadata_json, '$.basis') FROM edges e \
+             JOIN nodes s ON e.source_node_uid = s.node_uid AND s.snapshot_uid = e.snapshot_uid \
+             JOIN nodes t ON e.target_node_uid = t.node_uid AND t.snapshot_uid = e.snapshot_uid \
+             WHERE e.type = 'CALLS' AND s.qualified_name = 'App.run' \
+               AND t.qualified_name = 'UserService.process'",
+        )
+        .unwrap();
+    assert_eq!(
+        chain_resolution, "inferred|receiver_untyped_name_only",
+        "a name-only binding on an untyped receiver is inferred with its basis"
     );
 
     // Determinism (RG-REQ-001-L09): a second index of the same tree yields the same CALLS count.
@@ -1259,6 +1273,272 @@ fn index_python_binds_a_self_call_to_the_own_class_method() {
     assert_eq!(
         calls_first, calls_second,
         "indexing the same tree twice yields the same CALLS edge count"
+    );
+}
+
+#[test]
+fn index_python_untyped_receiver_call_is_inferred_and_leaves_the_certain_tallies() {
+    // PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L02, D-PRB-RATE-1 = A) end-to-end on the unchanged
+    // simple-app fixture: `App.run` → `self._service.process()` (src/app.py:22) is ONE inferred
+    // CALLS edge with its basis/receiver/pool; the certain tallies (g1 aggregate, g2 degrees, g3
+    // file pairs) count only certain calls; the inferred tally is persisted in the diagnostics.
+    let repo_path = python_fixture_path();
+    let mut storage = StorageConnection::open_in_memory().unwrap();
+    let result = index_into_storage(
+        &repo_path,
+        &mut storage,
+        "py-certainty",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    let snap = result.snapshot_uid.clone();
+    let scalar_i = |sql: String| -> i64 { storage.query_scalar(&sql).unwrap() };
+    let scalar_s = |sql: String| -> String { storage.query_scalar(&sql).unwrap() };
+    let edge_between = |src: &str, tgt: &str, col: &str| -> String {
+        scalar_s(format!(
+            "SELECT {col} FROM edges e \
+             JOIN nodes s ON e.source_node_uid = s.node_uid AND s.snapshot_uid = e.snapshot_uid \
+             JOIN nodes t ON e.target_node_uid = t.node_uid AND t.snapshot_uid = e.snapshot_uid \
+             WHERE e.snapshot_uid = '{snap}' AND e.type = 'CALLS' \
+               AND s.qualified_name = '{src}' AND t.qualified_name = '{tgt}'"
+        ))
+    };
+    assert_eq!(
+        edge_between("App.run", "UserService.process", "e.resolution"),
+        "inferred"
+    );
+    let meta: serde_json::Value = serde_json::from_str(&edge_between(
+        "App.run",
+        "UserService.process",
+        "e.metadata_json",
+    ))
+    .unwrap();
+    assert_eq!(meta["basis"], "receiver_untyped_name_only");
+    assert_eq!(meta["receiver"], "self._service");
+    assert_eq!(
+        meta["candidates"],
+        serde_json::json!(["UserService.process"])
+    );
+    assert_eq!(
+        edge_between(
+            "UserService.process",
+            "UserService._process_user",
+            "e.resolution"
+        ),
+        "static",
+        "the own-class self call stays static"
+    );
+
+    let certain = scalar_i(format!(
+        "SELECT COUNT(*) FROM edges WHERE snapshot_uid = '{snap}' AND type = 'CALLS' \
+         AND resolution IN ('static', 'dynamic')"
+    ));
+    let inferred = scalar_i(format!(
+        "SELECT COUNT(*) FROM edges WHERE snapshot_uid = '{snap}' AND type = 'CALLS' \
+         AND resolution = 'inferred'"
+    ));
+    assert!(
+        inferred >= 1 && certain >= 1,
+        "certain {certain}, inferred {inferred}"
+    );
+    assert_eq!(
+        scalar_i(format!(
+            "SELECT resolved_call_count FROM snapshots WHERE snapshot_uid = '{snap}'"
+        )),
+        certain,
+        "g1 = the certain CALLS rows"
+    );
+    assert_eq!(
+        scalar_i(format!(
+            "SELECT json_extract(extraction_diagnostics_json, '$.inferred_calls') \
+             FROM snapshots WHERE snapshot_uid = '{snap}'"
+        )),
+        inferred,
+        "the diagnostics state the inferred CALLS"
+    );
+    assert_eq!(
+        scalar_i(format!(
+            "SELECT COALESCE(SUM(call_fan_in), 0) FROM symbol_call_degrees \
+             WHERE snapshot_uid = '{snap}'"
+        )),
+        certain,
+        "g2 fan-in counts certain calls only"
+    );
+    assert_eq!(
+        scalar_i(format!(
+            "SELECT COALESCE(SUM(g.call_fan_in), 0) FROM symbol_call_degrees g \
+             JOIN nodes n ON n.node_uid = g.node_uid \
+             WHERE g.snapshot_uid = '{snap}' AND n.qualified_name = 'UserService.process'"
+        )),
+        0,
+        "an inferred call never keeps UserService.process alive"
+    );
+    let certain_cross_file = scalar_i(format!(
+        "SELECT COUNT(*) FROM edges e \
+         JOIN nodes s ON e.source_node_uid = s.node_uid JOIN nodes t ON e.target_node_uid = t.node_uid \
+         JOIN files fs ON fs.file_uid = s.file_uid JOIN files ft ON ft.file_uid = t.file_uid \
+         WHERE e.snapshot_uid = '{snap}' AND e.type = 'CALLS' \
+           AND e.resolution IN ('static', 'dynamic') AND fs.path <> ft.path"
+    ));
+    assert_eq!(
+        scalar_i(format!(
+            "SELECT COALESCE(SUM(call_edge_count), 0) FROM resolved_call_file_pairs \
+             WHERE snapshot_uid = '{snap}'"
+        )),
+        certain_cross_file,
+        "g3 counts certain cross-file calls only"
+    );
+}
+
+/// PYTHON-RECEIVER-BINDING-1 (D-PRB-CARRIER-1 as corrected 2026-09-24, item 3): the refresh
+/// check. A store whose Python carriers carry exactly the shape `python-core:0.1.0` wrote (no
+/// `receiverBinding`, that writer) is refreshed by the new binary: every previously certain
+/// self-call edge the hierarchy reproduces stays; every bare-name fall-through becomes a
+/// `self_call_hierarchy_miss` row; no row becomes `self_call_receiver_unproven`.
+///
+/// Limit: the 0.1.0 facts are the candidate's own extraction rewritten to that writer's measured
+/// shape (copy-forward copies `extractor` and `metadata_json` verbatim), not the base binary's
+/// output.
+#[test]
+fn delta_refresh_re_resolves_python_core_0_1_0_carriers_by_heads_stage_order_with_a_terminal_hierarchy_miss(
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::write(repo.join("helper.py"), "def run():\n    return 1\n").unwrap();
+    std::fs::write(repo.join("other.py"), "def elsewhere():\n    return 3\n").unwrap();
+    std::fs::write(repo.join("touch.py"), "X = 1\n").unwrap();
+    std::fs::write(
+        repo.join("a.py"),
+        "import helper as self\n\n\
+         class Hit:\n    def g(self):\n        return 1\n\n    def f(self):\n        return self.g()\n\n\n\
+         class Miss:\n    def h(self):\n        return self.elsewhere()\n\n\n\
+         class Aliased:\n    def run(self):\n        return 2\n\n    def caller(self):\n        return self.run()\n",
+    )
+    .unwrap();
+    let db_path = dir.path().join("store.db");
+    let mut storage = StorageConnection::open(&db_path).unwrap();
+    let r1 = index_into_storage(&repo, &mut storage, "r1", &ComposeOptions::default()).unwrap();
+
+    let target_of = |storage: &StorageConnection,
+                     snap: &str,
+                     caller: &str|
+     -> Option<(String, String)> {
+        storage
+            .query_scalar::<String>(&format!(
+                "SELECT t.qualified_name || '|' || e.resolution FROM edges e \
+                 JOIN nodes s ON e.source_node_uid = s.node_uid \
+                 JOIN nodes t ON e.target_node_uid = t.node_uid \
+                 WHERE e.snapshot_uid = '{snap}' AND e.type = 'CALLS' AND s.qualified_name = '{caller}'"
+            ))
+            .ok()
+            .map(|v| {
+                let (a, b) = v.split_once('|').unwrap();
+                (a.to_string(), b.to_string())
+            })
+    };
+    // (1) The parent, written by the candidate (state i): the discriminator binds to the class.
+    assert_eq!(
+        target_of(&storage, &r1.snapshot_uid, "Aliased.caller"),
+        Some(("Aliased.run".to_string(), "static".to_string()))
+    );
+
+    // (2) The ONE rewrite, through a second plain connection: the parent's Python extraction
+    // facts to exactly the shape `python-core:0.1.0` wrote.
+    {
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute(
+            "UPDATE extraction_edges SET extractor = 'python-core:0.1.0' \
+             WHERE snapshot_uid = ?1 AND extractor = 'python-core:0.2.0'",
+            rusqlite::params![r1.snapshot_uid],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE extraction_edges SET metadata_json = json_remove(metadata_json, '$.receiverBinding') \
+             WHERE snapshot_uid = ?1 AND metadata_json LIKE '%\"receiverBinding\"%'",
+            rusqlite::params![r1.snapshot_uid],
+        )
+        .unwrap();
+        let shapes: Vec<String> = conn
+            .prepare(
+                "SELECT metadata_json FROM extraction_edges WHERE snapshot_uid = ?1 \
+                 AND metadata_json LIKE '%selfCall%'",
+            )
+            .unwrap()
+            .query_map(rusqlite::params![r1.snapshot_uid], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(!shapes.is_empty());
+        assert!(
+            shapes
+                .iter()
+                .all(|m| m.starts_with("{\"selfCall\":true,\"enclosingClass\":")
+                    && !m.contains("receiverBinding")),
+            "the measured 0.1.0 carrier shape: {shapes:?}"
+        );
+    }
+
+    // (3) Change touch.py only; delta refresh by the candidate.
+    std::fs::write(repo.join("touch.py"), "X = 2\n").unwrap();
+    let r2 = refresh_into_storage(&repo, &mut storage, "r1", &ComposeOptions::default()).unwrap();
+    let snap2 = storage.get_snapshot(&r2.snapshot_uid).unwrap().unwrap();
+    assert_eq!(snap2.kind, "refresh", "the delta path");
+    assert_eq!(snap2.parent_snapshot_uid, Some(r1.snapshot_uid.clone()));
+    let snap = r2.snapshot_uid.clone();
+
+    // a.py's carriers were copied forward with the older writer and no key (the legacy path).
+    let legacy_carriers: i64 = storage
+        .query_scalar(&format!(
+            "SELECT COUNT(*) FROM extraction_edges WHERE snapshot_uid = '{snap}' \
+             AND metadata_json LIKE '%selfCall%' AND extractor = 'python-core:0.1.0' \
+             AND metadata_json NOT LIKE '%receiverBinding%'"
+        ))
+        .unwrap();
+    assert_eq!(
+        legacy_carriers, 3,
+        "Hit.f, Miss.h and Aliased.caller carriers copied forward"
+    );
+
+    // Every certain self-call edge the hierarchy reproduces stays.
+    assert_eq!(
+        target_of(&storage, &snap, "Hit.f"),
+        Some(("Hit.g".to_string(), "static".to_string()))
+    );
+    // HEAD's stage order for the alias case: the namespace stage first — which cannot bind a
+    // Python call through the real pipeline (`import helper` binds a NON-relative specifier, and
+    // the namespace stage resolves only relative ones), so HEAD itself reached the hierarchy and
+    // bound `Aliased.run`. The legacy path reproduces exactly that (the resolver unit test
+    // `python_carrier_without_a_receiver_binding_from_python_core_0_1_0_meets_the_namespace_stage_before_the_hierarchy_as_at_head`
+    // proves the namespace-first order with a resolvable binding).
+    assert_eq!(
+        target_of(&storage, &snap, "Aliased.caller"),
+        Some(("Aliased.run".to_string(), "static".to_string()))
+    );
+    // The bare-name fall-through (HEAD bound `self.elsewhere()` to `elsewhere`) is terminal now.
+    assert_eq!(target_of(&storage, &snap, "Miss.h"), None, "no CALLS edge");
+    let miss: String = storage
+        .query_scalar(&format!(
+            "SELECT u.basis_code || '|' || json_extract(u.metadata_json, '$.nameOnlyReason') || '|' \
+                    || json_extract(u.metadata_json, '$.nameOnlyCandidates') \
+             FROM unresolved_edges u JOIN nodes s ON u.source_node_uid = s.node_uid \
+             WHERE u.snapshot_uid = '{snap}' AND s.qualified_name = 'Miss.h' AND u.type = 'CALLS'"
+        ))
+        .unwrap();
+    assert_eq!(
+        miss, "self_call_hierarchy_miss|self_call_hierarchy_miss|[\"elsewhere\"]",
+        "one unresolved row with its reason, pool and basis"
+    );
+    let unproven: i64 = storage
+        .query_scalar(&format!(
+            "SELECT COUNT(*) FROM unresolved_edges WHERE snapshot_uid = '{snap}' \
+             AND (basis_code = 'self_call_receiver_unproven' \
+                  OR metadata_json LIKE '%self_call_receiver_unproven%')"
+        ))
+        .unwrap();
+    assert_eq!(
+        unproven, 0,
+        "the writer is python-core:0.1.0: nothing is unproven"
     );
 }
 

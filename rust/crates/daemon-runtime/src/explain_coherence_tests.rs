@@ -130,7 +130,7 @@ fn build_db_with_calls(
                 source_node_uid: uid_of[a].clone(),
                 target_node_uid: uid_of[b].clone(),
                 edge_type: "CALLS".to_string(),
-                resolution: "resolved".to_string(),
+                resolution: "static".to_string(),
                 extractor: "test".to_string(),
                 location: None,
                 metadata_json: None,
@@ -252,6 +252,10 @@ fn explain_callers_falls_back_to_sqlite_without_livegraph() {
         &snapshot_uid,
         "r:src/a.ts:Foo.bar:SYMBOL",
         vec![Signal::explain_callers(ExplainCallersEvidence {
+            inferred_by_basis: Default::default(),
+            inferred_count: 0,
+            inferred_items: Vec::new(),
+            unresolved_naming: None,
             count: 0,
             top_modules: Vec::new(),
             items: Vec::new(),
@@ -352,6 +356,10 @@ fn explain_callers_serves_live_name_from_livegraph() {
         &f.snapshot_uid,
         &f.dst,
         vec![Signal::explain_callers(ExplainCallersEvidence {
+            inferred_by_basis: Default::default(),
+            inferred_count: 0,
+            inferred_items: Vec::new(),
+            unresolved_naming: None,
             count: f.ks_callers.len() as u64,
             top_modules: Vec::new(),
             items: vec![ExplainCallerItem {
@@ -424,6 +432,10 @@ fn explain_callees_serves_live_name_from_livegraph() {
         &f.snapshot_uid,
         &f.src,
         vec![Signal::explain_callees(ExplainCalleesEvidence {
+            inferred_by_basis: Default::default(),
+            inferred_count: 0,
+            inferred_items: Vec::new(),
+            unresolved_from: None,
             count: f.ks_callees.len() as u64,
             top_modules: Vec::new(),
             items: vec![ExplainCalleeItem {

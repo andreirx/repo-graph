@@ -1097,6 +1097,8 @@ mod tests {
 
     fn callers_summary_signal() -> Signal {
         Signal::callers_summary(crate::dto::signal::CallersSummaryEvidence {
+            inferred_count: 0,
+            inferred_name_only: false,
             count: 2,
             top_modules: vec![crate::dto::signal::ModuleCountEvidence {
                 module: "mod_a".to_string(),
@@ -1107,6 +1109,8 @@ mod tests {
 
     fn callees_summary_signal() -> Signal {
         Signal::callees_summary(crate::dto::signal::CalleesSummaryEvidence {
+            inferred_count: 0,
+            inferred_name_only: false,
             count: 1,
             top_modules: vec![crate::dto::signal::ModuleCountEvidence {
                 module: "mod_b".to_string(),

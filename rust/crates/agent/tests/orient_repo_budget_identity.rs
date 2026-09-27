@@ -66,6 +66,7 @@ fn seed_depth_repo() -> FakeAgentStorage {
     fake.trust_summaries.insert(
         "snap-1".into(),
         AgentTrustSummary {
+            inferred_calls: 0,
             call_resolution_rate: 0.15,
             resolved_calls: 300,
             unresolved_calls: 1700,

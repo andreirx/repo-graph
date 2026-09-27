@@ -258,6 +258,11 @@ pub fn compute_import_graph_reliability(
 /// Call graph reliability (Variant A reweighting).
 ///
 /// Mirror of `computeCallGraphReliability` from `rules.ts:200`.
+///
+/// `unresolved_calls_internal_like` is the non-resolved part of the in-scope-or-unclassified
+/// universe. PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the service passes the internal-like
+/// unresolved calls PLUS the inferred calls here (an inferred call is in the universe, never
+/// resolved); the rule itself is unchanged.
 pub fn compute_call_graph_reliability(
     resolved_calls: u64,
     unresolved_calls_internal_like: u64,
@@ -972,6 +977,7 @@ mod tests {
         breakdown.insert("calls_function_ambiguous_or_missing".into(), 5);
         breakdown.insert("imports_file_not_found".into(), 3);
         let diag = ExtractionDiagnostics {
+            inferred_calls: None,
             diagnostics_version: 1,
             edges_total: 100,
             unresolved_total: 18,
@@ -983,6 +989,7 @@ mod tests {
     #[test]
     fn sum_unresolved_calls_zero_for_missing_categories() {
         let diag = ExtractionDiagnostics {
+            inferred_calls: None,
             diagnostics_version: 1,
             edges_total: 0,
             unresolved_total: 0,
@@ -997,6 +1004,7 @@ mod tests {
         breakdown.insert("imports_file_not_found".into(), 7);
         breakdown.insert("calls_obj_method_needs_type_info".into(), 10);
         let diag = ExtractionDiagnostics {
+            inferred_calls: None,
             diagnostics_version: 1,
             edges_total: 100,
             unresolved_total: 17,

@@ -255,6 +255,7 @@ fn call_graph_medium_everything_pass() {
     fake.trust_summaries.insert(
         "snap-1".into(),
         AgentTrustSummary {
+            inferred_calls: 0,
             call_resolution_rate: 0.75,
             resolved_calls: 75,
             unresolved_calls: 25,
@@ -302,6 +303,7 @@ fn enrichment_not_run_produces_fail() {
     fake.trust_summaries.insert(
         "snap-1".into(),
         AgentTrustSummary {
+            inferred_calls: 0,
             call_resolution_rate: 0.90,
             resolved_calls: 90,
             unresolved_calls: 10,

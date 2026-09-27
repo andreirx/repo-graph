@@ -399,7 +399,7 @@ fn promotion_never_seeds_families_on_a_pre_migration_snapshot() {
             source_node_uid: "n-called".to_string(),
             target_node_uid: "n-imported".to_string(),
             edge_type: "CALLS",
-            resolution: "enriched",
+            resolution: "static",
             extractor: "enrichment:0.1.0".to_string(),
             location: None,
             metadata_json: "{}".to_string(),

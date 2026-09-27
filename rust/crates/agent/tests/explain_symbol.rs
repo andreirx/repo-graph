@@ -842,3 +842,139 @@ fn explain_members_carry_the_undetermined_identity_marker_verbatim() {
         "key order and bytes of a determined member unchanged"
     );
 }
+
+// ── PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11, RG-REQ-005-L09): the call remainders ──
+
+const SERVICE_KEY: &str = "r1:src/service.ts:MyService:SYMBOL";
+
+fn inferred_row(key: &str, name: &str, line: u64) -> repo_graph_agent::AgentInferredCallRow {
+    repo_graph_agent::AgentInferredCallRow {
+        stable_key: key.into(),
+        name: name.into(),
+        qualified_name: Some(name.into()),
+        file: Some("src/other.py".into()),
+        line: Some(line),
+        module_path: Some("src".into()),
+        module_stable_key: None,
+        basis: "receiver_untyped_name_only".into(),
+        receiver: Some("dependencies".into()),
+        extractor: "python-core:0.2.0".into(),
+    }
+}
+
+fn basis(code: &str, count: u64) -> repo_graph_agent::AgentBasisCount {
+    repo_graph_agent::AgentBasisCount {
+        basis_code: code.into(),
+        count,
+    }
+}
+
+fn signal_json(result: &repo_graph_agent::OrientResult, code: SignalCode) -> serde_json::Value {
+    let sig = result
+        .signals
+        .iter()
+        .find(|s| s.code() == code)
+        .unwrap_or_else(|| panic!("must have {code:?}"));
+    serde_json::to_value(sig.evidence()).unwrap()
+}
+
+/// One certain caller, one inferred caller and one unresolved same-name call.
+fn seed_remainders(fake: &mut FakeAgentStorage) {
+    fake.symbol_callers.insert(
+        ("snap1".into(), SERVICE_KEY.into()),
+        vec![repo_graph_agent::AgentCallerRow {
+            stable_key: "r1:src/a.ts:certain:SYMBOL".into(),
+            name: "certain".into(),
+            file: Some("src/a.ts".into()),
+            line: Some(4),
+            module_path: Some("src".into()),
+            module_stable_key: None,
+        }],
+    );
+    fake.symbol_call_remainders.insert(
+        ("snap1".into(), SERVICE_KEY.into()),
+        repo_graph_agent::AgentCallRemainders {
+            inferred_callers: vec![inferred_row("r1:src/other.py#guess:SYMBOL", "guess", 1737)],
+            inferred_callees: vec![inferred_row("r1:src/other.py#ext:SYMBOL", "ext", 12)],
+            unresolved_naming: vec![basis("self_call_hierarchy_miss", 1)],
+            unresolved_naming_sites: Vec::new(),
+            unresolved_from: vec![
+                basis("no_supporting_signal", 2),
+                basis("self_call_hierarchy_miss", 1),
+            ],
+            unresolved_from_sites: Vec::new(),
+        },
+    );
+}
+
+#[test]
+fn explain_callers_state_the_inferred_remainder_and_the_unresolved_calls_naming_the_symbol() {
+    let mut fake = FakeAgentStorage::new();
+    seed_symbol_repo(&mut fake);
+    seed_remainders(&mut fake);
+    let result = run_explain(&fake, "r1", "MyService", Budget::Medium, TEST_NOW).unwrap();
+    let json = signal_json(&result, SignalCode::ExplainCallers);
+    assert_eq!(json["count"], 1, "certain rows only");
+    assert_eq!(json["items"].as_array().unwrap().len(), 1);
+    assert_eq!(json["inferred_count"], 1);
+    let inf = &json["inferred_items"][0];
+    assert_eq!(inf["name"], "guess");
+    assert_eq!(inf["line"], 1737, "the call site");
+    assert_eq!(inf["basis"], "receiver_untyped_name_only");
+    assert_eq!(
+        json["unresolved_naming"],
+        serde_json::json!({"name": "MyService", "count": 1, "by_basis": {"self_call_hierarchy_miss": 1}})
+    );
+}
+
+#[test]
+fn explain_callees_state_the_inferred_remainder_and_the_unresolved_calls_from_the_symbol() {
+    let mut fake = FakeAgentStorage::new();
+    seed_symbol_repo(&mut fake);
+    seed_remainders(&mut fake);
+    let result = run_explain(&fake, "r1", "MyService", Budget::Medium, TEST_NOW).unwrap();
+    let json = signal_json(&result, SignalCode::ExplainCallees);
+    assert_eq!(json["count"], 0);
+    assert_eq!(json["inferred_count"], 1);
+    assert_eq!(json["inferred_items"][0]["name"], "ext");
+    assert_eq!(
+        json["unresolved_from"],
+        serde_json::json!({"count": 3, "by_basis": {"no_supporting_signal": 2, "self_call_hierarchy_miss": 1}})
+    );
+}
+
+#[test]
+fn explain_zero_certain_callers_state_the_unresolved_calls_naming_the_symbol() {
+    // RG-REQ-005-L09: zero certain callers, two unresolved calls naming the symbol — the zero
+    // never reads as absence.
+    let mut fake = FakeAgentStorage::new();
+    seed_symbol_repo(&mut fake);
+    fake.symbol_call_remainders.insert(
+        ("snap1".into(), SERVICE_KEY.into()),
+        repo_graph_agent::AgentCallRemainders {
+            unresolved_naming: vec![
+                basis("no_supporting_signal", 1),
+                basis("self_call_ambiguous_mro", 1),
+            ],
+            ..Default::default()
+        },
+    );
+    let result = run_explain(&fake, "r1", "MyService", Budget::Medium, TEST_NOW).unwrap();
+    let json = signal_json(&result, SignalCode::ExplainCallers);
+    assert_eq!(json["count"], 0);
+    assert!(
+        json.get("inferred_count").is_none(),
+        "no inferred rows → no field"
+    );
+    assert_eq!(json["unresolved_naming"]["count"], 2);
+    assert_eq!(
+        json["unresolved_naming"]["by_basis"],
+        serde_json::json!({"no_supporting_signal": 1, "self_call_ambiguous_mro": 1})
+    );
+    // An explain with no remainder stays byte-identical: no remainder fields at all.
+    let mut plain = FakeAgentStorage::new();
+    seed_symbol_repo(&mut plain);
+    let r = run_explain(&plain, "r1", "MyService", Budget::Medium, TEST_NOW).unwrap();
+    let j = signal_json(&r, SignalCode::ExplainCallers);
+    assert!(j.get("unresolved_naming").is_none() && j.get("inferred_items").is_none());
+}

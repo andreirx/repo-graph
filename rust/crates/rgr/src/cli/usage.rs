@@ -81,8 +81,9 @@ pub fn print_usage() {
     eprintln!("    --dry-run  print rendered maps to stdout, write nothing");
     eprintln!();
     eprintln!("Graph queries (resolve repo from cwd):");
-    eprintln!("  rmap callers <symbol> [--edge-types <types>]");
-    eprintln!("  rmap callees <symbol> [--edge-types <types>]");
+    eprintln!("  rmap callers <symbol> [--edge-types <types>] [--include-inferred]");
+    eprintln!("  rmap callees <symbol> [--edge-types <types>] [--include-inferred]");
+    eprintln!("    --include-inferred  also list the calls bound by an inferred (name-only) binding, marked");
     eprintln!("  rmap path <from> <to>");
     eprintln!("  rmap imports <file_path>");
     eprintln!("  rmap cycles");

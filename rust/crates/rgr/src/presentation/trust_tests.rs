@@ -41,6 +41,7 @@ fn report() -> TrustReport {
         toolchain: None,
         diagnostics_version: Some(1),
         summary: TrustSummary {
+            inferred_calls: 0,
             edges_total: 100,
             edges_resolved: 100,
             unresolved_total: 20,
@@ -1703,4 +1704,45 @@ fn ceiling_posture_not_shown_on_non_degrading_band_coherent_with_check() {
         !out.contains("capability limit") && !out.contains("no resolver exists"),
         "no ceiling note beside a non-degrading band:\n{out}"
     );
+}
+
+// ── PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A) ──────────────────────
+
+fn inferred_report() -> TrustReport {
+    let mut r = report();
+    r.summary.resolved_calls = 25;
+    r.summary.inferred_calls = 10;
+    r.summary.unresolved_calls = 65;
+    r.summary.unresolved_calls_external = 0;
+    r.summary.unresolved_calls_internal_like = 65;
+    r.summary.call_resolution_rate = 0.25;
+    r
+}
+
+#[test]
+fn render_resolution_states_the_inferred_calls_not_counted() {
+    let out = render_trust_envelope(&trust_to_coherent(inferred_report(), warm_posture(), false));
+    assert!(
+        out.contains(
+            "your code's calls 25% resolved (25 of 100 in-scope or unclassified); +10 inferred calls not counted as resolved"
+        ),
+        "the universe keeps the inferred calls and the clause states them:\n{out}"
+    );
+}
+
+#[test]
+fn trust_json_round_trips_inferred_calls() {
+    let env = trust_to_coherent(inferred_report(), warm_posture(), false);
+    let json = serde_json::to_value(&env).unwrap();
+    assert_eq!(
+        json["value"]["resolution"]["value"]["inferred_calls"],
+        serde_json::json!(10)
+    );
+    let back: TrustEnvelope = serde_json::from_value(json).unwrap();
+    assert_eq!(back.value.resolution.value.inferred_calls, 10);
+    // A report without inferred calls carries no field (byte-stable) and reads back 0.
+    let plain = serde_json::to_value(trust_to_coherent(report(), warm_posture(), false)).unwrap();
+    assert!(plain["value"]["resolution"]["value"]
+        .get("inferred_calls")
+        .is_none());
 }

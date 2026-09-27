@@ -19,6 +19,8 @@
 //!   ...
 //! ```
 
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 
 // ── Response Types ───────────────────────────────────────────────────────────
@@ -76,6 +78,33 @@ pub struct EdgeSymbol {
     /// Exact occurrence corroboration on a `mixed` row: `confirmed` of `total`.
     #[serde(default)]
     pub occurrences: Option<Occurrences>,
+    /// PYTHON-RECEIVER-BINDING-1: on an `inferred` row, its recorded basis
+    /// (`receiver_untyped_name_only`) or `unrecorded`. Absent on certain rows.
+    #[serde(default)]
+    pub inference_basis: Option<String>,
+    /// PYTHON-RECEIVER-BINDING-1: on an `inferred` row, its writer — routing metadata, never
+    /// rendered; it decides only whether an `unrecorded` row is the verified older promoter.
+    #[serde(default)]
+    pub inference_extractor: Option<String>,
+}
+
+/// PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11): the inferred remainder of a callers/callees
+/// answer — rows bound only by an inferred binding, not in `count` by default.
+#[derive(Debug, Clone, Deserialize)]
+pub struct InferredRemainder {
+    pub count: u64,
+    pub by_basis: BTreeMap<String, u64>,
+}
+
+/// PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L09): the unresolved calls naming the symbol (`name`
+/// set, callers) or leaving it (callees), per classifier basis code. `sites` are JSON routing
+/// data (never rendered by the human line).
+#[derive(Debug, Clone, Deserialize)]
+pub struct UnresolvedRemainder {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub count: u64,
+    pub by_basis: BTreeMap<String, u64>,
 }
 
 /// RECON-M-R2: a `mixed` row's exact occurrence corroboration (`confirmed` of `total` — the
@@ -105,6 +134,12 @@ pub struct CallersResponse {
     /// RECON-M-R2 (additive; union answers only).
     #[serde(default)]
     pub witness_counts: Option<WitnessCounts>,
+    /// PYTHON-RECEIVER-BINDING-1: absent = no inferred row (or an older daemon) — never a zero.
+    #[serde(default)]
+    pub inferred: Option<InferredRemainder>,
+    /// PYTHON-RECEIVER-BINDING-1: absent = no unresolved call bears on the symbol.
+    #[serde(default)]
+    pub unresolved_naming: Option<UnresolvedRemainder>,
 }
 
 /// Response structure for callees command.
@@ -116,6 +151,12 @@ pub struct CalleesResponse {
     /// RECON-M-R2 (additive; union answers only).
     #[serde(default)]
     pub witness_counts: Option<WitnessCounts>,
+    /// PYTHON-RECEIVER-BINDING-1: absent = no inferred row (or an older daemon) — never a zero.
+    #[serde(default)]
+    pub inferred: Option<InferredRemainder>,
+    /// PYTHON-RECEIVER-BINDING-1: absent = no unresolved call bears on the symbol.
+    #[serde(default)]
+    pub unresolved_from: Option<UnresolvedRemainder>,
 }
 
 // ── Direction for shared rendering ───────────────────────────────────────────
@@ -145,6 +186,75 @@ impl EdgeDirection {
         } else {
             format!("{} {}s found", count, noun)
         }
+    }
+}
+
+// ── Remainder wording (PYTHON-RECEIVER-BINDING-1) ────────────────────────────
+
+/// The recorded basis of a name-only binding.
+const NAME_ONLY_BASIS: &str = repo_graph_agent::reliability::NAME_ONLY_BASIS;
+/// The verified older writer of compiler-promoted rows labelled `inferred` (D-PRB-ENRICH-1 as
+/// corrected): its unrecorded rows name the rebuild remedy; every other unrecorded row is
+/// `basis unknown`.
+const LEGACY_PROMOTER: &str = "compiler-promotion:0.1.0";
+
+/// Every inferred row's basis is the name-only binding (the "(name-only)" rule).
+pub(crate) fn all_name_only(by_basis: &BTreeMap<String, u64>) -> bool {
+    !by_basis.is_empty() && by_basis.keys().all(|b| b == NAME_ONLY_BASIS)
+}
+
+/// The end-of-row marker of one inferred row, in the reader's words (RG-REQ-002-L07/L08): the
+/// name-only binding, the verified older promoter (with the runnable rebuild remedy), or — for any
+/// other unrecorded row — `basis unknown`. The writer never renders.
+pub(crate) fn inferred_row_marker(
+    basis: Option<&str>,
+    extractor: Option<&str>,
+    repo: Option<&str>,
+) -> String {
+    match basis {
+        Some(NAME_ONLY_BASIS) => " (inferred: name-only binding — investigate)".to_string(),
+        Some("unrecorded") if extractor == Some(LEGACY_PROMOTER) => format!(
+            " (inferred: compiler-resolved call recorded by an older rmap — run rmap repo rebuild {})",
+            repo.map(super::shell_quote_arg)
+                .unwrap_or_else(|| "<path>".to_string())
+        ),
+        _ => " (inferred: basis unknown — investigate)".to_string(),
+    }
+}
+
+/// `"(<reader label>: <n>, …)"` over basis-code counts — the labels and order of the shared
+/// attribution breakdown; an unrecognized code folds into `unrecognized: <n>` (never dropped,
+/// never the raw code).
+pub(crate) fn reader_class_counts(by_basis: &BTreeMap<String, u64>) -> String {
+    let breakdown = repo_graph_agent::attribution::attribution_breakdown(
+        by_basis.iter().map(|(k, v)| (k.as_str(), *v)),
+    );
+    let mut parts: Vec<String> = breakdown
+        .classes
+        .iter()
+        .map(|(class, n)| format!("{}: {}", class.reader_label(), n))
+        .collect();
+    if breakdown.other > 0 {
+        parts.push(format!("unrecognized: {}", breakdown.other));
+    }
+    format!("({})", parts.join(", "))
+}
+
+/// RG-REQ-005-L09: the unresolved-calls line — `"<U> unresolved call(s) name(s) `<name>` (…)"`
+/// (callers) or `"<U> unresolved call(s) from this symbol (…)"` (callees).
+pub(crate) fn unresolved_line(
+    count: u64,
+    name: Option<&str>,
+    by_basis: &BTreeMap<String, u64>,
+) -> String {
+    let calls = if count == 1 { "call" } else { "calls" };
+    let classes = reader_class_counts(by_basis);
+    match name {
+        Some(n) => {
+            let verb = if count == 1 { "names" } else { "name" };
+            format!("{count} unresolved {calls} {verb} `{n}` {classes}")
+        }
+        None => format!("{count} unresolved {calls} from this symbol {classes}"),
     }
 }
 
@@ -182,17 +292,34 @@ fn render_witness_marker(edge: &EdgeSymbol) -> String {
     }
 }
 
+/// PYTHON-RECEIVER-BINDING-1: what a callers/callees answer states beside its certain rows.
+/// Every field `None` renders byte-identically to before (an absent field is never a zero).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EdgeRemainders<'a> {
+    pub inferred: Option<&'a InferredRemainder>,
+    pub unresolved: Option<&'a UnresolvedRemainder>,
+    /// The repository path, for the rebuild remedy of a legacy promoted row.
+    pub repo: Option<&'a str>,
+}
+
 /// Render graph edge response as human-readable text.
 ///
 /// Shared implementation for both callers and callees. `witness_counts` (RECON-M-R2) is `Some`
 /// ONLY on flag-ON union answers — its presence adds ONE section line + the per-row markers;
 /// absent, the output is byte-identical to the pre-M-R2 renderer (data-driven, R-0/R-1).
+///
+/// PYTHON-RECEIVER-BINDING-1: by default the count line names the inferred remainder with the flag
+/// that lists it (`; M inferred (name-only) — investigate with --include-inferred`); when the rows
+/// include inferred ones (the flag was given) it reads `N callers found; M of them inferred
+/// (name-only) — marked below` and each inferred row ends with its marker. The unresolved calls
+/// bearing on the symbol follow on their own line.
 pub fn render_graph_edges(
     direction: EdgeDirection,
     target: &TargetSymbol,
     edges: &[EdgeSymbol],
     count: usize,
     witness_counts: Option<&WitnessCounts>,
+    remainders: EdgeRemainders<'_>,
 ) -> String {
     let mut out = String::new();
 
@@ -203,7 +330,30 @@ pub fn render_graph_edges(
 
     // ── Count ──────────────────────────────────────────────────
     out.push_str(&direction.count_label(count));
+    let listed_inferred = edges
+        .iter()
+        .filter(|e| e.resolution.as_deref() == Some("inferred"))
+        .count() as u64;
+    if let Some(inf) = remainders.inferred {
+        let label = if all_name_only(&inf.by_basis) {
+            "inferred (name-only)"
+        } else {
+            "inferred"
+        };
+        if listed_inferred > 0 {
+            out.push_str(&format!("; {} of them {label} — marked below", inf.count));
+        } else {
+            out.push_str(&format!(
+                "; {} {label} — investigate with --include-inferred",
+                inf.count
+            ));
+        }
+    }
     out.push('\n');
+    if let Some(u) = remainders.unresolved {
+        out.push_str(&unresolved_line(u.count, u.name.as_deref(), &u.by_basis));
+        out.push('\n');
+    }
 
     // ── Witness section line (union answers only — recon-design-1 §5.2; the one-time
     //    "call sites are syntax-detected" clarification lives HERE, never per-row) ──
@@ -228,11 +378,18 @@ pub fn render_graph_edges(
         let location = render_location(edge);
         let edge_type = edge.edge_type.as_deref().unwrap_or("-");
         let resolution = edge.resolution.as_deref().unwrap_or("-");
-        let marker = if render_markers {
+        let mut marker = if render_markers {
             render_witness_marker(edge)
         } else {
             String::new()
         };
+        if edge.resolution.as_deref() == Some("inferred") {
+            marker.push_str(&inferred_row_marker(
+                edge.inference_basis.as_deref(),
+                edge.inference_extractor.as_deref(),
+                remainders.repo,
+            ));
+        }
 
         out.push_str(&format!(
             "  {}  {}  {}  {}{}\n",
@@ -246,12 +403,22 @@ pub fn render_graph_edges(
 impl CallersResponse {
     /// Render as human-readable text.
     pub fn render_human(&self) -> String {
+        self.render_human_for_repo(None)
+    }
+
+    /// Render as human-readable text; `repo` names the repository in a rebuild remedy.
+    pub fn render_human_for_repo(&self, repo: Option<&str>) -> String {
         render_graph_edges(
             EdgeDirection::Callers,
             &self.target,
             &self.callers,
             self.count,
             self.witness_counts.as_ref(),
+            EdgeRemainders {
+                inferred: self.inferred.as_ref(),
+                unresolved: self.unresolved_naming.as_ref(),
+                repo,
+            },
         )
     }
 }
@@ -259,12 +426,22 @@ impl CallersResponse {
 impl CalleesResponse {
     /// Render as human-readable text.
     pub fn render_human(&self) -> String {
+        self.render_human_for_repo(None)
+    }
+
+    /// Render as human-readable text; `repo` names the repository in a rebuild remedy.
+    pub fn render_human_for_repo(&self, repo: Option<&str>) -> String {
         render_graph_edges(
             EdgeDirection::Callees,
             &self.target,
             &self.callees,
             self.count,
             self.witness_counts.as_ref(),
+            EdgeRemainders {
+                inferred: self.inferred.as_ref(),
+                unresolved: self.unresolved_from.as_ref(),
+                repo,
+            },
         )
     }
 }
@@ -289,6 +466,8 @@ mod tests {
     fn sample_edges() -> Vec<EdgeSymbol> {
         vec![
             EdgeSymbol {
+                inference_basis: None,
+                inference_extractor: None,
                 stable_key: "repo_123:src/main.cpp#main:SYMBOL:FUNCTION".to_string(),
                 name: "main".to_string(),
                 qualified_name: Some("main".to_string()),
@@ -303,6 +482,8 @@ mod tests {
                 occurrences: None,
             },
             EdgeSymbol {
+                inference_basis: None,
+                inference_extractor: None,
                 stable_key: "repo_123:src/helper.cpp#Helper::run:SYMBOL:METHOD".to_string(),
                 name: "run".to_string(),
                 qualified_name: Some("Helper::run".to_string()),
@@ -322,6 +503,8 @@ mod tests {
     #[test]
     fn render_callers_includes_header() {
         let resp = CallersResponse {
+            inferred: None,
+            unresolved_naming: None,
             target: sample_target(),
             callers: sample_edges(),
             count: 2,
@@ -335,6 +518,8 @@ mod tests {
     #[test]
     fn render_callers_includes_count() {
         let resp = CallersResponse {
+            inferred: None,
+            unresolved_naming: None,
             target: sample_target(),
             callers: sample_edges(),
             count: 2,
@@ -349,6 +534,8 @@ mod tests {
         let mut edges = sample_edges();
         edges.pop();
         let resp = CallersResponse {
+            inferred: None,
+            unresolved_naming: None,
             target: sample_target(),
             callers: edges,
             count: 1,
@@ -361,6 +548,8 @@ mod tests {
     #[test]
     fn render_callers_includes_edges() {
         let resp = CallersResponse {
+            inferred: None,
+            unresolved_naming: None,
             target: sample_target(),
             callers: sample_edges(),
             count: 2,
@@ -376,6 +565,8 @@ mod tests {
     #[test]
     fn render_callees_uses_callees_label() {
         let resp = CalleesResponse {
+            inferred: None,
+            unresolved_from: None,
             target: sample_target(),
             callees: sample_edges(),
             count: 2,
@@ -389,6 +580,8 @@ mod tests {
     #[test]
     fn render_empty_callers() {
         let resp = CallersResponse {
+            inferred: None,
+            unresolved_naming: None,
             target: sample_target(),
             callers: vec![],
             count: 0,
@@ -451,6 +644,8 @@ mod tests {
         edges[0].file = Some(String::new());
         edges[0].line = Some(0);
         let resp = CallersResponse {
+            inferred: None,
+            unresolved_naming: None,
             target: sample_target(),
             callers: edges,
             count: 2,
@@ -474,6 +669,8 @@ mod tests {
         edges[0].file = None;
         edges[0].line = None;
         let resp = CallersResponse {
+            inferred: None,
+            unresolved_naming: None,
             target: sample_target(),
             callers: edges,
             count: 2,
@@ -518,6 +715,8 @@ mod tests {
             "fixture sanity: the four counts are 1:1 with the row multiset (§5.2)"
         );
         let resp = CallersResponse {
+            inferred: None,
+            unresolved_naming: None,
             target: sample_target(),
             callers: edges,
             count: 3,
@@ -546,6 +745,8 @@ mod tests {
     #[test]
     fn no_witness_data_renders_exactly_the_legacy_shape() {
         let resp = CallersResponse {
+            inferred: None,
+            unresolved_naming: None,
             target: sample_target(),
             callers: sample_edges(),
             count: 2,
@@ -556,5 +757,289 @@ mod tests {
                         main  src/main.cpp:10  CALLS  static\n  Helper::run  src/helper.cpp:55  \
                         CALLS  static\n";
         assert_eq!(out, expected, "byte-identical legacy render");
+    }
+
+    // ── PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11, RG-REQ-005-L09) ──────────
+
+    fn inferred_edge(name: &str, line: u32, basis: &str, extractor: &str) -> EdgeSymbol {
+        EdgeSymbol {
+            stable_key: format!("r:x.py#{name}:SYMBOL:FUNCTION"),
+            name: name.to_string(),
+            qualified_name: Some(name.to_string()),
+            kind: "SYMBOL".to_string(),
+            subtype: Some("FUNCTION".to_string()),
+            file: Some("x.py".to_string()),
+            line: Some(line),
+            column: Some(4),
+            edge_type: Some("CALLS".to_string()),
+            resolution: Some("inferred".to_string()),
+            witness: None,
+            occurrences: None,
+            inference_basis: Some(basis.to_string()),
+            inference_extractor: Some(extractor.to_string()),
+        }
+    }
+
+    fn remainder(count: u64, basis: &[(&str, u64)]) -> InferredRemainder {
+        InferredRemainder {
+            count,
+            by_basis: basis.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+        }
+    }
+
+    fn unresolved(name: Option<&str>, count: u64, basis: &[(&str, u64)]) -> UnresolvedRemainder {
+        UnresolvedRemainder {
+            name: name.map(str::to_string),
+            count,
+            by_basis: basis.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+        }
+    }
+
+    fn callers(
+        edges: Vec<EdgeSymbol>,
+        count: usize,
+        inferred: Option<InferredRemainder>,
+        naming: Option<UnresolvedRemainder>,
+    ) -> CallersResponse {
+        CallersResponse {
+            target: sample_target(),
+            callers: edges,
+            count,
+            witness_counts: None,
+            inferred,
+            unresolved_naming: naming,
+        }
+    }
+
+    #[test]
+    fn render_callers_states_the_inferred_remainder_on_the_count_line() {
+        let out = callers(
+            sample_edges(),
+            2,
+            Some(remainder(266, &[("receiver_untyped_name_only", 266)])),
+            None,
+        )
+        .render_human();
+        assert!(
+            out.contains(
+                "2 callers found; 266 inferred (name-only) — investigate with --include-inferred\n"
+            ),
+            "{out}"
+        );
+        assert!(
+            !out.contains("(inferred:"),
+            "no inferred row is listed by default:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_callers_include_inferred_marks_each_inferred_row() {
+        let mut edges = sample_edges();
+        edges.push(inferred_edge(
+            "_get_dependencies_for_model",
+            1737,
+            "receiver_untyped_name_only",
+            "python-core:0.2.0",
+        ));
+        let out = callers(
+            edges,
+            3,
+            Some(remainder(1, &[("receiver_untyped_name_only", 1)])),
+            None,
+        )
+        .render_human();
+        assert!(
+            out.contains("3 callers found; 1 of them inferred (name-only) — marked below\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("_get_dependencies_for_model  x.py:1737  CALLS  inferred (inferred: name-only binding — investigate)"),
+            "{out}"
+        );
+        assert_eq!(
+            out.matches("(inferred:").count(),
+            1,
+            "certain rows carry no marker:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_callers_include_inferred_marks_a_0_1_0_promoted_row_as_stored_by_an_older_rmap_with_the_rebuild_command(
+    ) {
+        let edges = vec![inferred_edge(
+            "registry",
+            54,
+            "unrecorded",
+            "compiler-promotion:0.1.0",
+        )];
+        let resp = callers(edges, 1, Some(remainder(1, &[("unrecorded", 1)])), None);
+        let out = resp.render_human_for_repo(Some("/work/repo-graph"));
+        assert!(
+            out.contains("(inferred: compiler-resolved call recorded by an older rmap — run rmap repo rebuild /work/repo-graph)"),
+            "{out}"
+        );
+        assert!(
+            !out.contains("compiler-promotion"),
+            "the writer never renders:\n{out}"
+        );
+        assert!(resp
+            .render_human()
+            .contains("run rmap repo rebuild <path>)"));
+    }
+
+    #[test]
+    fn render_callers_include_inferred_marks_an_unrecorded_row_of_any_other_writer_as_basis_unknown(
+    ) {
+        for writer in [
+            "compiler-promotion:0.2.0",
+            "compiler-promotion:0.3.0",
+            "some-writer:1.0.0",
+        ] {
+            let edges = vec![inferred_edge("f", 9, "unrecorded", writer)];
+            let out =
+                callers(edges, 1, Some(remainder(1, &[("unrecorded", 1)])), None).render_human();
+            assert!(
+                out.contains("(inferred: basis unknown — investigate)"),
+                "{writer}: {out}"
+            );
+            assert!(
+                !out.contains("older rmap") && !out.contains(writer),
+                "{writer}: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_callers_count_line_drops_name_only_when_an_inferred_row_is_unrecorded() {
+        let out = callers(
+            sample_edges(),
+            2,
+            Some(remainder(
+                3,
+                &[("receiver_untyped_name_only", 2), ("unrecorded", 1)],
+            )),
+            None,
+        )
+        .render_human();
+        assert!(
+            out.contains("2 callers found; 3 inferred — investigate with --include-inferred\n"),
+            "{out}"
+        );
+        assert!(!out.contains("(name-only)"), "{out}");
+    }
+
+    #[test]
+    fn render_callees_states_the_inferred_remainder_on_the_count_line() {
+        let resp = CalleesResponse {
+            target: sample_target(),
+            callees: sample_edges()[..1].to_vec(),
+            count: 1,
+            witness_counts: None,
+            inferred: Some(remainder(1, &[("receiver_untyped_name_only", 1)])),
+            unresolved_from: None,
+        };
+        let out = resp.render_human();
+        assert!(
+            out.contains(
+                "1 callee found; 1 inferred (name-only) — investigate with --include-inferred\n"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn render_callers_states_the_unresolved_calls_naming_the_symbol() {
+        let out = callers(
+            sample_edges(),
+            2,
+            None,
+            Some(unresolved(
+                Some("extend"),
+                3,
+                &[("self_call_hierarchy_miss", 3)],
+            )),
+        )
+        .render_human();
+        assert!(
+            out.contains("3 unresolved calls name `extend` (couldn't attribute: 3)\n"),
+            "{out}"
+        );
+        let one = callers(
+            sample_edges(),
+            2,
+            None,
+            Some(unresolved(
+                Some("bar"),
+                1,
+                &[("specifier_matches_runtime_module", 1)],
+            )),
+        )
+        .render_human();
+        assert!(
+            one.contains("1 unresolved call names `bar` (standard library / runtime module: 1)"),
+            "{one}"
+        );
+    }
+
+    #[test]
+    fn render_callees_states_the_unresolved_calls_from_the_symbol() {
+        let resp = CalleesResponse {
+            target: sample_target(),
+            callees: vec![],
+            count: 0,
+            witness_counts: None,
+            inferred: None,
+            unresolved_from: Some(unresolved(
+                None,
+                3,
+                &[("no_supporting_signal", 2), ("a_newer_basis", 1)],
+            )),
+        };
+        let out = resp.render_human();
+        assert!(
+            out.contains(
+                "3 unresolved calls from this symbol (couldn't attribute: 2, unrecognized: 1)\n"
+            ),
+            "an unrecognized basis folds, never renders raw:\n{out}"
+        );
+        assert!(!out.contains("a_newer_basis"));
+    }
+
+    #[test]
+    fn render_callers_zero_certain_with_unresolved_names_the_count() {
+        // RG-REQ-005-L09: a zero never reads as absence.
+        let out = callers(
+            vec![],
+            0,
+            None,
+            Some(unresolved(
+                Some("Recover"),
+                2,
+                &[("no_supporting_signal", 2)],
+            )),
+        )
+        .render_human();
+        assert!(
+            out.contains(
+                "0 callers found\n2 unresolved calls name `Recover` (couldn't attribute: 2)\n"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn render_callers_without_remainder_fields_is_unchanged() {
+        // An older daemon / LiveGraph payload: no remainder fields → today's bytes; an absent
+        // field is never read as a zero.
+        let json = serde_json::json!({
+            "target": {"name": "bar", "qualified_name": "Foo::bar", "kind": "SYMBOL", "file": "src/foo.cpp", "line": 42},
+            "callers": [{"name": "main", "qualified_name": "main", "kind": "SYMBOL", "file": "src/main.cpp", "line": 10, "edge_type": "CALLS", "resolution": "static"}],
+            "count": 1
+        });
+        let resp: CallersResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            resp.render_human(),
+            "Callers of Foo::bar\nFile: src/foo.cpp:42\n\n1 caller found\n\n  main  src/main.cpp:10  CALLS  static\n"
+        );
     }
 }

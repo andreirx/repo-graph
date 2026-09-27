@@ -73,6 +73,7 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
     let view = CallReliabilityView::derive(
         summary.resolved_calls,
         summary.unresolved_calls_internal_like,
+        summary.inferred_calls,
         0,
         0,
         Vec::new(),

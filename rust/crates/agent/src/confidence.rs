@@ -87,6 +87,7 @@ mod tests {
 
     fn ts(rate: f64, enrichment_state: EnrichmentState, eligible: u64) -> AgentTrustSummary {
         AgentTrustSummary {
+            inferred_calls: 0,
             call_resolution_rate: rate,
             resolved_calls: 0,
             unresolved_calls: 0,

@@ -317,7 +317,7 @@ fn build_sqlite_mirror(dir: &Path) -> (std::path::PathBuf, String) {
             source_node_uid: format!("ns{}", i + 1),
             target_node_uid: "ns0".into(),
             edge_type: "CALLS".into(),
-            resolution: "resolved".into(),
+            resolution: "static".into(),
             extractor: "test".into(),
             location: None,
             metadata_json: None,

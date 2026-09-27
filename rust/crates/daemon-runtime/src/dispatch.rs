@@ -1298,8 +1298,16 @@ impl ServiceDispatcher {
             &request.params,
             "engine",
         ));
-        let union_serving = crate::union_serve::union_serving_enabled()
-            && engine == crate::livegraph_feed::Engine::Auto;
+        // D-PRB-UNION-ROUTE-1: an inferred-inclusive request is not a union answer.
+        if let Err(e) = crate::call_certainty::check_include_inferred_param(&request.params) {
+            return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
+        }
+        let include_inferred = crate::call_certainty::include_inferred(&request.params);
+        let union_serving = crate::call_certainty::union_arm_selected(
+            crate::union_serve::union_serving_enabled(),
+            engine,
+            include_inferred,
+        );
 
         // W-B-EPOCH-IMPL-1: capture the request epoch ONCE (the pinned `AgentSnapshot` via the
         // `AgentStorageRead` trait + the BUILD-THEN-PEEK CALLGRAPH-cert LG-serve eligibility). The callers
@@ -1381,29 +1389,25 @@ impl ServiceDispatcher {
 
         // QUERY-AUTO-LAZY-SQLITE-1: the SQLite read is now LAZY -- a closure the engine_response calls ONLY
         // when LiveGraph cannot serve (or for --engine sqlite/compare). The LiveGraph-served default SKIPS it.
-        let edge_types = ["CALLS"];
         let repo_root = Self::get_optional_string_param(&request.params, "repo")
             .unwrap_or("")
             .to_string();
+        // PYTHON-RECEIVER-BINDING-1: each route serves the certain rows, then the remainder.
+        let q = crate::call_certainty::CallAnswerInputs {
+            storage: &storage,
+            repo_state: &repo_state,
+            epoch: &epoch,
+            target: &target,
+        };
         let value = if union_serving {
             // RECON-M-R2: the flag-ON `Auto` arm — union rows in W-BOTH activation; today's exact
             // fallback bytes everywhere else (the shared `callers_auto_or_sqlite` builder).
-            crate::union_serve::callers_union_response(&repo_state, &epoch, &target, || {
-                storage.find_direct_callers(epoch.snapshot_uid(), &target.stable_key, &edge_types)
-            })
+            crate::call_certainty::callers_union_answer(&q)
         } else {
-            crate::livegraph_feed::callers_engine_response(
+            crate::call_certainty::callers_engine_answer(
+                &q,
                 engine,
-                &repo_state,
-                &epoch,
-                &target,
-                || {
-                    storage.find_direct_callers(
-                        epoch.snapshot_uid(),
-                        &target.stable_key,
-                        &edge_types,
-                    )
-                },
+                include_inferred,
                 symbol,
                 &repo_root,
             )
@@ -1477,8 +1481,16 @@ impl ServiceDispatcher {
             &request.params,
             "engine",
         ));
-        let union_serving = crate::union_serve::union_serving_enabled()
-            && engine == crate::livegraph_feed::Engine::Auto;
+        // D-PRB-UNION-ROUTE-1: an inferred-inclusive request is not a union answer.
+        if let Err(e) = crate::call_certainty::check_include_inferred_param(&request.params) {
+            return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
+        }
+        let include_inferred = crate::call_certainty::include_inferred(&request.params);
+        let union_serving = crate::call_certainty::union_arm_selected(
+            crate::union_serve::union_serving_enabled(),
+            engine,
+            include_inferred,
+        );
 
         // W-B-EPOCH-IMPL-1: capture the request epoch ONCE (pinned `AgentSnapshot` + the BUILD-THEN-PEEK
         // CALLGRAPH-cert eligibility). Like callers, callees already resolved once — the epoch adds the EV-A
@@ -1556,27 +1568,23 @@ impl ServiceDispatcher {
 
         // QUERY-AUTO-LAZY-SQLITE-1: LAZY SQLite read -- the closure runs ONLY when LiveGraph cannot serve (or
         // for --engine sqlite/compare). The LiveGraph-served default SKIPS it.
-        let edge_types = ["CALLS"];
         let repo_root = Self::get_optional_string_param(&request.params, "repo")
             .unwrap_or("")
             .to_string();
+        // PYTHON-RECEIVER-BINDING-1: each route serves the certain rows, then the remainder.
+        let q = crate::call_certainty::CallAnswerInputs {
+            storage: &storage,
+            repo_state: &repo_state,
+            epoch: &epoch,
+            target: &target,
+        };
         let value = if union_serving {
-            crate::union_serve::callees_union_response(&repo_state, &epoch, &target, || {
-                storage.find_direct_callees(epoch.snapshot_uid(), &target.stable_key, &edge_types)
-            })
+            crate::call_certainty::callees_union_answer(&q)
         } else {
-            crate::livegraph_feed::callees_engine_response(
+            crate::call_certainty::callees_engine_answer(
+                &q,
                 engine,
-                &repo_state,
-                &epoch,
-                &target,
-                || {
-                    storage.find_direct_callees(
-                        epoch.snapshot_uid(),
-                        &target.stable_key,
-                        &edge_types,
-                    )
-                },
+                include_inferred,
                 symbol,
                 &repo_root,
             )
@@ -2792,20 +2800,15 @@ impl ServiceDispatcher {
             &to_sym.stable_key,
             &repo_uid,
             epoch.snapshot_uid(),
+            // PYTHON-RECEIVER-BINDING-1: certain hops; an inferred-only route is stated.
             || {
-                let path_result = storage.find_shortest_path(
+                crate::call_certainty::sqlite_path_value(
+                    &storage,
+                    &repo_uid,
                     epoch.snapshot_uid(),
                     &from_sym.stable_key,
                     &to_sym.stable_key,
-                    8,
-                )?;
-                let found = path_result.found;
-                Ok(serde_json::json!({
-                    "repo_uid": repo_uid,
-                    "snapshot_uid": epoch.snapshot_uid(),
-                    "path": path_result,
-                    "found": found,
-                }))
+                )
             },
             repo_root,
             &mut checkpoint,

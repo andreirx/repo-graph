@@ -52,6 +52,10 @@ pub(super) struct ServeSpy<'a, S: ?Sized> {
     /// both fired (the reads reached SQLite, never a defaulted empty section).
     pub(super) read_list_members_of_type: AtomicBool,
     pub(super) read_find_file_importers: AtomicBool,
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-SCOPE-1 amendment 4): the call-remainder read is
+    /// SQLite-delegated on EVERY path (never one of the six (b) methods) and RECORDED, so
+    /// `call_remainders_are_sqlite_delegated_and_attached_on_green` can prove it fired on green.
+    pub(super) read_find_symbol_call_remainders: AtomicBool,
 }
 
 impl<'a, S: ?Sized> ServeSpy<'a, S> {
@@ -82,6 +86,7 @@ impl<'a, S: ?Sized> ServeSpy<'a, S> {
             read_find_cycles_involving_module: AtomicBool::new(false),
             read_list_members_of_type: AtomicBool::new(false),
             read_find_file_importers: AtomicBool::new(false),
+            read_find_symbol_call_remainders: AtomicBool::new(false),
         }
     }
 }
@@ -314,6 +319,16 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for ServeSpy<'_, S> {
     ) -> Result<Vec<AgentFileImporter>, AgentStorageError> {
         self.read_find_file_importers.store(true, Ordering::Relaxed);
         self.inner.find_file_importers(s, p)
+    }
+    fn find_symbol_call_remainders(
+        &self,
+        s: &str,
+        k: &str,
+        n: &str,
+    ) -> Result<repo_graph_agent::AgentCallRemainders, AgentStorageError> {
+        self.read_find_symbol_call_remainders
+            .store(true, Ordering::Relaxed);
+        self.inner.find_symbol_call_remainders(s, k, n)
     }
     fn get_doc_inventory(&self, r: &str) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
         self.inner.get_doc_inventory(r)

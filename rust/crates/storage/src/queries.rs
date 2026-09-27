@@ -93,6 +93,15 @@ pub struct CallerResult {
     pub column: Option<i64>,
     pub edge_type: String,
     pub resolution: String,
+    /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11): on an `inferred` row, its recorded basis
+    /// (`receiver_untyped_name_only`) or `unrecorded` (absent/malformed evidence — decoded by
+    /// `call_remainder_reads::inferred_call_evidence`). `None` (absent on the wire) otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_basis: Option<String>,
+    /// PYTHON-RECEIVER-BINDING-1: on an `inferred` row, the edge's writer (`edges.extractor`) —
+    /// routing metadata that names the source of an `unrecorded` row. `None` otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_extractor: Option<String>,
 }
 
 /// A direct callee of a symbol.
@@ -108,6 +117,15 @@ pub struct CalleeResult {
     pub column: Option<i64>,
     pub edge_type: String,
     pub resolution: String,
+    /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11): on an `inferred` row, its recorded basis
+    /// (`receiver_untyped_name_only`) or `unrecorded` (absent/malformed evidence — decoded by
+    /// `call_remainder_reads::inferred_call_evidence`). `None` (absent on the wire) otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_basis: Option<String>,
+    /// PYTHON-RECEIVER-BINDING-1: on an `inferred` row, the edge's writer (`edges.extractor`) —
+    /// routing metadata that names the source of an `unrecorded` row. `None` otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_extractor: Option<String>,
 }
 
 /// An import result matching the TS `formatNodeResult` wire format.
@@ -149,6 +167,29 @@ pub struct BulkImportRow {
     pub subtype: Option<String>,
     /// The import edge resolution (e.g. `static` / `unresolved`).
     pub resolution: Option<String>,
+}
+
+/// PYTHON-RECEIVER-BINDING-1: the inference fields of a caller/callee row — `Some` only for an
+/// `inferred` row, decoded by the ONE evidence decoder.
+fn inference_fields(
+    resolution: &str,
+    extractor: &str,
+    metadata_json: Option<String>,
+) -> (Option<String>, Option<String>) {
+    if resolution != "inferred" {
+        return (None, None);
+    }
+    let evidence =
+        crate::call_remainder_reads::inferred_call_evidence(extractor, metadata_json.as_deref());
+    (Some(evidence.basis), Some(evidence.extractor))
+}
+
+/// The outcome of [`StorageConnection::find_shortest_path`]: the route (or `found: false`) and
+/// the number of INFERRED CALLS/IMPORTS edges on it (always 0 for a certain-only walk).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShortestPathSearch {
+    pub path: PathResult,
+    pub inferred_edges_on_route: u64,
 }
 
 /// Result of a shortest-path search between two symbols.
@@ -744,16 +785,23 @@ impl StorageConnection {
         target_stable_key: &str,
         edge_types: &[&str],
     ) -> Result<Vec<CallerResult>, StorageError> {
+        if edge_types.contains(&"CALLS") {
+            // PYTHON-RECEIVER-BINDING-1: the daemon splits these rows by certainty.
+            self.reject_unreadable_call_resolutions(snapshot_uid, "find_direct_callers")?;
+        }
         let placeholders = edge_types
             .iter()
             .map(|_| "?")
             .collect::<Vec<_>>()
             .join(", ");
+        // PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L08, D-PRB-SCOPE-1 amendment 3): a caller row opens
+        // at the CALL SITE — the edge's line/column in the caller's file — not the caller's
+        // declaration. Every row is returned (certain and inferred); the daemon partitions.
         let sql = format!(
             "SELECT
 				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
-				f.path AS file_path, n.line_start, n.col_start,
-				e.type AS edge_type, e.resolution
+				f.path AS file_path, e.line_start, e.col_start,
+				e.type AS edge_type, e.resolution, e.extractor, e.metadata_json
 			 FROM edges e
 			 JOIN nodes target_n ON e.target_node_uid = target_n.node_uid
 			 JOIN nodes n ON e.source_node_uid = n.node_uid
@@ -779,6 +827,9 @@ impl StorageConnection {
             params.iter().map(|p| p.as_ref()).collect();
 
         let rows = stmt.query_map(param_refs.as_slice(), |row| {
+            let resolution: String = row.get(9)?;
+            let (inference_basis, inference_extractor) =
+                inference_fields(&resolution, &row.get::<_, String>(10)?, row.get(11)?);
             Ok(CallerResult {
                 stable_key: row.get(0)?,
                 name: row.get(1)?,
@@ -789,7 +840,9 @@ impl StorageConnection {
                 line: row.get(6)?,
                 column: row.get(7)?,
                 edge_type: row.get(8)?,
-                resolution: row.get(9)?,
+                resolution,
+                inference_basis,
+                inference_extractor,
             })
         })?;
 
@@ -808,6 +861,10 @@ impl StorageConnection {
         source_stable_key: &str,
         edge_types: &[&str],
     ) -> Result<Vec<CalleeResult>, StorageError> {
+        if edge_types.contains(&"CALLS") {
+            // PYTHON-RECEIVER-BINDING-1: the daemon splits these rows by certainty.
+            self.reject_unreadable_call_resolutions(snapshot_uid, "find_direct_callees")?;
+        }
         let placeholders = edge_types
             .iter()
             .map(|_| "?")
@@ -817,7 +874,7 @@ impl StorageConnection {
             "SELECT
 				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
 				f.path AS file_path, n.line_start, n.col_start,
-				e.type AS edge_type, e.resolution
+				e.type AS edge_type, e.resolution, e.extractor, e.metadata_json
 			 FROM edges e
 			 JOIN nodes source_n ON e.source_node_uid = source_n.node_uid
 			 JOIN nodes n ON e.target_node_uid = n.node_uid
@@ -842,6 +899,9 @@ impl StorageConnection {
             params.iter().map(|p| p.as_ref()).collect();
 
         let rows = stmt.query_map(param_refs.as_slice(), |row| {
+            let resolution: String = row.get(9)?;
+            let (inference_basis, inference_extractor) =
+                inference_fields(&resolution, &row.get::<_, String>(10)?, row.get(11)?);
             Ok(CalleeResult {
                 stable_key: row.get(0)?,
                 name: row.get(1)?,
@@ -852,7 +912,9 @@ impl StorageConnection {
                 line: row.get(6)?,
                 column: row.get(7)?,
                 edge_type: row.get(8)?,
-                resolution: row.get(9)?,
+                resolution,
+                inference_basis,
+                inference_extractor,
             })
         })?;
 
@@ -1144,6 +1206,11 @@ impl StorageConnection {
             crate::crud::call_aggregates::CallAggregateFamily::SymbolCallDegrees,
         )?
         .is_some();
+        if !g2_present {
+            // PYTHON-RECEIVER-BINDING-1 review F-2: the live fallback splits the stored CALLS rows
+            // by certainty (the persisted g2 family was counted from the resolver's own output).
+            self.reject_unreadable_call_resolutions(snapshot_uid, "find_dead_nodes")?;
+        }
         let liveness_exclusion = if g2_present {
             "AND n.node_uid NOT IN (
 			     SELECT e.target_node_uid FROM edges e
@@ -1157,11 +1224,15 @@ impl StorageConnection {
 			   )"
         } else {
             // Labeled live-derived fallback (pre-migration snapshot).
+            // PYTHON-RECEIVER-BINDING-1: the same exclusion as the persisted g2 family — only a
+            // CERTAIN call (`static`/`dynamic`) is a use; an inferred call never keeps a symbol
+            // alive.
             "AND n.node_uid NOT IN (
 			     SELECT e.target_node_uid FROM edges e
 			     WHERE e.snapshot_uid = ?1
-			       AND e.type IN ('IMPORTS', 'CALLS', 'IMPLEMENTS', 'INSTANTIATES',
-			                      'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
+			       AND (e.type IN ('IMPORTS', 'IMPLEMENTS', 'INSTANTIATES',
+			                       'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
+			            OR (e.type = 'CALLS' AND e.resolution IN ('static', 'dynamic')))
 			   )"
         };
 
@@ -1811,10 +1882,19 @@ impl StorageConnection {
 
     /// Find the shortest path between two nodes via BFS.
     ///
-    /// Mirrors the TS `findPath` (sqlite-storage.ts:2335-2432).
-    /// Uses a recursive CTE bounded by `max_depth`. Edge types
-    /// are fixed to CALLS and IMPORTS. Returns `PathResult` with
-    /// `found: false` if no path exists within the depth bound.
+    /// Mirrors the TS `findPath` (sqlite-storage.ts:2335-2432) in its answer. PYTHON-RECEIVER-
+    /// BINDING-1: a level-by-level BFS bounded by `max_depth` that stops at the first depth
+    /// reaching the target (the prior recursive CTE enumerated every simple path up to the bound
+    /// before ordering). Edge types are fixed to CALLS and IMPORTS. Returns `found: false` if no
+    /// path exists within the depth bound.
+    ///
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-SCOPE-1 addendum; D-PSI-R1-VOCAB): `admit_inferred =
+    /// false` walks CERTAIN hops only (`resolution IN ('static','dynamic')`, calls and imports
+    /// alike); `true` also admits `inferred` edges and reports how many are on the route found.
+    /// The route is chosen DETERMINISTICALLY (F-PRB-PATH-TIE): among the routes of minimal
+    /// depth, the one with the fewest inferred edges, then the lexicographically smallest
+    /// sequence of node STABLE KEYS — never whichever row the CTE yields first. A failed read is
+    /// an error; only a genuinely absent row is "no route".
     ///
     /// Both `from_stable_key` and `to_stable_key` must be valid
     /// node stable keys (caller is responsible for resolution).
@@ -1824,84 +1904,181 @@ impl StorageConnection {
         from_stable_key: &str,
         to_stable_key: &str,
         max_depth: i64,
-    ) -> Result<PathResult, StorageError> {
-        // Resolve stable keys to node UIDs.
-        let from_uid: Option<String> = self
-            .connection()
-            .query_row(
-                "SELECT node_uid FROM nodes WHERE snapshot_uid = ? AND stable_key = ?",
-                rusqlite::params![snapshot_uid, from_stable_key],
-                |row| row.get(0),
-            )
-            .ok();
-
-        let to_uid: Option<String> = self
-            .connection()
-            .query_row(
-                "SELECT node_uid FROM nodes WHERE snapshot_uid = ? AND stable_key = ?",
-                rusqlite::params![snapshot_uid, to_stable_key],
-                |row| row.get(0),
-            )
-            .ok();
-
-        let (from_uid, to_uid) = match (from_uid, to_uid) {
+        admit_inferred: bool,
+    ) -> Result<ShortestPathSearch, StorageError> {
+        self.reject_unreadable_call_resolutions(snapshot_uid, "find_shortest_path")?;
+        let not_found = || ShortestPathSearch {
+            path: PathResult {
+                found: false,
+                path_length: 0,
+                path: Vec::new(),
+            },
+            inferred_edges_on_route: 0,
+        };
+        let uid_of = |key: &str| -> Result<Option<String>, StorageError> {
+            Ok(self
+                .connection()
+                .query_row(
+                    "SELECT node_uid FROM nodes WHERE snapshot_uid = ? AND stable_key = ?",
+                    rusqlite::params![snapshot_uid, key],
+                    |row| row.get(0),
+                )
+                .optional()?)
+        };
+        let (from_uid, to_uid) = match (uid_of(from_stable_key)?, uid_of(to_stable_key)?) {
             (Some(f), Some(t)) => (f, t),
-            _ => {
-                return Ok(PathResult {
-                    found: false,
-                    path_length: 0,
-                    path: Vec::new(),
-                });
-            }
+            _ => return Ok(not_found()),
         };
 
-        let mut stmt = self.connection().prepare(
-            "WITH RECURSIVE path_search(node_uid, depth, path_uids, path_edges) AS (
-				SELECT ?, 0, ?, ''
-
-				UNION ALL
-
-				SELECT e.target_node_uid, p.depth + 1,
-				       p.path_uids || ',' || e.target_node_uid,
-				       p.path_edges || CASE WHEN p.path_edges = '' THEN '' ELSE '|' END
-				         || e.source_node_uid || ':' || e.type || ':' || e.target_node_uid
-				FROM edges e
-				JOIN path_search p ON e.source_node_uid = p.node_uid
-				WHERE e.snapshot_uid = ?
-				  AND e.type IN ('CALLS', 'IMPORTS')
-				  AND p.depth < ?
-				  AND p.path_uids NOT LIKE '%' || e.target_node_uid || '%'
-			)
-			SELECT path_uids, path_edges, depth
-			FROM path_search
-			WHERE node_uid = ?
-			ORDER BY depth ASC
-			LIMIT 1",
-        )?;
-
-        let row: Option<(String, String, i64)> = stmt
-            .query_row(
-                rusqlite::params![&from_uid, &from_uid, snapshot_uid, max_depth, &to_uid],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .ok();
-
-        let (path_uids_str, path_edges_str, depth) = match row {
-            Some(r) => r,
-            None => {
-                return Ok(PathResult {
-                    found: false,
-                    path_length: 0,
-                    path: Vec::new(),
-                });
-            }
+        let admitted = if admit_inferred {
+            "('static', 'dynamic', 'inferred')"
+        } else {
+            "('static', 'dynamic')"
         };
 
-        // Parse path UIDs and look up each node.
-        let path_uids: Vec<&str> = path_uids_str.split(',').filter(|s| !s.is_empty()).collect();
+        // Level-by-level BFS over the admitted CALLS/IMPORTS hops, stopping at the FIRST depth
+        // that reaches the target (bounded work — the prior recursive CTE enumerated every simple
+        // path up to `max_depth` before ordering). `preds[v]` keeps every edge into `v` from the
+        // previous level, so every shortest route is represented for the tie-break below.
+        type Pred = (String, String, bool); // (predecessor uid, edge type, edge is inferred)
+        let mut dist: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        let mut preds: std::collections::HashMap<String, Vec<Pred>> =
+            std::collections::HashMap::new();
+        dist.insert(from_uid.clone(), 0);
+        let mut level: Vec<String> = vec![from_uid.clone()];
+        let mut depth: i64 = 0;
+        while !dist.contains_key(&to_uid) && !level.is_empty() && depth < max_depth {
+            depth += 1;
+            let mut next: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+            for chunk in level.chunks(500) {
+                let placeholders = vec!["?"; chunk.len()].join(", ");
+                let sql = format!(
+                    "SELECT source_node_uid, target_node_uid, type, resolution FROM edges \
+                     WHERE snapshot_uid = ? AND type IN ('CALLS', 'IMPORTS') \
+                       AND resolution IN {admitted} AND source_node_uid IN ({placeholders})"
+                );
+                let mut stmt = self.connection().prepare(&sql)?;
+                let mut params: Vec<&dyn rusqlite::types::ToSql> = vec![&snapshot_uid];
+                for uid in chunk {
+                    params.push(uid);
+                }
+                let rows = stmt.query_map(params.as_slice(), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?;
+                for row in rows {
+                    let (src, tgt, edge_type, resolution) = row?;
+                    match dist.get(&tgt) {
+                        Some(&d) if d < depth => continue,
+                        Some(_) => {}
+                        None => {
+                            dist.insert(tgt.clone(), depth);
+                            next.insert(tgt.clone());
+                        }
+                    }
+                    preds
+                        .entry(tgt)
+                        .or_default()
+                        .push((src, edge_type, resolution == "inferred"));
+                }
+            }
+            level = next.into_iter().collect();
+        }
+        let Some(&found_depth) = dist.get(&to_uid) else {
+            return Ok(not_found());
+        };
+
+        // Deterministic choice among the shortest routes (F-PRB-PATH-TIE): fewest inferred edges,
+        // then the lexicographically smallest sequence of node STABLE KEYS. Every prefix to a node
+        // has the same length (its BFS depth), so the best route's prefix is the best route to
+        // that prefix's end — computed once per node, from the source outward.
+        let mut key_cache: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let mut key_of = |uid: &str| -> Result<String, StorageError> {
+            if let Some(k) = key_cache.get(uid) {
+                return Ok(k.clone());
+            }
+            let k: String = self
+                .connection()
+                .query_row(
+                    "SELECT stable_key FROM nodes WHERE node_uid = ?",
+                    rusqlite::params![uid],
+                    |row| row.get(0),
+                )
+                .optional()?
+                // A route node with no row keeps its uid as its sort key.
+                .unwrap_or_else(|| uid.to_string());
+            key_cache.insert(uid.to_string(), k.clone());
+            Ok(k)
+        };
+        // best[v] = (inferred edges, stable keys, uids, edge types into each step).
+        type Best = (u64, Vec<String>, Vec<String>, Vec<String>);
+        let mut best: std::collections::HashMap<String, Best> = std::collections::HashMap::new();
+        best.insert(
+            from_uid.clone(),
+            (
+                0,
+                vec![key_of(&from_uid)?],
+                vec![from_uid.clone()],
+                vec![String::new()],
+            ),
+        );
+        // The nodes on some shortest route to the target, by level (walk the preds back).
+        let mut on_route: Vec<std::collections::BTreeSet<String>> =
+            vec![std::collections::BTreeSet::new(); (found_depth + 1) as usize];
+        on_route[found_depth as usize].insert(to_uid.clone());
+        for d in (1..=found_depth as usize).rev() {
+            let current: Vec<String> = on_route[d].iter().cloned().collect();
+            for v in current {
+                for (p, _, _) in preds.get(&v).into_iter().flatten() {
+                    if dist.get(p) == Some(&(d as i64 - 1)) {
+                        on_route[d - 1].insert(p.clone());
+                    }
+                }
+            }
+        }
+        for level_nodes in on_route.iter().skip(1) {
+            for v in level_nodes {
+                let v_key = key_of(v)?;
+                let mut chosen: Option<Best> = None;
+                for (p, edge_type, inferred) in preds.get(v).into_iter().flatten() {
+                    let Some(prefix) = best.get(p) else {
+                        continue;
+                    };
+                    let mut keys = prefix.1.clone();
+                    keys.push(v_key.clone());
+                    let candidate_inferred = prefix.0 + u64::from(*inferred);
+                    let better = match &chosen {
+                        None => true,
+                        Some(c) => {
+                            (candidate_inferred, &keys, edge_type)
+                                < (c.0, &c.1, &c.3[c.3.len() - 1])
+                        }
+                    };
+                    if better {
+                        let mut uids = prefix.2.clone();
+                        uids.push(v.clone());
+                        let mut types = prefix.3.clone();
+                        types.push(edge_type.clone());
+                        chosen = Some((candidate_inferred, keys, uids, types));
+                    }
+                }
+                if let Some(c) = chosen {
+                    best.insert(v.clone(), c);
+                }
+            }
+        }
+        let Some((inferred, _, route_uids, route_types)) = best.remove(&to_uid) else {
+            return Ok(not_found());
+        };
+        let depth = found_depth;
+
         let mut steps: Vec<PathStep> = Vec::new();
-
-        for uid in &path_uids {
+        for (uid, edge_type) in route_uids.iter().zip(route_types) {
             #[allow(clippy::type_complexity)]
             let node: Option<(String, Option<String>, Option<String>, Option<i64>)> = self
                 .connection()
@@ -1913,38 +2090,25 @@ impl StorageConnection {
                     rusqlite::params![uid],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
-                .ok();
-
+                .optional()?;
             if let Some((name, qualified_name, file_path, line)) = node {
                 steps.push(PathStep {
                     node_id: uid.to_string(),
                     symbol: qualified_name.unwrap_or(name),
                     file: file_path.unwrap_or_default(),
                     line,
-                    edge_type: String::new(), // filled below
+                    edge_type,
                 });
             }
         }
 
-        // Fill edge types from path_edges string.
-        // Format: "source_uid:EDGE_TYPE:target_uid|source_uid:EDGE_TYPE:target_uid|..."
-        let edge_segments: Vec<&str> = path_edges_str
-            .split('|')
-            .filter(|s| !s.is_empty())
-            .collect();
-        for (i, segment) in edge_segments.iter().enumerate() {
-            if i + 1 < steps.len() {
-                let parts: Vec<&str> = segment.split(':').collect();
-                if parts.len() >= 2 {
-                    steps[i + 1].edge_type = parts[1].to_string();
-                }
-            }
-        }
-
-        Ok(PathResult {
-            found: true,
-            path_length: depth,
-            path: steps,
+        Ok(ShortestPathSearch {
+            path: PathResult {
+                found: true,
+                path_length: depth,
+                path: steps,
+            },
+            inferred_edges_on_route: inferred,
         })
     }
 
@@ -2858,6 +3022,14 @@ impl StorageConnection {
             crate::crud::call_aggregates::CallAggregateFamily::ResolvedCallFilePairs,
         )?
         .is_some();
+        if !g3_present {
+            // PYTHON-RECEIVER-BINDING-1 review F-2: the live fallback splits the stored CALLS rows
+            // by certainty (the persisted g3 family was counted from the resolver's own output).
+            self.reject_unreadable_call_resolutions(
+                snapshot_uid,
+                "map_resolved_dep_edges_in_path",
+            )?;
+        }
         let sql = if g3_present {
             // IMPORTS owner-read UNION persisted CALLS pairs. UNION ALL is
             // exact: the two shares cannot collide (distinct type
@@ -2883,14 +3055,17 @@ impl StorageConnection {
              ORDER BY source_file ASC, target_file ASC, edge_type ASC"
         } else {
             // Labeled live-derived fallback (pre-migration snapshot):
-            // the pre-M-3a combined query, verbatim.
+            // the pre-M-3a combined query. PYTHON-RECEIVER-BINDING-1: its CALLS share applies
+            // the persisted family's rule — certain calls (`static`/`dynamic`) only.
             "SELECT DISTINCT src_f.path, tgt_f.path, e.type \
              FROM edges e \
              JOIN nodes src_n ON e.source_node_uid = src_n.node_uid \
              JOIN files src_f ON src_n.file_uid = src_f.file_uid \
              JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid \
              JOIN files tgt_f ON tgt_n.file_uid = tgt_f.file_uid \
-             WHERE e.snapshot_uid = ?1 AND e.type IN ('IMPORTS', 'CALLS') \
+             WHERE e.snapshot_uid = ?1 \
+               AND (e.type = 'IMPORTS' \
+                    OR (e.type = 'CALLS' AND e.resolution IN ('static', 'dynamic'))) \
                AND src_f.path <> tgt_f.path \
                AND (src_f.path LIKE ?2 ESCAPE '\\' OR src_f.path = ?3) \
              ORDER BY src_f.path ASC, tgt_f.path ASC, e.type ASC"
@@ -5586,6 +5761,417 @@ mod tests {
     }
 
     // ── SB-5: Dead-node resource exclusion tests ─────────────────
+
+    // ── PYTHON-RECEIVER-BINDING-1: certain vs inferred CALLS reads ──────────
+
+    /// An edge with an explicit resolution, extractor, call-site line and metadata.
+    #[allow(clippy::too_many_arguments)]
+    fn prb_edge(
+        storage: &StorageConnection,
+        snap: &str,
+        uid: &str,
+        src: &str,
+        tgt: &str,
+        edge_type: &str,
+        resolution: &str,
+        extractor: &str,
+        line: Option<i64>,
+        meta: Option<&str>,
+    ) {
+        storage
+            .connection()
+            .execute(
+                "INSERT INTO edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_node_uid, type, resolution, extractor, line_start, col_start, metadata_json)
+                 VALUES (?, ?, 'r1', ?, ?, ?, ?, ?, ?, 4, ?)",
+                rusqlite::params![uid, snap, src, tgt, edge_type, resolution, extractor, line, meta],
+            )
+            .unwrap();
+    }
+
+    /// Files a.py/b.py/c.py and symbols `target` (a.py:192), `certain_caller` (b.py:10),
+    /// `guess_caller` (c.py:1731).
+    fn prb_fixture() -> (StorageConnection, String) {
+        let (storage, snap) = setup_db_with_snapshot();
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO files (file_uid, repo_uid, path, language) VALUES \
+                   ('r1:a.py', 'r1', 'a.py', 'python'), ('r1:b.py', 'r1', 'b.py', 'python'), \
+                   ('r1:c.py', 'r1', 'c.py', 'python'); \
+                 INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, qualified_name, kind, subtype, file_uid, line_start) VALUES \
+                   ('t', '{snap}', 'r1', 'r1:a.py#target', 'target', 'L.target', 'SYMBOL', 'METHOD', 'r1:a.py', 192), \
+                   ('k', '{snap}', 'r1', 'r1:b.py#certain_caller', 'certain_caller', 'certain_caller', 'SYMBOL', 'FUNCTION', 'r1:b.py', 10), \
+                   ('g', '{snap}', 'r1', 'r1:c.py#guess_caller', 'guess_caller', 'guess_caller', 'SYMBOL', 'FUNCTION', 'r1:c.py', 1731);"
+            ))
+            .unwrap();
+        (storage, snap)
+    }
+
+    #[test]
+    fn find_direct_callers_anchors_each_row_at_its_call_site_line() {
+        let (storage, snap) = prb_fixture();
+        prb_edge(
+            &storage,
+            &snap,
+            "e1",
+            "k",
+            "t",
+            "CALLS",
+            "static",
+            "python-core:0.2.0",
+            Some(14),
+            None,
+        );
+        let rows = storage
+            .find_direct_callers(&snap, "r1:a.py#target", &["CALLS"])
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].line,
+            Some(14),
+            "the call site, not the caller's declaration (10)"
+        );
+        assert_eq!(rows[0].column, Some(4));
+        assert_eq!(rows[0].file.as_deref(), Some("b.py"));
+        assert_eq!(
+            (
+                rows[0].inference_basis.clone(),
+                rows[0].inference_extractor.clone()
+            ),
+            (None, None)
+        );
+        let json = serde_json::to_value(&rows[0]).unwrap();
+        assert!(
+            json.get("inference_basis").is_none(),
+            "absent on a certain row"
+        );
+    }
+
+    #[test]
+    fn find_direct_callers_carries_the_inference_basis_of_an_inferred_row() {
+        let (storage, snap) = prb_fixture();
+        prb_edge(
+            &storage,
+            &snap,
+            "e1",
+            "k",
+            "t",
+            "CALLS",
+            "static",
+            "python-core:0.2.0",
+            Some(14),
+            None,
+        );
+        prb_edge(
+            &storage,
+            &snap,
+            "e2",
+            "g",
+            "t",
+            "CALLS",
+            "inferred",
+            "python-core:0.2.0",
+            Some(1737),
+            Some(
+                r#"{"basis":"receiver_untyped_name_only","receiver":"dependencies","candidates":["L.target"]}"#,
+            ),
+        );
+        let rows = storage
+            .find_direct_callers(&snap, "r1:a.py#target", &["CALLS"])
+            .unwrap();
+        assert_eq!(
+            rows.len(),
+            2,
+            "every row is returned; the daemon partitions"
+        );
+        let inf = rows.iter().find(|r| r.resolution == "inferred").unwrap();
+        assert_eq!(inf.line, Some(1737));
+        assert_eq!(
+            inf.inference_basis.as_deref(),
+            Some("receiver_untyped_name_only")
+        );
+        assert_eq!(
+            inf.inference_extractor.as_deref(),
+            Some("python-core:0.2.0")
+        );
+        // The callee side decodes the same evidence.
+        let out = storage
+            .find_direct_callees(&snap, "r1:c.py#guess_caller", &["CALLS"])
+            .unwrap();
+        assert_eq!(
+            out[0].inference_basis.as_deref(),
+            Some("receiver_untyped_name_only")
+        );
+    }
+
+    #[test]
+    fn find_direct_callers_legacy_promoted_row_carries_unrecorded_and_its_extractor() {
+        let (storage, snap) = prb_fixture();
+        prb_edge(
+            &storage,
+            &snap,
+            "e1",
+            "g",
+            "t",
+            "CALLS",
+            "inferred",
+            "compiler-promotion:0.1.0",
+            Some(54),
+            Some(r#"{"promotedFrom":"1d4279fa","receiverType":"L","methodName":"target"}"#),
+        );
+        let rows = storage
+            .find_direct_callers(&snap, "r1:a.py#target", &["CALLS"])
+            .unwrap();
+        assert_eq!(rows.len(), 1, "served, never dropped, never an error");
+        assert_eq!(rows[0].inference_basis.as_deref(), Some("unrecorded"));
+        assert_eq!(
+            rows[0].inference_extractor.as_deref(),
+            Some("compiler-promotion:0.1.0")
+        );
+    }
+
+    /// A → B → C by CALLS where B → C is inferred, and A → D → C by IMPORTS where D → C is
+    /// inferred (the second route is one hop longer).
+    fn path_fixture() -> (StorageConnection, String) {
+        let (storage, snap) = setup_db_with_snapshot();
+        for (uid, key) in [
+            ("a", "k:a"),
+            ("b", "k:b"),
+            ("c", "k:c"),
+            ("d", "k:d"),
+            ("e", "k:e"),
+        ] {
+            insert_raw_node(&storage, &snap, uid, key, uid, "SYMBOL");
+        }
+        (storage, snap)
+    }
+
+    #[test]
+    fn find_shortest_path_does_not_traverse_an_inferred_call_or_import_edge() {
+        let (storage, snap) = path_fixture();
+        prb_edge(
+            &storage, &snap, "e1", "a", "b", "CALLS", "static", "t", None, None,
+        );
+        prb_edge(
+            &storage, &snap, "e2", "b", "c", "CALLS", "inferred", "t", None, None,
+        );
+        prb_edge(
+            &storage, &snap, "e3", "a", "d", "IMPORTS", "static", "t", None, None,
+        );
+        prb_edge(
+            &storage, &snap, "e4", "d", "c", "IMPORTS", "inferred", "t", None, None,
+        );
+        let r = storage
+            .find_shortest_path(&snap, "k:a", "k:c", 8, false)
+            .unwrap();
+        assert!(!r.path.found, "no certain route");
+        assert_eq!(r.inferred_edges_on_route, 0);
+        // A certain route is still found.
+        let r = storage
+            .find_shortest_path(&snap, "k:a", "k:b", 8, false)
+            .unwrap();
+        assert!(r.path.found);
+        assert_eq!(r.path.path_length, 1);
+        // A value outside the edge vocabulary is never certain (D-PSI-R1-VOCAB) and never
+        // silently skipped either: the walk is refused by name (review F-2, RG-REQ-002-L04).
+        prb_edge(
+            &storage, &snap, "e5", "a", "c", "CALLS", "resolved", "t", None, None,
+        );
+        let err = storage
+            .find_shortest_path(&snap, "k:a", "k:c", 8, false)
+            .expect_err("an unreadable resolution refuses the walk");
+        assert!(err.to_string().contains("unreadable resolution"), "{err}");
+    }
+
+    #[test]
+    fn find_shortest_path_admitting_inferred_counts_the_inferred_call_and_import_edges_on_the_route(
+    ) {
+        let (storage, snap) = path_fixture();
+        // The only routes: a -CALLS(static)-> b -CALLS(inferred)-> c -IMPORTS(inferred)-> e.
+        prb_edge(
+            &storage, &snap, "e1", "a", "b", "CALLS", "static", "t", None, None,
+        );
+        prb_edge(
+            &storage, &snap, "e2", "b", "c", "CALLS", "inferred", "t", None, None,
+        );
+        prb_edge(
+            &storage, &snap, "e3", "c", "e", "IMPORTS", "inferred", "t", None, None,
+        );
+        let r = storage
+            .find_shortest_path(&snap, "k:a", "k:e", 8, true)
+            .unwrap();
+        assert!(r.path.found);
+        assert_eq!(r.path.path_length, 3);
+        assert_eq!(
+            r.inferred_edges_on_route, 2,
+            "one inferred call + one inferred import"
+        );
+        let types: Vec<&str> = r.path.path.iter().map(|s| s.edge_type.as_str()).collect();
+        assert_eq!(types, vec!["", "CALLS", "CALLS", "IMPORTS"]);
+    }
+
+    #[test]
+    fn find_shortest_path_breaks_equal_depth_ties_by_fewest_inferred_edges_then_stable_keys_under_reversed_insertion(
+    ) {
+        let run = |reversed: bool| {
+            let (storage, snap) = setup_db_with_snapshot();
+            // Stable keys order: k:m1 < k:m2 < k:m3 < k:m4 (node uids deliberately reversed).
+            for (uid, key) in [
+                ("s", "k:s"),
+                ("z1", "k:m1"),
+                ("y2", "k:m2"),
+                ("x3", "k:m3"),
+                ("w4", "k:m4"),
+                ("t", "k:t"),
+            ] {
+                insert_raw_node(&storage, &snap, uid, key, uid, "SYMBOL");
+            }
+            // Four depth-2 routes s → m → t: via m1 and m2 two inferred edges... via m1 (2
+            // inferred), m2 (1 inferred), m3 (0 inferred), m4 (0 inferred).
+            let mut edges = vec![
+                ("a1", "s", "z1", "inferred"),
+                ("a2", "z1", "t", "inferred"),
+                ("b1", "s", "y2", "static"),
+                ("b2", "y2", "t", "inferred"),
+                ("c1", "s", "x3", "static"),
+                ("c2", "x3", "t", "static"),
+                ("d1", "s", "w4", "static"),
+                ("d2", "w4", "t", "static"),
+            ];
+            if reversed {
+                edges.reverse();
+            }
+            for (uid, src, tgt, res) in edges {
+                prb_edge(
+                    &storage, &snap, uid, src, tgt, "CALLS", res, "t", None, None,
+                );
+            }
+            let admitted = storage
+                .find_shortest_path(&snap, "k:s", "k:t", 8, true)
+                .unwrap();
+            let certain = storage
+                .find_shortest_path(&snap, "k:s", "k:t", 8, false)
+                .unwrap();
+            let via = |r: &ShortestPathSearch| r.path.path[1].node_id.clone();
+            (
+                via(&admitted),
+                admitted.inferred_edges_on_route,
+                via(&certain),
+                certain.inferred_edges_on_route,
+            )
+        };
+        let forward = run(false);
+        let backward = run(true);
+        assert_eq!(
+            forward, backward,
+            "the choice never depends on insertion order"
+        );
+        // Fewest inferred edges (0: m3 or m4), then the smallest stable-key sequence (m3 < m4).
+        assert_eq!(forward, ("x3".to_string(), 0, "x3".to_string(), 0));
+    }
+
+    #[test]
+    fn find_dead_nodes_live_fallback_does_not_count_an_inferred_call_as_a_use() {
+        // A snapshot without the persisted g2 family serves the live fallback.
+        let (storage, snap) = prb_fixture();
+        prb_edge(
+            &storage,
+            &snap,
+            "e1",
+            "k",
+            "t",
+            "CALLS",
+            "inferred",
+            "python-core:0.2.0",
+            Some(3),
+            None,
+        );
+        prb_edge(
+            &storage,
+            &snap,
+            "e2",
+            "t",
+            "g",
+            "CALLS",
+            "static",
+            "python-core:0.2.0",
+            Some(4),
+            None,
+        );
+        let dead: Vec<String> = storage
+            .find_dead_nodes(&snap, "r1", Some("SYMBOL"))
+            .unwrap()
+            .into_iter()
+            .map(|d| d.stable_key)
+            .collect();
+        assert!(
+            dead.contains(&"r1:a.py#target".to_string()),
+            "an inferred call is not a use: {dead:?}"
+        );
+        assert!(
+            !dead.contains(&"r1:c.py#guess_caller".to_string()),
+            "a certain call is a use"
+        );
+    }
+
+    #[test]
+    fn map_dep_edges_live_fallback_omits_an_inferred_call_pair() {
+        let (storage, snap) = prb_fixture();
+        prb_edge(
+            &storage,
+            &snap,
+            "e1",
+            "k",
+            "t",
+            "CALLS",
+            "inferred",
+            "python-core:0.2.0",
+            Some(3),
+            None,
+        );
+        prb_edge(
+            &storage,
+            &snap,
+            "e2",
+            "g",
+            "t",
+            "CALLS",
+            "static",
+            "python-core:0.2.0",
+            Some(4),
+            None,
+        );
+        prb_edge(
+            &storage,
+            &snap,
+            "e3",
+            "k",
+            "g",
+            "IMPORTS",
+            "static",
+            "python-core:0.2.0",
+            Some(1),
+            None,
+        );
+        let edges: Vec<(String, String, String)> = storage
+            .map_resolved_dep_edges_in_path(&snap, "")
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.source_file, e.target_file, e.edge_type))
+            .collect();
+        assert_eq!(
+            edges,
+            vec![
+                (
+                    "b.py".to_string(),
+                    "c.py".to_string(),
+                    "IMPORTS".to_string()
+                ),
+                ("c.py".to_string(), "a.py".to_string(), "CALLS".to_string()),
+            ],
+            "the inferred b.py → a.py call pair is omitted"
+        );
+    }
 
     #[test]
     fn find_dead_nodes_excludes_resource_kinds() {

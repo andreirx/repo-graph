@@ -600,6 +600,8 @@ impl AgentStorageRead for StorageConnection {
             resolved_calls,
             unresolved_calls,
             unresolved_calls_internal_like,
+            // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the trust report's inferred count.
+            inferred_calls: report.summary.inferred_calls,
             unresolved_calls_unknown,
             external_targets,
             call_graph_reliability,
@@ -729,12 +731,16 @@ impl AgentStorageRead for StorageConnection {
         }
     }
 
+    // PYTHON-RECEIVER-BINDING-1: both dead-node reads count only a CERTAIN call (`static`/
+    // `dynamic`) as a use — an inferred call never keeps a symbol alive (RG-REQ-005-L02).
     fn find_dead_nodes_in_path(
         &self,
         snapshot_uid: &str,
         repo_uid: &str,
         path_prefix: &str,
     ) -> Result<Vec<AgentDeadNode>, AgentStorageError> {
+        self.reject_unreadable_call_resolutions(snapshot_uid, "find_dead_nodes_in_path")
+            .map_err(map_err("find_dead_nodes_in_path"))?;
         let prefix_pattern = format!("{}/%", path_prefix);
         let sql = "SELECT
 				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
@@ -752,8 +758,9 @@ impl AgentStorageRead for StorageConnection {
 			   AND n.node_uid NOT IN (
 			     SELECT e.target_node_uid FROM edges e
 			     WHERE e.snapshot_uid = ?1
-			       AND e.type IN ('IMPORTS', 'CALLS', 'IMPLEMENTS', 'INSTANTIATES',
-			                      'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
+			       AND (e.type IN ('IMPORTS', 'IMPLEMENTS', 'INSTANTIATES',
+			                       'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
+			            OR (e.type = 'CALLS' AND e.resolution IN ('static', 'dynamic')))
 			   )
 			   AND n.stable_key NOT IN (
 			     SELECT d.target_stable_key FROM declarations d
@@ -792,6 +799,8 @@ impl AgentStorageRead for StorageConnection {
         repo_uid: &str,
         file_path: &str,
     ) -> Result<Vec<AgentDeadNode>, AgentStorageError> {
+        self.reject_unreadable_call_resolutions(snapshot_uid, "find_dead_nodes_in_file")
+            .map_err(map_err("find_dead_nodes_in_file"))?;
         let sql = "SELECT
 				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
 				f.path AS file_path, n.line_start,
@@ -808,8 +817,9 @@ impl AgentStorageRead for StorageConnection {
 			   AND n.node_uid NOT IN (
 			     SELECT e.target_node_uid FROM edges e
 			     WHERE e.snapshot_uid = ?1
-			       AND e.type IN ('IMPORTS', 'CALLS', 'IMPLEMENTS', 'INSTANTIATES',
-			                      'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
+			       AND (e.type IN ('IMPORTS', 'IMPLEMENTS', 'INSTANTIATES',
+			                       'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
+			            OR (e.type = 'CALLS' AND e.resolution IN ('static', 'dynamic')))
 			   )
 			   AND n.stable_key NOT IN (
 			     SELECT d.target_stable_key FROM declarations d
@@ -1289,11 +1299,16 @@ impl AgentStorageRead for StorageConnection {
         }
     }
 
+    // PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L02, RG-REQ-002-L11; D-PSI-R1-VOCAB): the certain
+    // caller/callee sets — only a CALLS row whose resolution is `static` or `dynamic`. The inferred
+    // remainder is `find_symbol_call_remainders`.
     fn find_symbol_callers(
         &self,
         snapshot_uid: &str,
         symbol_stable_key: &str,
     ) -> Result<Vec<AgentCallerRow>, AgentStorageError> {
+        self.reject_unreadable_call_resolutions(snapshot_uid, "find_symbol_callers")
+            .map_err(map_err("find_symbol_callers"))?;
         let conn = self.connection();
         let mut stmt = conn
             .prepare(
@@ -1314,6 +1329,7 @@ impl AgentStorageRead for StorageConnection {
 				 LEFT JOIN nodes mod_n ON own.source_node_uid = mod_n.node_uid \
 				 WHERE e.snapshot_uid = ? \
 					AND e.type = 'CALLS' \
+					AND e.resolution IN ('static', 'dynamic') \
 					AND e.target_node_uid = ( \
 						SELECT node_uid FROM nodes \
 						WHERE snapshot_uid = ? AND stable_key = ? \
@@ -1353,6 +1369,8 @@ impl AgentStorageRead for StorageConnection {
         snapshot_uid: &str,
         symbol_stable_key: &str,
     ) -> Result<Vec<AgentCalleeRow>, AgentStorageError> {
+        self.reject_unreadable_call_resolutions(snapshot_uid, "find_symbol_callees")
+            .map_err(map_err("find_symbol_callees"))?;
         let conn = self.connection();
         let mut stmt = conn
             .prepare(
@@ -1373,6 +1391,7 @@ impl AgentStorageRead for StorageConnection {
 				 LEFT JOIN nodes mod_n ON own.source_node_uid = mod_n.node_uid \
 				 WHERE e.snapshot_uid = ? \
 					AND e.type = 'CALLS' \
+					AND e.resolution IN ('static', 'dynamic') \
 					AND e.source_node_uid = ( \
 						SELECT node_uid FROM nodes \
 						WHERE snapshot_uid = ? AND stable_key = ? \
@@ -1405,6 +1424,23 @@ impl AgentStorageRead for StorageConnection {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(map_err("find_symbol_callees"))
+    }
+
+    fn find_symbol_call_remainders(
+        &self,
+        snapshot_uid: &str,
+        symbol_stable_key: &str,
+        symbol_name: &str,
+    ) -> Result<repo_graph_agent::AgentCallRemainders, AgentStorageError> {
+        // PYTHON-RECEIVER-BINDING-1: delegates to `call_remainder_reads` (queries.rs and this file
+        // are over the size guardrail).
+        StorageConnection::find_symbol_call_remainders(
+            self,
+            snapshot_uid,
+            symbol_stable_key,
+            symbol_name,
+        )
+        .map_err(|e| AgentStorageError::new("find_symbol_call_remainders", e.to_string()))
     }
 
     fn find_cycles_involving_module(

@@ -149,7 +149,7 @@ fn build_db_with_calls(
                 source_node_uid: uid_of[a].clone(),
                 target_node_uid: uid_of[b].clone(),
                 edge_type: "CALLS".to_string(),
-                resolution: "resolved".to_string(),
+                resolution: "static".to_string(),
                 extractor: "test".to_string(),
                 location: None,
                 metadata_json: None,
@@ -435,6 +435,8 @@ fn build_orient_envelope_symbol_focus_callers_leaf_is_multi_source() {
         &f.snapshot_uid,
         Focus::symbol(&f.dst, &f.dst, None),
         vec![Signal::callers_summary(CallersSummaryEvidence {
+            inferred_count: 0,
+            inferred_name_only: false,
             count: f.ks_callers.len() as u64,
             top_modules: Vec::new(),
         })],
@@ -475,6 +477,8 @@ fn build_orient_envelope_symbol_focus_callees_leaf_is_multi_source() {
         &f.snapshot_uid,
         Focus::symbol(&f.src, &f.src, None),
         vec![Signal::callees_summary(CalleesSummaryEvidence {
+            inferred_count: 0,
+            inferred_name_only: false,
             count: f.ks_callees.len() as u64,
             top_modules: Vec::new(),
         })],
@@ -881,6 +885,8 @@ fn build_orient_envelope_symbol_focus_callgraph_leaf_livegraph_via_cert() {
         &f.snapshot_uid,
         Focus::symbol(&callee, &callee, None),
         vec![Signal::callers_summary(CallersSummaryEvidence {
+            inferred_count: 0,
+            inferred_name_only: false,
             count: 1,
             top_modules: Vec::new(),
         })],

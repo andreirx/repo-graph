@@ -545,6 +545,20 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
             .list_members_of_type(snapshot_uid, qualified_name)
     }
 
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-SCOPE-1 amendment 4): the call remainder (inferred rows,
+    /// unresolved calls naming/leaving the symbol) is a SQLite read DELEGATED on every path —
+    /// including LiveGraph green, where the certain rows are LiveGraph-served — so the answer never
+    /// depends on the backend (RG-REQ-002-L02).
+    fn find_symbol_call_remainders(
+        &self,
+        snapshot_uid: &str,
+        symbol_stable_key: &str,
+        symbol_name: &str,
+    ) -> Result<repo_graph_agent::AgentCallRemainders, AgentStorageError> {
+        self.inner
+            .find_symbol_call_remainders(snapshot_uid, symbol_stable_key, symbol_name)
+    }
+
     fn find_file_importers(
         &self,
         snapshot_uid: &str,

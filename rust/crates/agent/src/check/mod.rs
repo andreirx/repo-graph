@@ -141,6 +141,7 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 call_graph_reliability: None,
                 resolved_calls: 0,
                 unresolved_calls_internal_like: 0,
+                inferred_calls: 0,
                 unresolved_calls: 0,
                 unresolved_calls_unknown: 0,
                 external_targets: Vec::new(),
@@ -195,6 +196,7 @@ pub fn run_check_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 // the unclassified count feeds the conservative-rate caveat.
                 resolved_calls: trust.resolved_calls,
                 unresolved_calls_internal_like: trust.unresolved_calls_internal_like,
+                inferred_calls: trust.inferred_calls,
                 unresolved_calls: trust.unresolved_calls,
                 unresolved_calls_unknown: trust.unresolved_calls_unknown,
                 external_targets: trust.external_targets.clone(),

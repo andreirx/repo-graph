@@ -269,6 +269,7 @@ mod tests {
                 unresolved_calls: 1,
                 unresolved_calls_external: 0,
                 unresolved_calls_internal_like: 1,
+                inferred_calls: 0,
                 call_resolution_rate: 0.83,
                 reliability: TrustReliability {
                     import_graph: axis(),

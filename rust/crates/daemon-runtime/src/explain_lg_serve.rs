@@ -234,6 +234,12 @@ pub(crate) fn serve_callers(
         items,
         items_truncated: ev.items_truncated,
         items_omitted_count: ev.items_omitted_count,
+        // PYTHON-RECEIVER-BINDING-1 (D-PRB-SCOPE-1 amendment 4): the call remainder is the
+        // SQLite-delegated read of the base evidence — it rides the LiveGraph-served rows.
+        inferred_count: ev.inferred_count,
+        inferred_items: ev.inferred_items,
+        inferred_by_basis: ev.inferred_by_basis,
+        unresolved_naming: ev.unresolved_naming,
     });
     (
         Some(original.adopt_rank_and_scope(served)),
@@ -306,6 +312,11 @@ pub(crate) fn serve_callees(
         items,
         items_truncated: ev.items_truncated,
         items_omitted_count: ev.items_omitted_count,
+        // PYTHON-RECEIVER-BINDING-1 (amendment 4): the remainder rides the LiveGraph rows.
+        inferred_count: ev.inferred_count,
+        inferred_items: ev.inferred_items,
+        inferred_by_basis: ev.inferred_by_basis,
+        unresolved_from: ev.unresolved_from,
     });
     (
         Some(original.adopt_rank_and_scope(served)),

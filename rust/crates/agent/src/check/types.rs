@@ -112,6 +112,10 @@ pub struct CheckInput {
     /// EXCLUDED — the in-scope-rate denominator with `resolved_calls`. review-3 §2:
     /// "in-scope OR unclassified", not known-internal. 0 when no snapshot.
     pub unresolved_calls_internal_like: u64,
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): CALLS bound only by an inferred binding —
+    /// in the rate's universe, never resolved; stated beside the rate in the
+    /// CALL_GRAPH_RELIABILITY summary. 0 when no snapshot.
+    pub inferred_calls: u64,
     /// RELIABILITY-REFRAME-1 (review-3 §1): ALL unresolved CALLS (resolved-or-not),
     /// the external-SHARE denominator with `resolved_calls` (`total_calls`). Lets
     /// `check` render the external share, not an `external=0` placeholder. 0 when no

@@ -29,7 +29,8 @@ use super::*;
 fn in_scope_rate_excludes_externals_from_denominator() {
     // 50 resolved, 5 internal-like unresolved, 80 external (NOT in denom).
     // In-scope = 50 / (50 + 5) = 90.9%, NOT 50 / (50 + 85) = 37%.
-    let v = CallReliabilityView::derive(50, 5, 80, 135, vec![], Some(AgentReliabilityLevel::High));
+    let v =
+        CallReliabilityView::derive(50, 5, 0, 80, 135, vec![], Some(AgentReliabilityLevel::High));
     let r = v.resolution.expect("resolved rate present");
     assert_eq!(r.resolved, 50);
     assert_eq!(r.in_scope_or_unclassified_total, 55);
@@ -39,7 +40,7 @@ fn in_scope_rate_excludes_externals_from_denominator() {
 #[test]
 fn no_in_scope_calls_is_unknown_not_fabricated_full() {
     // Slice §3 / REVISE #3: zero in-scope calls is UNKNOWN, never rendered 100%.
-    let v = CallReliabilityView::derive(0, 0, 0, 0, vec![], Some(AgentReliabilityLevel::High));
+    let v = CallReliabilityView::derive(0, 0, 0, 0, 0, vec![], Some(AgentReliabilityLevel::High));
     assert_eq!(v.resolution, None);
     assert_eq!(v.resolved_phrase(), "no in-scope calls measured");
     // The band does NOT ride a no-calls line (a band over zero calls is vacuous).
@@ -48,7 +49,8 @@ fn no_in_scope_calls_is_unknown_not_fabricated_full() {
 
 #[test]
 fn resolved_phrase_is_reader_frame_not_pipeline_grade() {
-    let v = CallReliabilityView::derive(42, 58, 0, 100, vec![], Some(AgentReliabilityLevel::Low));
+    let v =
+        CallReliabilityView::derive(42, 58, 0, 0, 100, vec![], Some(AgentReliabilityLevel::Low));
     assert_eq!(v.resolved_phrase(), "your code's calls 42% resolved");
     assert_eq!(
         v.resolved_with_band(),
@@ -62,8 +64,15 @@ fn resolved_phrase_is_reader_frame_not_pipeline_grade() {
 #[test]
 fn external_share_names_the_share_and_next_action() {
     // 30 external of 130 total calls → 23%.
-    let v =
-        CallReliabilityView::derive(70, 30, 30, 130, vec![], Some(AgentReliabilityLevel::Medium));
+    let v = CallReliabilityView::derive(
+        70,
+        30,
+        0,
+        30,
+        130,
+        vec![],
+        Some(AgentReliabilityLevel::Medium),
+    );
     let line = v.external_line().expect("external line present");
     assert!(
         line.contains("23% of calls go into external libraries"),
@@ -78,7 +87,15 @@ fn external_share_known_zero_is_preserved_distinct_from_unknown() {
     // KNOWN-ZERO: the heuristic ran over 130 calls and matched none. The projection PRESERVES
     // that as `Some(ExternalShare { external: 0, .. })` — a measured finding — and renders the
     // honest "none identified (heuristic)", never a fabricated "0% external" and never silence.
-    let v = CallReliabilityView::derive(100, 30, 0, 130, vec![], Some(AgentReliabilityLevel::High));
+    let v = CallReliabilityView::derive(
+        100,
+        30,
+        0,
+        0,
+        130,
+        vec![],
+        Some(AgentReliabilityLevel::High),
+    );
     assert_eq!(
         v.external,
         Some(ExternalShare {
@@ -100,7 +117,7 @@ fn external_share_known_zero_is_preserved_distinct_from_unknown() {
     // UNKNOWN: with NO calls at all there is genuinely nothing to measure — `None`, NOT a
     // known-zero. This is the ONLY case that collapses to `None`, kept distinct from the
     // known-zero above (the rule-6 separation the test name promises).
-    let empty = CallReliabilityView::derive(0, 0, 0, 0, vec![], None);
+    let empty = CallReliabilityView::derive(0, 0, 0, 0, 0, vec![], None);
     assert_eq!(empty.external, None, "no calls at all is unknown (None)");
     assert_eq!(empty.external_line(), None);
 }
@@ -150,6 +167,7 @@ fn named_coverage_map_line_caps_and_summarises_the_tail() {
     let v = CallReliabilityView::derive(
         10,
         10,
+        0,
         50,
         100,
         vec![
@@ -176,7 +194,7 @@ fn named_coverage_map_line_caps_and_summarises_the_tail() {
     assert!(line.contains("+1 more"), "{line}");
     assert!(line.contains("follow to their crates/docs"), "{line}");
     // Empty when nothing external is named.
-    let none = CallReliabilityView::derive(10, 10, 0, 20, vec![], None);
+    let none = CallReliabilityView::derive(10, 10, 0, 0, 20, vec![], None);
     assert_eq!(none.named_coverage_map_line(2), None);
 }
 
@@ -224,7 +242,8 @@ fn resolved_phrase_with_band_is_the_one_band_convention() {
         resolved_phrase_with_band(42.0, "LOW"),
         "your code's calls 42% resolved (LOW)"
     );
-    let v = CallReliabilityView::derive(42, 58, 0, 100, vec![], Some(AgentReliabilityLevel::Low));
+    let v =
+        CallReliabilityView::derive(42, 58, 0, 0, 100, vec![], Some(AgentReliabilityLevel::Low));
     assert_eq!(
         v.resolved_with_band(),
         resolved_phrase_with_band(42.0, "LOW")
@@ -282,4 +301,52 @@ fn language_reliability_cell_no_in_scope_calls_is_unknown_never_a_fabricated_per
         format!("Go {NO_IN_SCOPE_CALLS}")
     );
     assert!(language_reliability_cell("Go", 0, 0).contains("no in-scope calls measured"));
+}
+
+// ── PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A) ──────────────────────
+
+#[test]
+fn inferred_calls_stay_in_the_denominator_and_the_phrase_states_them() {
+    // 25 certain, 10 inferred, 65 internal-like: the universe is 100, the rate 25%.
+    let v =
+        CallReliabilityView::derive(25, 65, 10, 0, 100, vec![], Some(AgentReliabilityLevel::Low));
+    let r = v.resolution.expect("rate present");
+    assert_eq!(r.resolved, 25);
+    assert_eq!(r.inferred, 10);
+    assert_eq!(r.in_scope_or_unclassified_total, 100);
+    assert!((r.pct - 25.0).abs() < 1e-9);
+    assert_eq!(
+        v.resolved_phrase(),
+        "your code's calls 25% resolved; +10 inferred calls not counted as resolved"
+    );
+    assert_eq!(
+        v.resolved_with_band(),
+        "your code's calls 25% resolved (LOW); +10 inferred calls not counted as resolved"
+    );
+    assert_eq!(
+        v.inferred_clause().as_deref(),
+        Some("+10 inferred calls not counted as resolved")
+    );
+}
+
+#[test]
+fn inferred_clause_is_absent_when_no_call_is_inferred() {
+    let v =
+        CallReliabilityView::derive(42, 58, 0, 0, 100, vec![], Some(AgentReliabilityLevel::Low));
+    assert_eq!(v.inferred_clause(), None);
+    assert!(!v.resolved_with_band().contains("inferred"));
+    assert_eq!(inferred_calls_clause(0), None);
+}
+
+#[test]
+fn inferred_clause_is_singular_at_one() {
+    let v = CallReliabilityView::derive(9, 0, 1, 0, 10, vec![], None);
+    assert_eq!(
+        v.inferred_clause().as_deref(),
+        Some("+1 inferred call not counted as resolved")
+    );
+    assert_eq!(
+        v.resolved_phrase(),
+        "your code's calls 90% resolved; +1 inferred call not counted as resolved"
+    );
 }

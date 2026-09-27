@@ -84,6 +84,9 @@ pub struct ExternalTarget {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolvedRate {
     pub resolved: u64,
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): calls bound by an inferred (name-only)
+    /// binding. In the denominator (they are calls the index observed), never in `resolved`.
+    pub inferred: u64,
     /// The rate's denominator: resolved + all unresolved calls EXCEPT known-external
     /// = the genuinely in-scope calls PLUS the unclassified ones. NOT purely in-scope
     /// (hence the field name); the reader label spells "in-scope or unclassified" out.
@@ -93,13 +96,16 @@ pub struct ResolvedRate {
 
 impl ResolvedRate {
     /// `None` when there are no in-scope-or-unclassified calls at all (nothing to measure).
-    fn derive(resolved: u64, internal_like: u64) -> Option<Self> {
-        let in_scope_or_unclassified_total = resolved + internal_like;
+    /// The denominator is `resolved + inferred + internal_like` (D-PRB-RATE-1 = A: the universe
+    /// keeps the inferred calls; only the numerator counts certain calls).
+    fn derive(resolved: u64, inferred: u64, internal_like: u64) -> Option<Self> {
+        let in_scope_or_unclassified_total = resolved + inferred + internal_like;
         if in_scope_or_unclassified_total == 0 {
             return None;
         }
         Some(Self {
             resolved,
+            inferred,
             in_scope_or_unclassified_total,
             pct: resolved as f64 / in_scope_or_unclassified_total as f64 * 100.0,
         })
@@ -180,16 +186,21 @@ impl CallReliabilityView {
     /// (→ `external: None`, nothing to measure); `external = 0` WITH calls present
     /// yields the preserved known-zero share (review-5 §2). A surface with no named
     /// list passes `named_targets = vec![]`.
+    ///
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): `inferred` = calls bound by an inferred
+    /// (name-only) binding — kept in the rate's denominator, never counted resolved, and stated
+    /// beside the rate by [`Self::inferred_clause`] (appended to both phrases).
     pub fn derive(
         resolved: u64,
         internal_like: u64,
+        inferred: u64,
         external: u64,
         total_calls: u64,
         named_targets: Vec<ExternalTarget>,
         band: Option<AgentReliabilityLevel>,
     ) -> Self {
         Self {
-            resolution: ResolvedRate::derive(resolved, internal_like),
+            resolution: ResolvedRate::derive(resolved, inferred, internal_like),
             external: ExternalShare::derive(external, total_calls),
             total_calls,
             named_targets,
@@ -202,9 +213,20 @@ impl CallReliabilityView {
     /// unknown, never a fabricated 100%).
     pub fn resolved_phrase(&self) -> String {
         match &self.resolution {
-            Some(r) => resolved_phrase_pct(r.pct),
+            Some(r) => with_inferred_clause(resolved_phrase_pct(r.pct), r.inferred),
             None => NO_IN_SCOPE_CALLS.to_string(),
         }
+    }
+
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the clause stating the inferred calls the
+    /// rate did not count — "+N inferred calls not counted as resolved" (singular `call` at 1);
+    /// `None` when no call is inferred. Appended to [`Self::resolved_phrase`] and
+    /// [`Self::resolved_with_band`]; exposed for the surfaces (trust's bullet) that compose the
+    /// rate themselves.
+    pub fn inferred_clause(&self) -> Option<String> {
+        self.resolution
+            .as_ref()
+            .and_then(|r| inferred_calls_clause(r.inferred))
     }
 
     /// The in-scope phrase with the band appended: "your code's calls M% resolved
@@ -214,7 +236,9 @@ impl CallReliabilityView {
     /// [`resolved_phrase_with_band`] so the "(BAND)" convention has ONE home.
     pub fn resolved_with_band(&self) -> String {
         match (&self.resolution, self.band) {
-            (Some(r), Some(b)) => resolved_phrase_with_band(r.pct, band_label(b)),
+            (Some(r), Some(b)) => {
+                with_inferred_clause(resolved_phrase_with_band(r.pct, band_label(b)), r.inferred)
+            }
             _ => self.resolved_phrase(),
         }
     }
@@ -278,6 +302,40 @@ impl CallReliabilityView {
             shown.join(", "),
             tail
         ))
+    }
+}
+
+/// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the ONE wording of the inferred-calls clause —
+/// "+N inferred calls not counted as resolved" (singular `call` at 1); `None` at 0.
+pub fn inferred_calls_clause(inferred: u64) -> Option<String> {
+    match inferred {
+        0 => None,
+        1 => Some("+1 inferred call not counted as resolved".to_string()),
+        n => Some(format!("+{n} inferred calls not counted as resolved")),
+    }
+}
+
+/// PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11): the ONE label of an inferred-caller/-callee
+/// remainder — "N inferred (name-only)" when every inferred row's basis is the name-only binding
+/// (`receiver_untyped_name_only`), else "N inferred" (a remainder holding a row of another basis —
+/// a legacy compiler-promotion row — is never called name-only).
+pub fn inferred_remainder_label(count: u64, all_name_only: bool) -> String {
+    if all_name_only {
+        format!("{count} inferred (name-only)")
+    } else {
+        format!("{count} inferred")
+    }
+}
+
+/// The recorded basis of a name-only binding on an untyped receiver (the resolver's
+/// `RECEIVER_UNTYPED_NAME_ONLY_BASIS`; this crate does not depend on the indexer).
+pub const NAME_ONLY_BASIS: &str = "receiver_untyped_name_only";
+
+/// Append the inferred-calls clause to a rate phrase (`"<phrase>; <clause>"`) when N > 0.
+fn with_inferred_clause(phrase: String, inferred: u64) -> String {
+    match inferred_calls_clause(inferred) {
+        Some(clause) => format!("{phrase}; {clause}"),
+        None => phrase,
     }
 }
 
@@ -355,7 +413,10 @@ pub fn band_from_wire(level: &str) -> Option<AgentReliabilityLevel> {
 /// `resolved_phrase_with_band` / `sentence_case` / `band_from_wire` helpers in this module are already
 /// `pub` and consumed cross-crate (daemon + rgr) for the identical anti-fork reason.
 pub fn language_reliability_cell(display: &str, resolved: u64, internal_like: u64) -> String {
-    match ResolvedRate::derive(resolved, internal_like) {
+    // PYTHON-RECEIVER-BINDING-1: callers pass the scope's non-resolved share
+    // (`CallResolutionCounts::in_scope_not_resolved` = internal-like + inferred) as
+    // `internal_like`, so the "% of M calls" keeps the universe.
+    match ResolvedRate::derive(resolved, 0, internal_like) {
         Some(r) => format!(
             "{display} {:.0}% of {} calls",
             r.pct, r.in_scope_or_unclassified_total

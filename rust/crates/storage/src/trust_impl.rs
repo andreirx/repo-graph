@@ -30,7 +30,7 @@ use repo_graph_classification::types::{
     ClassifierEdgeInput, ImportBinding, PackageDependencySet, UnresolvedEdgeCategory,
 };
 use repo_graph_trust::storage_port::{
-    BasisCodeCountRow, ClassificationCountRow, CountByClassificationInput,
+    BasisCodeCountRow, CallCertaintyCounts, ClassificationCountRow, CountByClassificationInput,
     ExternalDependencyAttribution, NamedDependencyCount, PathPrefixModuleCycle,
     QueryUnresolvedEdgesInput, ResolvedCallAggregate, TrustModuleStats, TrustStorageRead,
     TrustUnresolvedEdgeSample, UnresolvedCallSite, UnresolvedEdgeBasisCode,
@@ -279,6 +279,28 @@ impl TrustStorageRead for StorageConnection {
             |row| row.get(0),
         )?;
         Ok(count as u64)
+    }
+
+    fn count_call_edges_by_certainty(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<CallCertaintyCounts, StorageError> {
+        // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A; D-PSI-R1-VOCAB): certain = `static` /
+        // `dynamic`; inferred = `inferred`. A value outside the vocabulary is unreadable: the
+        // read is refused rather than counting it in neither (never a complete-looking split).
+        self.reject_unreadable_call_resolutions(snapshot_uid, "count_call_edges_by_certainty")?;
+        let (certain, inferred): (i64, i64) = self.connection().query_row(
+            "SELECT \
+                COALESCE(SUM(CASE WHEN resolution IN ('static', 'dynamic') THEN 1 ELSE 0 END), 0), \
+                COALESCE(SUM(CASE WHEN resolution = 'inferred' THEN 1 ELSE 0 END), 0) \
+             FROM edges WHERE snapshot_uid = ?1 AND type = 'CALLS'",
+            rusqlite::params![snapshot_uid],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok(CallCertaintyCounts {
+            certain: certain as u64,
+            inferred: inferred as u64,
+        })
     }
 
     fn get_resolved_call_aggregate(
@@ -968,6 +990,44 @@ mod tests {
         let snap_uid = setup_with_snapshot(&storage);
         let count = TrustStorageRead::count_edges_by_type(&storage, &snap_uid, "CALLS");
         assert_eq!(count.unwrap(), 0);
+    }
+
+    #[test]
+    fn count_call_edges_by_certainty_splits_certain_from_inferred() {
+        // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A; D-PSI-R1-VOCAB).
+        let storage = setup();
+        let snap = setup_with_snapshot(&storage);
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind) VALUES \
+                   ('a', '{snap}', 'r1', 'k:a', 'a', 'SYMBOL'), ('b', '{snap}', 'r1', 'k:b', 'b', 'SYMBOL'); \
+                 INSERT INTO edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_node_uid, type, resolution, extractor) VALUES \
+                   ('e1', '{snap}', 'r1', 'a', 'b', 'CALLS', 'static', 't'), \
+                   ('e2', '{snap}', 'r1', 'a', 'b', 'CALLS', 'dynamic', 't'), \
+                   ('e3', '{snap}', 'r1', 'a', 'b', 'CALLS', 'inferred', 't'), \
+                   ('e5', '{snap}', 'r1', 'a', 'b', 'IMPORTS', 'inferred', 't');"
+            ))
+            .unwrap();
+        let split = TrustStorageRead::count_call_edges_by_certainty(&storage, &snap).unwrap();
+        assert_eq!(split.certain, 2, "static + dynamic");
+        assert_eq!(split.inferred, 1, "CALLS only; IMPORTS never counted");
+        // An empty snapshot is a measured zero (the read ran).
+        let other = setup_with_snapshot(&storage);
+        let zero = TrustStorageRead::count_call_edges_by_certainty(&storage, &other).unwrap();
+        assert_eq!((zero.certain, zero.inferred), (0, 0));
+        // A value outside the vocabulary is in neither count AND is not silently left out of
+        // both: the split is refused by name (review F-2, RG-REQ-002-L04).
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_node_uid, type, resolution, extractor) VALUES \
+                   ('e4', '{snap}', 'r1', 'a', 'b', 'CALLS', 'resolved', 't');"
+            ))
+            .unwrap();
+        let err = TrustStorageRead::count_call_edges_by_certainty(&storage, &snap)
+            .expect_err("an unreadable resolution refuses the split");
+        assert!(err.to_string().contains("unreadable resolution"), "{err}");
     }
 
     // ── get_resolved_call_aggregate (EC-1 M-3b) ───────────────

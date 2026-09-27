@@ -147,7 +147,12 @@ pub struct TrustComputationInput {
     pub module_stats: Vec<TrustModuleStats>,
     pub path_prefix_cycles: Vec<PathPrefixModuleCycle>,
     pub active_entrypoint_count: usize,
+    /// Certain CALLS (resolution `static`/`dynamic`) — the rate's numerator.
     pub resolved_calls: u64,
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): inferred CALLS — never counted resolved,
+    /// kept in the rate's universe (the denominator's non-resolved part with the internal-like
+    /// unresolved calls) and stated beside the rate.
+    pub inferred_calls: u64,
 
     // ── Classification data (pre-fetched) ─────────────────────
     /// Classification counts filtered to CALLS-family categories.
@@ -373,8 +378,14 @@ pub fn compute_trust_report_cancellable(
         unresolved_imports,
     );
 
-    let call_graph_reliability =
-        rules::compute_call_graph_reliability(input.resolved_calls, unresolved_calls_internal_like);
+    // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the band's non-resolved operand is the
+    // internal-like unresolved calls PLUS the inferred calls — the universe is unchanged, only
+    // the numerator loses the calls that were never certain. The parity-mirrored rule itself is
+    // unchanged (its second parameter's doc names the operand).
+    let call_graph_reliability = rules::compute_call_graph_reliability(
+        input.resolved_calls,
+        unresolved_calls_internal_like + input.inferred_calls,
+    );
 
     let dead_code_reliability = rules::compute_dead_code_reliability(
         missing_entrypoints.triggered,
@@ -591,7 +602,7 @@ pub fn compute_trust_report_cancellable(
 
     // ── Phase 8: Call resolution rate ─────────────────────────
     let call_resolution_rate = {
-        let total = input.resolved_calls + unresolved_calls_internal_like;
+        let total = input.resolved_calls + input.inferred_calls + unresolved_calls_internal_like;
         if total > 0 {
             input.resolved_calls as f64 / total as f64
         } else {
@@ -626,6 +637,7 @@ pub fn compute_trust_report_cancellable(
             unresolved_calls,
             unresolved_calls_external,
             unresolved_calls_internal_like,
+            inferred_calls: input.inferred_calls,
             call_resolution_rate,
             reliability: TrustReliability {
                 import_graph: import_graph_reliability,
@@ -927,14 +939,28 @@ pub fn assemble_trust_report_cancellable<S: TrustStorageRead>(
     // snapshots, and its source is distinguishable at the artifact layer
     // (aggregate absent = live-derived). Never fabricate a zero for a
     // missing aggregate — unknown is never zero.
-    let resolved_calls = match storage
-        .get_resolved_call_aggregate(snapshot_uid)
-        .map_err(TrustAssemblyError::Storage)?
-    {
-        Some(aggregate) => aggregate.count,
-        None => storage
-            .count_edges_by_type(snapshot_uid, "CALLS")
+    //
+    // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the persisted aggregate counts certain calls
+    // only on a snapshot written under the certainty rule, which ALSO writes the diagnostics key
+    // `inferred_calls`. The pair is served only together. When either is absent (a snapshot
+    // written before the rule, whose aggregate counts its `compiler-promotion:0.1.0` inferred
+    // rows as resolved), BOTH figures come from ONE live certainty split — never a persisted
+    // aggregate beside a live inferred count, which would count those rows twice, and never a
+    // defaulted zero.
+    let persisted_inferred = diagnostics.as_ref().and_then(|d| d.inferred_calls);
+    let (resolved_calls, inferred_calls) = match (
+        storage
+            .get_resolved_call_aggregate(snapshot_uid)
             .map_err(TrustAssemblyError::Storage)?,
+        persisted_inferred,
+    ) {
+        (Some(aggregate), Some(inferred)) => (aggregate.count, inferred),
+        _ => {
+            let split = storage
+                .count_call_edges_by_certainty(snapshot_uid)
+                .map_err(TrustAssemblyError::Storage)?;
+            (split.certain, split.inferred)
+        }
     };
 
     // CALLS-family classification counts (Variant A reweighting).
@@ -1002,6 +1028,7 @@ pub fn assemble_trust_report_cancellable<S: TrustStorageRead>(
         path_prefix_cycles,
         active_entrypoint_count,
         resolved_calls,
+        inferred_calls,
         calls_classification_counts,
         all_classification_counts,
         all_basis_code_counts,
@@ -1043,6 +1070,7 @@ mod tests {
             path_prefix_cycles: vec![],
             active_entrypoint_count: 1, // >0 to avoid missing_entrypoint trigger
             resolved_calls: 0,
+            inferred_calls: 0,
             calls_classification_counts: vec![],
             all_classification_counts: vec![],
             all_basis_code_counts: vec![],
@@ -1177,6 +1205,7 @@ mod tests {
         let mut breakdown = BTreeMap::new();
         breakdown.insert("calls_obj_method_needs_type_info".into(), 100);
         input.diagnostics = Some(ExtractionDiagnostics {
+            inferred_calls: None,
             diagnostics_version: 1,
             edges_total: 200,
             unresolved_total: 100,
@@ -1216,6 +1245,7 @@ mod tests {
         breakdown.insert("imports_file_not_found".into(), 20);
         breakdown.insert("other".into(), 1);
         input.diagnostics = Some(ExtractionDiagnostics {
+            inferred_calls: None,
             diagnostics_version: 1,
             edges_total: 100,
             unresolved_total: 26,
@@ -1722,6 +1752,7 @@ mod tests {
         let mut breakdown = BTreeMap::new();
         breakdown.insert("calls_function_ambiguous_or_missing".into(), 100);
         input.diagnostics = Some(ExtractionDiagnostics {
+            inferred_calls: None,
             diagnostics_version: 1,
             edges_total: 110,
             unresolved_total: 100,
@@ -1785,6 +1816,9 @@ mod tests {
         /// models a pre-migration snapshot, so every pre-existing test
         /// exercises the live-COUNT fallback path unchanged.
         resolved_call_aggregate: Option<ResolvedCallAggregate>,
+        /// PYTHON-RECEIVER-BINDING-1: the live INFERRED CALLS rows (the live certainty split's
+        /// second figure; its first is `resolved_calls`).
+        inferred_live: u64,
         calls_classification_counts: Vec<ClassificationCountRow>,
         all_classification_counts: Vec<ClassificationCountRow>,
         all_basis_code_counts: Vec<BasisCodeCountRow>,
@@ -1804,6 +1838,7 @@ mod tests {
                 active_entrypoint_count: 1,
                 resolved_calls: 0,
                 resolved_call_aggregate: None,
+                inferred_live: 0,
                 calls_classification_counts: vec![],
                 all_classification_counts: vec![],
                 all_basis_code_counts: vec![],
@@ -1850,6 +1885,19 @@ mod tests {
                 return self.err_result();
             }
             Ok(self.resolved_call_aggregate.clone())
+        }
+
+        fn count_call_edges_by_certainty(
+            &self,
+            _snapshot_uid: &str,
+        ) -> Result<crate::storage_port::CallCertaintyCounts, String> {
+            if self.force_error.is_some() {
+                return self.err_result();
+            }
+            Ok(crate::storage_port::CallCertaintyCounts {
+                certain: self.resolved_calls,
+                inferred: self.inferred_live,
+            })
         }
 
         fn count_active_declarations(&self, _repo_uid: &str, _kind: &str) -> Result<usize, String> {
@@ -1973,9 +2021,17 @@ mod tests {
     /// wins even over a divergent live COUNT (the read path performs a
     /// source swap, not a consistency check; parity between the two is the
     /// write path's obligation, enforced by the parity validation suite).
+    ///
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A; a changed fixture): the aggregate is served
+    /// only beside the diagnostics key `inferred_calls` written with it, so the fixture models a
+    /// snapshot written under the certainty rule (key present, 0 inferred).
     #[test]
     fn assembly_serves_resolved_calls_from_persisted_aggregate_when_present() {
         let mock = MockStorage {
+            diagnostics_json: Some(
+                r#"{"diagnostics_version":1,"edges_total":7,"unresolved_total":0,"unresolved_breakdown":{},"inferred_calls":0}"#
+                    .into(),
+            ),
             resolved_call_aggregate: Some(ResolvedCallAggregate {
                 count: 7,
                 provenance: "pipeline".into(),
@@ -2007,6 +2063,116 @@ mod tests {
             report.summary.resolved_calls, 42,
             "aggregate absent → live COUNT, never a fabricated 0"
         );
+    }
+
+    // ── PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A) ──────────────────
+
+    fn diagnostics_with(internal_like_unresolved: u64, inferred_key: Option<u64>) -> String {
+        let mut v = serde_json::json!({
+            "diagnostics_version": 1,
+            "edges_total": 100,
+            "unresolved_total": internal_like_unresolved,
+            "unresolved_breakdown": {"calls_obj_method_needs_type_info": internal_like_unresolved},
+        });
+        if let Some(i) = inferred_key {
+            v["inferred_calls"] = serde_json::json!(i);
+        }
+        v.to_string()
+    }
+
+    #[test]
+    fn inferred_calls_stay_in_the_rate_universe_and_leave_the_resolved_count() {
+        let mut input = minimal_input();
+        let mut breakdown = BTreeMap::new();
+        breakdown.insert("calls_obj_method_needs_type_info".into(), 5);
+        input.diagnostics = Some(ExtractionDiagnostics {
+            diagnostics_version: 1,
+            edges_total: 20,
+            unresolved_total: 5,
+            unresolved_breakdown: breakdown,
+            inferred_calls: Some(5),
+        });
+        input.resolved_calls = 10;
+        input.inferred_calls = 5;
+        let report = compute_trust_report(&input);
+        assert_eq!(report.summary.resolved_calls, 10, "certain calls only");
+        assert_eq!(report.summary.inferred_calls, 5, "stated beside the rate");
+        assert_eq!(report.summary.unresolved_calls_internal_like, 5);
+        // The universe: 10 certain + 5 inferred + 5 internal-like = 20.
+        assert!((report.summary.call_resolution_rate - 0.5).abs() < 1e-12);
+        // The band sees the same operand (10 of 20 → MEDIUM, not the 10 of 15 a
+        // numerator-only change would give).
+        let without = {
+            let mut i2 = minimal_input();
+            i2.diagnostics = input.diagnostics.clone();
+            i2.resolved_calls = 10;
+            compute_trust_report(&i2)
+        };
+        assert!((without.summary.call_resolution_rate - 10.0 / 15.0).abs() < 1e-12);
+        assert_eq!(
+            report.summary.reliability.call_graph.level,
+            rules::compute_call_graph_reliability(10, 10).level
+        );
+    }
+
+    #[test]
+    fn live_certainty_count_serves_both_figures_when_aggregate_and_diagnostics_key_are_absent() {
+        let mock = MockStorage {
+            diagnostics_json: Some(diagnostics_with(4, None)),
+            resolved_call_aggregate: None,
+            resolved_calls: 12,
+            inferred_live: 4,
+            ..MockStorage::ok()
+        };
+        let report = assemble_trust_report(&mock, "r1", "snap1", None, None).unwrap();
+        assert_eq!(report.summary.resolved_calls, 12);
+        assert_eq!(report.summary.inferred_calls, 4);
+        assert!((report.summary.call_resolution_rate - 12.0 / 20.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn live_certainty_count_serves_both_figures_when_the_diagnostics_key_is_absent_beside_a_persisted_aggregate(
+    ) {
+        // A pre-slice snapshot: its aggregate (10) counted 2 legacy inferred rows as resolved,
+        // and its diagnostics carry no `inferred_calls`. Both figures come from the live split
+        // (8 certain, 2 inferred) — never the persisted 10 beside a live 2 (counted twice).
+        let mock = MockStorage {
+            diagnostics_json: Some(diagnostics_with(6, None)),
+            resolved_call_aggregate: Some(ResolvedCallAggregate {
+                count: 10,
+                provenance: "pipeline".into(),
+            }),
+            resolved_calls: 8,
+            inferred_live: 2,
+            ..MockStorage::ok()
+        };
+        let report = assemble_trust_report(&mock, "r1", "snap1", None, None).unwrap();
+        assert_eq!(report.summary.resolved_calls, 8);
+        assert_eq!(report.summary.inferred_calls, 2);
+        // The rate over 10 + internal-like (6): 8 / 16.
+        assert!((report.summary.call_resolution_rate - 8.0 / 16.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn trust_json_omits_inferred_calls_when_zero_and_states_it_when_positive() {
+        let zero = compute_trust_report(&minimal_input());
+        let json = serde_json::to_value(&zero.summary).unwrap();
+        assert!(
+            json.get("inferred_calls").is_none(),
+            "a report without inferred calls serializes as before"
+        );
+        let mut input = minimal_input();
+        input.resolved_calls = 3;
+        input.inferred_calls = 2;
+        let pos = compute_trust_report(&input);
+        let json = serde_json::to_value(&pos.summary).unwrap();
+        assert_eq!(json["inferred_calls"], serde_json::json!(2));
+        // Round-trips (older wire without the key reads 0).
+        let back: TrustSummary = serde_json::from_value(json).unwrap();
+        assert_eq!(back.inferred_calls, 2);
+        let old: TrustSummary =
+            serde_json::from_value(serde_json::to_value(&zero.summary).unwrap()).unwrap();
+        assert_eq!(old.inferred_calls, 0);
     }
 
     #[test]

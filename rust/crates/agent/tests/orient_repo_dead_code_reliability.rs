@@ -43,6 +43,7 @@ fn make_trust(
     dead_code_reasons: Vec<String>,
 ) -> AgentTrustSummary {
     AgentTrustSummary {
+        inferred_calls: 0,
         call_resolution_rate: 0.90,
         resolved_calls: 90,
         unresolved_calls: 10,

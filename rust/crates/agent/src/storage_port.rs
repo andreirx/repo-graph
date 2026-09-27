@@ -460,6 +460,10 @@ pub struct AgentTrustSummary {
     /// Variant-A reweighting); the agent layer must NOT recompute the split from the
     /// classification axis.
     pub unresolved_calls_internal_like: u64,
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): CALLS bound by an inferred (name-only)
+    /// binding — never in `resolved_calls`; in the rate's universe with
+    /// `unresolved_calls_internal_like`, and stated beside every rate.
+    pub inferred_calls: u64,
     /// RELIABILITY-REFRAME-1 (review-3 §2): the UNCLASSIFIED (`unknown`) portion of
     /// `unresolved_calls_internal_like`, so `check` can fire the conservative-rate
     /// caveat from the SAME shared helper `trust`/`orient` use.
@@ -599,6 +603,86 @@ pub struct AgentCalleeRow {
     pub line: Option<u64>,
     pub module_path: Option<String>,
     pub module_stable_key: Option<String>,
+}
+
+// ── Call remainders (PYTHON-RECEIVER-BINDING-1) ─────────────────
+
+/// What the certain caller/callee sets of one symbol leave out (RG-REQ-002-L11, RG-REQ-005-L09):
+/// the calls bound only by an inferred binding, and the unresolved calls that name the symbol or
+/// leave it. Read from SQLite whatever engine served the certain rows (D-PRB-SCOPE-1 amendment 4).
+///
+/// [abstraction: one port DTO bundling the four remainder reads; users: `explain` (the agent
+/// crate) and the daemon's `callers`/`callees`/orient symbol focus; force: the certain rows
+/// (`AgentCallerRow`) must stay certain-only — their LiveGraph certificate literals cannot carry
+/// a remainder; rejected: four port methods (every implementor would change four times for one
+/// responsibility).]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AgentCallRemainders {
+    /// Callers whose CALLS edge to the symbol is `inferred`, anchored at the call site.
+    pub inferred_callers: Vec<AgentInferredCallRow>,
+    /// Callees the symbol reaches only through an `inferred` CALLS edge.
+    pub inferred_callees: Vec<AgentInferredCallRow>,
+    /// Unresolved CALLS whose target key's last `.`/`::` segment is the symbol's name, per basis.
+    pub unresolved_naming: Vec<AgentBasisCount>,
+    /// The first (bounded, ordered) sites of `unresolved_naming`, with their recorded candidates.
+    pub unresolved_naming_sites: Vec<AgentUnresolvedCallSite>,
+    /// Unresolved CALLS whose source is the symbol, per basis.
+    pub unresolved_from: Vec<AgentBasisCount>,
+    /// The first (bounded, ordered) sites of `unresolved_from`, with their recorded candidates.
+    pub unresolved_from_sites: Vec<AgentUnresolvedCallSite>,
+}
+
+impl AgentCallRemainders {
+    /// Total unresolved calls naming the symbol.
+    pub fn unresolved_naming_total(&self) -> u64 {
+        self.unresolved_naming.iter().map(|b| b.count).sum()
+    }
+
+    /// Total unresolved calls leaving the symbol.
+    pub fn unresolved_from_total(&self) -> u64 {
+        self.unresolved_from.iter().map(|b| b.count).sum()
+    }
+}
+
+/// One inferred CALLS row of a symbol's remainder. `line` is the CALL SITE (the edge's line,
+/// RG-REQ-005-L08). `basis` is the recorded basis (`receiver_untyped_name_only`) or `unrecorded`
+/// when the row's evidence is absent or malformed (D-PRB-ENRICH-1: a legacy
+/// `compiler-promotion:0.1.0` row) — then `extractor` names its writer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInferredCallRow {
+    pub stable_key: String,
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub file: Option<String>,
+    pub line: Option<u64>,
+    pub module_path: Option<String>,
+    pub module_stable_key: Option<String>,
+    pub basis: String,
+    pub receiver: Option<String>,
+    pub extractor: String,
+}
+
+/// A count of unresolved calls sharing one basis code (the classifier's wire value).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentBasisCount {
+    pub basis_code: String,
+    pub count: u64,
+}
+
+/// One unresolved call site of a remainder: where it is, what it named, its basis, and — when
+/// the resolver recorded a candidate pool (`nameOnlyCandidates` with `nameOnlyReason`, or
+/// `mroCandidates`) — the reason, the full candidate count and the first candidates (bounded;
+/// the store keeps every candidate). A malformed pool is `candidate_reason: "unreadable"` with
+/// no candidates — never a guessed list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentUnresolvedCallSite {
+    pub file: Option<String>,
+    pub line: Option<u64>,
+    pub target_key: String,
+    pub basis: String,
+    pub candidate_reason: Option<String>,
+    pub candidate_count: Option<u64>,
+    pub candidates: Option<Vec<String>>,
 }
 
 // ── Trait ────────────────────────────────────────────────────────
@@ -940,6 +1024,17 @@ pub trait AgentStorageRead {
         snapshot_uid: &str,
         symbol_stable_key: &str,
     ) -> Result<Vec<AgentCalleeRow>, AgentStorageError>;
+
+    /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11, RG-REQ-005-L09): what the certain caller/callee
+    /// sets of a symbol leave out — its inferred callers/callees and the unresolved calls naming
+    /// (`symbol_name`, the node's name) or leaving it. REQUIRED: every implementor states the
+    /// remainder (a default would read as "none").
+    fn find_symbol_call_remainders(
+        &self,
+        snapshot_uid: &str,
+        symbol_stable_key: &str,
+        symbol_name: &str,
+    ) -> Result<AgentCallRemainders, AgentStorageError>;
 
     /// Return module-level dependency cycles that involve the
     /// given module (exact qualified_name match, NOT prefix).

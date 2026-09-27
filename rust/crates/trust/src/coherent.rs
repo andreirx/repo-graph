@@ -154,7 +154,11 @@ pub struct ResolutionCounts {
     /// human render uses it for the reader-frame conservative-rate caveat.
     #[serde(default)]
     pub unresolved_calls_unknown: u64,
-    /// `resolved_calls / (resolved_calls + internal_like)` (1.0 when no calls).
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): inferred CALLS — not in `resolved_calls`,
+    /// in the rate's universe. Additive; serialized only when positive.
+    #[serde(default, skip_serializing_if = "crate::types::is_zero_u64")]
+    pub inferred_calls: u64,
+    /// `resolved_calls / (resolved_calls + inferred_calls + internal_like)` (1.0 when no calls).
     pub call_resolution_rate: f64,
 }
 
@@ -346,6 +350,7 @@ pub fn trust_to_coherent(
         unresolved_calls_external: summary.unresolved_calls_external,
         unresolved_calls_internal_like: summary.unresolved_calls_internal_like,
         unresolved_calls_unknown,
+        inferred_calls: summary.inferred_calls,
         call_resolution_rate: summary.call_resolution_rate,
     };
 

@@ -425,6 +425,21 @@ pub enum UnresolvedEdgeBasisCode {
     /// the competing `<Class>.<method>` labels. Adding this value does NOT bump the classifier
     /// version (see below).
     SelfCallAmbiguousMro,
+    /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L03; D-PRB-SCOPE-1 amendment 2): a Python
+    /// `self.<m>()` / `cls.<m>()` whose class-hierarchy walk found no declaration of `<m>` (or
+    /// whose own class is not unique in the caller's file). The resolver declined the bare-name
+    /// fallback and recorded its pool as `nameOnlyCandidates`. Classified `unknown` — a miss does
+    /// not show where the method lives (most are inherited from an unindexed base). Adding this
+    /// value does NOT bump the classifier version (the `SelfCallAmbiguousMro` precedent).
+    SelfCallHierarchyMiss,
+    /// PYTHON-RECEIVER-BINDING-1 (F-PRB-SELF-NOCARRIER): a Python `self.<m>()` / `cls.<m>()` with no
+    /// readable class context (a `self` parameter of a module-level function; a malformed
+    /// carrier) — no class could be walked, so the name-only pool is not evidence. `unknown`.
+    SelfCallWithoutClassContext,
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-CARRIER-1): a class-contained `self.<m>()` / `cls.<m>()`
+    /// whose receiver the extractor could not prove to be the method's first parameter — neither
+    /// the hierarchy nor a same-named alias is evidence; every candidate is recorded. `unknown`.
+    SelfCallReceiverUnproven,
     /// An `imports_file_not_found` observation whose specifier is
     /// path-relative (starts with "." for TS, or crate::/super::
     /// for Rust). Definite internal import.

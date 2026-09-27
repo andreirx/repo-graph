@@ -8,8 +8,8 @@
 //! via the daemon registry. No positional `<db_path> <repo_uid>` arguments.
 //!
 //! ```text
-//! rmap callers <symbol> [--edge-types <types>]
-//! rmap callees <symbol> [--edge-types <types>]
+//! rmap callers <symbol> [--edge-types <types>] [--include-inferred]
+//! rmap callees <symbol> [--edge-types <types>] [--include-inferred]
 //! rmap imports <file_path>
 //! rmap stats
 //! rmap cycles
@@ -172,6 +172,25 @@ fn extract_engine_flag(args: Vec<String>) -> (Vec<String>, String) {
         }
     }
     (out, engine)
+}
+
+/// PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11): remove `--include-inferred` from the args and
+/// report whether it was given. Default: the certain rows only, with the inferred remainder
+/// stated beside them.
+fn extract_include_inferred_flag(args: Vec<String>) -> (Vec<String>, bool) {
+    let mut found = false;
+    let out = args
+        .into_iter()
+        .filter(|a| {
+            if a == "--include-inferred" {
+                found = true;
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    (out, found)
 }
 
 /// Extract `--kind <value>` (CYCLES-LIVEGRAPH-CLI-1). Default `""` = no kind (the SQLite default).
@@ -435,19 +454,22 @@ pub fn run_callers(args: &[String]) -> ExitCode {
 
     // LIVEGRAPH-INTEGRATION-1B: extract --engine before edge-type parsing.
     let (filtered_args, engine) = extract_engine_flag(filtered_args);
+    let (filtered_args, include_inferred) = extract_include_inferred_flag(filtered_args);
 
     let (positional, edge_types) = match parse_edge_types_flag(&filtered_args) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
-            eprintln!("usage: rmap callers <symbol> [--edge-types <types>] [--engine auto|sqlite|livegraph|compare] [--json]");
+            eprintln!("usage: rmap callers <symbol> [--edge-types <types>] [--include-inferred] [--engine auto|sqlite|livegraph|compare] [--json]");
             return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
     // REG-1: one positional arg (symbol), repo from cwd
     if positional.len() != 1 {
-        eprintln!("usage: rmap callers <symbol> [--edge-types <types>] [--json]");
+        eprintln!(
+            "usage: rmap callers <symbol> [--edge-types <types>] [--include-inferred] [--json]"
+        );
         return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
@@ -471,6 +493,7 @@ pub fn run_callers(args: &[String]) -> ExitCode {
         "symbol": symbol,
         "edge_types": edge_types,
         "engine": engine,
+        "include_inferred": include_inferred,
     });
 
     match client.request("callers", Some(params)) {
@@ -516,7 +539,7 @@ pub fn run_callers(args: &[String]) -> ExitCode {
                 use crate::presentation::graph_edges::CallersResponse;
                 match serde_json::from_value::<CallersResponse>(result) {
                     Ok(response) => {
-                        print!("{}", response.render_human());
+                        print!("{}", response.render_human_for_repo(Some(&repo_path)));
                         print!("{}", reference_section);
                         ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }
@@ -556,19 +579,22 @@ pub fn run_callees(args: &[String]) -> ExitCode {
 
     // LIVEGRAPH-INTEGRATION-1B: extract --engine before edge-type parsing.
     let (filtered_args, engine) = extract_engine_flag(filtered_args);
+    let (filtered_args, include_inferred) = extract_include_inferred_flag(filtered_args);
 
     let (positional, edge_types) = match parse_edge_types_flag(&filtered_args) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
-            eprintln!("usage: rmap callees <symbol> [--edge-types <types>] [--engine auto|sqlite|livegraph|compare] [--json]");
+            eprintln!("usage: rmap callees <symbol> [--edge-types <types>] [--include-inferred] [--engine auto|sqlite|livegraph|compare] [--json]");
             return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
 
     // REG-1: one positional arg (symbol), repo from cwd
     if positional.len() != 1 {
-        eprintln!("usage: rmap callees <symbol> [--edge-types <types>] [--json]");
+        eprintln!(
+            "usage: rmap callees <symbol> [--edge-types <types>] [--include-inferred] [--json]"
+        );
         return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 
@@ -592,6 +618,7 @@ pub fn run_callees(args: &[String]) -> ExitCode {
         "symbol": symbol,
         "edge_types": edge_types,
         "engine": engine,
+        "include_inferred": include_inferred,
     });
 
     match client.request("callees", Some(params)) {
@@ -635,7 +662,7 @@ pub fn run_callees(args: &[String]) -> ExitCode {
                 use crate::presentation::graph_edges::CalleesResponse;
                 match serde_json::from_value::<CalleesResponse>(result) {
                     Ok(response) => {
-                        print!("{}", response.render_human());
+                        print!("{}", response.render_human_for_repo(Some(&repo_path)));
                         print!("{}", reference_section);
                         ExitCode::from(crate::daemon_command::EXIT_SUCCESS)
                     }

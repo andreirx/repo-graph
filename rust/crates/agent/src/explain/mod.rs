@@ -495,6 +495,12 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
         symbol_count: None,
     }));
 
+    // PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11, RG-REQ-005-L09): what the certain rows leave out
+    // — the inferred callers/callees and the unresolved calls naming or leaving the symbol. ONE
+    // SQLite read, whatever engine serves the certain rows (D-PRB-SCOPE-1 amendment 4).
+    let remainders =
+        storage.find_symbol_call_remainders(snapshot_uid, symbol_stable_key, &context.name)?;
+
     // ── EXPLAIN_CALLERS ─────────────────────────────────────
     // Always emitted for symbol targets — "0 callers" is
     // meaningful positive information in a deep dive.
@@ -518,12 +524,21 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
             })
             .collect();
         let (trunc, omitted) = truncate_items(&mut items, cap);
+        let mut inferred_items = inferred_call_items(&remainders.inferred_callers);
+        truncate_items(&mut inferred_items, cap);
         signals.push(Signal::explain_callers(ExplainCallersEvidence {
             count,
             top_modules,
             items,
             items_truncated: trunc,
             items_omitted_count: omitted,
+            inferred_count: remainders.inferred_callers.len() as u64,
+            inferred_items,
+            inferred_by_basis: basis_counts(&remainders.inferred_callers),
+            unresolved_naming: unresolved_calls_evidence(
+                Some(context.name.clone()),
+                &remainders.unresolved_naming,
+            ),
         }));
     }
 
@@ -547,12 +562,18 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
             })
             .collect();
         let (trunc, omitted) = truncate_items(&mut items, cap);
+        let mut inferred_items = inferred_call_items(&remainders.inferred_callees);
+        truncate_items(&mut inferred_items, cap);
         signals.push(Signal::explain_callees(ExplainCalleesEvidence {
             count,
             top_modules,
             items,
             items_truncated: trunc,
             items_omitted_count: omitted,
+            inferred_count: remainders.inferred_callees.len() as u64,
+            inferred_items,
+            inferred_by_basis: basis_counts(&remainders.inferred_callees),
+            unresolved_from: unresolved_calls_evidence(None, &remainders.unresolved_from),
         }));
     }
 
@@ -1145,6 +1166,53 @@ fn group_by_module<'a>(
     entries
 }
 
+/// PYTHON-RECEIVER-BINDING-1: the explain rows of an inferred caller/callee remainder (call-site
+/// anchored, with basis and — for an unrecorded basis — the writer).
+fn inferred_call_items(
+    rows: &[crate::storage_port::AgentInferredCallRow],
+) -> Vec<ExplainInferredCallItem> {
+    rows.iter()
+        .map(|r| ExplainInferredCallItem {
+            stable_key: r.stable_key.clone(),
+            name: r.name.clone(),
+            module: r.module_path.clone(),
+            file: r.file.clone(),
+            line: r.line,
+            basis: r.basis.clone(),
+            receiver: r.receiver.clone(),
+            extractor: r.extractor.clone(),
+        })
+        .collect()
+}
+
+/// PYTHON-RECEIVER-BINDING-1: the inferred rows counted per basis (uncapped).
+fn basis_counts(
+    rows: &[crate::storage_port::AgentInferredCallRow],
+) -> std::collections::BTreeMap<String, u64> {
+    let mut counts = std::collections::BTreeMap::new();
+    for r in rows {
+        *counts.entry(r.basis.clone()).or_insert(0) += 1;
+    }
+    counts
+}
+
+/// PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L09): the unresolved-calls evidence, `None` when no
+/// unresolved call bears on the symbol (the section is then byte-identical to before).
+fn unresolved_calls_evidence(
+    name: Option<String>,
+    by_basis: &[crate::storage_port::AgentBasisCount],
+) -> Option<ExplainUnresolvedCalls> {
+    let count: u64 = by_basis.iter().map(|b| b.count).sum();
+    (count > 0).then(|| ExplainUnresolvedCalls {
+        name,
+        count,
+        by_basis: by_basis
+            .iter()
+            .map(|b| (b.basis_code.clone(), b.count))
+            .collect(),
+    })
+}
+
 fn build_trust_signal(trust: &crate::storage_port::AgentTrustSummary) -> Signal {
     use crate::storage_port::EnrichmentState;
     Signal::explain_trust(ExplainTrustEvidence {
@@ -1171,7 +1239,11 @@ fn build_trust_signal(trust: &crate::storage_port::AgentTrustSummary) -> Signal 
         // unresolved_calls_internal_like`) — the same denominator the band is scored on — so the
         // field is named "in-scope OR unclassified", not purely in-scope (review-5 §1).
         resolved_in_scope: trust.resolved_calls,
-        in_scope_or_unclassified_total: trust.resolved_calls + trust.unresolved_calls_internal_like,
+        // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the universe keeps the inferred calls.
+        in_scope_or_unclassified_total: trust.resolved_calls
+            + trust.inferred_calls
+            + trust.unresolved_calls_internal_like,
+        inferred_calls: trust.inferred_calls,
     })
 }
 

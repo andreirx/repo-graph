@@ -21,13 +21,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use repo_graph_agent::{
-    AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentComplexityMeasurement,
-    AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry, AgentFileImporter,
-    AgentFocusCandidate, AgentImportEdge, AgentImportEntry, AgentMemberEntry, AgentModuleSize,
-    AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel,
-    AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageError,
-    AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentSymbolResolution,
-    AgentTrustSummary, EnrichmentState,
+    AgentBoundaryDeclaration, AgentCallRemainders, AgentCalleeRow, AgentCallerRow,
+    AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry,
+    AgentFileImporter, AgentFocusCandidate, AgentImportEdge, AgentImportEntry, AgentMemberEntry,
+    AgentModuleSize, AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis,
+    AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
+    AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
+    AgentSymbolResolution, AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_gate::{
     GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -56,6 +56,7 @@ pub const TEST_NOW: &str = "2026-04-15T00:00:00Z";
 /// production code does not grow fixture constructors.
 pub fn high_confidence_trust() -> AgentTrustSummary {
     AgentTrustSummary {
+        inferred_calls: 0,
         call_resolution_rate: 0.90,
         resolved_calls: 90,
         unresolved_calls: 10,
@@ -116,6 +117,9 @@ pub struct FakeAgentStorage {
     pub symbol_resolutions: HashMap<(String, String), AgentSymbolResolution>,
     pub symbol_callers: HashMap<(String, String), Vec<AgentCallerRow>>,
     pub symbol_callees: HashMap<(String, String), Vec<AgentCalleeRow>>,
+    /// PYTHON-RECEIVER-BINDING-1: seeded call remainders per (snapshot, symbol stable key).
+    /// Unseeded ⇒ an empty remainder (no inferred rows, no unresolved calls).
+    pub symbol_call_remainders: HashMap<(String, String), AgentCallRemainders>,
     pub cycles_involving_module: HashMap<(String, String), Vec<AgentCycle>>,
 
     // ── Explain-focus seed data ─────────────────────────────
@@ -542,6 +546,21 @@ impl AgentStorageRead for FakeAgentStorage {
         self.fail_if_forced("find_symbol_callees")?;
         let key = (snapshot_uid.to_string(), symbol_stable_key.to_string());
         Ok(self.symbol_callees.get(&key).cloned().unwrap_or_default())
+    }
+
+    fn find_symbol_call_remainders(
+        &self,
+        snapshot_uid: &str,
+        symbol_stable_key: &str,
+        _symbol_name: &str,
+    ) -> Result<AgentCallRemainders, AgentStorageError> {
+        self.fail_if_forced("find_symbol_call_remainders")?;
+        let key = (snapshot_uid.to_string(), symbol_stable_key.to_string());
+        Ok(self
+            .symbol_call_remainders
+            .get(&key)
+            .cloned()
+            .unwrap_or_default())
     }
 
     fn find_cycles_involving_module(

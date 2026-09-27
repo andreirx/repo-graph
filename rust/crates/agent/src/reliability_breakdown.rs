@@ -76,6 +76,11 @@ pub struct CallResolutionCounts {
     /// Of `unresolved`, the `unknown` (target-undetermined) share — kept IN the
     /// denominator (conservative), and used to fire the unclassified caveat.
     pub unknown: u64,
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): `edges` rows of type `CALLS` whose
+    /// resolution is `inferred` (a name-only binding) — never in `resolved`, always in the
+    /// rate's universe. `#[serde(default)]` for an older daemon's wire.
+    #[serde(default)]
+    pub inferred: u64,
 }
 
 impl CallResolutionCounts {
@@ -91,10 +96,17 @@ impl CallResolutionCounts {
         self.unresolved.saturating_sub(self.external)
     }
 
-    /// Every CALLS edge in this scope, resolved or not — the external-share
-    /// denominator (`resolved + unresolved`).
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the non-resolved part of the rate's
+    /// universe — the internal-like unresolved calls PLUS the inferred calls. The band's operand
+    /// (`internal_like()` keeps its meaning).
+    pub fn in_scope_not_resolved(&self) -> u64 {
+        self.internal_like() + self.inferred
+    }
+
+    /// Every CALLS edge in this scope, resolved, inferred or not — the external-share
+    /// denominator (`resolved + inferred + unresolved`).
     pub fn total_calls(&self) -> u64 {
-        self.resolved + self.unresolved
+        self.resolved + self.inferred + self.unresolved
     }
 }
 
@@ -158,7 +170,11 @@ pub struct ResolutionScopeRow {
     pub unresolved: u64,
     pub external: u64,
     pub unknown: u64,
-    /// `resolved + unresolved` — the external-share denominator.
+    /// PYTHON-RECEIVER-BINDING-1: inferred CALLS in this scope (not in `resolved`, in the
+    /// rate's denominator). Serialized only when positive; `#[serde(default)]` for older wire.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub inferred: u64,
+    /// `resolved + inferred + unresolved` — the external-share denominator.
     pub total_calls: u64,
     /// `resolved + internal_like` — the in-scope-or-unclassified denominator the
     /// rate is over. `0` exactly when [`resolved_pct`](Self::resolved_pct) is
@@ -197,6 +213,7 @@ pub fn scope_row(scope: &ScopeCounts) -> ResolutionScopeRow {
     let view = CallReliabilityView::derive(
         c.resolved,
         c.internal_like(),
+        c.inferred,
         c.external,
         c.total_calls(),
         Vec::new(), // named external targets are a whole-snapshot detail, not per-scope
@@ -227,6 +244,7 @@ pub fn scope_row(scope: &ScopeCounts) -> ResolutionScopeRow {
         unresolved: c.unresolved,
         external: c.external,
         unknown: c.unknown,
+        inferred: c.inferred,
         total_calls: c.total_calls(),
         in_scope_or_unclassified_total: in_scope_total,
         resolved_pct,
@@ -236,6 +254,10 @@ pub fn scope_row(scope: &ScopeCounts) -> ResolutionScopeRow {
         external_line: view.external_line(),
         caveat,
     }
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// The whole breakdown DTO — the daemon builds it, serializes it, and the `rgr`
@@ -299,9 +321,40 @@ mod tests {
                 unresolved,
                 external,
                 unknown,
+                inferred: 0,
             },
             band,
         }
+    }
+
+    #[test]
+    fn inferred_calls_stay_in_the_scope_denominator() {
+        // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): 20 certain, 10 inferred, 30 unresolved
+        // of which 10 external → the rate is 20 / (20 + 10 + 20) = 40%, the clause is stated,
+        // and the band operand is internal-like + inferred.
+        let mut s = scope("python", 20, 30, 10, 0, Some(AgentReliabilityLevel::Low));
+        s.counts.inferred = 10;
+        assert_eq!(s.counts.in_scope_not_resolved(), 30);
+        assert_eq!(
+            s.counts.internal_like(),
+            20,
+            "internal_like keeps its meaning"
+        );
+        let row = scope_row(&s);
+        assert_eq!(row.in_scope_or_unclassified_total, 50);
+        assert!((row.resolved_pct.unwrap() - 40.0).abs() < 1e-9);
+        assert_eq!(row.inferred, 10);
+        assert_eq!(row.total_calls, 60);
+        assert!(
+            row.phrase
+                .ends_with("; +10 inferred calls not counted as resolved"),
+            "{}",
+            row.phrase
+        );
+        let v = serde_json::to_value(&row).unwrap();
+        assert_eq!(v["inferred"], serde_json::json!(10));
+        let zero = serde_json::to_value(scope_row(&scope("go", 1, 0, 0, 0, None))).unwrap();
+        assert!(zero.get("inferred").is_none(), "absent when zero");
     }
 
     #[test]

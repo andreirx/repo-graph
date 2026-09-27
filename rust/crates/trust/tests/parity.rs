@@ -270,6 +270,18 @@ impl TrustStorageRead for FixtureMockStorage {
         Ok(None)
     }
 
+    fn count_call_edges_by_certainty(
+        &self,
+        _snapshot_uid: &str,
+    ) -> Result<repo_graph_trust::CallCertaintyCounts, String> {
+        // PYTHON-RECEIVER-BINDING-1: the TS-parity fixtures hold no inferred call — the live
+        // split's certain figure is the fixture's CALLS count, its inferred figure 0.
+        Ok(repo_graph_trust::CallCertaintyCounts {
+            certain: self.resolved_calls,
+            inferred: 0,
+        })
+    }
+
     fn count_active_declarations(&self, _repo_uid: &str, _kind: &str) -> Result<usize, String> {
         Ok(self.active_entrypoint_count)
     }

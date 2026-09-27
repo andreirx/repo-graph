@@ -173,13 +173,82 @@ default.
 ### `callers` / `callees` / `path` — `--engine`
 
 ```
-rmap callers <symbol> [--edge-types <types>] [--engine auto|sqlite|livegraph|compare] [--json]
-rmap callees <symbol> [--edge-types <types>] [--engine auto|sqlite|livegraph|compare] [--json]
+rmap callers <symbol> [--edge-types <types>] [--include-inferred] [--engine auto|sqlite|livegraph|compare] [--json]
+rmap callees <symbol> [--edge-types <types>] [--include-inferred] [--engine auto|sqlite|livegraph|compare] [--json]
 rmap path <from> <to> [--engine auto|sqlite|livegraph|compare] [--json]
 ```
 
 Default `auto` serves the LiveGraph when a per-call no-loss key-set compare holds, else the
 labelled SQLite fallback. Human output is byte-identical.
+
+### `callers` / `callees` — certain rows, the inferred and unresolved remainder (PYTHON-RECEIVER-BINDING-1)
+
+A call edge is **certain** only when its `resolution` is `static` or `dynamic`. A call bound by its
+method name alone on an untyped receiver (a Python `obj.m()`) is `inferred` — never a certain
+caller or callee (RG-REQ-005-L02, RG-REQ-002-L11).
+
+- **Default:** `callers`/`callees` list the certain rows; `count` is their number.
+- **`--include-inferred`** (wire param `include_inferred: true`): the inferred rows follow the
+  certain ones, each with `resolution: "inferred"`; `count` is every listed row.
+- Caller rows are anchored at the **call site** (`line`/`column` of the call), not the caller's
+  declaration (RG-REQ-005-L08). `explain`'s Callers section still anchors each caller's
+  declaration (its LiveGraph-served rows carry no call-site line) and says so inline:
+  `lines above are where each caller is defined — for the call sites run rmap callers <name>`.
+- `include_inferred` must be a boolean when present; any other value (a string, a number, `null`)
+  is an invalid request — never read as `false`.
+- A stored `CALLS` edge whose `resolution` is outside `static | dynamic | inferred` is unreadable.
+  Every read that splits the STORED call rows by certainty refuses with an error naming the value
+  and the count — never "0 callers" or a complete-looking rate: `callers`, `callees`, `explain`,
+  orient's symbol focus and its file/path dead-code reads, `path`, `reliability`, and trust's live
+  certain/inferred split. `dead` and `map`'s call pairs refuse only on their live fallback (a
+  snapshot without the persisted call-degree / call-pair families); when those families are
+  present they are served as persisted, and so is `trust` when its persisted resolved-call count
+  and inferred count are present. The persisted counts were computed by the indexer from its
+  own resolver output, not from the stored rows, so these reads do not re-check the rows.
+
+Additive fields (each absent when there is nothing to state — an absent field is never a zero;
+JSON routing metadata, RG-REQ-002-L08):
+
+| Field | Where | Meaning |
+|---|---|---|
+| `inferred` | callers, callees | `{count, by_basis}` — the inferred rows (whatever engine served the certain rows). |
+| `unresolved_naming` | callers | `{name, count, by_basis, sites}` — unresolved calls whose target's last `.`/`::` segment is the symbol's name. |
+| `unresolved_from` | callees | `{count, by_basis, sites}` — unresolved calls made by the symbol. |
+| `sites[]` | both unresolved blocks | at most 20 sites ordered by file, line, column, target key: `{file, line, target_key, basis, candidate_reason?, candidate_count?, candidates?}`. `candidate_reason` is the resolver's recorded reason (`ambiguous_name`, `self_call_hierarchy_miss`, `self_call_without_class_context`, `self_call_receiver_unproven`, `self_call_ambiguous_mro`) or `unreadable` for a malformed recorded pool (no candidates then); `candidate_count` is the full pool size; `candidates` the first 50, sorted. |
+| `inference_basis` | an inferred row | `receiver_untyped_name_only`, or `unrecorded` when the row's evidence is absent or malformed. |
+| `inference_extractor` | an inferred row | the row's writer; for an `unrecorded` row it names the source (`compiler-promotion:0.1.0` = a compiler-resolved call recorded by an older rmap — `rmap repo rebuild <path>` refreshes it). Never rendered on the human surface. |
+
+Unresolved basis codes introduced by this slice (classification `unknown`, reader class
+"couldn't attribute"): `self_call_hierarchy_miss` (a `self.`/`cls.` call whose class hierarchy
+declares no such method), `self_call_without_class_context` (a `self.`/`cls.` call with no class the
+index recorded), `self_call_receiver_unproven` (a class-contained `self.`/`cls.` call whose receiver
+is not proven to be the method's first parameter).
+
+Human lines: `N callers found; M inferred (name-only) — investigate with --include-inferred`
+(`(name-only)` only when every inferred row is a name-only binding; in `explain`, a remainder
+field that is present but unreadable renders `… : unknown — this answer's … field is unreadable`); with the flag `N+M callers
+found; M of them inferred (name-only) — marked below`, each inferred row ending ` (inferred:
+name-only binding — investigate)`, ` (inferred: compiler-resolved call recorded by an older rmap —
+run rmap repo rebuild <path>)` or ` (inferred: basis unknown — investigate)`; then `U unresolved
+calls name `<name>` (<reader class>: n, …)` / `U unresolved calls from this symbol (…)`.
+
+### `path` — certain hops; an inferred-only route is stated
+
+`path` walks certain `CALLS`/`IMPORTS` hops only. When no certain route exists within the search
+depth and a route exists once inferred edges are admitted, the answer adds
+`inferred_edges_on_route: N` (the inferred call/import edges on the shortest such route) and
+`search_depth: D` beside `found: false`; the human line reads `no route through certain edges within
+depth D; a route exists using N inferred call/import edges — investigate`. A count without its depth
+is a decode error. Among equal-depth routes the one with the fewest inferred edges, then the
+smallest stable-key sequence, is chosen.
+
+### Rate surfaces — `inferred_calls`
+
+The calls-resolved share counts certain calls only; the inferred calls stay in its universe
+(`resolved + inferred_calls + unresolved in-scope-or-unclassified`) and every rate line states them:
+`; +N inferred calls not counted as resolved`. JSON: `trust` `summary.inferred_calls` and the
+coherent `resolution.value.inferred_calls`, orient `call_coverage.inferred_calls`, explain trust
+evidence `inferred_calls`, `reliability` rows `inferred` — each serialized only when positive.
 
 ## Coherence Envelope (`orient` / `check` / `explain` / `trust`)
 

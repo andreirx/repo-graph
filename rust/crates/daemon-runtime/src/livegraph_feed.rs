@@ -499,6 +499,8 @@ fn caller_results_from_keys(keys: &[String]) -> Vec<CallerResult> {
             column: Some(0),
             edge_type: "CALLS".to_string(),
             resolution: "livegraph".to_string(),
+            inference_basis: None,
+            inference_extractor: None,
         })
         .collect()
 }
@@ -520,6 +522,8 @@ fn callee_results_from_keys(keys: &[String]) -> Vec<CalleeResult> {
             column: Some(0),
             edge_type: "CALLS".to_string(),
             resolution: "livegraph".to_string(),
+            inference_basis: None,
+            inference_extractor: None,
         })
         .collect()
 }
@@ -5074,6 +5078,8 @@ mod tests {
                 column: None,
                 edge_type: "CALLS".to_string(),
                 resolution: "sqlite".to_string(),
+                inference_basis: None,
+                inference_extractor: None,
             }])
         };
         // SERVED: Some(keys) -> LiveGraph; the PANICKING closure is NEVER called.

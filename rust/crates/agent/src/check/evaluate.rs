@@ -133,10 +133,16 @@ fn evaluate_call_graph_reliability(
                 // the rate ("your code's calls N% resolved") when there is one, or the honest
                 // no-measurement phrasing when there are no in-scope calls — so the FIGURES are
                 // byte-for-byte what the reader would otherwise see; only the framing is the ceiling.
-                let figure = if view.resolution.is_some() {
+                let figure = if let Some(r) = &view.resolution {
+                    // PYTHON-RECEIVER-BINDING-1: the rate is the sentence's subject here, so the
+                    // inferred-calls clause follows the predicate (the one shared wording).
+                    let clause = match view.inferred_clause() {
+                        Some(c) => format!("; {c}"),
+                        None => String::new(),
+                    };
                     format!(
-                        "{} is the deterministic-extraction figure",
-                        view.resolved_phrase()
+                        "{} is the deterministic-extraction figure{clause}",
+                        crate::reliability::resolved_phrase_pct(r.pct)
                     )
                 } else {
                     "no in-scope calls to resolve on this build".to_string()
@@ -360,13 +366,16 @@ pub fn evaluate_conditions(input: &CheckInput) -> Vec<ConditionResult> {
     // named coverage map — NOT an `external=0` placeholder. The named list fits check's
     // one-line-per-condition budget via the compact `named_coverage_map_line`, so this is
     // the full projection, not the operator's share+count floor.
-    let total_calls = input.resolved_calls + input.unresolved_calls;
+    // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the inferred calls are calls — in the
+    // external-share denominator and the rate's universe, never resolved.
+    let total_calls = input.resolved_calls + input.inferred_calls + input.unresolved_calls;
     let external = input
         .unresolved_calls
         .saturating_sub(input.unresolved_calls_internal_like);
     let view = CallReliabilityView::derive(
         input.resolved_calls,
         input.unresolved_calls_internal_like,
+        input.inferred_calls,
         external,
         total_calls,
         input.external_targets.clone(),

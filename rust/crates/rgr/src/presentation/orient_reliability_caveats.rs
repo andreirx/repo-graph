@@ -136,7 +136,8 @@ impl OrientResponse {
     /// to the rate-only legacy path.
     pub(super) fn call_reliability_view(&self, band: Option<&str>) -> Option<CallReliabilityView> {
         let cov = self.trust_briefing.as_ref()?.call_coverage.as_ref()?;
-        let total_calls = cov.resolved_calls + cov.unresolved_calls;
+        // PYTHON-RECEIVER-BINDING-1: the inferred calls are calls (never resolved).
+        let total_calls = cov.resolved_calls + cov.inferred_calls + cov.unresolved_calls;
         // Already external-filtered + count-desc at the producer; re-filter defensively so a
         // non-external target can never leak into the reader's coverage map.
         let named: Vec<ExternalTarget> = cov
@@ -151,6 +152,7 @@ impl OrientResponse {
         Some(CallReliabilityView::derive(
             cov.resolved_calls,
             cov.unresolved_calls_internal_like,
+            cov.inferred_calls,
             cov.unresolved_calls_external,
             total_calls,
             named,

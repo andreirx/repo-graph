@@ -39,7 +39,9 @@ use crate::state::DaemonState;
 /// the band in exactly that case (`resolution.is_none()`), so scoring every scope
 /// uniformly here is safe and matches the aggregate surfaces.
 fn band_for(counts: &CallResolutionCounts) -> Option<AgentReliabilityLevel> {
-    let score = compute_call_graph_reliability(counts.resolved, counts.internal_like());
+    // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the band's non-resolved operand keeps the
+    // inferred calls in the universe (`in_scope_not_resolved` = internal-like + inferred).
+    let score = compute_call_graph_reliability(counts.resolved, counts.in_scope_not_resolved());
     Some(match score.level {
         ReliabilityLevel::HIGH => AgentReliabilityLevel::High,
         ReliabilityLevel::MEDIUM => AgentReliabilityLevel::Medium,

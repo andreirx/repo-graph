@@ -318,3 +318,41 @@ fn empty_snapshot_yields_zero_total_and_no_scopes() {
         .unwrap()
         .is_empty());
 }
+
+// ── PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A) ──────────────────────
+
+#[test]
+fn inferred_calls_leave_resolved_and_stay_in_the_universe_per_scope_and_total() {
+    let s = fixture();
+    // Two inferred CALLS from sa (typescript prod) and one from sb (java) — they leave
+    // `resolved` and are counted `inferred` in every grouping.
+    s.connection()
+        .execute_batch(&format!(
+            "INSERT INTO edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_node_uid, type, resolution, extractor) VALUES \
+               ('e_i1', '{SNAP}', 'r1', 'sa', 'sb', 'CALLS', 'inferred', 'python-core:0.2.0'), \
+               ('e_i2', '{SNAP}', 'r1', 'sa', 'sc', 'CALLS', 'inferred', 'python-core:0.2.0'), \
+               ('e_i3', '{SNAP}', 'r1', 'sb', 'sc', 'CALLS', 'inferred', 'python-core:0.2.0');"
+        ))
+        .unwrap();
+    let total = s.query_call_resolution_total(SNAP).unwrap();
+    assert_eq!(total.resolved, 5, "the certain CALLS only");
+    assert_eq!(total.inferred, 3, "kept in the universe");
+    assert_eq!(total.total_calls(), 5 + 3 + 6);
+    assert_eq!(total.in_scope_not_resolved(), total.internal_like() + 3);
+    let langs = s.query_call_resolution_by_language(SNAP).unwrap();
+    assert_eq!(get(&langs, "typescript", false).inferred, 2);
+    assert_eq!(get(&langs, "java", false).inferred, 1);
+    assert_eq!(
+        get(&langs, "typescript", false).resolved,
+        2,
+        "unchanged by the inferred rows"
+    );
+    assert_eq!(
+        sum(&langs, |c| c.inferred),
+        total.inferred,
+        "parts reconcile"
+    );
+    let mods = s.query_call_resolution_by_module(SNAP).unwrap();
+    assert_eq!(sum(&mods, |c| c.inferred), total.inferred);
+    assert_eq!(sum(&mods, |c| c.resolved), total.resolved);
+}

@@ -239,10 +239,13 @@ fn render_resolution(v: &CoherentTrustReport) -> String {
     // is built with `external = 0` (only `.resolution` is read from it); the external SHARE is
     // derived and rendered on its own below.
     let first_party_calls = v.external_dependencies.value.first_party_calls;
-    let total_calls = r.resolved_calls + r.unresolved_calls;
+    // PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the inferred calls are calls — in the
+    // universe (denominator) and in the total, never in the resolved count.
+    let total_calls = r.resolved_calls + r.inferred_calls + r.unresolved_calls;
     let view = CallReliabilityView::derive(
         r.resolved_calls,
         r.unresolved_calls_internal_like,
+        r.inferred_calls,
         0,
         total_calls,
         Vec::new(), // the named targets render in their own section below
@@ -253,10 +256,15 @@ fn render_resolution(v: &CoherentTrustReport) -> String {
     // includes `unknown` classifications) — NOT known-internal. The label says so.
     match &view.resolution {
         Some(res) => out.push_str(&bullet(&format!(
-            "{} ({} of {} in-scope or unclassified)",
+            "{} ({} of {} in-scope or unclassified){}",
             reliability::resolved_phrase_pct(res.pct),
             res.resolved,
-            res.in_scope_or_unclassified_total
+            res.in_scope_or_unclassified_total,
+            // PYTHON-RECEIVER-BINDING-1: the one shared clause, when any call is inferred.
+            match view.inferred_clause() {
+                Some(c) => format!("; {c}"),
+                None => String::new(),
+            }
         ))),
         None => out.push_str(&bullet(reliability::NO_IN_SCOPE_CALLS)),
     }
@@ -271,6 +279,7 @@ fn render_resolution(v: &CoherentTrustReport) -> String {
             let external_view = CallReliabilityView::derive(
                 r.resolved_calls,
                 r.unresolved_calls_internal_like,
+                r.inferred_calls,
                 external_for_share,
                 total_calls,
                 Vec::new(),
@@ -342,8 +351,9 @@ fn render_reliability(v: &CoherentTrustReport) -> String {
     let view = CallReliabilityView::derive(
         res.resolved_calls,
         res.unresolved_calls_internal_like,
+        res.inferred_calls,
         0,
-        res.resolved_calls + res.unresolved_calls_internal_like,
+        res.resolved_calls + res.inferred_calls + res.unresolved_calls_internal_like,
         Vec::new(),
         None,
     );

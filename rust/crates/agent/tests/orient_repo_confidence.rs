@@ -38,6 +38,7 @@ fn make_trust(
     // confidence derivation under test. Reliability-gated
     // dead-code behavior is covered by its own test file.
     AgentTrustSummary {
+        inferred_calls: 0,
         call_resolution_rate: rate,
         resolved_calls: (rate * 100.0) as u64,
         unresolved_calls: ((1.0 - rate) * 100.0) as u64,

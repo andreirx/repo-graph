@@ -781,12 +781,26 @@ pub struct SnapshotInfoEvidence {
 pub struct CallersSummaryEvidence {
     pub count: u64,
     pub top_modules: Vec<ModuleCountEvidence>,
+    /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11): callers bound only by an inferred binding —
+    /// not in `count`, stated in the summary with the flag that lists them. Serialized only
+    /// when positive.
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub inferred_count: u64,
+    /// Every inferred row's basis is the name-only binding (the summary says "(name-only)").
+    #[serde(skip)]
+    pub inferred_name_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CalleesSummaryEvidence {
     pub count: u64,
     pub top_modules: Vec<ModuleCountEvidence>,
+    /// PYTHON-RECEIVER-BINDING-1: callees reached only through an inferred binding.
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub inferred_count: u64,
+    /// Every inferred row's basis is the name-only binding.
+    #[serde(skip)]
+    pub inferred_name_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -887,6 +901,47 @@ pub struct ExplainCallersEvidence {
     pub items_truncated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items_omitted_count: Option<u64>,
+    /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11): callers bound only by an inferred binding —
+    /// never in `count`/`items`. Serialized only when positive (byte-identical otherwise).
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub inferred_count: u64,
+    /// The inferred callers (budget-capped like `items`), each at its call site with its basis.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub inferred_items: Vec<ExplainInferredCallItem>,
+    /// Every inferred caller's basis, counted (uncapped) — decides the "(name-only)" label.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub inferred_by_basis: std::collections::BTreeMap<String, u64>,
+    /// RG-REQ-005-L09: the unresolved calls naming this symbol, with their bases.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unresolved_naming: Option<ExplainUnresolvedCalls>,
+}
+
+/// PYTHON-RECEIVER-BINDING-1: one inferred caller/callee row on `explain` — anchored at the call
+/// site, with its recorded basis (`receiver_untyped_name_only`, or `unrecorded` for a row whose
+/// evidence is absent/malformed — then `extractor` names its writer).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainInferredCallItem {
+    pub stable_key: String,
+    pub name: String,
+    pub module: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u64>,
+    pub basis: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver: Option<String>,
+    pub extractor: String,
+}
+
+/// PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L09): unresolved calls bearing on a symbol — naming it
+/// (`name` set) or leaving it — counted per classifier basis code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainUnresolvedCalls {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub count: u64,
+    pub by_basis: std::collections::BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -911,6 +966,17 @@ pub struct ExplainCalleesEvidence {
     pub items_truncated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items_omitted_count: Option<u64>,
+    /// PYTHON-RECEIVER-BINDING-1: callees reached only through an inferred binding.
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub inferred_count: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub inferred_items: Vec<ExplainInferredCallItem>,
+    /// Every inferred callee's basis, counted (uncapped).
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub inferred_by_basis: std::collections::BTreeMap<String, u64>,
+    /// RG-REQ-005-L09: the unresolved calls this symbol makes, with their bases.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unresolved_from: Option<ExplainUnresolvedCalls>,
 }
 
 // ── EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): type-focus member + referenced-by evidence ──
@@ -989,6 +1055,25 @@ pub struct ExplainReferencedByInferredItem {
     /// Repo path of the other candidate target (the package init for `python_submodule`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alternate: Option<String>,
+}
+
+/// PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11): append the inferred remainder to an orient
+/// callers/callees summary — "<summary without its period>; N inferred (name-only) — investigate
+/// with rmap <command> --include-inferred". Unchanged when nothing is inferred.
+fn with_inferred_remainder(
+    summary: String,
+    inferred: u64,
+    name_only: bool,
+    command: &str,
+) -> String {
+    if inferred == 0 {
+        return summary;
+    }
+    format!(
+        "{}; {} — investigate with rmap {command} --include-inferred",
+        summary.trim_end_matches('.'),
+        crate::reliability::inferred_remainder_label(inferred, name_only)
+    )
 }
 
 fn is_zero_u64(n: &u64) -> bool {
@@ -1126,6 +1211,11 @@ pub struct ExplainTrustEvidence {
     /// claim the denominator is purely in-scope).
     pub resolved_in_scope: u64,
     pub in_scope_or_unclassified_total: u64,
+    /// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A): the inferred calls inside
+    /// `in_scope_or_unclassified_total` — never in `resolved_in_scope`, stated beside the rate.
+    /// Serialized only when positive (an explain without inferred calls is byte-identical).
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub inferred_calls: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1800,6 +1890,12 @@ impl Signal {
                 "s"
             },
         );
+        let summary = with_inferred_remainder(
+            summary,
+            evidence.inferred_count,
+            evidence.inferred_name_only,
+            "callers",
+        );
         Self::build(
             SignalCode::CallersSummary,
             summary,
@@ -1819,6 +1915,12 @@ impl Signal {
             } else {
                 "s"
             },
+        );
+        let summary = with_inferred_remainder(
+            summary,
+            evidence.inferred_count,
+            evidence.inferred_name_only,
+            "callees",
         );
         Self::build(
             SignalCode::CalleesSummary,
@@ -2000,7 +2102,9 @@ impl Signal {
             evidence.resolved_in_scope,
             evidence
                 .in_scope_or_unclassified_total
-                .saturating_sub(evidence.resolved_in_scope),
+                .saturating_sub(evidence.resolved_in_scope)
+                .saturating_sub(evidence.inferred_calls),
+            evidence.inferred_calls,
             0,
             evidence.in_scope_or_unclassified_total,
             Vec::new(),

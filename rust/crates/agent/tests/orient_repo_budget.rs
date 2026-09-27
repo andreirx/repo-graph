@@ -51,6 +51,7 @@ fn seed_many_signals() -> FakeAgentStorage {
     fake.trust_summaries.insert(
         "snap-1".into(),
         AgentTrustSummary {
+            inferred_calls: 0,
             call_resolution_rate: 0.10,
             resolved_calls: 1,
             unresolved_calls: 9,

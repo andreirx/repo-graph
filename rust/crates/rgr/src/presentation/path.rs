@@ -52,14 +52,59 @@ pub struct PathResult {
 }
 
 /// Response structure for path command.
+///
+/// PYTHON-RECEIVER-BINDING-1 (D-PRB-SCOPE-1 addendum): when no route through certain edges
+/// exists and one exists through inferred call/import edges, the daemon adds
+/// `inferred_edges_on_route` and `search_depth`. A count WITHOUT its depth is a decode error —
+/// never a guessed bound.
 #[derive(Debug, Deserialize)]
+#[serde(try_from = "PathResponseWire")]
 pub struct PathResponse {
-    #[serde(default)]
     pub repo_uid: String,
-    #[serde(default)]
     pub snapshot_uid: String,
     pub path: PathResult,
     pub found: bool,
+    /// `(inferred edges on the uncertified route, the search depth both walks used)`.
+    pub inferred_route: Option<(u64, u64)>,
+}
+
+/// The wire shape of [`PathResponse`] before the inferred-route pair is validated.
+#[derive(Debug, Deserialize)]
+struct PathResponseWire {
+    #[serde(default)]
+    repo_uid: String,
+    #[serde(default)]
+    snapshot_uid: String,
+    path: PathResult,
+    found: bool,
+    #[serde(default)]
+    inferred_edges_on_route: Option<u64>,
+    #[serde(default)]
+    search_depth: Option<u64>,
+}
+
+impl TryFrom<PathResponseWire> for PathResponse {
+    type Error = String;
+
+    fn try_from(w: PathResponseWire) -> Result<Self, Self::Error> {
+        let inferred_route = match (w.inferred_edges_on_route, w.search_depth) {
+            (Some(n), Some(d)) => Some((n, d)),
+            (None, _) => None,
+            (Some(_), None) => {
+                return Err(
+                    "path response carries inferred_edges_on_route without search_depth"
+                        .to_string(),
+                )
+            }
+        };
+        Ok(Self {
+            repo_uid: w.repo_uid,
+            snapshot_uid: w.snapshot_uid,
+            path: w.path,
+            found: w.found,
+            inferred_route,
+        })
+    }
 }
 
 // ── Human Rendering ──────────────────────────────────────────────────────────
@@ -100,6 +145,15 @@ impl PathResponse {
         // ── Not found ──────────────────────────────────────────────
         if !self.found || !self.path.found {
             out.push_str("No path found.\n");
+            // PYTHON-RECEIVER-BINDING-1: an absent certain route is never presented as proof of
+            // absence when inferred call/import edges connect the endpoints.
+            if let Some((n, depth)) = self.inferred_route {
+                let edges = if n == 1 { "edge" } else { "edges" };
+                out.push_str(&format!(
+                    "no route through certain edges within depth {depth}; a route exists using {n} \
+                     inferred call/import {edges} — investigate\n"
+                ));
+            }
             return out;
         }
 
@@ -140,6 +194,7 @@ mod tests {
 
     fn sample_path_found() -> PathResponse {
         PathResponse {
+            inferred_route: None,
             repo_uid: "repo_123".to_string(),
             snapshot_uid: "snap_456".to_string(),
             found: true,
@@ -175,6 +230,7 @@ mod tests {
 
     fn sample_path_not_found() -> PathResponse {
         PathResponse {
+            inferred_route: None,
             repo_uid: "repo_123".to_string(),
             snapshot_uid: "snap_456".to_string(),
             found: false,
@@ -231,6 +287,7 @@ mod tests {
     #[test]
     fn render_single_hop() {
         let resp = PathResponse {
+            inferred_route: None,
             repo_uid: "r".to_string(),
             snapshot_uid: "s".to_string(),
             found: true,
@@ -258,5 +315,39 @@ mod tests {
         let output = resp.render_human_with_query("A", "B");
         assert!(output.contains("1 hop"));
         assert!(!output.contains("hops")); // singular
+    }
+
+    #[test]
+    fn render_path_not_found_states_the_inferred_edges_on_route_within_the_depth() {
+        let parse = |extra: serde_json::Value| -> Result<PathResponse, serde_json::Error> {
+            let mut v = serde_json::json!({
+                "repo_uid": "r", "snapshot_uid": "s", "found": false,
+                "path": {"found": false, "path_length": 0, "path": []}
+            });
+            for (k, x) in extra.as_object().unwrap() {
+                v[k] = x.clone();
+            }
+            serde_json::from_value(v)
+        };
+        let one =
+            parse(serde_json::json!({"inferred_edges_on_route": 1, "search_depth": 8})).unwrap();
+        let out = one.render_human_with_query("A.f", "B.g");
+        assert!(out.contains("No path found."), "{out}");
+        assert!(
+            out.contains("no route through certain edges within depth 8; a route exists using 1 inferred call/import edge — investigate"),
+            "{out}"
+        );
+        let three =
+            parse(serde_json::json!({"inferred_edges_on_route": 3, "search_depth": 8})).unwrap();
+        assert!(three
+            .render_human_with_query("A.f", "B.g")
+            .contains("a route exists using 3 inferred call/import edges — investigate"));
+        // Absent → the plain not-found render (byte-identical).
+        let plain = parse(serde_json::json!({})).unwrap();
+        assert!(!plain
+            .render_human_with_query("A.f", "B.g")
+            .contains("inferred"));
+        // A count without its depth is a decode error, never a guessed bound.
+        assert!(parse(serde_json::json!({"inferred_edges_on_route": 1})).is_err());
     }
 }

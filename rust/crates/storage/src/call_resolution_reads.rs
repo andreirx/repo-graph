@@ -12,7 +12,10 @@
 //!
 //! ## Populations (slice §2 — identical to the aggregate)
 //!
-//!   * resolved   = `edges` rows of `type='CALLS'` (resolved by construction);
+//!   * resolved   = `edges` rows of `type='CALLS'` whose resolution is `static`/`dynamic`
+//!     (PYTHON-RECEIVER-BINDING-1, D-PRB-RATE-1 = A: certain calls only);
+//!   * inferred   = `edges` rows of `type='CALLS'` whose resolution is `inferred` — kept in
+//!     the measured universe, never counted resolved;
 //!   * unresolved = `unresolved_edges` rows in the four CALLS categories
 //!     (the SAME filter `assemble_trust_report` applies for
 //!     `calls_classification_counts`);
@@ -72,6 +75,15 @@ use repo_graph_classification::types::{UnresolvedEdgeCategory, UnresolvedEdgeCla
 
 use crate::connection::StorageConnection;
 use crate::error::StorageError;
+
+/// PYTHON-RECEIVER-BINDING-1 (D-PRB-RATE-1 = A; D-PSI-R1-VOCAB): the two CALLS-edge count
+/// columns over `edges e` — the certain count (`static`/`dynamic`, the rate's numerator) and the
+/// inferred count (kept in the universe). A value outside the vocabulary is never silently left
+/// out of both: every read using these columns first refuses a snapshot holding one
+/// ([`StorageConnection::reject_unreadable_call_resolutions`]).
+const CERTAINTY_COLUMNS: &str =
+    "COALESCE(SUM(CASE WHEN e.resolution IN ('static', 'dynamic') THEN 1 ELSE 0 END), 0), \
+     COALESCE(SUM(CASE WHEN e.resolution = 'inferred' THEN 1 ELSE 0 END), 0)";
 
 /// The four CALLS-family unresolved categories — the SAME set
 /// `assemble_trust_report` filters `calls_classification_counts` to. Kept as typed
@@ -152,8 +164,8 @@ fn file_candidate_cte(snapshot_param: &str) -> String {
 /// test file (`files.is_test`); edges with no attributable file fall in
 /// `('(unknown)', false)`.
 type Cell = (String, bool);
-/// Grouped resolved counts: `(cell, resolved)`.
-type CellResolved = Vec<(Cell, u64)>;
+/// Grouped CALLS-edge counts: `(cell, (resolved, inferred))`.
+type CellResolved = Vec<(Cell, (u64, u64))>;
 /// Grouped unresolved counts: `(cell, (unresolved, external, unknown))`.
 type CellUnresolved = Vec<(Cell, (u64, u64, u64))>;
 
@@ -171,14 +183,17 @@ fn merge_cells(
         unresolved: 0,
         external: 0,
         unknown: 0,
+        inferred: 0,
     };
     let mut map: BTreeMap<Cell, CallResolutionCounts> = BTreeMap::new();
     // Seed present-but-callless scopes first (zero counts, so reconciliation holds).
     for cell in seed {
         map.entry(cell).or_insert_with(zero);
     }
-    for (cell, resolved_count) in resolved {
-        map.entry(cell).or_insert_with(zero).resolved += resolved_count;
+    for (cell, (resolved_count, inferred_count)) in resolved {
+        let e = map.entry(cell).or_insert_with(zero);
+        e.resolved += resolved_count;
+        e.inferred += inferred_count;
     }
     for (cell, (unresolved, external, unknown)) in unresolved {
         let e = map.entry(cell).or_insert_with(zero);
@@ -202,10 +217,11 @@ impl StorageConnection {
         &self,
         snapshot_uid: &str,
     ) -> Result<CallResolutionCounts, StorageError> {
-        let resolved: i64 = self.connection().query_row(
-            "SELECT COUNT(*) FROM edges WHERE snapshot_uid = ?1 AND type = 'CALLS'",
+        self.reject_unreadable_call_resolutions(snapshot_uid, "query_call_resolution_total")?;
+        let (resolved, inferred): (i64, i64) = self.connection().query_row(
+            &format!("SELECT {CERTAINTY_COLUMNS} FROM edges e WHERE e.snapshot_uid = ?1 AND e.type = 'CALLS'"),
             rusqlite::params![snapshot_uid],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
 
         let cats = calls_category_sql()?;
@@ -234,6 +250,7 @@ impl StorageConnection {
             unresolved: unresolved as u64,
             external: external as u64,
             unknown: unknown as u64,
+            inferred: inferred as u64,
         })
     }
 
@@ -246,6 +263,7 @@ impl StorageConnection {
         &self,
         snapshot_uid: &str,
     ) -> Result<Vec<ScopeCountRow>, StorageError> {
+        self.reject_unreadable_call_resolutions(snapshot_uid, "query_call_resolution_by_language")?;
         let seed = self.scope_inventory(
             snapshot_uid,
             &format!(
@@ -261,7 +279,7 @@ impl StorageConnection {
             snapshot_uid,
             &format!(
                 "SELECT COALESCE(f.language, '{UNATTRIBUTED_SCOPE}') AS scope, \
-                    COALESCE(f.is_test, 0) AS is_test, COUNT(*) AS cnt \
+                    COALESCE(f.is_test, 0) AS is_test, {CERTAINTY_COLUMNS} \
                  FROM edges e \
                  JOIN nodes n ON e.source_node_uid = n.node_uid \
                  LEFT JOIN files f ON n.file_uid = f.file_uid \
@@ -304,6 +322,7 @@ impl StorageConnection {
         &self,
         snapshot_uid: &str,
     ) -> Result<Vec<ScopeCountRow>, StorageError> {
+        self.reject_unreadable_call_resolutions(snapshot_uid, "query_call_resolution_by_module")?;
         let seed = self.scope_inventory(
             snapshot_uid,
             &format!(
@@ -323,7 +342,7 @@ impl StorageConnection {
             &format!(
                 "{cte} \
                  SELECT COALESCE(fc.scope, '{UNATTRIBUTED_SCOPE}') AS scope, \
-                    COALESCE(f.is_test, 0) AS is_test, COUNT(*) AS cnt \
+                    COALESCE(f.is_test, 0) AS is_test, {CERTAINTY_COLUMNS} \
                  FROM edges e \
                  JOIN nodes n ON e.source_node_uid = n.node_uid \
                  LEFT JOIN files f ON f.file_uid = n.file_uid \
@@ -365,8 +384,8 @@ impl StorageConnection {
             .map_err(StorageError::from)
     }
 
-    /// Run a grouped resolved-CALLS query (`?1` = snapshot_uid). Columns:
-    /// `scope, is_test, count`.
+    /// Run a grouped CALLS-edge query (`?1` = snapshot_uid). Columns:
+    /// `scope, is_test, resolved (certain), inferred`.
     fn grouped_resolved(
         &self,
         snapshot_uid: &str,
@@ -376,7 +395,7 @@ impl StorageConnection {
         let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {
             Ok((
                 (row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0),
-                row.get::<_, i64>(2)? as u64,
+                (row.get::<_, i64>(2)? as u64, row.get::<_, i64>(3)? as u64),
             ))
         })?;
         rows.collect::<Result<Vec<_>, _>>()

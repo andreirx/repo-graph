@@ -2195,3 +2195,181 @@ fn query_high_complexity_symbols_carries_the_file_flags_and_keeps_every_row() {
     .unwrap();
     assert_eq!(count, 4, "count is the unfiltered above-threshold total");
 }
+
+// ── PYTHON-RECEIVER-BINDING-1: certain sets and the call remainder ─────────
+
+/// One static caller (b.py, call at :14), one inferred caller (c.py, call at :1737) and one legacy
+/// promoted caller (d.py, call at :54) of `target` (a.py); `target` calls `helper` statically and
+/// `guess` by an inferred edge; two unresolved calls name `target`, one leaves it.
+fn seed_certainty(storage: &StorageConnection) -> String {
+    insert_repo(storage, "r1", "py");
+    let snap = create_ready_snapshot(storage, "r1");
+    let sql = [
+        "INSERT INTO files (file_uid, repo_uid, path, language, is_test) VALUES \
+           ('r1:a.py','r1','pkg/a.py','python',0), ('r1:b.py','r1','pkg/b.py','python',0), \
+           ('r1:c.py','r1','pkg/c.py','python',0), ('r1:d.py','r1','pkg/d.py','python',0)"
+            .to_string(),
+        format!(
+            "INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype, name, qualified_name, file_uid, line_start) VALUES \
+               ('t','{snap}','r1','r1:pkg/a.py#L.target:SYMBOL:METHOD','SYMBOL','METHOD','target','L.target','r1:a.py',192), \
+               ('h','{snap}','r1','r1:pkg/a.py#helper:SYMBOL:FUNCTION','SYMBOL','FUNCTION','helper','helper','r1:a.py',300), \
+               ('k','{snap}','r1','r1:pkg/b.py#certain:SYMBOL:FUNCTION','SYMBOL','FUNCTION','certain','certain','r1:b.py',10), \
+               ('g','{snap}','r1','r1:pkg/c.py#guess:SYMBOL:FUNCTION','SYMBOL','FUNCTION','guess','guess','r1:c.py',1731), \
+               ('p','{snap}','r1','r1:pkg/d.py#promoted:SYMBOL:FUNCTION','SYMBOL','FUNCTION','promoted','promoted','r1:d.py',50)"
+        ),
+        format!(
+            "INSERT INTO edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_node_uid, type, resolution, extractor, line_start, col_start, metadata_json) VALUES \
+               ('e1','{snap}','r1','k','t','CALLS','static','python-core:0.2.0',14,4,NULL), \
+               ('e2','{snap}','r1','g','t','CALLS','inferred','python-core:0.2.0',1737,16,'{{\"basis\":\"receiver_untyped_name_only\",\"receiver\":\"dependencies\",\"candidates\":[\"L.target\"]}}'), \
+               ('e3','{snap}','r1','p','t','CALLS','inferred','compiler-promotion:0.1.0',54,4,'{{\"promotedFrom\":\"x\",\"receiverType\":\"L\",\"methodName\":\"target\"}}'), \
+               ('e4','{snap}','r1','t','h','CALLS','static','python-core:0.2.0',195,8,NULL), \
+               ('e5','{snap}','r1','t','g','CALLS','inferred','python-core:0.2.0',196,8,'{{\"basis\":\"receiver_untyped_name_only\",\"receiver\":\"obj\",\"candidates\":[\"guess\"]}}')"
+        ),
+        format!(
+            "INSERT INTO unresolved_edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key, type, resolution, extractor, line_start, col_start, metadata_json, category, classification, classifier_version, basis_code, observed_at) VALUES \
+               ('u1','{snap}','r1','k','self.target','CALLS','static','python-core:0.2.0',20,4,'{{\"selfCall\":true,\"enclosingClass\":\"K\",\"receiverBinding\":\"parameter\",\"nameOnlyCandidates\":[\"L.target\"],\"nameOnlyReason\":\"self_call_hierarchy_miss\"}}','calls_obj_method_needs_type_info','unknown',6,'self_call_hierarchy_miss','t'), \
+               ('u2','{snap}','r1','g','x.target','CALLS','static','python-core:0.2.0',30,4,NULL,'calls_obj_method_needs_type_info','unknown',6,'no_supporting_signal','t'), \
+               ('u3','{snap}','r1','t','fields.values','CALLS','static','python-core:0.2.0',197,4,'{{\"nameOnlyCandidates\":[\"A.values\",\"B.values\"],\"nameOnlyReason\":\"ambiguous_name\"}}','calls_obj_method_needs_type_info','unknown',6,'no_supporting_signal','t')"
+        ),
+    ];
+    for s in sql {
+        storage.execute_raw(&s).unwrap();
+    }
+    snap
+}
+
+const TARGET: &str = "r1:pkg/a.py#L.target:SYMBOL:METHOD";
+
+#[test]
+fn find_symbol_callers_returns_only_certain_calls() {
+    let (_d, storage) = open_temp_storage();
+    let snap = seed_certainty(&storage);
+    let callers = AgentStorageRead::find_symbol_callers(&storage, &snap, TARGET).unwrap();
+    let names: Vec<&str> = callers.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["certain"],
+        "inferred and legacy-promoted rows are not callers"
+    );
+}
+
+#[test]
+fn find_symbol_callees_returns_only_certain_calls() {
+    let (_d, storage) = open_temp_storage();
+    let snap = seed_certainty(&storage);
+    let callees = AgentStorageRead::find_symbol_callees(&storage, &snap, TARGET).unwrap();
+    let names: Vec<&str> = callees.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["helper"]);
+}
+
+#[test]
+fn find_symbol_call_remainders_returns_inferred_rows_with_basis_receiver_and_call_site_line() {
+    let (_d, storage) = open_temp_storage();
+    let snap = seed_certainty(&storage);
+    let r =
+        AgentStorageRead::find_symbol_call_remainders(&storage, &snap, TARGET, "target").unwrap();
+    let guess = r
+        .inferred_callers
+        .iter()
+        .find(|c| c.name == "guess")
+        .unwrap();
+    assert_eq!(guess.file.as_deref(), Some("pkg/c.py"));
+    assert_eq!(
+        guess.line,
+        Some(1737),
+        "the call site, not the declaration (1731)"
+    );
+    assert_eq!(guess.basis, "receiver_untyped_name_only");
+    assert_eq!(guess.receiver.as_deref(), Some("dependencies"));
+    assert_eq!(guess.extractor, "python-core:0.2.0");
+    assert_eq!(r.inferred_callees.len(), 1);
+    let callee = &r.inferred_callees[0];
+    assert_eq!(callee.name, "guess");
+    // A callee row is anchored at the call site too: the calling file and the edge's line.
+    assert_eq!(
+        (callee.file.as_deref(), callee.line),
+        (Some("pkg/a.py"), Some(196))
+    );
+}
+
+#[test]
+fn find_symbol_call_remainders_counts_unresolved_calls_naming_and_from_the_symbol_by_basis() {
+    let (_d, storage) = open_temp_storage();
+    let snap = seed_certainty(&storage);
+    let r =
+        AgentStorageRead::find_symbol_call_remainders(&storage, &snap, TARGET, "target").unwrap();
+    let naming: Vec<(&str, u64)> = r
+        .unresolved_naming
+        .iter()
+        .map(|b| (b.basis_code.as_str(), b.count))
+        .collect();
+    assert_eq!(
+        naming,
+        vec![("no_supporting_signal", 1), ("self_call_hierarchy_miss", 1)]
+    );
+    let site = r
+        .unresolved_naming_sites
+        .iter()
+        .find(|s| s.target_key == "self.target")
+        .unwrap();
+    assert_eq!(
+        site.candidate_reason.as_deref(),
+        Some("self_call_hierarchy_miss")
+    );
+    assert_eq!(
+        site.candidates.as_deref(),
+        Some(&["L.target".to_string()][..])
+    );
+    assert_eq!(r.unresolved_from_total(), 1);
+    let from = &r.unresolved_from_sites[0];
+    assert_eq!((from.line, from.candidate_count), (Some(197), Some(2)));
+    assert_eq!(from.candidate_reason.as_deref(), Some("ambiguous_name"));
+}
+
+#[test]
+fn find_symbol_call_remainders_serves_a_legacy_promoted_row_as_unrecorded_with_its_extractor() {
+    let (_d, storage) = open_temp_storage();
+    let snap = seed_certainty(&storage);
+    let r =
+        AgentStorageRead::find_symbol_call_remainders(&storage, &snap, TARGET, "target").unwrap();
+    let legacy = r
+        .inferred_callers
+        .iter()
+        .find(|c| c.name == "promoted")
+        .expect("served in the inferred remainder, never dropped");
+    assert_eq!(legacy.basis, "unrecorded");
+    assert_eq!(legacy.receiver, None);
+    assert_eq!(legacy.extractor, "compiler-promotion:0.1.0");
+    assert_eq!(legacy.line, Some(54));
+    assert_eq!(r.inferred_callers.len(), 2);
+}
+
+#[test]
+fn find_dead_nodes_in_path_and_file_do_not_count_an_inferred_call_as_a_use() {
+    let (_d, storage) = open_temp_storage();
+    let snap = seed_certainty(&storage);
+    let in_path: Vec<String> =
+        AgentStorageRead::find_dead_nodes_in_path(&storage, &snap, "r1", "pkg")
+            .unwrap()
+            .into_iter()
+            .map(|d| d.stable_key)
+            .collect();
+    // `guess` is reached only by an inferred call (e5): not a use → a dead candidate. `helper` is
+    // called statically (e4) → alive. `target` has a static caller → alive.
+    assert!(
+        in_path.contains(&"r1:pkg/c.py#guess:SYMBOL:FUNCTION".to_string()),
+        "{in_path:?}"
+    );
+    assert!(!in_path.contains(&"r1:pkg/a.py#helper:SYMBOL:FUNCTION".to_string()));
+    assert!(!in_path.contains(&TARGET.to_string()));
+    let in_file: Vec<String> =
+        AgentStorageRead::find_dead_nodes_in_file(&storage, &snap, "r1", "pkg/c.py")
+            .unwrap()
+            .into_iter()
+            .map(|d| d.stable_key)
+            .collect();
+    assert_eq!(
+        in_file,
+        vec!["r1:pkg/c.py#guess:SYMBOL:FUNCTION".to_string()]
+    );
+}
