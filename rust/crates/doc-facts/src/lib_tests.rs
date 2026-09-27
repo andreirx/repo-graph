@@ -562,3 +562,217 @@ fn inventory_reports_unscanned_markup_outside_docs_tree() {
         &[".md", ".markdown", ".rst", ".adoc"]
     );
 }
+
+// ── DOCS-UNREADABLE-DECODE-1 (RG-REQ-008-L05, RG-REQ-008-L08 as amended by D-DU-CC10) ──────────
+//
+// The content hash is the sha256 of the file's BYTES; the text is decoded separately. A document
+// whose bytes are not UTF-8 keeps a real hash, gets no content and is counted unreadable; a
+// document whose bytes could not be read at all has no hash, and its entry still SERIALIZES the
+// `content_hash` key (as null) — an unknown marked, never omitted, never fabricated.
+//
+// Serialization is asserted through `serde_yaml` (this crate's existing serializer dependency):
+// whether the key is emitted is decided by the derived `Serialize` impl (`skip_serializing_if`),
+// independently of the output format, and the frozen Cargo.toml carries no `serde_json`.
+
+fn create_bytes(dir: &Path, name: &str, bytes: &[u8]) {
+    let path = dir.join(name);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(path, bytes).unwrap();
+}
+
+/// The serialized `content_hash` of an entry: `Some(Some(s))` a string, `Some(None)` the key
+/// present with null, `None` the key absent.
+fn serialized_content_hash(entry: &DocInventoryEntry) -> Option<Option<String>> {
+    let value = serde_yaml::to_value(entry).expect("entry serializes");
+    let map = value.as_mapping().expect("entry serializes as a mapping");
+    map.get(serde_yaml::Value::String("content_hash".to_string()))
+        .map(|v| match v {
+            serde_yaml::Value::Null => None,
+            serde_yaml::Value::String(s) => Some(s.clone()),
+            other => panic!("content_hash is neither a string nor null: {other:?}"),
+        })
+}
+
+fn inventory_entry<'a>(result: &'a DocInventoryResult, path: &str) -> &'a DocInventoryEntry {
+    result
+        .entries
+        .iter()
+        .find(|e| e.path == path)
+        .unwrap_or_else(|| panic!("{path} admitted to the inventory"))
+}
+
+/// poco's `packaging/README.txt` is Windows-1252 (`Apple\x92s Cocoa`).
+const WINDOWS_1252_BYTES: &[u8] = b"Apple\x92s Cocoa\n";
+/// sha256 of [`WINDOWS_1252_BYTES`], computed independently of the implementation.
+const WINDOWS_1252_SHA256: &str =
+    "00873e70bc71b05cc510c80ff317e1f2ed5a82eee47b0405b83a3c2e21a90109";
+
+#[test]
+fn undecodable_utf8_document_keeps_a_byte_hash_and_counts_unreadable() {
+    let dir = tempdir().unwrap();
+    create_file(dir.path(), "README.md", "# Readable\n");
+    create_bytes(dir.path(), "packaging/README.txt", WINDOWS_1252_BYTES);
+    // A sidecar-NAMED undecodable file: counted once, by the sidecar pass, never twice.
+    create_bytes(dir.path(), "src/gen/MAP.md", b"\x92 map\n");
+
+    let result = discover_doc_inventory(dir.path(), true).unwrap();
+
+    let mut paths: Vec<&str> = result.entries.iter().map(|e| e.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(
+        paths,
+        vec!["README.md", "packaging/README.txt", "src/gen/MAP.md"],
+        "every document admitted, the undecodable ones included"
+    );
+    let undecodable = inventory_entry(&result, "packaging/README.txt");
+    assert_eq!(
+        undecodable.content_hash.as_deref(),
+        Some(WINDOWS_1252_SHA256),
+        "the hash is the sha256 of the file's bytes"
+    );
+    assert_eq!(undecodable.kind, "readme", "kind by name, as before");
+    assert!(!undecodable.generated);
+    let sidecar = inventory_entry(&result, "src/gen/MAP.md");
+    assert!(
+        !sidecar.generated,
+        "an undecodable sidecar is not asserted generated"
+    );
+    assert_eq!(
+        result.unreadable_count, 2,
+        "the undecodable README and the undecodable sidecar, each counted exactly once"
+    );
+    for entry in &result.entries {
+        assert!(
+            matches!(serialized_content_hash(entry), Some(Some(_))),
+            "{} serializes a string content_hash",
+            entry.path
+        );
+    }
+}
+
+#[test]
+fn readable_document_hash_is_unchanged_by_the_byte_read() {
+    let dir = tempdir().unwrap();
+    create_file(dir.path(), "README.md", "# Résumé — ✓\n");
+
+    let result = discover_doc_inventory(dir.path(), true).unwrap();
+
+    assert_eq!(
+        inventory_entry(&result, "README.md")
+            .content_hash
+            .as_deref(),
+        Some("ae9c3d6d18a8667af95c59681aa94026b17feafb9d7af579331995b26dbd1155"),
+        "a valid UTF-8 document hashes exactly as before (sha256 of its bytes)"
+    );
+    assert_eq!(result.unreadable_count, 0);
+}
+
+#[test]
+fn extract_warns_on_an_undecodable_document() {
+    let dir = tempdir().unwrap();
+    create_file(
+        dir.path(),
+        "README.md",
+        "# OK\n\n<!-- rg:replaces old-module -->\n",
+    );
+    create_bytes(
+        dir.path(),
+        "packaging/README.txt",
+        b"<!-- rg:replaces other-module -->\nApple\x92s Cocoa\n",
+    );
+
+    let result = extract_semantic_facts(dir.path()).unwrap();
+
+    let expected_error = fs::read_to_string(dir.path().join("packaging/README.txt")).unwrap_err();
+    assert_eq!(result.files_scanned, 2);
+    assert_eq!(
+        result.warnings.len(),
+        1,
+        "one warning: {:?}",
+        result.warnings
+    );
+    assert_eq!(result.warnings[0].file, "packaging/README.txt");
+    assert_eq!(
+        result.warnings[0].message,
+        format!("failed to read: {}", expected_error),
+        "the warning reads exactly as the text read's error always did"
+    );
+    assert_eq!(
+        result.facts.len(),
+        1,
+        "nothing is extracted from the undecodable document: {:?}",
+        result.facts
+    );
+    assert_eq!(
+        result.facts[0].source_file, "README.md",
+        "the one fact comes from the readable document"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn entry_with_unread_bytes_serializes_content_hash_null_with_the_key_present() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempdir().unwrap();
+    create_file(dir.path(), "README.md", "# Readable\n");
+    let blocked = dir.path().join("docs/NOTES.md");
+    create_file(dir.path(), "docs/NOTES.md", "private notes\n");
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
+
+    let result = discover_doc_inventory(dir.path(), true).unwrap();
+
+    // Restore permissions so tempdir cleanup can remove the file.
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o644)).unwrap();
+
+    let unread = inventory_entry(&result, "docs/NOTES.md");
+    assert_eq!(unread.content_hash, None, "no truthful hash exists");
+    assert_eq!(unread.kind, "doc");
+    assert!(!unread.generated);
+    assert_eq!(result.unreadable_count, 1);
+    assert_eq!(
+        serialized_content_hash(unread),
+        Some(None),
+        "the key is serialized, with null"
+    );
+    assert!(
+        serde_yaml::to_string(unread)
+            .unwrap()
+            .lines()
+            .any(|l| l == "content_hash: null"),
+        "the serialized entry carries `content_hash: null`"
+    );
+    assert!(
+        matches!(
+            serialized_content_hash(inventory_entry(&result, "README.md")),
+            Some(Some(_))
+        ),
+        "a readable entry serializes a string"
+    );
+}
+
+#[test]
+fn entry_with_undecodable_bytes_serializes_its_byte_hash() {
+    let dir = tempdir().unwrap();
+    create_bytes(dir.path(), "README.txt", WINDOWS_1252_BYTES);
+
+    let result = discover_doc_inventory(dir.path(), true).unwrap();
+
+    assert_eq!(
+        serialized_content_hash(inventory_entry(&result, "README.txt")),
+        Some(Some(WINDOWS_1252_SHA256.to_string())),
+        "the undecodable entry serializes the sha256 of its bytes"
+    );
+    // `release_family` keeps its skip: absent on a non-release entry.
+    let value = serde_yaml::to_value(inventory_entry(&result, "README.txt")).unwrap();
+    assert!(
+        value
+            .as_mapping()
+            .unwrap()
+            .get(serde_yaml::Value::String("release_family".to_string()))
+            .is_none(),
+        "release_family stays omitted when None"
+    );
+}

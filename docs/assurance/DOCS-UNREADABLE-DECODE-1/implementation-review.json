@@ -1,0 +1,455 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-DOCS-UNREADABLE-DECODE-1-0",
+  "workItemId": "DOCS-UNREADABLE-DECODE-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/DOCS-UNREADABLE-DECODE-1-INPUT-3.json",
+    "sha256": "sha256:e755e25792801e0ce66128b19199cb22f962dd70a68f3b96b6c5ae9be0dc6934"
+  },
+  "allocation": {
+    "path": "docs/slices/docs-unreadable-decode-1.md",
+    "sha256": "sha256:abfa134934b4be48d7449209f876e3627b6ef0eca11d4af6a2214e402316cfe0"
+  },
+  "subject": {
+    "candidateSha256": "sha256:4b157fb87e1c5f31993b478d663b31c98872ebfb7751d444562ebcf906bd1b27",
+    "verification": {
+      "path": "docs/assurance/DOCS-UNREADABLE-DECODE-1/verification.json",
+      "sha256": "sha256:a15f3cdeb86f7bf718b7d75fa6417a9055d4391ad16fb861ca4436d166aa3b16"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-DOCS-UNREADABLE-DECODE-1-0"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/DOCS-UNREADABLE-DECODE-1-INPUT-3.json",
+      "sha256": "sha256:e755e25792801e0ce66128b19199cb22f962dd70a68f3b96b6c5ae9be0dc6934"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/DOCS-UNREADABLE-DECODE-1-INPUT-3.json",
+        "sha256": "sha256:e755e25792801e0ce66128b19199cb22f962dd70a68f3b96b6c5ae9be0dc6934",
+        "byteLength": 3364
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-008-documentation-inventory.md",
+        "sha256": "sha256:1fc97cd13e03f0bc874897ba30af4d33ff0d0b0879d7c9cadbeb2b5c7ae116ad",
+        "byteLength": 14957
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+        "sha256": "sha256:0d3bfb05be9c22a916184c25412ad0b1a51136978506f5106d711e8017d732bb",
+        "byteLength": 15479
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:c66ee8f94324460d07768f5993ae9e164445451fb72a890c3c44e6e62154ba35",
+        "byteLength": 20305,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/docs-list-2.md",
+        "sha256": "sha256:edc2185eee6bd8a9206b777b03c50d4988368e83b59ef5b38d3d6b0390b90c1f",
+        "byteLength": 3486,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/audit5-minors-1.md",
+        "sha256": "sha256:cf4db06b57ba95e2730f0342b4b896cbd1d7758274d8daba5f0d201a85edb496",
+        "byteLength": 7535,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/self-pollution-1.md",
+        "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199",
+        "byteLength": 4474,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/modules-method-1.md",
+        "sha256": "sha256:8c5c41ca832099568431228145556caae17d35c0dc3bc093f3b202311971820e",
+        "byteLength": 5226,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/state-root-separation-1.md",
+        "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f",
+        "byteLength": 10847,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/snapshot-retention-1.md",
+        "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff",
+        "byteLength": 5984,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/daemon-residuals-2.md",
+        "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408",
+        "byteLength": 9750,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:6bafbfb4a000ae346b79ae396adbd7564f268437a511fd556e89cde2ecda1c47",
+        "byteLength": 13830
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:4e6e2a618c2c15f1546d38736b876bdba688d1926ab102741cbe60c3a9bb3f04",
+        "byteLength": 10492
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DU-CC10.md",
+        "sha256": "sha256:88ff0bc17769d3101471ad66eccd7b90a66361eb87679f6728d1e774cd17b5b8",
+        "byteLength": 1486
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/docs-unreadable-decode-1.md",
+        "sha256": "sha256:abfa134934b4be48d7449209f876e3627b6ef0eca11d4af6a2214e402316cfe0",
+        "byteLength": 60399
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/DOCS-UNREADABLE-DECODE-1-INPUT-3/requirements-review.json",
+        "sha256": "sha256:f2a8ff2ea533291a5c2e87ed62ab41a5400871faf20894ba7b56a959c1838922",
+        "byteLength": 52729
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/DOCS-UNREADABLE-DECODE-1-INPUT-3/baseline-approval.json",
+        "sha256": "sha256:69ffde5d5214381b5656d5f4950d6dad353576d80444024c31829a88159d7206",
+        "byteLength": 1442
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:e4e9c5944a15f5fe4b7cdbfb4483a1bf5436cf18aa6c608452c30419abeedd55",
+        "byteLength": 7940
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/DOCS-UNREADABLE-DECODE-1/selection.md",
+        "sha256": "sha256:4371bc80314b1abcaf24f04a330b3e919d9e2c4805ec93f64fa53b293864e460",
+        "byteLength": 2366
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-0",
+        "sha256": "sha256:8f5e9e543304bbd2253a25b55b53ee30be7320492543abeda0e44e3ed1214656",
+        "byteLength": 5813
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "implementation-allocation-0",
+        "sha256": "sha256:f47879736e8ca480efc9d0a4b003f047cb18d2697816cf4c271cbb54a1fd4c1d",
+        "byteLength": 32136
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-0",
+        "sha256": "sha256:177726ba762445e1bb7db42aac114290999e82a3cc855cce015289c34ce587fe",
+        "byteLength": 1758
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "verification-draft-0",
+        "sha256": "sha256:a15f3cdeb86f7bf718b7d75fa6417a9055d4391ad16fb861ca4436d166aa3b16",
+        "byteLength": 44309
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-0",
+        "sha256": "sha256:a424e0ec552f0ee2ffac38f54ea155643f469cbcf418145f0a7b0c4a7ef4e03a",
+        "byteLength": 27305
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:1e6ed69b6acfb463f7cb937e1103738994b7054e73f321bc5d61a5b6d76224cd",
+        "byteLength": 10169
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:b43571cfe88b1ec28b6d14a60bfd7cfa83f8e91156908bb4620e983d014c7c43",
+        "byteLength": 29039
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:39059d3fe9d84700476cb9c1042d05a6e891db27a8179f0b8eb163b4d482a0e2",
+        "byteLength": 317028
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-008-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-008-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DU-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DU-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DU-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "DU-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports 126 doc-facts tests passed and inspected names and assertions, but did not independently run the check."
+      }
+    },
+    {
+      "checkId": "DU-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports 1,289 rgr library, 6 CLI, and 3 overlay tests passed, including the corrected two-file scope assertion, but did not independently run the check."
+      }
+    },
+    {
+      "checkId": "DU-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports builder fmt and clippy passed; the reviewer separately executed git diff --check successfully."
+      }
+    },
+    {
+      "checkId": "DU-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports the builder's isolated CLI proof and observed captures, but did not independently repeat the serving run."
+      }
+    },
+    {
+      "checkId": "DU-C05",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports the builder's cleanup check and observed that the operator registry digest matches the recorded before digest and only manager-owned before-roots remain."
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "rust/crates/doc-facts/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/doc-facts/src/lib_tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/docs.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/docs_tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-09-27T03:14:47.081Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nRESULT: accepted\n\n**OBSERVED:** At base `9da64dbd`, the candidate checkpoint matches the four uncommitted Rust files; `git diff --check` exits 0. The changes stay within the approved allocation. The prior stale-comment finding is closed, the selection packet now names all four paths and copy-only state-root use, and DU-C02 now pins C collation.\n\n**Obligations:** RG-REQ-008, RG-REQ-011, RG-REQ-008-L01/L03/L04/L05/L06/L08, RG-REQ-011-L06, and P-DU-01/02/03 are **accepted within this slice’s stated boundary**. No finding or new decision remains.\n\n| Check | Review assessment |\n|---|---|\n| DU-C01 | **BUILDER-EXECUTED:** 126 doc-facts tests passed; names and assertions inspected. Not independently run. |\n| DU-C02 | **BUILDER-EXECUTED:** 1,289 rgr library, 6 CLI, and 3 overlay tests passed; the corrected two-file scope assertion passed. Not independently run. |\n| DU-C03 | **BUILDER-EXECUTED:** fmt and clippy passed. **EXECUTED:** `git diff --check` passed. |\n| DU-C04 | **BUILDER-EXECUTED:** isolated CLI proof. **OBSERVED:** captures show poco changing from exit 2 in both modes to a 15-document human listing and 16 JSON entries; the mode-000 document has `\"content_hash\": null`. The serving run was not independently repeated. |\n| DU-C05 | **BUILDER-EXECUTED:** cleanup check. **OBSERVED:** the operator registry digest matches the recorded before digest, and only manager-owned before-roots remain. |\n\n**OBSERVED witness:** `poco/packaging/README.txt:1` reads ` POCO C++ Libraries`; byte `0x92` occurs at offset 232. Its captured JSON hash matches the checkout’s SHA-256, `dae0857d…f86993`. **OBSERVED preservation example:** `leveldb/README.md:1` begins “LevelDB is a fast key-value storage library…”; the captured before/after human listings are byte-identical at `9 documents`, and their parsed JSON is equal.\n\nThe four paths each serve an allocated obligation: `doc-facts/src/lib.rs` hashes bytes before decoding and always serializes the hash key; `lib_tests.rs` checks readable, undecodable, and unreadable outcomes; `rgr/src/presentation/docs.rs` accepts a required key whose value may be null; `docs_tests.rs` checks decode and filtered JSON re-emission. `ContentRead` serves the existing inventory and extraction callers, distinguishing decoded text from bytes read but undecodable; a plain I/O error would lose that distinction. The required-nullable decoder serves the CLI wire field; a plain `Option` would also accept a missing key.\n\nThis restores the VISION’s documentation-discovery step without fabricating a hash for bytes the tool could not read. **NOT RUN independently:** Cargo suites or a live daemon proof in this read-only review environment. The whole-workspace, smoke, and dogfood gates remain the operator’s post-acceptance work; this verdict does not claim those gates passed."
+}

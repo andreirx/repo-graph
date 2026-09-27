@@ -67,8 +67,10 @@ pub struct DocInventoryEntry {
     pub kind: String,
     /// Whether this is a generated document (e.g., MAP.md from rgistr).
     pub generated: bool,
-    /// SHA-256 hash of content (optional, computed on demand).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// SHA-256 of the document's BYTES (computed on demand), or `None` when they were not read —
+    /// a read that failed (permission/IO), or hashing not requested. ALWAYS serialized: `null`
+    /// marks the unknown, never omitted, never fabricated (RG-REQ-008-L08, D-DU-CC10). Bytes that
+    /// are not UTF-8 still carry their hash (RG-REQ-008-L05).
     pub content_hash: Option<String>,
     /// DOCS-LIST-2 §2 (DOC_FACTS_PUBLIC_API review-0, Option B): the CONFIRMED release/changelog
     /// subtree this doc lives under (e.g. `docs/releases`), or `None` for a non-release doc. Set ONLY
@@ -97,15 +99,18 @@ pub struct DocInventoryResult {
     /// - **sidecar-NAMED** (`MAP.md` / `*_MAP.md`) whose `rmap map` generated-marker could not be
     ///   read (counted in the sidecar pass, works even when `compute_hashes == false`);
     /// - **non-sidecar** docs whose content read failed during the hashing pass (DOCS-LIST-2 review-0
-    ///   F4), so the `license` marker check below could not run — a failed license read must NOT be
-    ///   silently indistinguishable from "no license marker" (honesty rule #1). Counted only when
+    ///   F4) — the bytes could not be read, or were read (and hashed) but do not decode as UTF-8
+    ///   text (DOCS-UNREADABLE-DECODE-1) — so no text reaches the content-based refinement below
+    ///   (the `release-notes` manifest `toctree` inspection); a failed read must NOT be silently
+    ///   indistinguishable from "inspected, no manifest" (honesty rule #1). Counted only when
     ///   `compute_hashes` (the only path that reads non-sidecar content).
     ///
     /// Such an entry is ADMITTED to the inventory (conservative: never silently excluded) and left at
-    /// its location/name-based kind + `generated = false` — but we do NOT assert authorship OR
-    /// "not a license": it is UNKNOWN, counted here so the surface can say so out loud
-    /// ("+N unreadable, counted"), never a silent claim (operator RULING 3, honesty rule #1). ⊆ the
-    /// entry count.
+    /// its location/name-based kind + `generated = false` — the `license` kind is NAME-only
+    /// (AUDIT5-MINORS-1 F1), so an unreadable `LICENSE*` is still `license` — but we do NOT assert
+    /// authorship or any content-based kind: it is UNKNOWN, counted here so the surface can say so
+    /// out loud ("+N unreadable, counted"), never a silent claim (operator RULING 3, honesty rule
+    /// #1). ⊆ the entry count.
     pub unreadable_count: usize,
     /// DOCS-DISCOVERY-1 (RG-REQ-008-L06): markup files (`.md`/`.markdown`/`.rst`/`.adoc`) the
     /// discovery walk visited and the rule refused — prose outside a doc tree, NOT in `entries`.
@@ -168,18 +173,21 @@ pub fn discover_doc_inventory(
     let mut unreadable_count = 0usize;
 
     // Optionally read and hash content (for staleness detection). DOCS-LIST-2 review-0 F4: do NOT
-    // discard the fallible read (`let _ = …`) — its result FEEDS the `license` content classification
-    // below. Only `NotFound` is genuine absence (silent); any other IO error means the file EXISTS
-    // but is unreadable, so the license-marker check cannot run and the doc must be surfaced as
-    // UNKNOWN, never silently treated as "no license marker" (honesty rule #1). Sidecar-named docs
-    // are counted by the sidecar pass instead (they get a marker check there), so we exclude them
-    // here to keep the two contributors disjoint.
+    // discard the fallible read (`let _ = …`) — the text it loads FEEDS the content-based
+    // `release-notes` manifest inspection below (the `license` kind is NAME-only and needs none).
+    // Only `NotFound` is genuine absence (silent); any other IO error — or bytes that do not decode
+    // as UTF-8 — means the file EXISTS but its text is unreadable, so that inspection has no basis
+    // and the doc must be surfaced as UNKNOWN, never silently treated as "inspected" (honesty
+    // rule #1). Sidecar-named docs are counted by the sidecar pass instead (they get a marker check
+    // there), so we exclude them here to keep the two contributors disjoint.
     if compute_hashes {
         for doc in &mut doc_files {
             match read_and_hash(doc) {
-                Ok(()) => {}
+                Ok(ContentRead::Text) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(_) => {
+                // Bytes hashed but not UTF-8 text, or bytes not read at all (permission/IO): the
+                // content is unreadable either way — admitted, counted, never asserted.
+                Ok(ContentRead::Undecodable(_)) | Err(_) => {
                     if !self_generated::has_map_sidecar_name(&doc.relative_path) {
                         unreadable_count += 1;
                     }
@@ -232,9 +240,9 @@ pub fn discover_doc_inventory(
     // after the cycle-5 F1 narrowing; no deterministic basis → old kind).
     //
     // The candidate index's CONTENT is consulted here only when the `compute_hashes` pass already
-    // loaded it (the `docs list` path) — the SAME no-read discipline the `license` kind uses below
-    // (review-4 item 1: an on-demand read on the `compute_hashes == false` path silently swallowed
-    // `Unreadable` as "not confirmed", leaving docs `architecture` with no unknown rendered — the
+    // loaded it (the `docs list` path) — no on-demand read here (the `license` kind below reads no
+    // content at all: it is NAME-only) (review-4 item 1: an on-demand read on the
+    // `compute_hashes == false` path silently swallowed `Unreadable` as "not confirmed", leaving docs `architecture` with no unknown rendered — the
     // zero-collapse class). With no loaded content there is NO BASIS, so the kind is unchanged
     // ("no basis keeps the old kind"); a genuine read failure at `compute_hashes == true` is already
     // surfaced via `unreadable_count` (the `read_and_hash` pass counted it), never double-counted.
@@ -345,8 +353,10 @@ pub fn extract_semantic_facts(repo_path: &Path) -> Result<ExtractionResult, DocF
     let mut warnings = Vec::new();
     for doc in &mut doc_files {
         match read_and_hash(doc) {
-            Ok(()) => {}
-            Err(e) => {
+            Ok(ContentRead::Text) => {}
+            // An undecodable document reports the same `InvalidData` error the text read always
+            // did, so the warning reads exactly as before; with no content nothing is extracted.
+            Ok(ContentRead::Undecodable(e)) | Err(e) => {
                 warnings.push(ExtractionWarning {
                     file: doc.relative_path.clone(),
                     message: format!("failed to read: {}", e),
@@ -480,19 +490,35 @@ fn read_doc_content(doc: &DocFile) -> MarkerRead {
     }
 }
 
-/// Read file content and compute SHA-256 hash.
-fn read_and_hash(doc: &mut DocFile) -> Result<(), std::io::Error> {
-    let content = fs::read_to_string(&doc.path)?;
+/// What [`read_and_hash`] made of a document whose bytes it read (and hashed).
+enum ContentRead {
+    /// The bytes decode as UTF-8: `doc.content` holds the text.
+    Text,
+    /// The bytes do not decode as UTF-8: `doc.content` stays `None`. Carries the `InvalidData`
+    /// error std's text read reports for such bytes (what `fs::read_to_string` returned here before
+    /// the bytes were hashed separately), so a reported warning reads as it always did.
+    Undecodable(std::io::Error),
+}
+
+/// Read a document's BYTES, set `doc.content_hash` to their SHA-256, then decode them as UTF-8
+/// text into `doc.content` (RG-REQ-008-L05). For valid UTF-8 the decoded text's bytes ARE the
+/// file's bytes, so every readable document's hash is what hashing its text gave. `Err` only when
+/// the bytes could not be read (no hash set).
+fn read_and_hash(doc: &mut DocFile) -> Result<ContentRead, std::io::Error> {
+    let bytes = fs::read(&doc.path)?;
 
     let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    let hash = hasher.finalize();
-    let hash_hex = hex::encode(hash);
+    hasher.update(&bytes);
+    doc.content_hash = Some(hex::encode(hasher.finalize()));
 
-    doc.content = Some(content);
-    doc.content_hash = Some(hash_hex);
-
-    Ok(())
+    // `io::read_to_string` decodes exactly as the former `fs::read_to_string` did, with its error.
+    match std::io::read_to_string(bytes.as_slice()) {
+        Ok(content) => {
+            doc.content = Some(content);
+            Ok(ContentRead::Text)
+        }
+        Err(e) => Ok(ContentRead::Undecodable(e)),
+    }
 }
 
 // Re-export hex for internal use

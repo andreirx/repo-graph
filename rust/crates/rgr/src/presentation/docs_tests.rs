@@ -18,21 +18,21 @@ fn sample_list_response() -> DocsListResponse {
                 path: "README.md".to_string(),
                 kind: "readme".to_string(),
                 generated: false,
-                content_hash: "abc123".to_string(),
+                content_hash: Some("abc123".to_string()),
                 release_family: None,
             },
             DocEntry {
                 path: "docs/README.md".to_string(),
                 kind: "readme".to_string(),
                 generated: false,
-                content_hash: "def456".to_string(),
+                content_hash: Some("def456".to_string()),
                 release_family: None,
             },
             DocEntry {
                 path: "CHANGELOG.md".to_string(),
                 kind: "changelog".to_string(),
                 generated: true,
-                content_hash: "ghi789".to_string(),
+                content_hash: Some("ghi789".to_string()),
                 release_family: None,
             },
         ],
@@ -58,7 +58,7 @@ fn sample_list_response_no_generated() -> DocsListResponse {
             path: "README.md".to_string(),
             kind: "readme".to_string(),
             generated: false,
-            content_hash: "abc".to_string(),
+            content_hash: Some("abc".to_string()),
             release_family: None,
         }],
         count: 1,
@@ -177,7 +177,7 @@ fn list_render_singular_document() {
             path: "README.md".to_string(),
             kind: "readme".to_string(),
             generated: false,
-            content_hash: "abc".to_string(),
+            content_hash: Some("abc".to_string()),
             release_family: None,
         }],
         count: 1,
@@ -204,21 +204,21 @@ fn response_with_generated_maps() -> DocsListResponse {
                 path: "README.md".to_string(),
                 kind: "readme".to_string(),
                 generated: false,
-                content_hash: "a".to_string(),
+                content_hash: Some("a".to_string()),
                 release_family: None,
             },
             DocEntry {
                 path: "src/MAP.md".to_string(),
                 kind: "map".to_string(),
                 generated: true,
-                content_hash: "b".to_string(),
+                content_hash: Some("b".to_string()),
                 release_family: None,
             },
             DocEntry {
                 path: "src/core/MAP.md".to_string(),
                 kind: "map".to_string(),
                 generated: true,
-                content_hash: "c".to_string(),
+                content_hash: Some("c".to_string()),
                 release_family: None,
             },
         ],
@@ -292,7 +292,7 @@ fn list_all_generated_does_not_claim_no_docs() {
             path: "MAP.md".to_string(),
             kind: "map".to_string(),
             generated: true,
-            content_hash: "a".to_string(),
+            content_hash: Some("a".to_string()),
             release_family: None,
         }],
         count: 1,
@@ -325,7 +325,7 @@ fn entry(path: &str, kind: &str) -> DocEntry {
         path: path.to_string(),
         kind: kind.to_string(),
         generated: false,
-        content_hash: "h".to_string(),
+        content_hash: Some("h".to_string()),
         release_family: None,
     }
 }
@@ -337,7 +337,7 @@ fn release_entry(path: &str, family: &str) -> DocEntry {
         path: path.to_string(),
         kind: "release-notes".to_string(),
         generated: false,
-        content_hash: "h".to_string(),
+        content_hash: Some("h".to_string()),
         release_family: Some(family.to_string()),
     }
 }
@@ -911,4 +911,88 @@ fn extract_render_singular_file() {
     };
     let out = resp.render_human();
     assert!(out.contains("1 file scanned")); // singular
+}
+
+// ── DOCS-UNREADABLE-DECODE-1 (RG-REQ-008-L08 as amended by D-DU-CC10) ───────────────────────────
+// `content_hash` is always present on the wire: a string when the daemon read the document's bytes,
+// `null` when it could not. The CLI decodes both, still refuses an entry WITHOUT the key, and the
+// filtered `--json` view re-emits the key in both cases.
+
+fn doc_entry_json(content_hash: Option<serde_json::Value>) -> serde_json::Value {
+    let mut e = serde_json::json!({"path": "docs/NOTES.md", "kind": "doc", "generated": false});
+    if let Some(h) = content_hash {
+        e["content_hash"] = h;
+    }
+    e
+}
+
+#[test]
+fn doc_entry_decodes_a_string_content_hash() {
+    let e: DocEntry =
+        serde_json::from_value(doc_entry_json(Some(serde_json::json!("abc")))).expect("decodes");
+    assert_eq!(e.content_hash.as_deref(), Some("abc"));
+}
+
+#[test]
+fn doc_entry_decodes_a_null_content_hash_as_none() {
+    let e: DocEntry = serde_json::from_value(doc_entry_json(Some(serde_json::Value::Null)))
+        .expect("an explicit null decodes");
+    assert_eq!(e.content_hash, None);
+
+    // The whole `docs list` payload decodes too — the one decode both modes pass through
+    // (commands/docs.rs), which failed the command before.
+    let payload = raw_payload(serde_json::json!({
+        "entries": [
+            {"path": "README.md", "kind": "readme", "generated": false, "content_hash": "a"},
+            {"path": "docs/NOTES.md", "kind": "doc", "generated": false, "content_hash": null}
+        ],
+        "count": 2,
+        "counts_by_kind": {"readme": 1, "doc": 1},
+        "unreadable": 1
+    }));
+    let resp: DocsListResponse = serde_json::from_value(payload).expect("payload decodes");
+    assert_eq!(resp.entries.len(), 2);
+    assert_eq!(resp.entries[1].content_hash, None);
+    assert_eq!(resp.unreadable, 1);
+}
+
+#[test]
+fn doc_entry_rejects_a_missing_content_hash_key() {
+    let err = serde_json::from_value::<DocEntry>(doc_entry_json(None))
+        .expect_err("an entry without the key is refused (L08: the key is always present)");
+    assert!(
+        err.to_string().contains("missing field `content_hash`"),
+        "names the missing key: {err}"
+    );
+}
+
+#[test]
+fn json_filtered_view_re_emits_content_hash_as_string_and_null() {
+    let mut resp = response_with_generated_maps();
+    resp.entries.push(DocEntry {
+        path: "docs/NOTES.md".to_string(),
+        kind: "doc".to_string(),
+        generated: false,
+        content_hash: None,
+        release_family: None,
+    });
+    resp.entries[0].content_hash = Some("h1".to_string());
+
+    let v = resp
+        .filtered_json_view(false)
+        .expect("a generated map forces the filtered view");
+    let entries = v["entries"].as_array().expect("entries");
+    let find = |p: &str| {
+        entries
+            .iter()
+            .find(|e| e["path"] == p)
+            .unwrap_or_else(|| panic!("{p} in the filtered view: {v}"))
+    };
+    assert_eq!(find("README.md")["content_hash"], "h1");
+    let notes = find("docs/NOTES.md").as_object().expect("entry object");
+    assert!(
+        notes.contains_key("content_hash"),
+        "the key is re-emitted for an unread document: {v}"
+    );
+    assert!(notes["content_hash"].is_null(), "…with null: {v}");
 }

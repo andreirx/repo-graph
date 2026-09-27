@@ -112,6 +112,16 @@ where
     serde_json::Value::deserialize(deserializer).map(Some)
 }
 
+/// A REQUIRED key whose value may be `null`: a string → `Some`, `null` → `None`. Used without
+/// `#[serde(default)]`, serde's derive reports a missing key as `missing field …` (a plain
+/// `Option` field would silently decode a missing key as `None`).
+fn required_nullable_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)
+}
+
 /// A `docs_list` payload whose unscanned count and discovery rule do not form one fact. Surfaces
 /// through the command's decode error ("failed to parse response"), never as a rendered answer.
 #[derive(Debug)]
@@ -189,7 +199,13 @@ pub struct DocEntry {
     pub path: String,
     pub kind: String,
     pub generated: bool,
-    pub content_hash: String,
+    /// SHA-256 of the document's bytes, or `None` when the daemon could not read them. RG-REQ-008-L08
+    /// (D-DU-CC10): the key is ALWAYS present — a string, or `null` for the unknown — so it decodes
+    /// through [`required_nullable_string`] (a MISSING key stays a decode error, ``missing field
+    /// `content_hash` ``; no `default`) and re-serializes without a skip, so the filtered `--json`
+    /// view re-emits the key in both cases.
+    #[serde(deserialize_with = "required_nullable_string")]
+    pub content_hash: Option<String>,
     /// DOCS-LIST-2 §2 (DOC_FACTS_PUBLIC_API review-0, Option B): the CONFIRMED release/changelog
     /// subtree the daemon attached, or `None` for a non-release doc. STRUCTURAL basis, not location:
     /// the subtree is confirmed only when its `index.{txt,rst,md}` manifest's INSPECTED CONTENT carries

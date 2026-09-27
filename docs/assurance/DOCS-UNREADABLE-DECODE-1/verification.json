@@ -1,0 +1,280 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-DOCS-UNREADABLE-DECODE-1-0",
+  "workItemId": "DOCS-UNREADABLE-DECODE-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/DOCS-UNREADABLE-DECODE-1-INPUT-3.json",
+    "sha256": "sha256:e755e25792801e0ce66128b19199cb22f962dd70a68f3b96b6c5ae9be0dc6934"
+  },
+  "allocation": {
+    "path": "docs/slices/docs-unreadable-decode-1.md",
+    "sha256": "sha256:abfa134934b4be48d7449209f876e3627b6ef0eca11d4af6a2214e402316cfe0"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "9da64dbdc9a1a0b5d7df72ac859eb6c9b47818cd",
+    "entries": [
+      {
+        "path": "rust/crates/doc-facts/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:fda2e1b9a6f2b4decaf666aac8f3dcc9d6698b69087de535374fdcb22885ba89",
+          "byteLength": 24327
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ec51f509eb66795466107b18aa9c52af5a27ae22ff3c34554d3a5b51b1daf52d",
+          "byteLength": 26508
+        }
+      },
+      {
+        "path": "rust/crates/doc-facts/src/lib_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:297c53b35b695af1d6e7ee740b900d7552ee180dc45661833ecf2e119b5f3f64",
+          "byteLength": 21322
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2835f957501e5bef15fd0aed94799d40fda13cfc80c6746242d7afcd197d7836",
+          "byteLength": 29229
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/docs.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:23d43f1ae820c7c02151b1084251214818b5584044e4eea116171c8b20b30946",
+          "byteLength": 27393
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:752ca1c6cffc24fddada6f8cfb42d61aa73244c1638edad22749e02559672868",
+          "byteLength": 28353
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/docs_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:1d26926144a4ca8b7072228dd76082268a43d17a85ec86c89a82ad9b1e7ffc7c",
+          "byteLength": 32563
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:021e3a6aaa5851233236599109ae875524e66642463112fa5aa38dbd53c689e7",
+          "byteLength": 35945
+        }
+      }
+    ],
+    "sha256": "sha256:4b157fb87e1c5f31993b478d663b31c98872ebfb7751d444562ebcf906bd1b27"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-DOCS-UNREADABLE-DECODE-1-0"
+  },
+  "checks": [
+    {
+      "checkId": "DU-C01",
+      "obligationIds": [
+        "P-DU-01",
+        "P-DU-02",
+        "RG-REQ-008-L01",
+        "RG-REQ-008-L03",
+        "RG-REQ-008-L05",
+        "RG-REQ-008-L06",
+        "RG-REQ-008-L08"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-doc-facts 2>&1 | tee /tmp/du-c01.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/du-c01.txt && for t in entry_with_unread_bytes_serializes_content_hash_null_with_the_key_present entry_with_undecodable_bytes_serializes_its_byte_hash undecodable_utf8_document_keeps_a_byte_hash_and_counts_unreadable readable_document_hash_is_unchanged_by_the_byte_read extract_warns_on_an_undecodable_document inventory_unreadable_sidecar_is_admitted_and_counted_never_asserted_generated inventory_unreadable_license_named_doc_is_license_by_name_and_still_counted inventory_license_is_name_only_content_body_is_not_upgraded extract_handles_unreadable_files extract_from_repo_with_readme inventory_flags_generated_only_with_marker env_files_excluded_from_inventory inventory_reports_unscanned_markup_outside_docs_tree stem_and_extension_match_case_insensitively admits_txt_and_rst_under_docs_tree unscanned_counts_markup_outside_a_docs_tree_never_txt marker_confirms_generated markerless_user_map_is_not_self_generated; do grep -qE \"^test ([a-z_]+::)*$t \\.\\.\\. ok$\" /tmp/du-c01.txt || { echo \"MISSING $t\"; exit 1; }; done && ! grep -qE 'let content = fs::read_to_string\\(&doc\\.path\\)\\?;' crates/doc-facts/src/lib.rs && git diff --quiet HEAD -- crates/doc-facts/src/discovery.rs crates/doc-facts/src/classification.rs crates/doc-facts/src/self_generated.rs crates/doc-facts/src/release_notes.rs crates/doc-facts/src/types.rs crates/doc-facts/src/extractors crates/doc-facts/Cargo.toml && test \"$(grep -cE '^[[:space:]]*pub content_hash: Option<String>,$' crates/doc-facts/src/lib.rs)\" = 1 && test \"$(awk '/pub content_hash: Option<String>,/{print prev} {prev=$0}' crates/doc-facts/src/lib.rs | grep -c skip_serializing_if)\" = 0 && awk '/pub release_family: Option<String>,/{print prev} {prev=$0}' crates/doc-facts/src/lib.rs | grep -q 'skip_serializing_if = \"Option::is_none\"'",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "PRODUCER (doc-facts). `read_and_hash` (rust/crates/doc-facts/src/lib.rs:484-496) today calls `fs::read_to_string` (:485), so bytes that are not UTF-8 fail the read and the document is admitted with NO hash. After: `fs::read` the BYTES, hash the bytes, set `doc.content_hash` whenever the bytes were read, then `String::from_utf8`: `Ok` → `doc.content = Some`; `Err` → `doc.content = None` and the function reports the undecodable outcome to its callers (e.g. `Ok(ReadOutcome::{Text, Undecodable})`, IO errors unchanged in `Err`; the shape is the builder's, the observable facts below are the contract). For valid UTF-8 the decoded string's bytes ARE the file's bytes, so every readable hash is unchanged. `discover_doc_inventory`'s hashing pass (:177-189) counts an undecodable document in `unreadable_count` exactly as it counts a non-`NotFound` IO error, INCLUDING the `!self_generated::has_map_sidecar_name` guard (:183): a sidecar-named undecodable file is counted once, by the sidecar pass (`read_doc_content` :472-480 finds `doc.content == None`, re-reads with `read_to_string`, gets `InvalidData` → `MarkerRead::Unreadable` → counted at :213-216), never twice. The `license` kind is NAME-only (AUDIT5-MINORS-1 F1), so an undecodable `LICENSE*` stays `license`; the only content-reading kind rule, the release-notes manifest check (:246-253), sees `doc.content == None` exactly as today. `extract_semantic_facts` (:344-356) pushes, for an undecodable document, a warning byte-identical to today's (`format!(\"failed to read: {}\", e)` over the `InvalidData` error `fs::read_to_string` returns — the test compares against `fs::read_to_string(&path).unwrap_err()`, not a hard-coded std string) and extracts nothing (`extractors/mod.rs:20-29` returns empty without `content`). SERIALIZATION (RG-REQ-008-L08 as amended, D-DU-CC10): `DocInventoryEntry.content_hash` (lib.rs:71-72) loses `#[serde(skip_serializing_if = \"Option::is_none\")]`, so the key is always serialized — a string when the bytes were read, `null` when they could not be; `release_family` (lib.rs:80-81) keeps its skip (the wire of every non-release entry unchanged). NEW tests (lib_tests.rs): `undecodable_utf8_document_keeps_a_byte_hash_and_counts_unreadable` (`discover_doc_inventory(dir, true)` over `README.md` UTF-8, `packaging/README.txt` = the bytes `Apple\\x92s Cocoa\\n`, and a sidecar-named `src/gen/MAP.md` holding byte 0x92: all three admitted; `packaging/README.txt`'s `content_hash` = `00873e70bc71b05cc510c80ff317e1f2ed5a82eee47b0405b83a3c2e21a90109` (sha256 of those 15 bytes, lowercase 64-hex, the encoding `read_and_hash` already emits); `unreadable_count == 2`; `serde_json::to_value` of every entry carries a STRING `content_hash`); `readable_document_hash_is_unchanged_by_the_byte_read` (a fixture of the UTF-8 text `# Résumé — ✓\\n` hashes to the literal `ae9c3d6d18a8667af95c59681aa94026b17feafb9d7af579331995b26dbd1155`, computed independently of the implementation); `extract_warns_on_an_undecodable_document`; `entry_with_unread_bytes_serializes_content_hash_null_with_the_key_present` (`discover_doc_inventory(dir, true)` over `README.md` and a `docs/NOTES.md` set to mode 0o000 with `fs::set_permissions` and restored before assertions, the precedent at lib_tests.rs:478-493: the entry is admitted, `unreadable_count == 1`, and `serde_json::to_string` of its entry contains the literal `\"content_hash\":null`); `entry_with_undecodable_bytes_serializes_its_byte_hash` (the undecodable entry's `serde_json::to_value(..)[\"content_hash\"]` is the JSON string of the sha256 of its bytes). The existing inventory, extraction, discovery (L01, L06) and generated-marker (L03) tests are bound by name. The greps pin: the `read_to_string` read in `read_and_hash` is gone; exactly one `pub content_hash: Option<String>,` in lib.rs with no `skip_serializing_if` on the line above it; `release_family` keeps its skip; discovery.rs, classification.rs, self_generated.rs, release_notes.rs, types.rs, extractors/ and Cargo.toml unchanged. Other consumer of the changed read (no code change, named for impact): `storage/src/agent_orient_reads.rs:90` (`discover_doc_inventory(&resolved, true)` for `orient`'s orientation docs) projects `path/kind/generated` only — an undecodable file has no `content` before or after, so the orient line does not move. Guardrail call (CLAUDE.md, files over 500 lines — lib.rs 515, lib_tests.rs 564): the change modifies an existing responsibility (the content read) and tests it; no new responsibility is appended."
+      },
+      "expected": "exit 0: a document whose bytes are not UTF-8 is admitted with the sha256 of its bytes and counted once as unreadable (RG-REQ-008-L05); a document whose bytes cannot be read is admitted, counted and serialized with the key `content_hash` present and `null` (RG-REQ-008-L08 as amended by D-DU-CC10); the extraction warning for an undecodable document reads exactly as before and nothing is extracted from it; no behavior change for readable documents (every readable hash unchanged — pinned by an independent literal) nor for discovery, the generated-marker decision, the vendored/unscanned inputs or `release_family` serialization (their modules unchanged, their tests green)",
+      "candidateSha256": "sha256:4b157fb87e1c5f31993b478d663b31c98872ebfb7751d444562ebcf906bd1b27",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "exit 0; doc-facts: 126 passed, 0 failed; all 18 required test names ok; source greps and unchanged-module checks pass.",
+        "supportingEvidence": [
+          "du-c01.txt",
+          "build-progress.md in .agent-manager/slices/DOCS-UNREADABLE-DECODE-1/cmds-adm2/"
+        ]
+      }
+    },
+    {
+      "checkId": "DU-C02",
+      "obligationIds": [
+        "P-DU-02",
+        "RG-REQ-008-L03",
+        "RG-REQ-008-L04",
+        "RG-REQ-008-L05",
+        "RG-REQ-008-L06",
+        "RG-REQ-008-L08"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib 2>&1 | tee /tmp/du-c02.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/du-c02.txt && for t in doc_entry_decodes_a_string_content_hash doc_entry_decodes_a_null_content_hash_as_none doc_entry_rejects_a_missing_content_hash_key json_filtered_view_re_emits_content_hash_as_string_and_null json_filtered_view_preserves_entry_fields_and_recomputes_counts_by_kind json_filtered_view_surfaces_unreadable_when_present json_filtered_view_surfaces_unscanned_and_rule_when_present list_default_excludes_generated_maps_and_states_the_count json_default_excludes_generated_and_reports_excluded_count vendored_demoted_from_headline_and_listing_but_stated list_render_surfaces_unreadable_count entry_list_budgeted_with_remainder family_lines_and_entries_share_one_budget; do grep -qE \"^test presentation::docs::tests::$t \\.\\.\\. ok$\" /tmp/du-c02.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(grep -cE '^[[:space:]]*pub content_hash: Option<String>,$' crates/rgr/src/presentation/docs.rs)\" = 1 && test \"$(awk '/pub content_hash: Option<String>,/{print prev} {prev=$0}' crates/rgr/src/presentation/docs.rs | grep -cE 'default|skip_serializing_if')\" = 0 && cargo test -p repo-graph-rgr --test docs_command 2>&1 | tee /tmp/du-c02b.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/du-c02b.txt && for t in docs_list_daemon_required docs_list_usage_error_unexpected_args; do grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/du-c02b.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p repo-graph-daemon-runtime --lib docs_list_overlay 2>&1 | tee /tmp/du-c02c.txt | grep -E '^test result: ok\\.' && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED' /tmp/du-c02c.txt && for t in vendored_override_clears_release_family non_vendored_release_note_keeps_family vendored_non_release_doc_demoted_family_already_none; do grep -qE \"^test docs_list_overlay::tests::$t \\.\\.\\. ok$\" /tmp/du-c02c.txt || { echo \"MISSING $t\"; exit 1; }; done && git diff --quiet HEAD -- crates/daemon-runtime crates/storage crates/agent && test \"$(git diff HEAD --name-only --relative -- crates/rgr | LC_ALL=C sort | tr '\\n' ' ')\" = 'crates/rgr/src/presentation/docs.rs crates/rgr/src/presentation/docs_tests.rs '",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "CONSUMER (rgr). `DocEntry.content_hash` (rust/crates/rgr/src/presentation/docs.rs:192, today `pub content_hash: String,`) becomes `pub content_hash: Option<String>,` decoded so that a JSON string → `Some`, JSON `null` → `None`, and a MISSING key is still the decode error `missing field `content_hash`` (L08: the key is always present). serde's derive decodes a MISSING `Option` field as `None` unless the field carries `deserialize_with` (INFERRED from serde_derive's missing-field handling; `doc_entry_rejects_a_missing_content_hash_key` is the oracle), so the field carries `#[serde(deserialize_with = \"<a required-nullable decoder>\")]` and NEITHER `default` NOR `skip_serializing_if` — the same file's `present_value` (docs.rs:108-113) is the precedent for a presence-aware decoder. Serialization keeps the key in both cases, so the filtered `--json` view (`filtered_json_view`, docs.rs:242-288, which re-serializes `DocEntry` when generated maps are excluded) re-emits `\"content_hash\": \"<hash>\"` or `\"content_hash\": null`; the raw passthrough (nothing filtered) prints the daemon value unchanged. The human render does not print the hash (unchanged). Every literal `DocEntry` construction in docs_tests.rs (11 — 13 lines match `DocEntry {`, two of them the return types of `fn entry`/`fn release_entry`; docs.rs:188 is the struct definition, not a construction; grep-verified 2026-09-23) gains `Some(..)`. NEW tests (docs_tests.rs): `doc_entry_decodes_a_string_content_hash`, `doc_entry_decodes_a_null_content_hash_as_none`, `doc_entry_rejects_a_missing_content_hash_key` (the error text contains `missing field `content_hash``), `json_filtered_view_re_emits_content_hash_as_string_and_null` (a response with a generated `MAP.md` — which forces the filtered view — `README.md` with `Some(\"h1\")` and `docs/NOTES.md` with `None`: the view's `README.md` entry has `\"content_hash\": \"h1\"`, its `docs/NOTES.md` entry has the KEY `content_hash` with value `null`). Existing tests bound by name: the filtered/raw JSON view (`json_filtered_view_preserves_entry_fields_and_recomputes_counts_by_kind`), generated exclusion (L03), vendored demotion (L04), the unreadable line and JSON count (L05), the unscanned count and rule (L06), the budget. `docs_command` CLI tests and the daemon's `docs_list_overlay` tests (L04) stay green. The greps pin exactly one `pub content_hash: Option<String>,` in docs.rs with no `default`/`skip_serializing_if` on the attribute line above it; daemon-runtime, storage and agent are unchanged (`handle_docs_list` and the payload path are untouched — the producer change is doc-facts'); rgr's tracked diff is exactly docs.rs and docs_tests.rs (`--relative`: `git diff --name-only` is repository-relative by default). Guardrail call (docs.rs 575 lines, docs_tests.rs 914): the decode of an existing DTO field and its tests — no new responsibility."
+      },
+      "expected": "exit 0: the CLI decodes both ratified shapes (a string and `null`), still refuses an entry without the key, and re-emits the key in both cases on the filtered `--json` view; every existing rgr docs test (generated, vendored, unreadable, unscanned, budget), the docs_command CLI tests and the overlay tests stay green; the daemon, storage and agent crates are unchanged (no behavior change outside the decode)",
+      "candidateSha256": "sha256:4b157fb87e1c5f31993b478d663b31c98872ebfb7751d444562ebcf906bd1b27",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "exit 0; rgr lib: 1289 passed; docs_command: 6 passed; docs_list_overlay: 3 passed. The rgr diff is exactly the two docs files (sorted with LC_ALL=C); daemon-runtime, storage and agent are unchanged.",
+        "supportingEvidence": [
+          "du-c02*.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "DU-C03",
+      "obligationIds": [
+        "P-DU-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo fmt --check -p repo-graph-doc-facts -p repo-graph-rgr && cargo clippy -p repo-graph-doc-facts -p repo-graph-daemon-runtime -p repo-graph-rgr --all-targets -- -D warnings > /tmp/du-c03.txt 2>&1; rc=$?; tail -3 /tmp/du-c03.txt; test $rc -eq 0 && git -C .. diff HEAD --check",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "formatter over doc-facts and rgr; clippy over doc-facts, daemon-runtime (the consumer of `DocInventoryEntry`) and rgr, all targets, warnings denied; whitespace hygiene of the tracked diff."
+      },
+      "expected": "exit 0: no formatting, lint or whitespace debt enters with the candidate",
+      "candidateSha256": "sha256:4b157fb87e1c5f31993b478d663b31c98872ebfb7751d444562ebcf906bd1b27",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "exit 0; fmt --check, clippy -D warnings over doc-facts, daemon-runtime and rgr, and git diff --check are all clean.",
+        "supportingEvidence": [
+          "du-c03.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "DU-C04",
+      "obligationIds": [
+        "P-DU-01",
+        "RG-REQ-008-L01",
+        "RG-REQ-008-L04",
+        "RG-REQ-008-L05",
+        "RG-REQ-008-L06",
+        "RG-REQ-008-L08",
+        "RG-REQ-011-L06",
+        "P-DU-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "R=/private/tmp/DOCS-UNREADABLE-DECODE-1; C=$R-unreadable-after; LC='/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases'; BEFORE=\"$HOME/.local/bin/rmap\"; CAND='/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/target/release/rmap'; run() { ( cd \"$1\" && env RMAP_STATE_ROOT=\"$2\" RMAP_SOCKET_PATH=\"$2/d.sock\" RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off \"$3\" $4 > \"$5\" 2> \"$5.err\"; echo $? > \"$5.rc\" ); }; FP() { find \"$R-poco-before\" \"$R-leveldb-before\" -type f -exec stat -f '%N %z %m' {} + | sort; shasum -a 256 \"$R-poco-before/registry.json\" \"$R-leveldb-before/registry.json\"; }; cpr() { cp -R \"$R-$1-before\" \"$R-copy-$1-$2\" && python3 -c 'import sys, json; s, d = sys.argv[1], sys.argv[2]; p = d + \"/registry.json\"; j = json.load(open(p)); [e.update(db_path=e[\"db_path\"].replace(s + \"/\", d + \"/\")) for e in j[\"repos\"]]; json.dump(j, open(p, \"w\"), indent=2)' \"$R-$1-before\" \"$R-copy-$1-$2\" && grep -q \"$R-copy-$1-$2/databases/\" \"$R-copy-$1-$2/registry.json\" && ! grep -q \"$R-$1-before/\" \"$R-copy-$1-$2/registry.json\"; }; rm -f /tmp/du-poco-* /tmp/du-ldb-* /tmp/du-unr*; test \"$(id -u)\" != 0 && test \"$(\"$BEFORE\" --version)\" = 'rmap 0.19.0' && test -x \"$HOME/.local/bin/rmapd\" && test -x \"$CAND\" && test -x \"${CAND}d\" && test -d \"$R-poco-before\" && test -d \"$R-leveldb-before\" && test ! -e \"$C\" && ! ls -d \"$R\"-copy-* >/dev/null 2>&1 && trap 'chmod -R u+rwX \"$C\" 2>/dev/null; rm -rf \"$C\" \"$R\"-copy-*' EXIT && FP0=$(FP) && cpr poco cmp && cpr leveldb cmp && cpr poco cand && cpr leveldb cand && run \"$LC/poco\" \"$R-copy-poco-cmp\" \"$BEFORE\" 'docs list' /tmp/du-poco-before.txt && run \"$LC/poco\" \"$R-copy-poco-cmp\" \"$BEFORE\" 'docs list --json' /tmp/du-poco-before.json && run \"$LC/leveldb\" \"$R-copy-leveldb-cmp\" \"$BEFORE\" 'docs list' /tmp/du-ldb-before.txt && run \"$LC/leveldb\" \"$R-copy-leveldb-cmp\" \"$BEFORE\" 'docs list --json' /tmp/du-ldb-before.json && run \"$LC/poco\" \"$R-copy-poco-cand\" \"$CAND\" 'docs list' /tmp/du-poco-after.txt && run \"$LC/poco\" \"$R-copy-poco-cand\" \"$CAND\" 'docs list --json' /tmp/du-poco-after.json && run \"$LC/leveldb\" \"$R-copy-leveldb-cand\" \"$CAND\" 'docs list' /tmp/du-ldb-after.txt && run \"$LC/leveldb\" \"$R-copy-leveldb-cand\" \"$CAND\" 'docs list --json' /tmp/du-ldb-after.json && mkdir -p \"$C/state\" \"$C/corpus/docs\" && printf '# Readable\\n' > \"$C/corpus/README.md\" && printf 'private notes\\n' > \"$C/corpus/docs/NOTES.md\" && printf 'fn main() {}\\n' > \"$C/corpus/main.rs\" && git -C \"$C/corpus\" init -q && git -C \"$C/corpus\" add -A && git -C \"$C/corpus\" -c user.email=du@example.invalid -c user.name=du commit -qm c1 && run \"$C/corpus\" \"$C/state\" \"$CAND\" index /tmp/du-unr-index.txt && chmod 000 \"$C/corpus/docs/NOTES.md\" && run \"$C/corpus\" \"$C/state\" \"$CAND\" 'docs list' /tmp/du-unr.txt && run \"$C/corpus\" \"$C/state\" \"$CAND\" 'docs list --json' /tmp/du-unr.json && chmod 644 \"$C/corpus/docs/NOTES.md\" && test \"$(FP)\" = \"$FP0\" && python3 - <<'PY'\nimport json, hashlib, os\nLC = '/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases'\nMISSING = 'error: failed to parse response: missing field `content_hash`'\ndef rd(p): return open(p, encoding='utf-8').read()\ndef rc(p): return int(open(p + '.rc').read().strip())\ndef sha(p): return hashlib.sha256(open(p, 'rb').read()).hexdigest()\nfor p in ('/tmp/du-poco-before.txt', '/tmp/du-poco-before.json'):\n    assert rc(p) == 2, ('before exit', p, rc(p))\n    assert MISSING in rd(p + '.err'), ('before stderr', p, rd(p + '.err'))\nfor p in ('/tmp/du-poco-after.txt', '/tmp/du-poco-after.json', '/tmp/du-ldb-before.txt', '/tmp/du-ldb-before.json', '/tmp/du-ldb-after.txt', '/tmp/du-ldb-after.json', '/tmp/du-unr-index.txt', '/tmp/du-unr.txt', '/tmp/du-unr.json'):\n    assert rc(p) == 0, ('exit', p, rc(p), rd(p + '.err'))\nlines = rd('/tmp/du-poco-after.txt').splitlines()\nfor want in ('15 documents', '+1 vendored doc (excluded; third-party/dependency directories — see --json for the full set)', '+1 unreadable, counted (content unreadable — kind refinement unverifiable)', '+5 markdown/prose files outside a docs tree not scanned (--json for the rule)', '  readme  11', '  doc  4', '  packaging/README.txt  readme'):\n    assert want in lines, ('poco human line missing', want)\nv = json.load(open('/tmp/du-poco-after.json'))\nents = {e['path']: e for e in v['entries']}\nassert v['count'] == 16 and len(ents) == 16, ('poco count', v['count'], len(ents))\nassert v.get('unreadable') == 1, ('poco unreadable', v.get('unreadable'))\nassert all(isinstance(e.get('content_hash'), str) for e in v['entries']), ('poco entry without a string hash', [e['path'] for e in v['entries'] if not isinstance(e.get('content_hash'), str)])\nu = ents['packaging/README.txt']\nassert u['kind'] == 'readme', u\nassert u['content_hash'] == sha(LC + '/poco/packaging/README.txt') == 'dae0857da12cb0f9652108e2607ea6d1d1a2b2ae2b8d9b07188cee1fddf86993', u\nassert ents['README.md']['content_hash'] == sha(LC + '/poco/README.md'), ents['README.md']\nassert ents['dependencies/README.md']['kind'] == 'vendored', ents['dependencies/README.md']\nassert rd('/tmp/du-ldb-before.txt') == rd('/tmp/du-ldb-after.txt'), 'leveldb human output moved'\nassert '9 documents' in rd('/tmp/du-ldb-after.txt').splitlines(), 'leveldb headline'\nlb, la = json.load(open('/tmp/du-ldb-before.json')), json.load(open('/tmp/du-ldb-after.json'))\nassert lb == la, 'leveldb JSON moved (compared parsed: counts_by_kind key order follows a HashMap in any build of this source)'\nfor e in la['entries']:\n    assert e['content_hash'] == sha(LC + '/leveldb/' + e['path']), ('leveldb hash', e)\nx = json.load(open('/tmp/du-unr.json'))\nxe = {e['path']: e for e in x['entries']}\nassert set(xe) == {'README.md', 'docs/NOTES.md'}, sorted(xe)\nn = xe['docs/NOTES.md']\nassert 'content_hash' in n and n['content_hash'] is None, ('bytes-unreadable entry', n)\nassert n['kind'] == 'doc' and n['generated'] is False, n\nassert xe['README.md']['content_hash'] == hashlib.sha256(b'# Readable\\n').hexdigest(), xe['README.md']\nassert x.get('unreadable') == 1, x.get('unreadable')\nul = rd('/tmp/du-unr.txt').splitlines()\nassert '2 documents' in ul and '+1 unreadable, counted (content unreadable — kind refinement unverifiable)' in ul, ul\nprint('DU-C04 ok: poco 2->0 both modes, 16 entries each with a byte hash (packaging/README.txt dae0857d...f86993), 1 unreadable, 1 vendored; leveldb identical (human bytes, JSON parsed); docs/NOTES.md (mode 000) listed with content_hash null; the manager before-roots served only as copies, fingerprint unchanged')\nPY",
+        "cwd": ".",
+        "environment": "the candidate's release build (`rust/target/release/rmap` + `rmapd`, built at §5 step 3) and the observed v0.19.0 comparator `~/.local/bin/rmap` (its sibling `~/.local/bin/rmapd` serves stdio — `find_rmapd` prefers the executable's sibling, rgr/src/daemon_client/stdio_transport.rs:217-226). PROVENANCE: the comparator is identified only by its self-reported `rmap 0.19.0`; which source built it is NOT attested. `git diff --stat v0.19.0 HEAD -- rust` being empty at HEAD 8b80253f says the two SOURCE trees are equal, not that the installed executables were built from either (at HEAD fbd53845 it is no longer empty — 36 files, none under doc-facts nor the rgr docs files; on copies of both re-captured roots the comparator and the HEAD release build answered identically, PREP-5 2026-09-27). The comparator's before assertions are BEHAVIOURAL (what an installed v0.19.0 does on poco); P-DU-01's independent oracles are the per-file sha256 values and the unit-test literal, not the comparator. If leveldb's comparator and candidate outputs differ, STOP and report the difference as UNATTRIBUTED (the slice, or a local build difference in the comparator); attributing it needs an attested baseline — a before-binary built from `git worktree add /private/tmp/DOCS-UNREADABLE-DECODE-1-before HEAD` (CLAUDE.md) — which is the operator's call, not the builder's. Pre-provisioned manager-owned roots /private/tmp/DOCS-UNREADABLE-DECODE-1-poco-before (poco) and /private/tmp/DOCS-UNREADABLE-DECODE-1-leveldb-before (leveldb), re-captured 2026-09-27T01:19Z/01:20Z by the manager with the release build `rust/target/release/rmap` (self-reports `rmap 0.19.0`; built from HEAD fbd53845 per the manager's record, not attested) — each one ready full snapshot (poco basis 49af400, leveldb 7ee830d) stamped `indexer:1.1.0`, `cpp-core:0.2.0`; `docs list` is a query-time walk of the repo's root path. The manager's roots are NEVER served (a served state root is not read-only — CLAUDE.md; the packet: copies only): the command fingerprints them (every file's size and mtime, both registry digests — `FP`), copies each once per binary (`cpr`: `cp -R` to `/private/tmp/DOCS-UNREADABLE-DECODE-1-copy-<poco|leveldb>-<cmp|cand>`, the copy's registry `db_path` redirected to the copy and asserted — the copied registry otherwise names the ORIGINAL store), serves only the copies, asserts the fingerprint unchanged after the last invocation, and removes every copy in its EXIT trap (~1 GB transient); the roots STAY, never reindexed. The builder-made root /private/tmp/DOCS-UNREADABLE-DECODE-1-unreadable-after (state/ + corpus/) is created and removed by the command itself (EXIT trap). RMAP_TRANSPORT=stdio, RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off, RMAP_AUTO_RETENTION=off on every invocation; not run as root (a mode-000 file must be unreadable). The command is a BASH command — run it as `bash -c '<command>'` or from a bash shell: `run` passes `$4` unquoted and relies on bash field splitting, which zsh (this workstation's shell) does not perform — under zsh `docs list` reaches rmap as one argument and every `run` exits 1 `unknown command` (EXECUTED, PREP-5).",
+        "inputs": "poco (C++, HEAD 49af400): `packaging/README.txt` is Windows-1252 — `file`: `Non-ISO extended-ASCII text`; byte 0x92 at offset 232 (also 0x91 at 324, 0x92 at 337); admitted by the ratified stem rule. BEFORE (the observed v0.19.0 comparator): `docs list` AND `docs list --json` exit 2 with stderr `error: failed to parse response: missing field `content_hash`` (both modes asserted). AFTER (the manager's and the PREP-4 author's python emulation of discovery.rs over the checkout, 2026-09-23: 16 candidates, 5 refused markup files, one non-UTF-8 file; the product is the truth — a differing literal is a STOP-and-report): the human lines `15 documents`, `+1 vendored doc (excluded; third-party/dependency directories — see --json for the full set)`, `+1 unreadable, counted (content unreadable — kind refinement unverifiable)`, `+5 markdown/prose files outside a docs tree not scanned (--json for the rule)`, `  readme  11`, `  doc  4`, `  packaging/README.txt  readme` (readme: `README.md`, `Benchmark/README.md`, `DNSSD/README.md`, `Data/SQLParser/README.md`, `Data/SQLParser/benchmark/README.md`, `MongoDB/samples/ReplicaSet/README.md`, `NetSSL_OpenSSL/samples/download/doc/readme.txt`, `NetSSL_Win/doc/README.txt`, `cmake/README`, `packaging/README.md`, `packaging/README.txt`; doc: `CHANGELOG`, `CONTRIBUTING.md`, `NetSSL_OpenSSL/doc/howtobuild.txt`, `Zip/doc/ZIP Spec.txt`; vendored: `dependencies/README.md` — `dependencies` is in `classification/src/vendored_path.rs` VENDORED_SEGMENTS); `--json` (the raw daemon payload — no generated maps, so no filtered view): `count` 16, `unreadable` 1, EVERY entry a string `content_hash`, `packaging/README.txt`'s = `dae0857da12cb0f9652108e2607ea6d1d1a2b2ae2b8d9b07188cee1fddf86993` (sha256 of its bytes, computed read-only from the checkout 2026-09-23), `README.md`'s = the sha256 of its bytes (`92512c74…ec1b6a`; unchanged by the byte read). leveldb (HEAD 7ee830d; 9 documents, all UTF-8): human output byte-identical between the two binaries; `--json` identical AFTER parsing (in any build of this source serde_json's `preserve_order` feature is unified on — classification and indexer enable it — and the daemon builds `counts_by_kind` from a `HashMap`, dispatch.rs:5715-5728 at HEAD fbd53845, so its key order is per-process; comparing bytes would test HashMap iteration, not the slice — INFERRED from source for the candidate, and assumed, not attested, for the comparator); every leveldb hash equals the sha256 of the file's bytes. BYTES-UNREADABLE corpus (RG-REQ-008-L05/L08 as amended; D-DU-CC10): a git repo with `README.md` (`# Readable\\n`), `docs/NOTES.md` (inside a doc tree so the ratified rule admits it — a root `NOTES.md` is NOT a document: `notes` is not a stem) and `main.rs`; committed and indexed by the candidate while readable, THEN `docs/NOTES.md` set to mode 000 (the daemon runs as this user, so `fs::read` fails with EACCES); `docs list --json` exits 0 and lists exactly `README.md` (a string hash = sha256 of `# Readable\\n`) and `docs/NOTES.md` as `{\"path\":\"docs/NOTES.md\",\"kind\":\"doc\",\"generated\":false,\"content_hash\":null}` (the key present), `unreadable` 1; the human output reads `2 documents` and `+1 unreadable, counted (content unreadable — kind refinement unverifiable)`; the mode is restored and the root removed. All assertions are in the trailing python (each failure names its file and value)."
+      },
+      "expected": "exit 0: the first repository with an undecodable README gets its documentation surface back — the file listed with the sha256 of its bytes and counted out loud as RG-REQ-008-L05 requires, every JSON entry carrying `content_hash` as L08 requires; a document whose bytes cannot be read at all is admitted, counted and listed with the key `content_hash` present and `null` (an unknown marked, never omitted, never fabricated); discovery (L01), vendored (L04) and unscanned (L06) lines hold on poco; a repository with nothing unreadable (leveldb) shows no behavior change — human output byte-identical, JSON identical after parsing, every hash equal to its file's sha256",
+      "candidateSha256": "sha256:4b157fb87e1c5f31993b478d663b31c98872ebfb7751d444562ebcf906bd1b27",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "exit 0, ending DU-C04 ok: poco 2->0 both modes, 16 entries … leveldb identical … docs/NOTES.md (mode 000) listed with content_hash null … fingerprint unchanged.",
+        "supportingEvidence": [
+          "captures-adm2/"
+        ]
+      }
+    },
+    {
+      "checkId": "DU-C05",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "P-DU-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "test \"$(grep -E '^registry-before [0-9a-f]{64}$' .agent-manager/slices/DOCS-UNREADABLE-DECODE-1/build-progress.md | tail -1 | cut -d' ' -f2)\" = \"$(shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -d' ' -f1)\" && PIDS=$(pgrep -x rmapd | paste -sd, -); { [ -z \"$PIDS\" ] || ! ps -o command= -p \"$PIDS\" | grep -v '/\\.local/bin/rmapd' | grep -q .; } && ! test -e /private/tmp/DOCS-UNREADABLE-DECODE-1-unreadable-after && ! ls -d /private/tmp/DOCS-UNREADABLE-DECODE-1-copy-* >/dev/null 2>&1 && ls -d /private/tmp/DOCS-UNREADABLE-DECODE-1-poco-before /private/tmp/DOCS-UNREADABLE-DECODE-1-leveldb-before >/dev/null && ! git status --short | grep -vE '^[ MA?][ MA?] rust/crates/(doc-facts/src/lib\\.rs|doc-facts/src/lib_tests\\.rs|rgr/src/presentation/docs\\.rs|rgr/src/presentation/docs_tests\\.rs)$' | grep -q . && git diff --check",
+        "cwd": ".",
+        "environment": "candidate tree, after every other check",
+        "inputs": "the full sha256 of the operator registry recorded as `registry-before <digest>` in .agent-manager/slices/DOCS-UNREADABLE-DECODE-1/build-progress.md at §5 step 0 equals the current one; no rmapd process other than the operator's installed `~/.local/bin/rmapd`; the builder-made root /private/tmp/DOCS-UNREADABLE-DECODE-1-unreadable-after and every `/private/tmp/DOCS-UNREADABLE-DECODE-1-copy-*` copy are gone; the two manager-owned `-before` roots are kept; `git status --short` names only the four candidate paths; no whitespace errors."
+      },
+      "expected": "exit 0: every proof was isolated (the operator's registry unchanged — no behavior change outside the isolated roots), the builder's root is removed, and the tree holds only the allocated paths",
+      "candidateSha256": "sha256:4b157fb87e1c5f31993b478d663b31c98872ebfb7751d444562ebcf906bd1b27",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "exit 0; operator registry hash equals registry-before 4762fd94…879d64c; builder root and all copies are gone; git status shows only the four paths.",
+        "supportingEvidence": [
+          "build-progress.md in .agent-manager/slices/DOCS-UNREADABLE-DECODE-1/cmds-adm2/"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/doc-facts/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-008-L05",
+        "RG-REQ-008-L08"
+      ],
+      "summary": "read_and_hash reads and hashes bytes before UTF-8 decoding; invalid UTF-8 is counted once as unreadable, docs extract retains its warning, content_hash serializes as string or null, release_family keeps its skip, and comments are corrected."
+    },
+    {
+      "path": "rust/crates/doc-facts/src/lib_tests.rs",
+      "obligationIds": [
+        "RG-REQ-008-L05",
+        "RG-REQ-008-L08",
+        "P-DU-01"
+      ],
+      "summary": "Adds the five tests required by DU-C01."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/docs.rs",
+      "obligationIds": [
+        "RG-REQ-008-L08"
+      ],
+      "summary": "DocEntry.content_hash is Option<String>; accepts string or null, rejects an entry with no key, and has no default or skip attribute."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/docs_tests.rs",
+      "obligationIds": [
+        "RG-REQ-008-L08",
+        "P-DU-01"
+      ],
+      "summary": "Updates 11 existing test entries to Some(..) and adds four decode and filtered-view tests."
+    }
+  ],
+  "completedAt": "2026-09-27T03:11:13.509Z",
+  "limitations": [
+    "Step 1 (write failing tests first) was not re-run here; red-first evidence is in admission-1/build-progress.md step 1, run against this same patch.",
+    "The comparator's build source is not attested; it is identified only by its self-reported rmap 0.19.0. Independent checks are per-file SHA-256 values and the literal in the unit test.",
+    "cargo test --workspace, smoke scripts, and dogfood were not run; they are the operator's gate after acceptance.",
+    "Release build artifacts in rust/target/ were left for the operator's end-of-slice cleanup."
+  ],
+  "report": "All five checks passed. Poco's `rmap docs list` no longer crashes: it lists 15 documents and counts `packaging/README.txt` as unreadable, with the SHA-256 of its bytes. A document that can't be read at all is now listed with `\"content_hash\": null` instead of failing the command. Nothing is committed; the changes are in the working tree.\n\n**Candidate:** HEAD `9da64dbd` plus the four allocated paths (384 insertions, 44 deletions). I applied `candidate-admission-1.patch` cleanly, then made one edit: I reflowed a comment line at `rust/crates/doc-facts/src/lib.rs:243-245`. No code or classification changed.\n\n**F-DU-COMMENT-1 (stale license comments):** the patch already fixed this, and the iteration-1 review closed it. The rule it applies: comments describe the `license` kind as name-only and the `release-notes` manifest check as the only kind rule that reads content. `grep -n -i license lib.rs` finds no comment left that claims the license check reads content.\n\n## Checks\nEach command was extracted verbatim from SLICE_DOC, run under `bash` from its `cwd`, and saved in `.agent-manager/slices/DOCS-UNREADABLE-DECODE-1/cmds-adm2/`. Logs are in `build-progress.md` in the same directory.\n\n| Check | Result | Evidence (EXECUTED) |\n|---|---|---|\n| DU-C01 | **passed** | exit 0. doc-facts: 126 passed, 0 failed; all 18 required test names ok; the source greps and unchanged-module checks pass. Log: `du-c01.txt` |\n| DU-C02 | **passed** | exit 0. rgr lib: 1289 passed; `docs_command`: 6 passed; `docs_list_overlay`: 3 passed. The rgr diff is exactly the two docs files (now sorted with `LC_ALL=C`); daemon-runtime, storage and agent are unchanged. Logs: `du-c02*.txt` |\n| DU-C03 | **passed** | exit 0. `fmt --check`, `clippy -D warnings` over doc-facts, daemon-runtime and rgr, and `git diff --check` are all clean. Log: `du-c03.txt` |\n| DU-C04 | **passed** | exit 0, ending `DU-C04 ok: poco 2->0 both modes, 16 entries … leveldb identical … docs/NOTES.md (mode 000) listed with content_hash null … fingerprint unchanged`. Captures: `captures-adm2/` |\n| DU-C05 | **passed** | exit 0. The operator registry's hash equals `registry-before 4762fd94…879d64c`; the builder root and all copies are gone; `git status` shows only the four paths |\n\nStep 1 (write failing tests first) was not re-run here. The red-first evidence is in `admission-1/build-progress.md` step 1, which was run against this same patch.\n\n## What the product now answers about poco (checkout 49af400)\n- **The file:** `poco/packaging/README.txt:1` is ` POCO C++ Libraries`. `file` reports `Non-ISO extended-ASCII text`. Line 6 reads `…the .NET Framework or Apple\\x92s Cocoa.`, and `xxd` shows byte `0x92` at offset 232.\n- **Before (v0.19.0 comparator, both modes):** exit 2, `error: failed to parse response: missing field `content_hash``.\n- **After (candidate):** `15 documents` / `+1 vendored doc (excluded; …)` / `+1 unreadable, counted (content unreadable — kind refinement unverifiable)` / `+5 markdown/prose files outside a docs tree not scanned (--json for the rule)` / `readme 11` / `doc 4`.\n- **The undecodable entry in `--json`:** `{\\\"path\\\":\\\"packaging/README.txt\\\",\\\"kind\\\":\\\"readme\\\",\\\"generated\\\":false,\\\"content_hash\\\":\\\"dae0857da12cb0f9652108e2607ea6d1d1a2b2ae2b8d9b07188cee1fddf86993\\\"}`. This equals `shasum -a 256` of the file.\n- **A readable entry:** `README.md`'s hash `92512c74…ec1b6a` equals the SHA-256 of its bytes.\n- **leveldb:** `9 documents`. The human output is byte-identical to the comparator's, the JSON is equal after parsing, and every hash equals its file's SHA-256.\n- **Mode-000 test repo (only the unreadable-document case):** `{'path': 'docs/NOTES.md', 'kind': 'doc', 'generated': False, 'content_hash': None}` in parsed JSON, i.e. `\"content_hash\": null` on the wire. The human output reads `2 documents` and `+1 unreadable, counted (…)`.\n- **Remaining case:** a document whose bytes can't be read at all has no hash. This is the ratified `null` form (D-DU-CC10); DU-C04 exercises it.\n\n## Changed paths\n- **`doc-facts/src/lib.rs`** (L05, L08): `read_and_hash` now reads the file's bytes, hashes them, then decodes them as UTF-8. A file that isn't valid UTF-8 is still counted once as unreadable, and `docs extract` gives the same warning as before. `content_hash` is always serialized, as a string or `null`; `release_family` keeps its skip. Comments are corrected (F-DU-COMMENT-1).\n- **`doc-facts/src/lib_tests.rs`** (L05, L08, P-DU-01): the five new tests DU-C01 requires.\n- **`rgr/src/presentation/docs.rs`** (L08): `DocEntry.content_hash` is now `Option<String>`. It accepts a string or `null`, still rejects an entry with no key, and has no `default` or skip attribute.\n- **`rgr/src/presentation/docs_tests.rs`** (L08, preservation): the 11 existing test entries now use `Some(..)`, plus the four new decode and filtered-view tests.\n\n## Deviation and limitations\n- **Deviation:** SLICE_DOC says the doc-facts serialization tests use `serde_json`. They use `serde_yaml` instead, because doc-facts' `Cargo.toml` is frozen (P-DU-02) and has no `serde_json` dependency. Whether the key is written at all is decided by the struct's serde attributes regardless of format. The JSON wire form is shown at the command line by DU-C04, both `null` and a string. The previous review saw this and raised no finding.\n- **Comparator:** the comparator's build source is not attested; it is identified only by its self-reported `rmap 0.19.0`. The independent checks are the per-file SHA-256 values and the literal in the unit test.\n- **Not run:** `cargo test --workspace`, the smoke scripts and the dogfood. These are the operator's gate after acceptance.\n- **Left in place:** release build artifacts in `rust/target/`, for the operator's end-of-slice cleanup.\n\nNo stop condition was hit and no decision is needed."
+}
