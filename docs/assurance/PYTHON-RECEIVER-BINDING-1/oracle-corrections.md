@@ -244,3 +244,7 @@ OC-6 and OC-7 revision 3 are approved; their "Approver: PENDING" lines above are
 - **Changed:** nothing in any oracle, check, obligation, candidate path or decision. INPUT-4 differs from INPUT-3 only in `baselineId` and the `allocation` digest. The slice document differs from 7dbdecaf only in the block's `baselinePath`, the Status line (revision 10) and its §9 INPUT-4 entry.
 - **Author:** requirements author of PREP-9 (claude-opus-5-5). **Approver:** PENDING — the operator (in-place-manager).
 - **Slice document digests (PREP-9):** before (7dbdecaf) sha256:6dbb7dd12d845b28bf9fe37264ab52a095c3bae069f2049bae5aa69184967f86; after sha256:43c42ad3e0d4f023defc01f8dc775b8b465970b6346f866ef78ccdeda4c1abd4. The INPUT-4 manifest's `allocation` digest is re-pinned to the after value.
+
+## Closeout (2026-09-27, in-place-manager)
+
+Shipped as `dac37a98` under INPUT-4. The implementation review's acceptance (admission 3, review-2) covers OC-1 … OC-7 as carried by INPUT-2 … INPUT-4. No correction changed behaviour.
