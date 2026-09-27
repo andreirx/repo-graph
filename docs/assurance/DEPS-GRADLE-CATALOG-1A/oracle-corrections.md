@@ -122,3 +122,58 @@ Append-only (agent-manager docs/MANAGER.md § Oracle corrections). INPUT-1 was a
 - **Author:** requirements author of PREP-4 (claude-opus-5-5). **Approver:** PENDING — the operator (in-place-manager). **Carried as:** INPUT-2.
 
 - **Slice document digests (OC-1 … OC-5, the Status line and the §9 INPUT-2 entry, one pass):** before sha256:659ed4b78b760ea4f93d9226e711b45ec622b61e60f4eeef105ba768cb14d709 (the manager's INPUT-2 `baselinePath` edit, equal to the manifest's placeholder `allocation` digest); after sha256:07326d4fc1393b945490a91abfdb982d26d0f1b52f1f629f5912fc4a52968f38. The INPUT-2 manifest's `allocation` digest is re-pinned to the after value.
+
+## OC-6 (2026-09-27, PREP-5) — DGC-A04 predicted rows that correctly disappear (→ INPUT-3)
+
+- **Context:** INPUT-2 (1ea958bc) was admitted and built. DGC-A01, A02, A03, A05 and A06 passed. DGC-A04 failed at `assert strip(b) == strip(a), (n, "a header field moved", …)`: kafka `count` 61 → 60 (`.agent-manager/slices/DEPS-GRADLE-CATALOG-1A/evidence/DGC-A04.out`, rc 1). The implementation review (`review-1.json`, `RESULT: decision-required`) found no product defect and raised D-DGC-A04-EMPTY-RECORD. The operator resolved it as **A**: correct the oracle to the existing sparse-row contract. Keeping empty rows (B) would change a frozen output contract outside the allocation.
+- **Old prediction (DGC-A04 `inputs`, PREDICTED AFTER):**
+  - "kafka — every row loses exactly `org.ajoberstar.grgit` … and nothing else in any row or the header moves";
+  - the command asserted `len(bm) == ROWS[n]` (61 / 1 / 37 rows after), `strip(b) == strip(a)` including `count`, the human header and rollup unchanged apart from the declared total, and `set(a) == set(b)` over the Java `file_signals` rows.
+- **Sparse-emission sites, at HEAD 1ea958bc (OBSERVED, source), and not touched by the candidate** (`candidate-admission-1.patch`: its orchestrator.rs hunks are the `INDEXER_VERSION` literal only; its module-queries `deps/compose.rs` hunks add `undetermined_blocks: None` to two test helpers):
+  - `rust/crates/module-queries/src/deps/compose.rs:469-480` `reconcilable_module_paths` = the keys of `module_imports` ∪ `module_declared` ∪ `module_rejected`, called at :316-317. A declared key is inserted only for a `file_signals` row that `get_package_dependencies_for_snapshot` returns, and that read filters `AND fs.package_dependencies_json IS NOT NULL` (`rust/crates/storage/src/crud/module_edges_support.rs:398-411`). Import and rejected keys come only from `external_library_candidate` references (`module_edges_support.rs:285-312`).
+  - `rust/crates/repo-index/src/compose.rs:658` maps an empty declared set to `None`. `rust/crates/indexer/src/orchestrator.rs:701-707` writes a `file_signals` row only when `has_bindings || has_pkg_deps || has_aliases`.
+- **New (rule, DGC-A04 only):** a row whose every fact is a coordinate 1A excludes is ABSENT after. The rule is computed from the BEFORE side, never from the candidate.
+  - **Module row:** absent iff every entry is `declared_but_unobserved` of its predicted group and every observed-side count (`declared_and_used`, `type_only_import`, `observed_but_undeclared`, `first_party_self`, `runtime_builtins`, `unknown_external_like`, `rejected_non_specifier`) is 0. This is evaluated on the v0.19.0 rows, and it must agree with the same rule read from the v0.19.0 store (`store_vanished`: owned Java declared sets inside the predicted group, and no Java `external_library_candidate` reference from the module's files).
+  - **Java file-signal row:** absent iff `import_bindings_json` and `tsconfig_aliases_json` are NULL and its declared set lies inside its predicted group (`bare`, read from the v0.19.0 store with `immutable=1`).
+  - **Everything else unchanged from INPUT-2:**
+    - every surviving row is compared with its v0.19.0 row minus exactly the predicted coordinates;
+    - the JSON `count`, the human header (`deps · java · N modules`) and the rollup's module count move by exactly the absent rows (an absent row is predicted only inside the rollup, and this is asserted);
+    - every other header field, the marking, the human transform and petclinic's `rg-store-diff.py` whole-store identity and byte-identical render are unchanged;
+    - an absent file-signal row reads as the empty declared set.
+- **Literals** (asserted beside the rule; EXECUTED, python sqlite3 `?immutable=1` on the manager's re-created roots):
+  - Module rows: kafka `['group-coordinator/group-coordinator-api']` (61 → 60); petclinic none; grpc-java none. `core` keeps its row on `observed_but_undeclared` 1.
+    - The kafka module is the 17th of the 61 rows, inside the rollup. Its row is `declared_but_unobserved` 1 (`org.ajoberstar.grgit`), with every other count 0.
+    - It owns eleven Java files, six of them with import bindings. No Java `external_library_candidate` reference comes from them.
+  - The two derivations agree on all three stores: the rule over the stale capture and the store read.
+  - Java file-signal rows absent: kafka 535, petclinic 0, grpc-java 14 (all under `core/`, e.g. `core/src/main/java/io/grpc/internal/BackoffPolicy.java`). No non-Java `file_signals` row carries a declared set in any of the three stores (kafka: 149 Python rows; grpc-java: 3 C++ rows; none with `package_dependencies_json`).
+  - Human render: kafka `deps · java · 60 modules` and `(+53 more modules: 0 declared deps — \`--json\` for all)`.
+- **Agreement with the builder's diagnostic** (`evidence/DGC-A04-diagnostic.py`/`.out`, non-binding):
+  - It reports kafka 61 → 60 with `group-coordinator/group-coordinator-api` vanished, and 535 kafka / 14 grpc-java Java files with no after-row, 0 petclinic.
+  - That agrees on every count and on the module. Its file rule was weaker: absent ⊆ files with no import bindings, plus per-file equality reading an absent row as the empty set. With the per-file equality, every absent file's v0.19.0 set lies inside its predicted group. Its absent sets are therefore subsets of this rule's sets, and with equal counts (535 = 535, 14 = 14) they are equal (INFERRED from its assertions; the after-stores were deleted by DGC-A05).
+- **Probes** (EXECUTED; scratch `/private/tmp/DEPS-GRADLE-CATALOG-1A-PREP-5-work` and `-probe`, removed). The extracted Python was run with its capture and after-root paths redirected. The inputs were:
+  - the candidate's real captures (`evidence/dgc-{kafka,petclinic,grpc-java}-{stale,after}.{json,txt}`);
+  - a MODELED after-store: the v0.19.0 Java `file_signals` minus the predicted group, under the unchanged writer rule. The real after-stores no longer exist.
+
+  Results:
+  - **Positive:** the corrected oracle prints `DGC-A04 OK` (kafka 60 rows, absent `['group-coordinator/group-coordinator-api']`; 5,877 files, 535 without a row; grpc-java 235 moved, 14 without a row; petclinic unchanged).
+  - **Old behaviour (must fail) — all fail:**
+    - the unfixed JSON (stale served as after) → `count moves by exactly the absent rows` (61, 61);
+    - the unfixed writer (every v0.19.0 row kept) → `the Java file-signal rows after are the v0.19.0 rows minus exactly the fact-less ones`;
+    - the human header left at 61, and the rollup left at +54 → the whole-text transform;
+    - option B (the empty row kept, count 61) → the count assertion.
+  - **A candidate that drops a row that still has a fact (must fail) — all fail:**
+    - JSON without kafka `clients`, grpc-java `core` or petclinic `.` → the count assertion;
+    - a swap (the empty row kept and `connect/api` dropped, count 60) → `module rows: the v0.19.0 rows minus exactly the absent ones`;
+    - a store missing a kafka row, or a grpc-java row, that still has a fact → the file-signal assertion;
+    - the human render without the kafka `clients` row → the whole-text transform.
+  - **Control:** the INPUT-2 oracle fails on the same captures exactly as the implementation run did (`a header field moved`, `count` 61 vs 60).
+  - `bash -n` passes on all six check commands.
+- **Not changed:**
+  - any other check, `expected` beyond DGC-A04, the obligation sets, `candidatePaths`, the acceptance boundary, §2.3 and §6. §6's definition of done names no row count. §2.3 says "every row and header field identical except the predicted removals" and "(kafka 5,877 files; grpc-java 233 + 2)"; both remain true under the rule, which counts an absent row as a predicted removal and reads an absent file row as an empty set. They were left untouched under the item's diff bound; see the author's report.
+  - the product: no code, no emitter, and no frozen output contract.
+- **Author:** requirements author of DEPS-GRADLE-CATALOG-1A-PREP-5 (claude-opus-5-5). **Approver:** in-place-manager (operator; the D-DGC-A04-EMPTY-RECORD = A ruling in the PREP-5 packet). **Carried as:** INPUT-3.
+- **Slice document digests (OC-6, the Status line and the §9 INPUT-3 entry, one pass):**
+  - before: sha256:fbc48b3bfb5ea8087244d741573cbb914d9a60c463f4881f9b7e2e73668d1702 (the manager's INPUT-3 `baselinePath` edit, equal to the manifest's placeholder `allocation` digest);
+  - after: sha256:2da600706ce93673885dd402bad31b31edcfd23d428f5314a091a367a6bb4bef.
+
+  The INPUT-3 manifest's `allocation` digest is re-pinned to the after value.

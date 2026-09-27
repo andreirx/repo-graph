@@ -1,0 +1,62 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DEPS-GRADLE-CATALOG-1A-BASELINE-APPROVAL-3",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DEPS-GRADLE-CATALOG-1A-INPUT-3.json",
+    "sha256": "sha256:10534d2256eb8ea6b823a7e6a0353d89d2aa0b717063f9a4ee8c3d13cc34b42f"
+  },
+  "review": {
+    "path": "docs/assurance/DEPS-GRADLE-CATALOG-1A-INPUT-3/requirements-review.json",
+    "sha256": "sha256:accd41ed877b8367acece8af9b0ef25c466c33552a71dc7d4561c1acfd022ee2"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-GRADLE-DECLARED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+        "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-DGC-CONDITIONAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-CONDITIONAL-1.md",
+        "sha256": "sha256:240e67c53adcd3f4daf09233d8bdbd003d5acaa61a300230977af94da4bfa3f0"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-27T18:42:39.541Z",
+  "rationale": "Document item DEPS-GRADLE-CATALOG-1A-PREP-5 accepted at cycle 1 (codex gpt-6-sol): DGC-A04's PREDICTED AFTER becomes a rule computed from the v0.19.0 before stores \u2014 a module row or file signal whose every fact is an excluded coordinate is absent (kafka group-coordinator/group-coordinator-api, 61 \u2192 60 rows; 535 kafka / 14 grpc-java file signals), every other row loses exactly those coordinates (implementation review-1 D-DGC-A04-EMPTY-RECORD = A, operator)."
+}
