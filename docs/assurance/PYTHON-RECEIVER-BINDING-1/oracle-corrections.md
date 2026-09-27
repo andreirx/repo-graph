@@ -236,3 +236,11 @@ Append-only (agent-manager docs/MANAGER.md § Oracle corrections).
 ## Operator confirmation (2026-09-27, in-place-manager) — OC-6 and OC-7 (revision 3)
 
 OC-6 and OC-7 revision 3 are approved; their "Approver: PENDING" lines above are resolved by this entry. OC-6: the alias-case expectation was the manager's wrong prediction. `resolver.rs:1591` at 7a950321 refuses non-relative specifiers; the builder, implementation review-0 and PREP-8 review-0 found this independently. OC-7: carried under D-PRB-UNION-ROUTE-1 (operator; the human may override). Accepted by PREP-8 review-2 (codex gpt-6-sol). Carried as INPUT-3; records in `docs/assurance/PYTHON-RECEIVER-BINDING-1-INPUT-3/`.
+
+## Carry (2026-09-27, PYTHON-RECEIVER-BINDING-1-PREP-9) — OC-6 and OC-7 (revision 3) carried as INPUT-4; no oracle changes
+
+- **Reason:** a record defect. INPUT-3's committed approval (`docs/assurance/PYTHON-RECEIVER-BINDING-1-INPUT-3/baseline-approval.json`, commit 7dbdecaf) resolves only `D-PRB-UNION-ROUTE-1`. The INPUT-3 manifest requires nine decisions: the eight carried from INPUT-2 and that one. Admission therefore refuses INPUT-3. Published records are append-only, so INPUT-3's review and approval stay as published and cannot be used. They are not edited.
+- **Carried:** OC-6 and OC-7 revision 3, as the operator confirmation above approved them, are carried unchanged as `docs/requirements/baselines/PYTHON-RECEIVER-BINDING-1-INPUT-4.json`. The entries above that say "→ INPUT-3" or "Carried as: INPUT-3" are history. This entry supersedes them for the carry and does not edit them.
+- **Changed:** nothing in any oracle, check, obligation, candidate path or decision. INPUT-4 differs from INPUT-3 only in `baselineId` and the `allocation` digest. The slice document differs from 7dbdecaf only in the block's `baselinePath`, the Status line (revision 10) and its §9 INPUT-4 entry.
+- **Author:** requirements author of PREP-9 (claude-opus-5-5). **Approver:** PENDING — the operator (in-place-manager).
+- **Slice document digests (PREP-9):** before (7dbdecaf) sha256:6dbb7dd12d845b28bf9fe37264ab52a095c3bae069f2049bae5aa69184967f86; after sha256:43c42ad3e0d4f023defc01f8dc775b8b465970b6346f866ef78ccdeda4c1abd4. The INPUT-4 manifest's `allocation` digest is re-pinned to the after value.

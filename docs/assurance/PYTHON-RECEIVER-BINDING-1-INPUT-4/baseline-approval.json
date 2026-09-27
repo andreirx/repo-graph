@@ -1,0 +1,97 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "PYTHON-RECEIVER-BINDING-1-BASELINE-APPROVAL-4",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/PYTHON-RECEIVER-BINDING-1-INPUT-4.json",
+    "sha256": "sha256:4abf7801482f4cdd87fdb763246279e6377b3db7c7429ca1f81f4e71e8061c90"
+  },
+  "review": {
+    "path": "docs/assurance/PYTHON-RECEIVER-BINDING-1-INPUT-4/requirements-review.json",
+    "sha256": "sha256:5ba9b0c2180dec704a9fda7b778c98a0d2dd975c99a0a00ba758f14fa8291bc8"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-PRB-RATE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PRB-RATE-1.md",
+        "sha256": "sha256:3e60cb1715683cc6936c7a8b94635a0e18e84794a99d8d8aa2a5298d667d3bb7"
+      }
+    },
+    {
+      "id": "D-PRB-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PRB-SCOPE-1.md",
+        "sha256": "sha256:0f48c8942a33ba79cfc1a8b80e8e954a2ae327e37ea3cdd72980160699fb9cf9"
+      }
+    },
+    {
+      "id": "D-PRB-ENRICH-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PRB-ENRICH-1.md",
+        "sha256": "sha256:8103c76601b38824509f6c9d189be3bee9b2a35ead1958de0094c1cba6f1da4e"
+      }
+    },
+    {
+      "id": "D-PRB-CARRIER-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PRB-CARRIER-1.md",
+        "sha256": "sha256:2fac0a65ba16cbda3e4f601db77d4f914d63f8c14424ec4dd63faf66d9a4025d"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-PSI-R1-VOCAB",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSI-R1-VOCAB.md",
+        "sha256": "sha256:9fefd3779c40ddf74db9f3298ca5d8f055b5089ee1b1f619b0a5d15d15023eb1"
+      }
+    },
+    {
+      "id": "D-PRB-UNION-ROUTE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PRB-UNION-ROUTE-1.md",
+        "sha256": "sha256:b1cc2aad8eb7c1cfdfb17d2c5b77f40b6cc4f6653d8fe42957456eeaa87477e9"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-27T09:25:00.812Z",
+  "rationale": "Document item PYTHON-RECEIVER-BINDING-1-PREP-9 accepted at cycle 1 (reviewer codex gpt-6-sol): INPUT-4 carries INPUT-3's accepted content unchanged (OC-6, OC-7 rev 3, D-PRB-UNION-ROUTE-1). INPUT-3's approval record resolved only D-PRB-UNION-ROUTE-1 of its nine required decisions and is kept as published, unusable. This approval resolves all nine: the eight carried from INPUT-2 as approved there, plus D-PRB-UNION-ROUTE-1 (operator; the human may override)."
+}
