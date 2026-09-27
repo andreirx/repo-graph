@@ -16,3 +16,10 @@ Append-only (agent-manager docs/MANAGER.md § Oracle corrections).
 
 - **Old:** every comparator/candidate `run` passed `$R-poco-before` / `$R-leveldb-before` as `RMAP_STATE_ROOT`. **New:** each binary serves its own copy `$R-copy-<repo>-<cmp|cand>` (registry `db_path` redirected and asserted); the originals are fingerprinted before and asserted unchanged; the EXIT trap removes the copies; DU-C05 asserts none remain; DU-C04 also carries RG-REQ-011-L06 and P-DU-03. **Evidence:** packet stop condition "the manager's before-roots are read-only (copies only)"; CLAUDE.md "a retained state root is not read-only under a serving daemon"; mechanics dry run EXECUTED under bash (fails, as it must before a candidate exists, at `('exit', '/tmp/du-poco-after.txt', 2, …)` after the fingerprint assertion passed; copies removed; originals unchanged). **Approver:** pending the delta review. **Carried as:** INPUT-2.
 - **Slice document digests:** before sha256:32b82e01ccef05f1a1d65bc42b7a5b161dec663daa80a697f379174eeed69f77; after sha256:5eae7ea5bde00539bc6ea08c35802fcbb12cce23f4ff266b8f992cc11ead4f78.
+
+## OC-4 (2026-09-27) — DU-C02 compared a locale-sorted list with a C-collation literal (→ INPUT-3)
+
+- **Old:** `git diff HEAD --name-only --relative -- crates/rgr | sort | tr ...`. **New:** `... | LC_ALL=C sort | tr ...`.
+- **Evidence:** implementation review of the INPUT-2 admission, cycle 1 (codex gpt-6-sol), F-DU-C02-1 / D-DU-C02-COLLATION: the verbatim command exited 1 under `en_US` collation on the correct two-file rgr diff and 0 with `LC_ALL=C`; the failed run is preserved in `.agent-manager/slices/DOCS-UNREADABLE-DECODE-1/admission-1/`.
+- **Approver:** in-place-manager. **Carried as:** INPUT-3.
+- **Slice document digests:** before sha256:5eae7ea5bde00539bc6ea08c35802fcbb12cce23f4ff266b8f992cc11ead4f78; after sha256:abfa134934b4be48d7449209f876e3627b6ef0eca11d4af6a2214e402316cfe0.

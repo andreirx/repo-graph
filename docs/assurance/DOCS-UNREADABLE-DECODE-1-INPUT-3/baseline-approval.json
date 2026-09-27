@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DOCS-UNREADABLE-DECODE-1-BASELINE-APPROVAL-3",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DOCS-UNREADABLE-DECODE-1-INPUT-3.json",
+    "sha256": "sha256:e755e25792801e0ce66128b19199cb22f962dd70a68f3b96b6c5ae9be0dc6934"
+  },
+  "review": {
+    "path": "docs/assurance/DOCS-UNREADABLE-DECODE-1-INPUT-3/requirements-review.json",
+    "sha256": "sha256:f2a8ff2ea533291a5c2e87ed62ab41a5400871faf20894ba7b56a959c1838922"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-DU-CC10",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DU-CC10.md",
+        "sha256": "sha256:88ff0bc17769d3101471ad66eccd7b90a66361eb87679f6728d1e774cd17b5b8"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-27T03:06:37.958Z",
+  "rationale": "Successor baseline INPUT-3 accepted at DOCS-UNREADABLE-DECODE-1-PREP-6 cycle 0: oracle correction OC-4 (DU-C02 sorts with LC_ALL=C; the literal is in C collation)."
+}
