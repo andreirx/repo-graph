@@ -1,0 +1,76 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "TEST-EDGE-SCOPE-1A-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/TEST-EDGE-SCOPE-1A-INPUT-1.json",
+    "sha256": "sha256:544a15d22d1fb4c905b0c33ac25d5813cab2312c24376ee68658720496517640"
+  },
+  "review": {
+    "path": "docs/assurance/TEST-EDGE-SCOPE-1A-INPUT-1/requirements-review.json",
+    "sha256": "sha256:f6c95d95e85eeb2d7bde82a72face89e0bb24de4fdb30a220f00d487bdb30487"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-TEST-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+        "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d"
+      }
+    },
+    {
+      "id": "D-TEST-UNDETERMINED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-UNDETERMINED-1.md",
+        "sha256": "sha256:61ffac89c67841ee628c73ed7f66bce1e910ed99925a6b4ae012c2dbce0622f0"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-TESA-DERIVED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TESA-DERIVED-1.md",
+        "sha256": "sha256:ac035faa4bd90a0e915de26f89cb7481ea3a270a702c6be7709d96b815b0af26"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-29T18:30:56.298Z",
+  "rationale": "Document item TEST-EDGE-SCOPE-1A-PREP-2 accepted at cycle 6 (codex gpt-6-sol), authored fresh under the amended RG-REQ-001-L07 (D-TEST-UNDETERMINED-1): testsuite/ joins the routing conventions; UNDETERMINED test status is computed when asked by one shared function of path + known-false is_test (D-TESA-DERIVED-1, HUMAN 2026-09-29), stated per surface with its universe inline; D-TESA-13's per-surface table (S1\u2013S13) binds true/false/unknown handling to named checks. 12 checks."
+}
