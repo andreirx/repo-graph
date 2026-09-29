@@ -1317,7 +1317,28 @@ NEXT: DOCS-UNREADABLE-DECODE-1 (RC-1), then the queue above in order; CPP-INCLUD
   - DOCTOR-FALLBACK-STATE-ROOT-1: `granular_socket_probes` returns on `ConnectFailed` before its state-root probe, so `doctor` in a sandbox never says where state lives.
   - FOREGROUND-PATIENCE-FLAKE-1: `daemon-runtime/src/foreground_open/tests.rs:107` asserts a locked open gives up within 900 ms; it measured 1.04 / 1.06 / 1.14 s inside the parallel suite at load average 20+, and passes alone.
   - agent-manager `scripts/repo-graph-release-cut.sh` is macOS-only (`launchctl gui/501`; step 5's retained-root paths are stale).
-NEXT (remaining queue): DEPS-GRADLE-CATALOG-1A (each: INPUT-2 rebase → implementation); TEST-EDGE-SCOPE-1A (re-cut under the amended L07) → 1B (the release gate) → CPP-INCLUDE-BASENAME-1 (rebase → implementation); TS-WORKSPACE-RESOLUTION-1 (re-cut, D-TS-WORKSPACE-1); release.
+- **DEPS-GRADLE-CATALOG-1A — SHIPPED** `24ca42ac` (2026-09-29). A Gradle project's declared dependencies now come from its own direct `dependencies` blocks, never from a `buildscript` classpath.
+  - kafka `build.gradle:27` `classpath "org.ajoberstar.grgit:grgit-core:$versions.grgit"` had been stored as a declared dependency of all 61 modules. Now the `clients` row reads `no static import found 0` (was 1) with the incomplete-set suffix. `group-coordinator/group-coordinator-api`, whose only fact it was, leaves the list (61 → 60). 535 kafka and 14 grpc-java file signals with no other fact are gone.
+  - grpc-java `core/build.gradle:3` (`buildscript { dependencies { classpath 'com.google.guava:guava:33.4.8-android' } }`) is excluded the same way.
+  - spring-petclinic is byte-identical.
+  - Residual (1B): catalog aliases, e.g. kafka `build.gradle:1879` `implementation libs.zstd`.
+
+  Honesty rules shipped with it:
+  - D-DGC-ATTRIBUTION-1 (operator): a Gradle file whose nearest script cannot decide its declared set is declared, undetermined with the block located, or a FAILED record — never a certain empty set.
+  - D-DGC-BOUNDARY-1 (human 2026-09-29, "Fix everything here"): file ownership ranks the repo root last in every ecosystem (it tied with one-character module directories, `repo-index/src/compose.rs:3028`); a failed manifest record keeps its module in `deps list` as unknown-with-reason; the manifest record states parse vs attribution failure (additive).
+  - Corpus check DGC-A07: no one-character module root and no failed manifest record in the 29 retained stores, so none of these moved a corpus row.
+
+  Tally:
+  - baselines: 6 (INPUT-2 rebase; -3 the kafka 61 → 60 prediction; -4 D-DGC-ATTRIBUTION-1; -5 D-DGC-BOUNDARY-1; -6 fact-less boundary fixtures);
+  - document items PREP-4…8;
+  - admissions: 5 (1: 5/6 checks; 2: 6/6 plus the attribution finding; 3: boundary defects; 4: 6/7, fixtures; 5: accepted at cycle 2 after a comment-only correction).
+
+  Every blocking finding after admission 2 was a gap in the manager's packets or oracles, not in the fix. Gates: green on the second run; the first failed only `index_disconnect.rs:153` `database is locked` (LOCK-TEST-FLAKE-1).
+
+  Follow-ups:
+  - DGC-ATTRIBUTION-PRECISE-1: exact cross-script attribution, only if such layouts appear in the corpus;
+  - DEPS-GRADLE-CATALOG-1B: catalog aliases.
+NEXT (remaining queue): TEST-EDGE-SCOPE-1A (re-cut under the amended L07) → 1B (the release gate) → CPP-INCLUDE-BASENAME-1 (rebase → implementation); TS-WORKSPACE-RESOLUTION-1 (re-cut, D-TS-WORKSPACE-1); release.
 
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a

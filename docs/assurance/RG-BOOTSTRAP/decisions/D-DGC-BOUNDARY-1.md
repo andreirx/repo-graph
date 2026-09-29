@@ -30,3 +30,11 @@ All three fixes are therefore expected to move no corpus output beyond what DGC-
 - The allocation gains the candidate paths these fixes need (at least `repo-index/src/compose.rs`), named tests for each defect at the reader and at the `deps list` boundary, and a byte oracle stating that the corpus moves nothing beyond DGC-A04.
 - The persisted-record change is additive and backward-compatible; nothing else in the wire shape changes.
 - DGC-ATTRIBUTION-PRECISE-1 (D-DGC-ATTRIBUTION-1's follow-up) stands.
+
+## Correction (2026-09-29, in-place-manager) — defect 3's wording
+
+Defect 3 above describes an attribution failure as a manifest that "parsed, but attribution failed", beside "a declaration that was in fact read". That is not always true.
+- An attribution failure can be recorded against an unreadable `settings.gradle` itself (`resolve_gradle_dir_without_script`), whose contents were never read.
+- The correct statement is: the record states whether the failure is a parse failure of the recorded manifest, or a failure to establish Gradle project/declaration attribution. The latter includes a settings-file failure, and asserts nothing about whether the recorded file was read.
+
+Found by DEPS-GRADLE-CATALOG-1A implementation admission 5, review-0 (codex gpt-6-sol). The shipped code comments were corrected in the same slice (`24ca42ac`). The ruling itself is unchanged.
