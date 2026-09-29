@@ -1,0 +1,76 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DEPS-GRADLE-CATALOG-1A-BASELINE-APPROVAL-5",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DEPS-GRADLE-CATALOG-1A-INPUT-5.json",
+    "sha256": "sha256:33da06808da9774aedfb77bf8cd9bdfd10d7631d1e3d82eb2fdd8c863e99aa6b"
+  },
+  "review": {
+    "path": "docs/assurance/DEPS-GRADLE-CATALOG-1A-INPUT-5/requirements-review.json",
+    "sha256": "sha256:85a1f4b7e234a4e18a7156adb148429ea735838f5842f069d9a71832b8b09ec0"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-GRADLE-DECLARED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+        "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-DGC-CONDITIONAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-CONDITIONAL-1.md",
+        "sha256": "sha256:240e67c53adcd3f4daf09233d8bdbd003d5acaa61a300230977af94da4bfa3f0"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-DGC-ATTRIBUTION-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-ATTRIBUTION-1.md",
+        "sha256": "sha256:c0dd3ff3220f38fc273398376dac6c52bcdb1b2645559ec7a2edda295d5c2d77"
+      }
+    },
+    {
+      "id": "D-DGC-BOUNDARY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-BOUNDARY-1.md",
+        "sha256": "sha256:531a2dcad843c3096b75b4d7b847892296b7154fac4895630687705690877afd"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-29T09:53:38.302Z",
+  "rationale": "Document item DEPS-GRADLE-CATALOG-1A-PREP-7 accepted at cycle 4 (codex gpt-6-sol): allocation amendment A-2 carries D-DGC-BOUNDARY-1 (HUMAN, 2026-09-29: 'Fix everything here') \u2014 the repo root ranks last in file ownership; a failed manifest record establishes view membership and renders unknown-with-reason; the manifest record states parse vs attribution failure (additive, old records read as parse); provenance vs attribution distinguished, the same-build unreadable-root fixture added; corpus absence facts (no one-character module root, no failed record in 29 stores) as an executed check. 7 checks."
+}

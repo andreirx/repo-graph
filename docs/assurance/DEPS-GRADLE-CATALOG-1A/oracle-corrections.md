@@ -223,3 +223,160 @@ Append-only (agent-manager docs/MANAGER.md § Oracle corrections). INPUT-1 was a
 ## Operator confirmation (2026-09-28, in-place-manager) — A-1 and its third outcome
 
 A-1 is approved; its "Approver: PENDING" line above is resolved by this entry. The third outcome of rule (a) is confirmed as within D-DGC-ATTRIBUTION-1: an unknown build reached by no script is a FAILED record naming the cause. That is the ruling's invariant (never a certain empty set; unknown with a reason) under this slice's existing unknown-build rule (§2.1 (2)). A FAILED build carries no `undetermined_blocks` marking (D-DGC-CONDITIONAL-1), so the ruling's UNDETERMINED branch cannot apply there. PREP-6 accepted at review-1 (codex gpt-6-sol). Carried as INPUT-4.
+
+## A-2 (2026-09-29, PREP-7) — allocation amendment: the three downstream defects are fixed in this slice (→ INPUT-5)
+
+- **Context:** INPUT-4 (9c4a3822) was admitted and built (admission 3, `candidate-admission-3.patch`). The candidate implemented D-DGC-ATTRIBUTION-1 at the reader, and its reader tests passed. DGC-A06's two boundary tests failed (`evidence3/dgc-06-rgr.txt`: 1,317 passed, 2 failed). Implementation review-0 (`.agent-manager/slices/DEPS-GRADLE-CATALOG-1A/review-0.json`, `RESULT: decision-required`, D-DGC-BOUNDARY-AND-STATUS) traced both failures to defects downstream of the slice's code. It also found the `present but not parsed` status misleading for an attribution failure. The HUMAN ruled "Fix everything here" (D-DGC-BOUNDARY-1). The manager added the record to INPUT-5 as governance and to `requiredDecisionIds`, and pointed `baselinePath` at INPUT-5. This is an amendment, not an oracle correction: candidate paths and checks change.
+- **Sites** (OBSERVED at HEAD 9c4a3822; `git diff --quiet 8b88f205 HEAD -- rust` true, EXECUTED):
+  - (7) repo-index `compose.rs:3016` `compute_cargo_file_ownership`. It ranks roots with `sorted_modules.sort_by(|a, b| b.0.len().cmp(&a.0.len()))` at :3037, over the vector built from :3028. The record cites :3028, the statement's first line. The root `"."` matches every file (:3045-3047). The five callers are :2995 (Rust), :3121 (JS/TS), :3181 (Python), :3240 (JVM) and :3302 (inferred modules over uncovered files). Each persists its candidates first (`insert_cargo_module_candidates`, :2978/:3104/:3163/:3223/:3286). The function is the only producer of `FileOwnershipInput` in compose.rs.
+  - (8) module-queries `deps/compose.rs:640` `module_covered_by_parsed_manifest`, called at :340. It acts only in the zero-ecosystem-module fallback (:326-327) and admits a record only when `r.error.is_none()`. `governing_manifest` (:590) filters the same way, but it attributes `declared_manifest_paths` and does not admit membership. It stays as it is, and its test `governing_manifest_picks_longest_ancestor_parsed_and_ignores_failed_and_wrong_eco` is bound.
+  - (9) repo-index `manifest_deps.rs:274-287` `ManifestRecord.error` and module-queries `types.rs:171-187` `ManifestProvenance.error`. Two sites word a failed record, `deps/compose.rs:519-520` and daemon-runtime `deps_ecosystem_presence.rs:88-95`. Both use the same `manifest {} present but not parsed: {}` format. A one-pass `git grep` over the three marking crates' production code finds no other site.
+- **Rules** (slice doc §2.1 (7)–(9); DGC-A01's and DGC-A06's BOUNDARY FIXES paragraphs):
+  - (7) The root ranks as length 0, i.e. last. Nothing else changes.
+  - (8) The predicate admits a covering record of the view's ecosystem whatever its failure state, and is renamed `module_covered_by_manifest_record`. The admitted row reads unknown with its reason through the unchanged `attach_manifest_context` precedence. The sparse-row rule is unchanged.
+  - (9) A new field `error_kind` takes the values `"parse"` and `"attribution"`. It is written only for an attribution failure. An ABSENT key reads as `parse`: that is the old-store rule, and every parse failure keeps today's bytes. An unknown value, or the key on a record without `error`, is malformed and follows the existing `Unavailable` path. One function, `ManifestProvenance::failure_note`, words a failed record, and both sites call it. The attribution wording is `manifest <path> — dependency attribution failed: <reason>`. It never says "not parsed" and never claims the file was read.
+  - The class rule for (9): a failed record is worded only by `failure_note`, according to its kind.
+- **Allocation:**
+  - `candidatePaths` 15 → 16 (`rust/crates/repo-index/src/compose.rs`, for (7) only; it had left the list in OC-3). DGC-A05's exact list follows.
+  - `preservationObligationIds` gains P-DGC-05, the corpus preservation. P-DGC-01 and P-DGC-04 state the fixes' exceptions.
+  - The implements, changes and preserves sets are unchanged, and so is the implementation packet's `IMPLEMENT_OBLIGATION_IDS` line. EXECUTED: it equals implements ∪ preserves ∪ changes (26 ids), and the line needs no edit.
+  - DGC-A01 gains three names in its loop and the floor 447 → 450. Its Python asserts `changed(COMP) == []` no longer. It now asserts four things: compose.rs production differs from HEAD only inside `compute_cargo_file_ownership` and its doc comment; the test module only gains lines, among them the ownership test; `INDEXER_VERSION` is still read by name once; the five callers route through the one function, which is the only producer of `FileOwnershipInput`, and no new file calls `insert_file_ownership`. `inputs` gains the BOUNDARY FIXES AT THE READER paragraph, and `expected` gains the two rules.
+  - DGC-A02: text only. The composer's bounded change is stated, and the command is unchanged.
+  - DGC-A04: its obligation list gains P-DGC-05. The command is unchanged.
+  - DGC-A06:
+    - The name loop gains six new names: three module-queries tests, one daemon-runtime test, one rgr boundary test, and the renamed containment test. It also binds six existing tests by name: three module-queries (`attach_present_but_unreadable_manifest_is_unavailable_not_parsed`, `present_but_unreadable_manifest_has_no_reconcile_scope`, `governing_manifest_…`), one daemon-runtime (`ecosystem_presence_present_but_unparsed_is_unavailable_with_reason`) and two rgr (`unavailable_states_the_reason_never_a_false_absence`, `secondary_ecosystem_unavailable_and_absence_render_honestly`).
+    - Floors: 86 → 89, 806 → 807, 1,319 → 1,320.
+    - The Python diff scope is rewritten, and the amended form is binding. deps_coverage.rs and reader_context.rs helpers may gain only `undetermined_blocks: None,` / `error_kind: None,`. Module-queries compose.rs production is bounded, after the rename, to `attach_manifest_context` and `module_covered_by_manifest_record`, and its old name must be gone. deps_ecosystem_presence.rs production is bounded to `classify_ecosystem_presence`. Test modules only gain lines. The re-export lists gain exactly `UndeterminedBlocks` and `ManifestErrorKind`. The two record-wording patterns occur only in types.rs, and both note sites call `.failure_note()`. The rules for lib.rs and dispatch.rs are unchanged.
+    - `inputs` gains the BOUNDARY FIXES AT THE QUERY SIDE AND AT THE BOUNDARY paragraph: the taxonomy, the tests with their oracles, the changed oracle and the literal-construction list. `expected` gains the rules.
+  - New DGC-A07 runs three in-process route suites and the corpus-fact measurement. The suites are daemon-runtime `--test deps_attrib_nested_workspace --test find_facts_class_honesty_seam` and rgr `--test trust_module_edges_seam`; their five names were listed at 9c4a3822 (EXECUTED `-- --list`). The measurement is python sqlite3 `?immutable=1` over the 29 retained stores.
+  - `acceptanceBoundary` names the new bounds and DGC-A07.
+  - §0, §2.1, §2.2, §3, §4, §5, §6, §8, §9 and the Status line follow.
+- **Changed oracle (stated; the fixture is unchanged):** `deps_list_gradle_failure_behind_a_parsed_script_is_unknown_with_reason_in_json_and_human`.
+  - Old human condition: some row header carries `build.gradle present but not parsed` with `zz/settings.gradle` and `unreadable`.
+  - New condition: every row's `manifest_context` and every human row header carries `build.gradle — dependency attribution failed` with `zz/settings.gradle` and `unreadable`, and none carries `not parsed`. The row holding the retained `org.root` declaration is one of them.
+  - Why: review-0's finding 2 is that the old text asserted the misleading status. D-DGC-BOUNDARY-1 defect 3 rules that an attribution failure must not say "not parsed". The JSON conditions are unchanged.
+  - `deps_list_gradle_project_without_an_ancestor_script_is_declared_or_marked_in_json_and_human` is unchanged. It passes by (7) through its DECLARED branch. That is INFERRED from admission 3's output, where `org.acme` is declared on the root row (`declared_but_unobserved`), so it lands on row `a` once `a` owns `A.java`.
+- **Observation that shaped the new oracle** (OBSERVED, `evidence3/dgc-06-rgr.txt:1378-1437`): in admission 3's fixture, `import org.acme.Lib;` is counted as `1 non-import fragment dropped` (`rejected_non_specifier`), not as an observed `org.acme`. The new membership test therefore never asserts an import's category. It binds to the one row of a one-file fixture and to its context, scope, and absence of declared or undeclared entries. Also, DGC-A06 case 1's UNDETERMINED branch requires an `observed_but_undeclared` `org.acme` entry that this classification cannot produce in that fixture. The case still has a reachable outcome, DECLARED, which the ownership fix enables. The branch is reported here, not changed, because A-1 revision 1 ratified that oracle.
+- **Corpus facts** (EXECUTED 2026-09-29; DGC-A07's Python, run from `/private/tmp/DEPS-GRADLE-CATALOG-1A-PREP-7-probe`): 29 stores, 29 snapshots, 484 module candidates, 354 `deps_manifests` records. There are 0 one-character roots other than `.` and 0 records with `error`/`error_kind`, which matches D-DGC-BOUNDARY-1. Admission 3's after-captures for kafka, grpc-java and petclinic hold 0 `present but not parsed` (OBSERVED, `grep -c`). Every fix therefore stays inside DGC-A04's existing oracle, and no corpus is indexed beyond it (INFERRED from the two facts and the oracle's row-by-row, header and whole-text comparison).
+- **Probes** (EXECUTED). The scratch worktree `/private/tmp/DEPS-GRADLE-CATALOG-1A-PREP-7-wt` was at 9c4a3822 with `candidate-admission-3.patch` applied. The scratch probe directory was `/private/tmp/DEPS-GRADLE-CATALOG-1A-PREP-7-probe`. Both were removed.
+  - `bash -n` passes on all seven commands, extracted from the document.
+  - DGC-A01 Python, as embedded:
+    - admission 3 → fails with "the compose.rs test module only gains lines, among them the ownership test";
+    - a modeled fix (the root ranked 0, doc line, test stub) → passes, and so does the version block (`indexer:1.2.0 -> indexer:1.3.0`);
+    - four mutations fail at the production fence: the Express sort changed, a caller rerouted, `FileOwnershipInput` built elsewhere, the `INDEXER_VERSION` line changed;
+    - with the fence disabled, the routing assertions alone still fail the reroute (4 calls) and the stray constructor.
+  - DGC-A06 Python, as embedded:
+    - admission 3 → fails ("the membership predicate is renamed …");
+    - a text-level model of (8)/(9) → passes;
+    - five mutations fail: `governing_manifest` changed, the presence site keeping its local format, a helper gaining another line, a re-export missing `ManifestErrorKind`, an existing test helper's signature changed.
+  - Name loops, run on admission 3's real logs plus synthetic lines for the new names:
+    - DGC-A01 (52 names): real log alone → `MISSING file_ownership_…`; plus the three new names → PASS; one new name missing, or an existing name `FAILED` → MISSING.
+    - DGC-A06 (22 names): real logs → `MISSING deps_list_gradle_project_…` (the two boundary tests FAILED there); boundary tests ok plus the six new names → PASS; one missing, or a bound existing test `FAILED` → MISSING. The six bound existing names each read `ok` in admission 3's logs.
+    - DGC-A07 (5 names): all → PASS; one missing → MISSING.
+  - DGC-A07 Python, as embedded: the real stores → `DGC-A07 CORPUS FACTS OK`. A scratch corpus (28 symlinks plus a mutated copy of `b7fa63af94380470.db`) fails for exactly the injected condition: a candidate root `a`, or a `deps_manifests` record with `error`. The retained store's mtime (Sep 23) was unchanged.
+  - DGC-A05: its exact list equals the sorted 16 `candidatePaths`, and would not accept the list without compose.rs.
+  - The validator reports `ALLOCATION VALID: 7 checks`.
+- **Not changed:** the implements, changes and preserves sets; the requirement texts; DGC-A03; the commands of DGC-A02 and DGC-A04; the product.
+- **Same-class residual, reported, not fixed:** the Express route→module resolver (`compose.rs:2774-2801`, sort at :2784) has the same root/one-character tie. It serves `surfaces` (RG-REQ-007, not a parent of this baseline), and no retained store holds a one-character root. The rule that would close the class is "the repo root ranks last in every longest-prefix module resolver" (slice doc §8).
+- **Traceability note:** fix (7) makes persisted ownership match the longest-prefix rule of RG-REQ-004-L06, which is not a requirement of this baseline. The allocation traces it to RG-REQ-006-L13 (the project's own row), RG-REQ-002-L01/L02 and P-DGC-05, and cites RG-REQ-004-L06 only in prose.
+- **Author:** requirements author of DEPS-GRADLE-CATALOG-1A-PREP-7 (claude-opus-5-5). **Approver:** PENDING — the operator (in-place-manager). **Carried as:** INPUT-5.
+- **Slice document digests (A-2, the Status line and the §9 INPUT-5 entry, one pass):**
+  - before: sha256:06489e10487c37087fa04d0f78302bfb58d3301fc7dc002cd120cf0305307d56 (the manager's INPUT-5 `baselinePath` edit, equal to the manifest's placeholder `allocation` digest);
+  - after: sha256:6f34153471677e9d1282717eda4837a41644edc1612eb7da4001ba552933f1da.
+
+  The INPUT-5 manifest's `allocation` digest is re-pinned to the after value.
+
+## A-2 revision 1 (2026-09-29, PREP-7 iteration 1) — every record that admits a module reaches its row; the membership limit is stated (→ INPUT-5)
+
+- **Raised:** document review-0 of PREP-7 (`.agent-manager/slices/DEPS-GRADLE-CATALOG-1A-PREP-7/review-0.json`, `RESULT: refinement-required`, F-1).
+  - The renamed predicate admits a module by containment in both directions. `attach_manifest_context` states only the nearest ancestor record (module-queries `deps/compose.rs:503-523`) and, lacking one, only PARSED nested records (:531-552); otherwise it returns `Absent` (:554-557). So a coarse module admitted through a failed nested manifest would read `no manifest — imports unattributed`. OBSERVED at HEAD.
+  - A-2 proved only the ancestor case at the boundary.
+  - A-2 did not state that record-based membership acts only in the zero-ecosystem-module fallback (:326-327, :339-349), against the packet's unqualified wording.
+- **Class and rule:** the defect class is membership evidence that does not reach the affected row with its certainty intact. The rule: every manifest record that can admit a module to the view reaches that module's row with its state, whether it sits above the module or inside it, and whether it parsed or failed. A row is never `Parsed` or `no manifest` while a failed record covers it.
+- **Applied** (names of existing tests, candidate paths, obligation sets and the other checks unchanged):
+  - DGC-A06's (8) paragraph states the context rule as cases (i)–(v):
+    - a failed ancestor keeps today's note, and any failures strictly inside the module are appended;
+    - a parsed ancestor with failures inside reads `manifest <ancestor> parsed; <notes>`;
+    - the nested form counts failed records and appends their notes, byte-identical when none failed;
+    - otherwise the output is unchanged.
+  - DGC-A06 also states the LIMIT: records admit only in the fallback, a failed record exactly as a parsed one. This reconciles the packet's wording through D-DGC-BOUNDARY-1's "also establishes membership". Rows admitted by the prefix gate state their covering failures by the same rule. Extending record membership into the prefix gate would move rows for parsed records too on repositories that already have ecosystem modules. That extension is recorded in §8, and the operator may rule otherwise.
+  - Two new tests:
+    - `attach_states_every_failed_record_covering_the_module_ancestor_or_nested`, in module-queries, covering cases (a)–(f) with exact strings (floor 89 → 90);
+    - `deps_list_module_over_a_nested_failed_manifest_states_its_path_and_reason_in_json_and_human`, an rgr boundary test through the real daemon (floor 1,320 → 1,321).
+  - The nested boundary test's fixture is the reviewer's case, written for the Java view: `frontend/web/build.gradle` is created as a directory and `frontend/web/src/main/java/w/W.java` holds `import org.x.Y;`. Its module is the inferred top-level `frontend` (OBSERVED: indexer `inferred_modules.rs:53` lists `src packages services apps libs modules` as the only umbrella prefixes, and :429-441 creates the top-level module). It asserts that the row's `module` is `frontend`, that its context carries `nested`, the failed path, `present but not parsed` and `unreadable`, and that no row reads `no manifest — imports unattributed`. It fails on admission 3 (`results: []`) and on a predicate-only fix.
+  - Bound by name, today's all-parsed forms: `attach_coarse_module_containing_nested_manifests_names_them_truthfully` and `attach_picks_longest_ancestor_dir_in_matching_ecosystem`. Both read `ok` in admission 3's log (OBSERVED).
+  - P-DGC-04 names the all-parsed nested form as byte-identical.
+  - The reviewer asked the evidence bound to be explicit. P-DGC-05 and DGC-A07's `expected` now state it: the 29 stores as stored plus DGC-A04's three re-indexed corpora, not a re-index of the other 26.
+  - §2.1 (8), §2.2, §3, §5 (52 new tests), §6, §8 and §9 follow.
+  - DGC-A06's diff-scope Python is unchanged. It already confines the change to `attach_manifest_context` and `module_covered_by_manifest_record`, and it keeps the prefix gate byte-identical.
+- **Probes** (EXECUTED; scratch `/private/tmp/DEPS-GRADLE-CATALOG-1A-PREP-7-r1`, removed):
+  - `bash -n` passes on all seven commands.
+  - DGC-A06's name loop (26 names):
+    - admission 3's real logs → `MISSING deps_list_gradle_project_…`;
+    - with the boundary tests `ok` and the eight new names added → PASS;
+    - the nested boundary test missing → MISSING;
+    - the new unit test `FAILED` → MISSING;
+    - a bound all-parsed test `FAILED` → MISSING.
+  - The validator reports `ALLOCATION VALID: 7 checks`.
+- **Author:** requirements author of DEPS-GRADLE-CATALOG-1A-PREP-7 (claude-opus-5-5). **Approver:** PENDING — the operator (in-place-manager). **Carried as:** INPUT-5.
+- **Slice document digests (this revision and its §9 line, one pass):**
+  - before: sha256:6f34153471677e9d1282717eda4837a41644edc1612eb7da4001ba552933f1da (A-2 as first submitted);
+  - after: sha256:b7c287a4d9d3994d658542cc603397c7f86ad7741ceae28edd992b32e20e4c49.
+
+  The INPUT-5 manifest's `allocation` digest is re-pinned to the after value.
+
+## A-2 revision 2 (2026-09-29, PREP-7 iteration 2) — the row rule follows the governing (nearest) ancestor (→ INPUT-5)
+
+- **Raised:** document review-1 of PREP-7 (`.agent-manager/slices/DEPS-GRADLE-CATALOG-1A-PREP-7/review-1.json`, `RESULT: refinement-required`, F-1).
+  - Revision 1 said every failed record covering an admitted module reaches its row. But `attach_manifest_context` selects the NEAREST ancestor record (module-queries `deps/compose.rs:503-509`, `max_by_key(|r| r.dir.len())`; OBSERVED).
+  - So a failed root `build.gradle` behind a parsed `svc/build.gradle` leaves `svc` `Parsed`, and the six-case test did not cover that ordering.
+- **Option taken:** the reviewer's recommended one — qualify the rule to nearest-manifest semantics.
+  - The rejected alternative states every covering ancestor failure. It would mark a nearer, independently parsed manifest unknown, and D-DGC-BOUNDARY-1 does not rule on that mixed-ancestor case.
+- **Rule:** an admitted module's row states two things:
+  - its governing record, meaning its nearest ancestor-or-equal record of the view's ecosystem, with its state;
+  - every failed record strictly inside the module.
+  
+  A farther ancestor behind a nearer one governs none of the module's files. Its failure is stated on the rows of the modules it governs, not on the nearer manifest's row. This is the nearest-script contract of §2.1 (2) applied at query time.
+- **Applied** (text and one test identity only):
+  - DGC-A06's paragraph heading, rule sentence and `expected` are qualified accordingly.
+  - The unit test is renamed `attach_states_the_nearest_ancestor_and_every_failed_record_inside_the_module`, in the name loop and in every live mention, so its name no longer promises "every failed record covering the module". It gains case (g):
+    - records: a parse-failed root `build.gradle` and a parsed `svc/build.gradle`;
+    - module `svc` → exactly `Parsed { path: "svc/build.gradle" }`;
+    - module `.` → exactly `manifest build.gradle present but not parsed: unreadable: x`.
+  - §2.1 (8), §2.2, §5 and §9 (the iteration 2 entry) follow. The §9 iteration 1 entry keeps its historical wording.
+  - Unchanged: the floors, obligation sets, candidate paths and the other checks.
+- **Probes** (EXECUTED; scratch `/private/tmp/DEPS-GRADLE-CATALOG-1A-PREP-7-r2`, removed):
+  - `bash -n` passes on all seven commands.
+  - DGC-A06's name loop (26 names; floors 90/807/1321):
+    - admission 3's real logs → `MISSING deps_list_gradle_project_…`;
+    - with the eight new names → PASS;
+    - with only the old test name → `MISSING attach_states_the_nearest_ancestor_…`;
+    - with the renamed test `FAILED` → MISSING.
+  - The validator reports `ALLOCATION VALID: 7 checks`.
+- **Author:** requirements author of DEPS-GRADLE-CATALOG-1A-PREP-7 (claude-opus-5-5). **Approver:** PENDING — the operator (in-place-manager). **Carried as:** INPUT-5.
+- **Slice document digests:** before sha256:b7c287a4d9d3994d658542cc603397c7f86ad7741ceae28edd992b32e20e4c49 (revision 1); after sha256:0b73a68ac8e9883c31c46388871727f713346c5e925f3e384133644f24672f73. The INPUT-5 manifest's `allocation` digest is re-pinned to the after value.
+
+## A-2 revision 3 (2026-09-29, PREP-7 cycle 4) — provenance selection versus same-build attribution (→ INPUT-5)
+
+- **Raised:** document review-2 of PREP-7 (`.agent-manager/slices/DEPS-GRADLE-CATALOG-1A-PREP-7/review-2.json`, `RESULT: refinement-required`, F-2). "A farther ancestor governs none of the module's files" holds for nearest-script provenance, but not for the declared set. In one settings build, the root script's `allprojects`/`subprojects`/`project(':svc')` blocks feed `svc` (§2.1 (2)). No test paired an unreadable root script with a readable child script, and case (g) only uses synthetic records. The manager's cycle-4 packet asked for exactly the smallest correction.
+- **Mechanism** (OBSERVED in `candidate-admission-3.patch`, `fn gradle_build`): it reads every project script of the settings build. On an `Unreadable` script it fails the whole build with `gradle project attribution unknown: build script <path> of project <gradle path> <reason>`, and each file's nearest-script record is written FAILED through `fail_gradle_record`. Under A-2's (9) that record carries kind `attribution`.
+- **Applied:**
+  - The sentence is qualified to "the nearest-script PROVENANCE of none of the module's files" in DGC-A06's inputs and §2.1 (8), each followed by the attribution caveat. DGC-A06's `expected` is qualified the same way. Case (g) stays the pure provenance-selection case.
+  - One same-build fixture: `settings.gradle` `include ':svc'`, the root `build.gradle` a DIRECTORY, a readable `svc/build.gradle` declaring `org.svc:lib:1.0`, and `svc/src/main/java/s/S.java`.
+    - Reader: `gradle_unreadable_root_script_makes_a_child_projects_attribution_a_failure`. `S.java` reads `[]`. `svc/build.gradle` is FAILED with kind `attribution` and no marking, and its reason names the root script. Repo-index floor 450 → 451, bound in DGC-A01's loop.
+    - Boundary: `deps_list_gradle_unreadable_root_script_makes_the_child_project_row_unknown_with_attribution_wording_in_json_and_human`. Row `svc` has `manifest_path` null and a context with `svc/build.gradle`, `dependency attribution failed` and `unreadable`, never `not parsed` and no declared entry. The human header carries the same wording. It fails on admission 3, whose context reads "present but not parsed". rgr floor 1,321 → 1,322, bound in DGC-A06's loop.
+  - The closing check of every unreadable-beside-readable interaction of the §2.1 rules is recorded in §2.2, one line each. Every existing test it cites is bound by name (OBSERVED in the extracted loops). Two gaps are named rather than filled, both INFERRED from rule (2): an unreadable farther script with no settings file, and an unreadable outer script over a nested build. Two cases closed by edits to tests A-2 already defines:
+    - case (i) of `gradle_failures_record_attribution_for_the_build_and_parse_for_the_script` now pairs a readable root with an unreadable `sub/build.gradle`, so an unreadable nearest script is never skipped for a farther readable one;
+    - the attach test gains case (h), the reverse provenance order.
+  - §5 lists 54 new tests; §9 has an iteration 3 entry. The obligation sets, candidate paths and the other checks are unchanged.
+- **Probes** (EXECUTED; scratch `/private/tmp/DEPS-GRADLE-CATALOG-1A-PREP-7-r3`, removed):
+  - `bash -n` passes on all 7 commands.
+  - DGC-A01 loop (53 names; floor 451): admission 3's log → MISSING; plus the four new names → PASS; the same-build test missing or `FAILED` → MISSING.
+  - DGC-A06 loop (27 names; floors 90/807/1322): admission 3's logs → MISSING; plus the nine new names → PASS; the new boundary test missing or `FAILED` → MISSING.
+  - The validator reports `ALLOCATION VALID: 7 checks`.
+- **Author:** requirements author of DEPS-GRADLE-CATALOG-1A-PREP-7 (claude-opus-5-5). **Approver:** PENDING — the operator (in-place-manager). **Carried as:** INPUT-5.
+- **Slice document digests:** before sha256:0b73a68ac8e9883c31c46388871727f713346c5e925f3e384133644f24672f73 (revision 2); after sha256:fd635011b96758581453a0d8c3c5a50d5cf99b7d8413e5b0cc9cb9f2fd9bf57c. The INPUT-5 manifest's `allocation` digest is re-pinned to the after value.
+
+## Operator confirmation (2026-09-29, in-place-manager) — A-2 and its revisions
+
+A-2 and both appended revisions (PREP-7 cycles 2–4) are approved; their "Approver: PENDING" lines above are resolved by this entry. A-2 carries D-DGC-BOUNDARY-1 (the human's ruling "Fix everything here", 2026-09-29) and was accepted by PREP-7 review-3 (codex gpt-6-sol). The two unreadable-script interactions the author marks INFERRED stay INFERRED: they are not claimed as tested. Carried as INPUT-5.
