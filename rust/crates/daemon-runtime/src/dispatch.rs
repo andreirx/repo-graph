@@ -7012,6 +7012,12 @@ impl ServiceDispatcher {
             &other_ecosystems,
             maven_capability.as_deref(),
         );
+        // DEPS-GRADLE-CATALOG-1A (D-DGC-CONDITIONAL-1): the declared-set marking keys.
+        let response = crate::deps_undetermined::attach_declared_undetermined(
+            response,
+            &input.manifest_provenance,
+            &ecosystem,
+        );
 
         DispatchResult::success(&request.id, response)
     }

@@ -331,13 +331,13 @@ pub fn compose_dependency_summaries(
 
     for canonical_path in all_module_paths {
         // A module belongs to this ecosystem's view when its `module_key` carries the ecosystem prefix,
-        // OR — only in the zero-ecosystem-module fallback — it is STRUCTURALLY covered by a PARSED
-        // manifest of this ecosystem (file/manifest CONTAINMENT, not declared-dep presence — review-0
-        // item 2). A module with no `module_key` keeps the prior "included" behaviour (no filter block
-        // runs). See [`module_covered_by_parsed_manifest`] for why the earlier `module_has_manifest`
+        // OR — only in the zero-ecosystem-module fallback — it is STRUCTURALLY covered by a manifest
+        // RECORD of this ecosystem, parsed or failed (file/manifest CONTAINMENT, not declared-dep
+        // presence — review-0 item 2; D-DGC-BOUNDARY-1 (8)). A module with no `module_key` keeps the prior "included" behaviour (no filter block
+        // runs). See [`module_covered_by_manifest_record`] for why the earlier `module_has_manifest`
         // gate (NON-empty declared-dep rows) was the wrong predicate.
         let owns_ecosystem_manifest = !has_ecosystem_module
-            && module_covered_by_parsed_manifest(
+            && module_covered_by_manifest_record(
                 canonical_path,
                 &input.ecosystem,
                 &input.manifest_provenance,
@@ -485,9 +485,20 @@ fn reconcilable_module_paths<'a, V>(
 /// carried declared deps — so a manifest that PARSED but declared ZERO dependencies still renders
 /// its real path (ruling 3, item 3: parsed ≠ produced-rows), never "no manifest".
 ///
-/// - A record whose `ecosystem` matches and whose `dir` is the LONGEST ancestor-or-equal of
-///   `canonical_path` → [`ManifestContext::Parsed`] (the same nearest-manifest semantics the index
-///   used, evaluated against the persisted records — NOT a filesystem rescan).
+/// For `Tracked` provenance the row states the module's GOVERNING record — the record of this
+/// `ecosystem` whose `dir` is the LONGEST ancestor-or-equal of `canonical_path` (the same
+/// nearest-manifest semantics the index used, evaluated against the persisted records — NOT a
+/// filesystem rescan) — with its state, and every FAILED record of this ecosystem strictly inside
+/// the module (D-DGC-BOUNDARY-1 (8); document reviews 0–2 of PREP-7). A failed record is worded
+/// only by [`ManifestProvenance::failure_note`], by its kind. A farther ancestor behind a nearer
+/// one is the nearest-manifest provenance of none of the module's files and is not stated here.
+///
+/// - Governing record FAILED → its note, then `; ` and the inner failures' notes in path order.
+/// - Governing record PARSED, no failure inside → [`ManifestContext::Parsed`].
+/// - Governing record PARSED, failures inside → [`ManifestContext::ProvenanceUnavailable`]
+///   `manifest <path> parsed; <notes>` — never a clean `Parsed` over a failure.
+/// - No ancestor, nested records (parsed or failed) → `governed by N nested <eco> manifest(s)
+///   (<paths>)`, then `; ` and the failed ones' notes — byte-identical to before when none failed.
 /// - Otherwise, if no declared deps were parsed for this module → [`ManifestContext::Absent`]
 ///   (genuinely no owning manifest).
 /// - Otherwise (deps parsed but no exact file) → [`ManifestContext::ProvenanceUnavailable`] carrying
@@ -501,6 +512,20 @@ fn attach_manifest_context(
 ) -> ManifestContext {
     // Pin the exact manifest from the records first (works even for a zero-dependency manifest).
     if let ProvenanceRead::Tracked(records) = provenance {
+        // Every FAILED record of this ecosystem strictly inside the module (its dir has the
+        // module as a proper ancestor), worded by kind, in path order.
+        let mut inner_failures: Vec<(&str, String)> = records
+            .iter()
+            .filter(|r| {
+                r.ecosystem == ecosystem
+                    && dir_is_ancestor_or_equal(canonical_path, &r.dir)
+                    && !dir_is_ancestor_or_equal(&r.dir, canonical_path)
+            })
+            .filter_map(|r| r.failure_note().map(|note| (r.path.as_str(), note)))
+            .collect();
+        inner_failures.sort_unstable();
+        let inner_notes: Vec<String> = inner_failures.into_iter().map(|(_, n)| n).collect();
+
         let best = records
             .iter()
             .filter(|r| {
@@ -509,15 +534,22 @@ fn attach_manifest_context(
             .max_by_key(|r| r.dir.len());
         if let Some(r) = best {
             // review-4 item 1: a record that PARSED (`error == None`) pins its exact file; a record
-            // that was PRESENT but unreadable/malformed (`error == Some`) renders unknown-with-reason
-            // — never laundered into a `Parsed` zero-dep that would present read failure as
-            // measured-empty. The reason is carried verbatim (ruling-3 item 2), tagged with the file.
-            return match &r.error {
-                None => ManifestContext::Parsed {
+            // that was PRESENT but unreadable/malformed, or whose attribution failed, renders
+            // unknown-with-reason — never laundered into a `Parsed` zero-dep that would present a
+            // failure as measured-empty. The reason is carried verbatim (ruling-3 item 2), tagged
+            // with the file and worded by the failure's kind (D-DGC-BOUNDARY-1 (9)).
+            return match (r.failure_note(), inner_notes.is_empty()) {
+                (None, true) => ManifestContext::Parsed {
                     path: r.path.clone(),
                 },
-                Some(reason) => ManifestContext::ProvenanceUnavailable {
-                    reason: format!("manifest {} present but not parsed: {}", r.path, reason),
+                (None, false) => ManifestContext::ProvenanceUnavailable {
+                    reason: format!("manifest {} parsed; {}", r.path, inner_notes.join("; ")),
+                },
+                (Some(note), _) => ManifestContext::ProvenanceUnavailable {
+                    reason: std::iter::once(note)
+                        .chain(inner_notes)
+                        .collect::<Vec<_>>()
+                        .join("; "),
                 },
             };
         }
@@ -526,27 +558,29 @@ fn attach_manifest_context(
         // manifests (glamCRM's `frontend` module spans `frontend/web` + `frontend/workspace` — neither
         // is at the module root). A single exact file can't be pinned, but the manifests DO cover this
         // module's subtree, so the honest cell names them rather than falsely claiming "no manifest
-        // record covers this module". (Parsed records only — a present-but-unparsed nested manifest is
-        // not asserted as covering.)
+        // record covers this module". D-DGC-BOUNDARY-1 (8): a FAILED nested record is named too, and
+        // its failure stated after the list.
         let mut nested: Vec<&str> = records
             .iter()
             .filter(|r| {
-                r.ecosystem == ecosystem
-                    && r.error.is_none()
-                    && dir_is_ancestor_or_equal(canonical_path, &r.dir)
+                r.ecosystem == ecosystem && dir_is_ancestor_or_equal(canonical_path, &r.dir)
             })
             .map(|r| r.path.as_str())
             .collect();
         if !nested.is_empty() {
             nested.sort_unstable();
+            let listed = format!(
+                "governed by {} nested {} manifest{} ({})",
+                nested.len(),
+                ecosystem,
+                if nested.len() == 1 { "" } else { "s" },
+                nested.join(", "),
+            );
             return ManifestContext::ProvenanceUnavailable {
-                reason: format!(
-                    "governed by {} nested {} manifest{} ({})",
-                    nested.len(),
-                    ecosystem,
-                    if nested.len() == 1 { "" } else { "s" },
-                    nested.join(", "),
-                ),
+                reason: std::iter::once(listed)
+                    .chain(inner_notes)
+                    .collect::<Vec<_>>()
+                    .join("; "),
             };
         }
     }
@@ -622,12 +656,16 @@ fn dir_is_ancestor_or_equal(dir: &str, path: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('/'))
 }
 
-/// Whether module `canonical_path` is STRUCTURALLY covered by a PARSED manifest of `ecosystem`
+/// Whether module `canonical_path` is STRUCTURALLY covered by a manifest RECORD of `ecosystem`
 /// (DEPS-ATTRIB-2, review-0 item 2). The membership fact is FILE/MANIFEST CONTAINMENT, never
-/// declared-dep presence. True when a provenance record of this ecosystem that PARSED
-/// (`error == None`) is an ANCESTOR-or-equal of the module (the module sits UNDER the manifest) OR
-/// is NESTED within the module (a coarse `inferred:` module whose subtree spans several leaf
-/// manifests — glamCRM's `frontend` over `frontend/web` + `frontend/workspace`).
+/// declared-dep presence. True when a provenance record of this ecosystem — PARSED or FAILED
+/// (D-DGC-BOUNDARY-1 (8): a module whose only covering manifest failed belongs to the view and
+/// renders unknown with the reason, never dropped) — is an ANCESTOR-or-equal of the module (the
+/// module sits UNDER the manifest) OR is NESTED within the module (a coarse `inferred:` module whose
+/// subtree spans several leaf manifests — glamCRM's `frontend` over `frontend/web` +
+/// `frontend/workspace`). A failed record gets exactly a parsed record's membership power: records
+/// admit modules only in the zero-ecosystem-module fallback; the row then states the failure
+/// through [`attach_manifest_context`].
 ///
 /// Why NOT the earlier `module_has_manifest` gate: that flag was set only from NON-empty
 /// declared-dep rows (`compose` step 4), and the indexer stores no dep rows for a zero-dependency
@@ -637,7 +675,7 @@ fn dir_is_ancestor_or_equal(dir: &str, path: &str) -> bool {
 /// NOT `Tracked` (old snapshot / unreadable) there is no structural evidence → `false` (honest
 /// degradation: membership is never fabricated from a name or a dep-count without a covering record;
 /// a fresh re-index restores the records and the module).
-fn module_covered_by_parsed_manifest(
+fn module_covered_by_manifest_record(
     canonical_path: &str,
     ecosystem: &str,
     provenance: &ProvenanceRead,
@@ -647,7 +685,6 @@ fn module_covered_by_parsed_manifest(
     };
     records.iter().any(|r| {
         r.ecosystem == ecosystem
-            && r.error.is_none()
             && (dir_is_ancestor_or_equal(&r.dir, canonical_path)
                 || dir_is_ancestor_or_equal(canonical_path, &r.dir))
     })
@@ -841,6 +878,8 @@ mod tests {
             dir: dir.to_string(),
             ecosystem: eco.to_string(),
             error: None,
+            error_kind: None,
+            undetermined_blocks: None,
         }
     }
 
@@ -850,6 +889,20 @@ mod tests {
             dir: dir.to_string(),
             ecosystem: eco.to_string(),
             error: Some(reason.to_string()),
+            error_kind: None,
+            undetermined_blocks: None,
+        }
+    }
+
+    fn prov_attribution_failed(
+        path: &str,
+        dir: &str,
+        eco: &str,
+        reason: &str,
+    ) -> ManifestProvenance {
+        ManifestProvenance {
+            error_kind: Some(crate::deps::types::ManifestErrorKind::Attribution),
+            ..prov_failed(path, dir, eco, reason)
         }
     }
 
@@ -1143,7 +1196,7 @@ mod tests {
     }
 
     #[test]
-    fn module_covered_by_parsed_manifest_uses_containment_not_dep_presence() {
+    fn module_covered_by_manifest_record_uses_containment_not_dep_presence() {
         // DEPS-ATTRIB-2 review-0 item 2: membership is FILE/MANIFEST CONTAINMENT, not declared-dep
         // presence. A coarse inferred module `frontend` is covered by its NESTED leaf manifests even
         // though no manifest sits at the module root, and a FINE module `serverless/packages/backend`
@@ -1166,31 +1219,31 @@ mod tests {
         ];
         let tracked = ProvenanceRead::Tracked(records);
         // Coarse module NESTING several npm manifests → covered.
-        assert!(module_covered_by_parsed_manifest(
+        assert!(module_covered_by_manifest_record(
             "frontend", "npm", &tracked
         ));
         // Fine module AT a (zero-dep) npm manifest dir → covered.
-        assert!(module_covered_by_parsed_manifest(
+        assert!(module_covered_by_manifest_record(
             "serverless/packages/backend",
             "npm",
             &tracked
         ));
         // Wrong ecosystem: the java manifest does not cover an npm view of `backend`.
-        assert!(!module_covered_by_parsed_manifest(
+        assert!(!module_covered_by_manifest_record(
             "backend", "npm", &tracked
         ));
         // The java manifest DOES cover a java view of `backend`.
-        assert!(module_covered_by_parsed_manifest(
+        assert!(module_covered_by_manifest_record(
             "backend", "java", &tracked
         ));
         // A module with no covering manifest in either direction → not covered.
-        assert!(!module_covered_by_parsed_manifest(
+        assert!(!module_covered_by_manifest_record(
             "unrelated/pkg",
             "npm",
             &tracked
         ));
         // No structural evidence (old snapshot) → never fabricated as covered.
-        assert!(!module_covered_by_parsed_manifest(
+        assert!(!module_covered_by_manifest_record(
             "frontend",
             "npm",
             &ProvenanceRead::Absent
@@ -1410,5 +1463,247 @@ mod tests {
             }
         ));
         assert!(!scope_available(false, &ManifestContext::Absent));
+    }
+
+    // ── D-DGC-BOUNDARY-1 (8)/(9): failed records reach the view and the row, worded by kind ──────
+
+    /// (9): an attribution failure is worded as such — never "not parsed" beside a declaration that
+    /// was read; a parse failure, and a record decoded from today's wire shape (no `error_kind`),
+    /// keep today's exact wording.
+    #[test]
+    fn attach_attribution_failure_is_worded_as_attribution_and_parse_keeps_todays_wording() {
+        let attribution = vec![prov_attribution_failed(
+            "build.gradle",
+            "",
+            "java",
+            "gradle project attribution unknown: zz/settings.gradle unreadable (x)",
+        )];
+        let ctx =
+            attach_manifest_context(true, "src", "java", &ProvenanceRead::Tracked(attribution));
+        assert_eq!(
+            ctx,
+            ManifestContext::ProvenanceUnavailable {
+                reason: "manifest build.gradle — dependency attribution failed: gradle project \
+                         attribution unknown: zz/settings.gradle unreadable (x)"
+                    .to_string()
+            }
+        );
+        let ManifestContext::ProvenanceUnavailable { reason } = ctx else {
+            unreachable!()
+        };
+        assert!(!reason.contains("not parsed"), "{reason}");
+
+        let parse = vec![prov_failed("build.gradle", "", "java", "unreadable: x")];
+        assert_eq!(
+            attach_manifest_context(true, "src", "java", &ProvenanceRead::Tracked(parse)),
+            ManifestContext::ProvenanceUnavailable {
+                reason: "manifest build.gradle present but not parsed: unreadable: x".to_string()
+            }
+        );
+    }
+
+    /// (8), document reviews 0–2 of PREP-7: an admitted module's row states its GOVERNING (nearest)
+    /// ancestor record with its state and every FAILED record of the view's ecosystem strictly
+    /// inside the module; a farther ancestor behind a nearer one is not stated on the row.
+    #[test]
+    fn attach_states_the_nearest_ancestor_and_every_failed_record_inside_the_module() {
+        let unavailable = |r: &str| ManifestContext::ProvenanceUnavailable {
+            reason: r.to_string(),
+        };
+        let at = |has: bool, module: &str, records: Vec<ManifestProvenance>| {
+            attach_manifest_context(has, module, "java", &ProvenanceRead::Tracked(records))
+        };
+        // (a) a coarse module over one parse-failed nested record → named, never `Absent`.
+        assert_eq!(
+            at(
+                false,
+                "frontend",
+                vec![prov_failed(
+                    "frontend/web/build.gradle",
+                    "frontend/web",
+                    "java",
+                    "unreadable: x"
+                )]
+            ),
+            unavailable(
+                "governed by 1 nested java manifest (frontend/web/build.gradle); manifest \
+                 frontend/web/build.gradle present but not parsed: unreadable: x"
+            ),
+            "(a)"
+        );
+        // (b) a parsed and an attribution-failed nested record → both counted, the failure noted.
+        assert_eq!(
+            at(
+                false,
+                "frontend",
+                vec![
+                    prov("frontend/a/build.gradle", "frontend/a", "java"),
+                    prov_attribution_failed(
+                        "frontend/b/build.gradle",
+                        "frontend/b",
+                        "java",
+                        "gradle project attribution unknown: y"
+                    ),
+                ]
+            ),
+            unavailable(
+                "governed by 2 nested java manifests (frontend/a/build.gradle, \
+                 frontend/b/build.gradle); manifest frontend/b/build.gradle — dependency \
+                 attribution failed: gradle project attribution unknown: y"
+            ),
+            "(b)"
+        );
+        // (c) a parsed root ancestor and a failed record inside `.` → never a clean `Parsed`.
+        assert_eq!(
+            at(
+                false,
+                ".",
+                vec![
+                    prov("build.gradle", "", "java"),
+                    prov_failed("svc/build.gradle", "svc", "java", "unreadable: x"),
+                ]
+            ),
+            unavailable(
+                "manifest build.gradle parsed; manifest svc/build.gradle present but not parsed: \
+                 unreadable: x"
+            ),
+            "(c)"
+        );
+        // (d) a failed ancestor and a failed record inside → the ancestor's note, then the inner one.
+        assert_eq!(
+            at(
+                false,
+                "svc",
+                vec![
+                    prov_failed("svc/build.gradle", "svc", "java", "unreadable: x"),
+                    prov_failed(
+                        "svc/inner/build.gradle",
+                        "svc/inner",
+                        "java",
+                        "unreadable: x"
+                    ),
+                ]
+            ),
+            unavailable(
+                "manifest svc/build.gradle present but not parsed: unreadable: x; manifest \
+                 svc/inner/build.gradle present but not parsed: unreadable: x"
+            ),
+            "(d)"
+        );
+        // (e) the only nested failure is another ecosystem's → nothing stated in the java view.
+        assert_eq!(
+            at(
+                false,
+                "frontend",
+                vec![prov_failed(
+                    "frontend/web/package.json",
+                    "frontend/web",
+                    "npm",
+                    "malformed"
+                )]
+            ),
+            ManifestContext::Absent,
+            "(e)"
+        );
+        // (f) two parsed nested records, no failure → today's exact nested form.
+        assert_eq!(
+            at(
+                false,
+                "frontend",
+                vec![
+                    prov("frontend/a/build.gradle", "frontend/a", "java"),
+                    prov("frontend/b/build.gradle", "frontend/b", "java"),
+                ]
+            ),
+            unavailable(
+                "governed by 2 nested java manifests (frontend/a/build.gradle, \
+                 frontend/b/build.gradle)"
+            ),
+            "(f)"
+        );
+        // (g) a failed root and a parsed `svc/build.gradle`: the nearer parsed manifest governs
+        // `svc`; `.` states the root's failure (its only inner record parsed — nothing appended).
+        let g = vec![
+            prov_failed("build.gradle", "", "java", "unreadable: x"),
+            prov("svc/build.gradle", "svc", "java"),
+        ];
+        assert_eq!(
+            at(false, "svc", g.clone()),
+            ManifestContext::Parsed {
+                path: "svc/build.gradle".to_string()
+            },
+            "(g) svc"
+        );
+        assert_eq!(
+            at(false, ".", g),
+            unavailable("manifest build.gradle present but not parsed: unreadable: x"),
+            "(g) root"
+        );
+        // (h) the reverse: the nearer failure governs `svc` (the farther parsed record is never a
+        // fallback); `.` reads case (iii).
+        let h = vec![
+            prov("build.gradle", "", "java"),
+            prov_failed("svc/build.gradle", "svc", "java", "unreadable: x"),
+        ];
+        assert_eq!(
+            at(false, "svc", h.clone()),
+            unavailable("manifest svc/build.gradle present but not parsed: unreadable: x"),
+            "(h) svc"
+        );
+        assert_eq!(
+            at(false, ".", h),
+            unavailable(
+                "manifest build.gradle parsed; manifest svc/build.gradle present but not parsed: \
+                 unreadable: x"
+            ),
+            "(h) root"
+        );
+    }
+
+    /// D-DGC-BOUNDARY-1 (8): a FAILED record covers a module exactly as a parsed one does — as an
+    /// ancestor or nested inside a coarse module, for a parse and an attribution failure alike —
+    /// and only in its own ecosystem's view; without tracked provenance nothing is covered.
+    #[test]
+    fn module_covered_by_a_failed_manifest_record_is_in_the_ecosystem_view() {
+        for failed in [
+            prov_failed("svc/build.gradle", "svc", "java", "unreadable: x"),
+            prov_attribution_failed(
+                "svc/build.gradle",
+                "svc",
+                "java",
+                "gradle project attribution unknown: y",
+            ),
+        ] {
+            let tracked = ProvenanceRead::Tracked(vec![
+                failed,
+                prov_failed(
+                    "frontend/web/package.json",
+                    "frontend/web",
+                    "npm",
+                    "malformed",
+                ),
+            ]);
+            assert!(module_covered_by_manifest_record("svc", "java", &tracked));
+            assert!(module_covered_by_manifest_record(
+                "svc/core", "java", &tracked
+            ));
+            assert!(module_covered_by_manifest_record(
+                "frontend", "npm", &tracked
+            ));
+            assert!(!module_covered_by_manifest_record("svc", "npm", &tracked));
+            assert!(!module_covered_by_manifest_record(
+                "frontend", "java", &tracked
+            ));
+        }
+        assert!(!module_covered_by_manifest_record(
+            "svc",
+            "java",
+            &ProvenanceRead::Absent
+        ));
+        assert!(!module_covered_by_manifest_record(
+            "svc",
+            "java",
+            &ProvenanceRead::Unavailable { reason: "x".into() }
+        ));
     }
 }

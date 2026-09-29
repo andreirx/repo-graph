@@ -41,6 +41,6 @@ pub use normalize::{normalize_cargo_specifier, normalize_npm_specifier};
 pub use reconcile::{reconcile_module_dependencies, ReconcileInput};
 pub use resolve::{build_identifier_resolution_map, resolve_import_specifier};
 pub use types::{
-    DependencyCategory, DependencyEntry, DriftEntry, DriftKind, ManifestContext,
-    ManifestProvenance, ModuleDependencySummary, PackageUsage, ProvenanceRead,
+    DependencyCategory, DependencyEntry, DriftEntry, DriftKind, ManifestContext, ManifestErrorKind,
+    ManifestProvenance, ModuleDependencySummary, PackageUsage, ProvenanceRead, UndeterminedBlocks,
 };

@@ -178,6 +178,18 @@ pub struct DepsListResponse {
     /// caveat line.
     #[serde(default)]
     pub declared_unobserved_caveat: String,
+    /// DEPS-GRADLE-CATALOG-1A (D-DGC-CONDITIONAL-1; RG-REQ-002-L11): the number of Gradle
+    /// `dependencies` blocks the index could not attribute statically in this view's builds — the
+    /// declared set may be missing their declarations. Additive, `#[serde(default)]`: an older
+    /// daemon (or untracked provenance) omits it → 0 → today's output. Nonzero → the note line and
+    /// the ` (declared set incomplete)` suffix on every nonzero `undeclared` count.
+    #[serde(default)]
+    pub declared_undetermined_blocks: u64,
+    /// The daemon's sentence for `declared_undetermined_blocks` (`declared set may be incomplete:
+    /// N dependency block(s) not statically attributed (<path>:<line>) — investigate`). Empty with a
+    /// nonzero count → the count-only form renders instead (never dropped).
+    #[serde(default)]
+    pub declared_undetermined_note: String,
     #[serde(default)]
     pub results: Vec<DepModule>,
 }
@@ -437,6 +449,22 @@ impl DepsListResponse {
             }
         }
 
+        // DEPS-GRADLE-CATALOG-1A (D-DGC-CONDITIONAL-1): dependency blocks the index could not
+        // attribute statically make the declared set possibly incomplete — stated once, after the
+        // coverage line, so an agent reads every `undeclared` count below as possibly a declaration
+        // the index did not evaluate, not a certain absence.
+        if self.declared_undetermined_blocks > 0 {
+            if self.declared_undetermined_note.is_empty() {
+                out.push_str(&format!(
+                    "declared set may be incomplete: {} dependency block(s) not statically attributed — investigate\n",
+                    self.declared_undetermined_blocks
+                ));
+            } else {
+                out.push_str(&self.declared_undetermined_note);
+                out.push('\n');
+            }
+        }
+
         // DEPS-ATTRIB-2 §2.4 (ruling Option 2): every materially-present secondary ecosystem states
         // its truth here — attributed deps, unknown-with-reason, or computed-true absence — so a
         // material ecosystem (glamCRM's Java half) is never silently absent from the default view.
@@ -507,14 +535,24 @@ impl DepsListResponse {
             } else {
                 String::new()
             };
+            // DEPS-GRADLE-CATALOG-1A: a nonzero `undeclared` count may hold declarations the index
+            // did not evaluate (the note above). `undeclared 0` cannot be inflated by a missing
+            // declaration, so it carries no suffix (the `(resolution downgraded)` placement).
+            let undeclared_suffix =
+                if self.declared_undetermined_blocks > 0 && m.observed_but_undeclared > 0 {
+                    " (declared set incomplete)"
+                } else {
+                    ""
+                };
             out.push_str(&format!(
-                "  used {}{} · {} {}{} · undeclared {}{} · builtins {}{}\n",
+                "  used {}{} · {} {}{} · undeclared {}{}{} · builtins {}{}\n",
                 m.declared_and_used,
                 type_only_suffix,
                 unused_label,
                 m.declared_but_unobserved,
                 unused_suffix,
                 m.observed_but_undeclared,
+                undeclared_suffix,
                 self_suffix,
                 m.runtime_builtins,
                 unknown_suffix,
@@ -1414,6 +1452,569 @@ mod tests {
                 "⚠ 13956 of 13967 external references are imports from files outside the npm ecosystem (13956 python) — see `deps list --ecosystem python`"
             ),
             "current envelope renders the cross-ecosystem headline verbatim"
+        );
+    }
+
+    // ── DEPS-GRADLE-CATALOG-1A (D-DGC-CONDITIONAL-1; RG-REQ-002-L11) — the declared-set marking ──
+
+    const MARK_NOTE: &str = "declared set may be incomplete: 5 dependency block(s) not statically attributed (build.gradle:190) — investigate";
+
+    /// A two-row java payload with a coverage shortfall (so a coverage line renders) and rows with
+    /// `undeclared 2` and `undeclared 0`; `extra` adds envelope keys.
+    fn marking_payload(extra: serde_json::Value) -> serde_json::Value {
+        let mut v = serde_json::json!({
+            "ecosystem": "java",
+            "total_external_imports": 40,
+            "manifests_present": 3,
+            "manifests_attributed": 2,
+            "manifests_no_indexed_source": 1,
+            "count": 2,
+            "results": [
+                {"module": "core", "manifest_path": "core/build.gradle", "declared_and_used": 1,
+                 "declared_but_unobserved": 0, "observed_but_undeclared": 2, "runtime_builtins": 3},
+                {"module": "api", "manifest_path": "api/build.gradle", "declared_and_used": 1,
+                 "declared_but_unobserved": 0, "observed_but_undeclared": 0, "runtime_builtins": 1}
+            ]
+        });
+        if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
+            for (k, x) in e {
+                o.insert(k.clone(), x.clone());
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn declared_undetermined_renders_the_note_after_coverage_and_suffixes_nonzero_undeclared() {
+        let out = resp(marking_payload(serde_json::json!({
+            "declared_undetermined_blocks": 5,
+            "declared_undetermined_note": MARK_NOTE
+        })))
+        .render_human();
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(
+            lines.iter().filter(|l| **l == MARK_NOTE).count(),
+            1,
+            "the note renders exactly once: {out}"
+        );
+        let note = lines.iter().position(|l| *l == MARK_NOTE).unwrap();
+        let coverage = lines
+            .iter()
+            .position(|l| l.contains("java manifests attributed to a module"))
+            .expect("coverage line present");
+        let first_row = lines
+            .iter()
+            .position(|l| l.starts_with("  used "))
+            .expect("row present");
+        assert!(coverage < note && note < first_row, "{out}");
+        assert!(
+            out.contains("· undeclared 2 (declared set incomplete) · builtins 3"),
+            "a nonzero undeclared count carries the suffix: {out}"
+        );
+        assert!(
+            out.contains("· undeclared 0 · builtins 1"),
+            "undeclared 0 cannot be inflated by a missing declaration — no suffix: {out}"
+        );
+    }
+
+    #[test]
+    fn declared_undetermined_zero_renders_neither_line_nor_suffix() {
+        let with_zero = resp(marking_payload(serde_json::json!({
+            "declared_undetermined_blocks": 0,
+            "declared_undetermined_note": ""
+        })))
+        .render_human();
+        let without = resp(marking_payload(serde_json::json!({}))).render_human();
+        assert_eq!(with_zero, without, "a zero count renders byte-identically");
+        assert!(!with_zero.contains("declared set"), "{with_zero}");
+    }
+
+    #[test]
+    fn envelope_without_declared_undetermined_keys_renders_as_today() {
+        let r = resp(marking_payload(serde_json::json!({})));
+        assert_eq!(r.declared_undetermined_blocks, 0);
+        assert_eq!(r.declared_undetermined_note, "");
+        let out = r.render_human();
+        assert!(!out.contains("declared set may be incomplete"), "{out}");
+        assert!(out.contains("· undeclared 2 · builtins 3"), "{out}");
+    }
+
+    /// A count with an empty note (a malformed envelope) still marks the view: the count-only line,
+    /// never dropped, and the suffix.
+    #[test]
+    fn declared_undetermined_count_without_note_still_renders_a_line() {
+        let out = resp(marking_payload(serde_json::json!({
+            "declared_undetermined_blocks": 2
+        })))
+        .render_human();
+        assert!(
+            out.lines().any(|l| l
+                == "declared set may be incomplete: 2 dependency block(s) not statically attributed — investigate"),
+            "{out}"
+        );
+        assert!(
+            out.contains("· undeclared 2 (declared set incomplete) ·"),
+            "{out}"
+        );
+    }
+
+    // ── D-DGC-ATTRIBUTION-1: the `deps list` boundary, through the REAL daemon in-process ──
+    //
+    // Harness of `daemon-runtime/tests/deps_attrib_nested_workspace.rs`: an isolated temp state
+    // root (never the operator's registry — RG-REQ-011-L06), background passes forced off. The JSON
+    // is the dispatch result `deps list --json` prints verbatim; the human text is that JSON decoded
+    // into `DepsListResponse` and rendered, exactly as `commands/deps.rs` does.
+
+    struct QuietEmitter;
+    impl repo_graph_daemon_transport::ProgressEmitter for QuietEmitter {
+        fn emit(
+            &mut self,
+            _detail: repo_graph_daemon_transport::ProgressDetail,
+        ) -> Result<(), repo_graph_daemon_transport::EmitError> {
+            Ok(())
+        }
+    }
+
+    /// Index `fixture` into a throwaway state root and return `deps list --ecosystem java`'s JSON
+    /// and human render.
+    fn deps_list_java_through_the_daemon(fixture: &std::path::Path) -> (serde_json::Value, String) {
+        use repo_graph_daemon_runtime::{
+            auto_reindex, enrich_pass, retention_pass, seed, DaemonState, RepoRegistry,
+            ServiceDispatcher,
+        };
+        use repo_graph_daemon_transport::{DispatchResult, Dispatcher, Request};
+        seed::set_auto_seed_for_test(false);
+        enrich_pass::set_auto_enrich_for_test(false);
+        retention_pass::set_auto_retention_for_test(false);
+        auto_reindex::set_auto_reindex_for_test(Some(false));
+        let state_root = tempfile::tempdir().expect("state root tempdir");
+        let registry = RepoRegistry::with_state_root(state_root.path()).expect("isolated registry");
+        let dispatcher =
+            ServiceDispatcher::new(std::sync::Arc::new(DaemonState::with_registry(registry)));
+        let call = |id: &str, method: &str, params: serde_json::Value| -> serde_json::Value {
+            let request = Request {
+                id: id.to_string(),
+                method: method.to_string(),
+                params,
+            };
+            match dispatcher.dispatch(&request, &mut QuietEmitter) {
+                DispatchResult::Success(s) => s.result,
+                DispatchResult::Error(e) => {
+                    panic!("{method} failed: {} {}", e.error.code, e.error.message)
+                }
+            }
+        };
+        let indexed = call(
+            "idx",
+            "index",
+            serde_json::json!({ "repo_path": fixture.to_string_lossy() }),
+        );
+        let repo = indexed["canonical_path"]
+            .as_str()
+            .expect("index returns canonical_path")
+            .to_string();
+        let json = call(
+            "deps",
+            "deps_list",
+            serde_json::json!({ "repo": repo, "ecosystem": "java" }),
+        );
+        let human = serde_json::from_value::<DepsListResponse>(json.clone())
+            .expect("the envelope decodes as `deps list` renders it")
+            .render_human();
+        (json, human)
+    }
+
+    /// Write `body` at repo-relative `rel` under `root`.
+    fn put_file(root: &std::path::Path, rel: &str, body: &str) {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    }
+
+    /// The human block of the row whose module label is `module`: its header line
+    /// (`<module>  [<manifest>]`) through the line before the next unindented line.
+    fn row_block<'a>(human: &'a str, module: &str) -> Option<Vec<&'a str>> {
+        let lines: Vec<&str> = human.lines().collect();
+        let start = lines
+            .iter()
+            .position(|l| l.starts_with(&format!("{module}  [")))?;
+        let mut block = vec![lines[start]];
+        for l in &lines[start + 1..] {
+            if !l.starts_with(' ') {
+                break;
+            }
+            block.push(l);
+        }
+        Some(block)
+    }
+
+    /// Every row header of the human render (an unindented `<module>  [<manifest>]` line).
+    fn row_headers(human: &str, json: &serde_json::Value) -> Vec<String> {
+        json["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|r| {
+                let m = r["module"].as_str().unwrap_or("");
+                let label = if m.is_empty() { "." } else { m };
+                row_block(human, label).map(|b| b[0].to_string())
+            })
+            .collect()
+    }
+
+    /// Does an `e.g.` example group labelled one of `labels` in `block` name `package`?
+    fn block_names_in_group(block: &[&str], labels: &[&str], package: &str) -> bool {
+        block.iter().any(|l| {
+            l.trim_start().strip_prefix("e.g. ").is_some_and(|groups| {
+                groups.split("  ").any(|g| {
+                    labels.iter().any(|label| {
+                        g.strip_prefix(&format!("{label}: ")).is_some_and(|names| {
+                            names
+                                .split(", ")
+                                .any(|n| n == package || n.starts_with(&format!("{package} (")))
+                        })
+                    })
+                })
+            })
+        })
+    }
+
+    /// D-DGC-ATTRIBUTION-1 case (a), the reviewer's first counterexample, at the `deps list`
+    /// boundary: `settings.gradle` includes `a`, `b`; no build script at the root or in `a/`;
+    /// `b/build.gradle` declares `org.acme` for `:a`. Project `a`'s own row carries either the
+    /// declared coordinate (DECLARED) or its `undeclared` count suffixed and the note naming
+    /// `b/build.gradle:2` (UNDETERMINED); no other row ever holds `org.acme`.
+    #[test]
+    fn deps_list_gradle_project_without_an_ancestor_script_is_declared_or_marked_in_json_and_human()
+    {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path();
+        put_file(root, "settings.gradle", "include 'a', 'b'\n");
+        put_file(
+            root,
+            "b/build.gradle",
+            "project(':a') {\n  dependencies {\n    implementation 'org.acme:lib:1.0'\n  }\n}\n",
+        );
+        put_file(
+            root,
+            "a/src/main/java/app/A.java",
+            "package app;\nimport org.acme.Lib;\npublic class A { Lib l; }\n",
+        );
+        put_file(
+            root,
+            "b/src/main/java/b/B.java",
+            "package b;\npublic class B {}\n",
+        );
+        let (json, human) = deps_list_java_through_the_daemon(root);
+        let rows = json["results"].as_array().expect("results[]");
+        let row_a = rows
+            .iter()
+            .find(|r| r["module"] == "a")
+            .unwrap_or_else(|| panic!("project a's row is present: {json:#}\n{human}"));
+        let acme = |r: &serde_json::Value| -> Vec<String> {
+            r["entries"]
+                .as_array()
+                .map(|es| {
+                    es.iter()
+                        .filter(|e| e["package"] == "org.acme")
+                        .map(|e| e["category"].as_str().unwrap_or("").to_string())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let block_a = row_block(&human, "a")
+            .unwrap_or_else(|| panic!("row a renders in the human output:\n{human}"));
+        const DECLARED_CATS: [&str; 3] = [
+            "declared_and_used",
+            "declared_but_unobserved",
+            "type_only_import",
+        ];
+        let declared = acme(row_a)
+            .iter()
+            .any(|c| DECLARED_CATS.contains(&c.as_str()))
+            && block_names_in_group(
+                &block_a,
+                &["used", "no static import", "type-only import"],
+                "org.acme",
+            );
+        let note = json["declared_undetermined_note"].as_str().unwrap_or("");
+        let undetermined = row_a["manifest_scope_available"] == true
+            && !acme(row_a)
+                .iter()
+                .any(|c| DECLARED_CATS.contains(&c.as_str()))
+            && acme(row_a).iter().any(|c| c == "observed_but_undeclared")
+            && json["declared_undetermined_blocks"].as_u64().unwrap_or(0) >= 1
+            && note.starts_with("declared set may be incomplete: ")
+            && note.contains("b/build.gradle:2")
+            && note.ends_with("— investigate")
+            && human.lines().any(|l| l == note)
+            && block_a
+                .iter()
+                .any(|l| l.contains(" · undeclared ") && l.contains(" (declared set incomplete)"));
+        assert!(
+            declared ^ undetermined,
+            "exactly one of DECLARED / UNDETERMINED on row a (declared={declared}, \
+             undetermined={undetermined}):\n{json:#}\n{human}"
+        );
+        for r in rows.iter().filter(|r| r["module"] != "a") {
+            assert!(
+                acme(r).is_empty(),
+                "org.acme appears on another row {}: {json:#}",
+                r["module"]
+            );
+            let label = r["module"]
+                .as_str()
+                .filter(|m| !m.is_empty())
+                .unwrap_or(".");
+            if let Some(block) = row_block(&human, label) {
+                assert!(
+                    !block.iter().any(|l| l.contains("org.acme")),
+                    "row {label}'s human block names org.acme:\n{human}"
+                );
+            }
+        }
+    }
+
+    /// D-DGC-ATTRIBUTION-1 case (b), the reviewer's second counterexample, at the `deps list`
+    /// boundary: root `build.gradle` with a direct block, no root settings file, and
+    /// `zz/settings.gradle` present but unreadable. The index resolves `src/…` first (path order),
+    /// recording `build.gradle` parsed before `zz/…` meets the failure; the failure wins, so no
+    /// row reads `build.gradle` as parsed and a row states the reason in JSON and human.
+    #[test]
+    fn deps_list_gradle_failure_behind_a_parsed_script_is_unknown_with_reason_in_json_and_human() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path();
+        put_file(
+            root,
+            "build.gradle",
+            "dependencies {\n  implementation 'org.root:core:1.0'\n}\n",
+        );
+        std::fs::create_dir_all(root.join("zz/settings.gradle")).unwrap();
+        put_file(
+            root,
+            "src/main/java/r/R.java",
+            "package r;\nimport org.root.core.Core;\npublic class R { Core c; }\n",
+        );
+        put_file(
+            root,
+            "zz/src/main/java/z/Z.java",
+            "package z;\nimport org.nested.Thing;\npublic class Z { Thing t; }\n",
+        );
+        let (json, human) = deps_list_java_through_the_daemon(root);
+        let rows = json["results"].as_array().expect("results[]");
+        assert!(!rows.is_empty(), "rows render: {json:#}\n{human}");
+        assert!(
+            !rows.iter().any(|r| r["manifest_path"] == "build.gradle"),
+            "no row reads build.gradle as parsed: {json:#}"
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r["manifest_context"].as_str().is_some_and(|c| {
+                    c.contains("build.gradle")
+                        && c.contains("zz/settings.gradle")
+                        && c.contains("unreadable")
+                })),
+            "a row states the settings failure: {json:#}"
+        );
+        let headers = row_headers(&human, &json);
+        assert!(
+            !headers.iter().any(|h| h.ends_with("[build.gradle]")),
+            "no human row header reads [build.gradle]:\n{human}"
+        );
+        // D-DGC-BOUNDARY-1 (9), CHANGED ORACLE (fixture unchanged): `build.gradle` was read and its
+        // declaration retained, so the failure is an ATTRIBUTION failure — worded as such on EVERY
+        // row and header (every file's nearest script is `build.gradle`), never "not parsed".
+        let states_attribution = |c: &str| {
+            c.contains("build.gradle — dependency attribution failed")
+                && c.contains("zz/settings.gradle")
+                && c.contains("unreadable")
+                && !c.contains("not parsed")
+        };
+        for r in rows {
+            let c = r["manifest_context"].as_str().unwrap_or("");
+            assert!(
+                states_attribution(c),
+                "row {} states the attribution failure: {json:#}",
+                r["module"]
+            );
+        }
+        assert_eq!(headers.len(), rows.len(), "every row renders:\n{human}");
+        for h in &headers {
+            assert!(
+                states_attribution(h),
+                "human row header {h:?} states the attribution failure:\n{human}"
+            );
+        }
+        assert!(
+            rows.iter().any(
+                |r| r["entries"].as_array().is_some_and(|es| es.iter().any(|e| {
+                    e["package"] == "org.root"
+                        && DECLARED_CATEGORIES.contains(&e["category"].as_str().unwrap_or(""))
+                }))
+            ),
+            "a row holds the retained declaration org.root: {json:#}"
+        );
+    }
+
+    /// The categories that assert a manifest declaration.
+    const DECLARED_CATEGORIES: [&str; 3] = [
+        "declared_and_used",
+        "declared_but_unobserved",
+        "type_only_import",
+    ];
+
+    /// Does row `r` hold an entry of a declared category, or one `observed_but_undeclared`?
+    fn holds_declared_or_undeclared(r: &serde_json::Value) -> bool {
+        r["entries"].as_array().is_some_and(|es| {
+            es.iter().any(|e| {
+                let c = e["category"].as_str().unwrap_or("");
+                DECLARED_CATEGORIES.contains(&c) || c == "observed_but_undeclared"
+            })
+        })
+    }
+
+    /// D-DGC-BOUNDARY-1 (8), the ancestor case: a module covered ONLY by a failed manifest record
+    /// (a root `build.gradle` present but unreadable — a parse failure) is in the java view and
+    /// renders unknown with the reason, never parsed and never a measured-empty manifest.
+    /// OC-7: the row rests on the `System` call (a `java.lang` runtime global, stored as an
+    /// `external_library_candidate` reference); with its governing manifest failed, the file's
+    /// declared set is empty, so the import is `unknown` and admits no row on its own. The same
+    /// fact carries the two fixtures below.
+    #[test]
+    fn deps_list_module_covered_only_by_a_failed_manifest_is_in_the_view_unknown_with_reason_in_json_and_human(
+    ) {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path();
+        std::fs::create_dir_all(root.join("build.gradle")).unwrap();
+        put_file(
+            root,
+            "src/main/java/p/P.java",
+            "package p;\nimport org.x.Y;\npublic class P { Y y; void m() { System.out.println(\"x\"); } }\n",
+        );
+        let (json, human) = deps_list_java_through_the_daemon(root);
+        let rows = json["results"].as_array().expect("results[]");
+        assert_eq!(rows.len(), 1, "exactly one row: {json:#}\n{human}");
+        let row = &rows[0];
+        assert!(row["manifest_path"].is_null(), "{json:#}");
+        let c = row["manifest_context"].as_str().unwrap_or("");
+        assert!(
+            c.contains("build.gradle")
+                && c.contains("present but not parsed")
+                && c.contains("unreadable"),
+            "the row states the parse failure: {json:#}"
+        );
+        assert_eq!(row["manifest_scope_available"], false, "{json:#}");
+        assert!(!holds_declared_or_undeclared(row), "{json:#}");
+        let headers = row_headers(&human, &json);
+        assert_eq!(headers.len(), 1, "exactly one row header:\n{human}");
+        assert!(
+            headers[0].contains("build.gradle present but not parsed")
+                && headers[0].contains("unreadable"),
+            "the header states the failure:\n{human}"
+        );
+        assert!(
+            !headers.iter().any(|h| h.ends_with("[build.gradle]")),
+            "no header reads [build.gradle] as parsed:\n{human}"
+        );
+    }
+
+    /// D-DGC-BOUNDARY-1 (8), the nested case (document review-0 of PREP-7, F-1): a failed manifest
+    /// record strictly inside the coarse inferred module `frontend` admits it to the view, and its
+    /// row names the nested record with its path and reason — never `no manifest`.
+    #[test]
+    fn deps_list_module_over_a_nested_failed_manifest_states_its_path_and_reason_in_json_and_human()
+    {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path();
+        std::fs::create_dir_all(root.join("frontend/web/build.gradle")).unwrap();
+        put_file(
+            root,
+            "frontend/web/src/main/java/w/W.java",
+            "package w;\nimport org.x.Y;\npublic class W { Y y; void m() { System.out.println(\"x\"); } }\n",
+        );
+        let (json, human) = deps_list_java_through_the_daemon(root);
+        let rows = json["results"].as_array().expect("results[]");
+        assert_eq!(rows.len(), 1, "exactly one row: {json:#}\n{human}");
+        let row = &rows[0];
+        assert_eq!(row["module"], "frontend", "{json:#}");
+        assert!(row["manifest_path"].is_null(), "{json:#}");
+        let c = row["manifest_context"].as_str().unwrap_or("");
+        assert!(
+            c.contains("nested")
+                && c.contains("frontend/web/build.gradle")
+                && c.contains("present but not parsed")
+                && c.contains("unreadable"),
+            "the row names the nested failure: {json:#}"
+        );
+        assert_eq!(row["manifest_scope_available"], false, "{json:#}");
+        assert!(!holds_declared_or_undeclared(row), "{json:#}");
+        let headers = row_headers(&human, &json);
+        assert_eq!(headers.len(), 1, "exactly one row header:\n{human}");
+        assert!(
+            headers[0].starts_with("frontend  [")
+                && headers[0].contains("frontend/web/build.gradle present but not parsed")
+                && headers[0].contains("unreadable"),
+            "the header names the nested failure:\n{human}"
+        );
+        assert!(
+            !human.contains("no manifest — imports unattributed"),
+            "no row reads `no manifest`:\n{human}"
+        );
+    }
+
+    /// D-DGC-BOUNDARY-1 (9), the same-build failure (document review-2 of PREP-7, F-2): the root
+    /// script of the settings build is unreadable, so project `svc`'s declared set — which the
+    /// root's scope blocks can feed — is unknown even though `svc/build.gradle` is readable. Row
+    /// `svc` reads unknown with the attribution wording, never `[svc/build.gradle]` with `org.svc`.
+    #[test]
+    fn deps_list_gradle_unreadable_root_script_makes_the_child_project_row_unknown_with_attribution_wording_in_json_and_human(
+    ) {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path();
+        put_file(root, "settings.gradle", "include ':svc'\n");
+        std::fs::create_dir_all(root.join("build.gradle")).unwrap();
+        put_file(
+            root,
+            "svc/build.gradle",
+            "dependencies {\n  implementation 'org.svc:lib:1.0'\n}\n",
+        );
+        put_file(
+            root,
+            "svc/src/main/java/s/S.java",
+            "package s;\nimport org.svc.Lib;\npublic class S { Lib l; void m() { System.out.println(\"x\"); } }\n",
+        );
+        let (json, human) = deps_list_java_through_the_daemon(root);
+        let rows = json["results"].as_array().expect("results[]");
+        let row = rows
+            .iter()
+            .find(|r| r["module"] == "svc")
+            .unwrap_or_else(|| panic!("row svc is present: {json:#}\n{human}"));
+        assert!(row["manifest_path"].is_null(), "{json:#}");
+        let c = row["manifest_context"].as_str().unwrap_or("");
+        assert!(
+            c.contains("svc/build.gradle")
+                && c.contains("dependency attribution failed")
+                && c.contains("unreadable")
+                && !c.contains("not parsed"),
+            "row svc states the attribution failure: {json:#}"
+        );
+        assert!(
+            !row["entries"].as_array().is_some_and(|es| es
+                .iter()
+                .any(|e| DECLARED_CATEGORIES.contains(&e["category"].as_str().unwrap_or("")))),
+            "no certain declaration from the readable child script: {json:#}"
+        );
+        let block = row_block(&human, "svc").unwrap_or_else(|| panic!("row svc renders:\n{human}"));
+        assert!(
+            block[0].contains("svc/build.gradle — dependency attribution failed")
+                && block[0].contains("unreadable"),
+            "the svc header states the attribution failure:\n{human}"
+        );
+        assert!(
+            !row_headers(&human, &json)
+                .iter()
+                .any(|h| h.ends_with("[svc/build.gradle]")),
+            "no header reads [svc/build.gradle] as parsed:\n{human}"
         );
     }
 }

@@ -60,7 +60,7 @@ const COPIED_SIGNALS_READ_CHUNK: usize = 500;
 
 /// Indexer version string stamped on module-derived edges.
 /// Also the `indexer` component of every snapshot toolchain stamp ([`build_toolchain_json`]).
-pub const INDEXER_VERSION: &str = "indexer:1.2.0";
+pub const INDEXER_VERSION: &str = "indexer:1.3.0";
 
 // ── Error type ───────────────────────────────────────────────────
 
@@ -4406,15 +4406,15 @@ mod tests {
         };
         let (mut a, mut b, mut c) = (named("ts-core:0.2.0"), named("c-core:0.1.0"), named("z:9"));
         let ports: Vec<&mut dyn ExtractorPort> = vec![&mut c, &mut a, &mut b];
-        assert_eq!(INDEXER_VERSION, "indexer:1.2.0");
+        assert_eq!(INDEXER_VERSION, "indexer:1.3.0");
         assert_eq!(
             build_toolchain_json(&ports),
-            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.2.0"}"#
+            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.3.0"}"#
         );
         let none: Vec<&mut dyn ExtractorPort> = Vec::new();
         assert_eq!(
             build_toolchain_json(&none),
-            r#"{"extractors":[],"indexer":"indexer:1.2.0"}"#
+            r#"{"extractors":[],"indexer":"indexer:1.3.0"}"#
         );
     }
 

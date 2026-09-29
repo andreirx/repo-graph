@@ -193,6 +193,8 @@ mod tests {
             dir: dir.to_string(),
             ecosystem: eco.to_string(),
             error: None,
+            error_kind: None,
+            undetermined_blocks: None,
         }
     }
 

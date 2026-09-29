@@ -82,17 +82,14 @@ pub(crate) fn classify_ecosystem_presence(
     // read would claim COMPLETE truth over a hidden failed read — the mixed-failure mask the reviewer
     // caught. Surface the failure (with its exact reason) BEFORE the parsed-count branches, so the
     // presence of one errored manifest is never silently swallowed by another that parsed.
-    if let Some(f) = records
+    // D-DGC-BOUNDARY-1 (9): the failure is worded by its kind through the one wording function —
+    // a parse failure keeps today's `present but not parsed`, an attribution failure never says so.
+    if let Some(reason) = records
         .iter()
-        .find(|r| r.ecosystem == ecosystem && r.error.is_some())
+        .filter(|r| r.ecosystem == ecosystem)
+        .find_map(|r| r.failure_note())
     {
-        return EcosystemPresenceState::Unavailable {
-            reason: format!(
-                "manifest {} present but not parsed: {}",
-                f.path,
-                f.error.as_deref().unwrap_or("unknown error")
-            ),
-        };
+        return EcosystemPresenceState::Unavailable { reason };
     }
     // No errored manifest of this ecosystem remains — every matching record parsed cleanly.
     let parsed = records.iter().filter(|r| r.ecosystem == ecosystem).count();
@@ -226,6 +223,8 @@ mod tests {
             dir: dir.to_string(),
             ecosystem: eco.to_string(),
             error: None,
+            error_kind: None,
+            undetermined_blocks: None,
         }
     }
 
@@ -235,6 +234,8 @@ mod tests {
             dir: dir.to_string(),
             ecosystem: eco.to_string(),
             error: Some(reason.to_string()),
+            error_kind: None,
+            undetermined_blocks: None,
         }
     }
 
@@ -542,5 +543,35 @@ mod tests {
             vec![("npm".to_string(), 12)],
             "npm's 12% aggregate must survive even though TS and JS are each < 10%"
         );
+    }
+
+    /// D-DGC-BOUNDARY-1 (9): an ATTRIBUTION failure of a secondary ecosystem's manifest is stated
+    /// as such on the secondary line — never "not parsed" (the kind states that attribution could
+    /// not be established, not a parse failure).
+    #[test]
+    fn presence_attribution_failure_is_worded_as_attribution_never_not_parsed() {
+        let records = vec![ManifestProvenance {
+            error_kind: Some(repo_graph_module_queries::ManifestErrorKind::Attribution),
+            ..prov_rec_failed(
+                "build.gradle",
+                "",
+                "java",
+                "gradle project attribution unknown: zz/settings.gradle unreadable (x)",
+            )
+        }];
+        let state = classify_ecosystem_presence(
+            "java",
+            10,
+            &ProvenanceRead::Tracked(records),
+            Err("unused".to_string()),
+        );
+        match state {
+            EcosystemPresenceState::Unavailable { reason } => assert_eq!(
+                reason,
+                "manifest build.gradle — dependency attribution failed: gradle project \
+                 attribution unknown: zz/settings.gradle unreadable (x)"
+            ),
+            other => panic!("expected Unavailable, got: {other:?}"),
+        }
     }
 }

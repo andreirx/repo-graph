@@ -142,14 +142,15 @@ impl ManifestContext {
     }
 }
 
-/// Outcome of reading the persisted parsed-manifest provenance for a snapshot (operator ruling 3,
+/// Outcome of reading the persisted manifest provenance for a snapshot (operator ruling 3,
 /// item 2). A quad-state rather than `Option<Vec<_>>` because the three "no records" causes are NOT
 /// the same fact — an old snapshot (absent) must not be reported with a corrupt-blob's reason, and
 /// vice versa. Produced by the query layer's diagnostics read, consumed by [`super::compose`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProvenanceRead {
-    /// Provenance was tracked; these are the manifests actually parsed (possibly empty = tracked,
-    /// none parsed). Each module attaches its exact manifest by longest-ancestor-`dir` match.
+    /// Provenance was tracked; these are the recorded manifests — PARSED, or FAILED with a reason
+    /// and kind (possibly empty = tracked, none recorded). Each module attaches its exact manifest
+    /// by longest-ancestor-`dir` match.
     Tracked(Vec<ManifestProvenance>),
     /// The snapshot predates manifest-provenance tracking (no `deps_manifests` diagnostics record).
     /// Renders "indexed before provenance tracking".
@@ -160,30 +161,146 @@ pub enum ProvenanceRead {
     Unavailable { reason: String },
 }
 
-/// A persisted parsed-manifest record (DEPS-LIST-REWRITE-1 §2.2; operator ruling 2026-08-26).
+/// A persisted manifest-provenance record — PARSED, or FAILED with its reason and kind
+/// (DEPS-LIST-REWRITE-1 §2.2; operator ruling 2026-08-26; D-DGC-BOUNDARY-1 (9)).
 ///
 /// Written at index time through the extraction-diagnostics channel (the `deps_manifests` key
 /// beside `index_basis`) BEFORE the Ready flip, read back at query time. Raw strings — a boundary
 /// DTO, no framework/hardware types. `dir` is the manifest's repo-relative directory; the query
 /// layer attaches a manifest to a module by longest-ancestor-`dir` match against these records
 /// (the same nearest-manifest semantics the index used), never a filesystem rescan.
+///
+/// Decoding goes through [`ManifestProvenanceWire`] so an `error_kind` on a record WITHOUT `error`
+/// is rejected (D-DGC-BOUNDARY-1 (9)): the whole `deps_manifests` decode then fails and the caller's
+/// `ProvenanceRead::Unavailable` path renders unknown-with-reason, never a default.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "ManifestProvenanceWire")]
 pub struct ManifestProvenance {
     /// Repo-relative path of the manifest file the resolver ENCOUNTERED (`build.gradle.kts`,
-    /// `pyproject.toml`). Present whether the read+parse succeeded or the file was present-but-
-    /// unreadable — [`Self::error`] distinguishes the two.
+    /// `pyproject.toml`). Present whether the record parsed or FAILED — [`Self::error`] and
+    /// [`Self::error_kind`] distinguish the cases.
     pub path: String,
     /// Repo-relative directory the manifest governs (used for module attribution).
     pub dir: String,
     /// Ecosystem the reader belongs to (`npm`/`cargo`/`python`/`java`).
     pub ecosystem: String,
     /// `None` = the manifest was read AND parsed (declared deps possibly empty — a legitimate
-    /// measured-empty, ruling-3 item 3). `Some(reason)` = the manifest was PRESENT but could not be
-    /// parsed (an io read error, or malformed content the reader could detect) — review-4 item 1: a
-    /// failed read is NEVER laundered into a parsed zero-dep. `#[serde(default)]` so a snapshot
-    /// written before this field decodes as parsed (backward-compatible).
+    /// measured-empty, ruling-3 item 3). `Some(reason)` = FAILED: the declared set this record
+    /// stands for is unknown — [`Self::error_kind`] says whether the manifest's own read or parse
+    /// failed (an io read error, or malformed content the reader could detect) or Gradle declaration
+    /// attribution could not be established. Review-4 item 1: a failure is NEVER laundered into a
+    /// parsed zero-dep.
+    /// `#[serde(default)]` so a snapshot written before this field decodes as parsed
+    /// (backward-compatible).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// D-DGC-BOUNDARY-1 (9): which failure [`Self::error`] states — `Some(Attribution)` when Gradle
+    /// project/declaration attribution could not be established (an unreadable settings file or
+    /// project script of the build, an unhandled `projectDir` form). It states the outcome only —
+    /// not whether the recorded file was read, nor where the failed input resides (the record may
+    /// be an unknown build's `settings.gradle` itself, unreadable). `None` on a FAILED record is
+    /// the `parse` kind: every record written
+    /// before this field, and every parse failure written after it, carries no key. A decoded
+    /// `"parse"` is normalised to `None`, so a parse failure re-serializes without the key. Read it
+    /// through [`Self::failure_note`], the one place a failed record is worded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<ManifestErrorKind>,
+    /// DEPS-GRADLE-CATALOG-1A (D-DGC-CONDITIONAL-1; RG-REQ-002-L11): the Gradle `dependencies`
+    /// blocks the index-time reader skipped because it cannot attribute them statically (under a
+    /// condition, callback, receiver or composed scope head). One record per Gradle build carries
+    /// its build's marking, so a sum over records counts distinct blocks. `None` = no marking (every
+    /// non-Gradle record, a build with no such block, a record written before this field — `default`
+    /// keeps those decoding as today). A malformed value fails the whole `deps_manifests` decode, so
+    /// the caller's `ProvenanceRead::Unavailable` path renders unknown-with-reason, never a zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undetermined_blocks: Option<UndeterminedBlocks>,
+}
+
+impl ManifestProvenance {
+    /// The reader-facing statement of a FAILED record, by its kind (D-DGC-BOUNDARY-1 (9)) — the ONE
+    /// place a failed record is worded; every surface that states one calls this. `None` for a
+    /// parsed record. A `parse` failure keeps today's exact wording; an `attribution` failure says
+    /// attribution failed — never "not parsed" (the kind does not state a parse failure) and never a
+    /// claim that the file was read (an unknown build's `settings.gradle` record may itself be
+    /// unreadable).
+    pub fn failure_note(&self) -> Option<String> {
+        let reason = self.error.as_deref()?;
+        Some(match self.error_kind {
+            Some(ManifestErrorKind::Attribution) => format!(
+                "manifest {} — dependency attribution failed: {}",
+                self.path, reason
+            ),
+            Some(ManifestErrorKind::Parse) | None => {
+                format!("manifest {} present but not parsed: {}", self.path, reason)
+            }
+        })
+    }
+}
+
+/// Which failure a FAILED [`ManifestProvenance`] record states (D-DGC-BOUNDARY-1 (9); the wire
+/// mirror of `repo-index`'s record field). Wire values `"parse"` and `"attribution"`; any other
+/// value fails the decode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestErrorKind {
+    /// The manifest's own read or parse failed.
+    Parse,
+    /// Gradle project/declaration attribution could not be established (a settings-file failure
+    /// included). No claim about whether the recorded file was read or where the failed input
+    /// resides.
+    Attribution,
+}
+
+/// The persisted shape of [`ManifestProvenance`] as decoded, before the kind/error consistency
+/// check (`#[serde(try_from)]`). Field-for-field the same wire contract.
+#[derive(Deserialize)]
+struct ManifestProvenanceWire {
+    path: String,
+    dir: String,
+    ecosystem: String,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    error_kind: Option<ManifestErrorKind>,
+    #[serde(default)]
+    undetermined_blocks: Option<UndeterminedBlocks>,
+}
+
+impl TryFrom<ManifestProvenanceWire> for ManifestProvenance {
+    type Error = String;
+
+    /// Reject `error_kind` on a record without `error` (a malformed record — the kind of a failure
+    /// that did not happen); normalise `"parse"` to the absent key it means.
+    fn try_from(w: ManifestProvenanceWire) -> Result<Self, String> {
+        if w.error.is_none() && w.error_kind.is_some() {
+            return Err(format!(
+                "manifest record {} carries error_kind without error",
+                w.path
+            ));
+        }
+        Ok(ManifestProvenance {
+            path: w.path,
+            dir: w.dir,
+            ecosystem: w.ecosystem,
+            error: w.error,
+            error_kind: w
+                .error_kind
+                .filter(|k| *k == ManifestErrorKind::Attribution),
+            undetermined_blocks: w.undetermined_blocks,
+        })
+    }
+}
+
+/// The count and first location of the Gradle `dependencies` blocks one build's reader could not
+/// attribute statically (DEPS-GRADLE-CATALOG-1A; the wire mirror of `repo-index`'s record field).
+/// `count` counts skipped BLOCKS, not declarations; `first` is `<repo-relative script path>:<line>`
+/// of the first one (the root project's script first).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UndeterminedBlocks {
+    /// Number of skipped `dependencies` blocks in the build.
+    pub count: u32,
+    /// `<repo-relative path>:<line>` of the first skipped block.
+    pub first: String,
 }
 
 /// A single entry in a dependency summary.
@@ -353,5 +470,195 @@ mod tests {
                 "{not_declared:?} must NOT count as a declared manifest dependency"
             );
         }
+    }
+
+    /// A minimal JSON-shaped value for decode tests: this crate has no `serde_json` (and the slice
+    /// adds no dependency), so the wire shape is driven through serde's own value deserializers.
+    enum J {
+        S(&'static str),
+        I(i64),
+        M(Vec<(&'static str, J)>),
+        A(Vec<J>),
+    }
+
+    impl<'de> serde::Deserializer<'de> for J {
+        type Error = serde::de::value::Error;
+        fn deserialize_any<V: serde::de::Visitor<'de>>(
+            self,
+            v: V,
+        ) -> Result<V::Value, Self::Error> {
+            match self {
+                J::S(s) => v.visit_borrowed_str(s),
+                J::I(n) => v.visit_i64(n),
+                J::M(entries) => {
+                    v.visit_map(serde::de::value::MapDeserializer::new(entries.into_iter()))
+                }
+                J::A(items) => {
+                    v.visit_seq(serde::de::value::SeqDeserializer::new(items.into_iter()))
+                }
+            }
+        }
+        fn deserialize_option<V: serde::de::Visitor<'de>>(
+            self,
+            v: V,
+        ) -> Result<V::Value, Self::Error> {
+            v.visit_some(self)
+        }
+        /// A string is a unit variant (as `serde_json` reads `"attribution"`); anything else is
+        /// handed to the visitor as-is, which rejects it.
+        fn deserialize_enum<V: serde::de::Visitor<'de>>(
+            self,
+            _name: &'static str,
+            _variants: &'static [&'static str],
+            v: V,
+        ) -> Result<V::Value, Self::Error> {
+            match self {
+                J::S(s) => {
+                    v.visit_enum(serde::de::IntoDeserializer::<Self::Error>::into_deserializer(s))
+                }
+                other => other.deserialize_any(v),
+            }
+        }
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes byte_buf
+            unit unit_struct newtype_struct seq tuple tuple_struct map struct identifier
+            ignored_any
+        }
+    }
+
+    impl<'de> serde::de::IntoDeserializer<'de, serde::de::value::Error> for J {
+        type Deserializer = J;
+        fn into_deserializer(self) -> J {
+            self
+        }
+    }
+
+    fn java_record(extra: Option<J>) -> J {
+        let mut fields = vec![
+            ("path", J::S("build.gradle")),
+            ("dir", J::S("")),
+            ("ecosystem", J::S("java")),
+        ];
+        if let Some(e) = extra {
+            fields.push(("undetermined_blocks", e));
+        }
+        J::A(vec![J::M(fields)])
+    }
+
+    fn decode(v: J) -> Result<Vec<ManifestProvenance>, serde::de::value::Error> {
+        serde::Deserialize::deserialize(v)
+    }
+
+    /// DEPS-GRADLE-CATALOG-1A (D-DGC-CONDITIONAL-1): the wire mirror of the index-time marking.
+    /// ABSENT key → `None` (today's records, every non-Gradle record); PRESENT-VALID → `Some`;
+    /// PRESENT-MALFORMED (a non-integer or negative `count`, a missing `first`) → the whole
+    /// `deps_manifests` vector fails to decode, so the caller's existing
+    /// `ProvenanceRead::Unavailable` path renders unknown-with-reason — never a silent zero.
+    #[test]
+    fn manifest_provenance_undetermined_blocks_absent_present_and_malformed() {
+        let absent = decode(java_record(None)).unwrap();
+        assert_eq!(absent[0].undetermined_blocks, None);
+        assert_eq!(absent[0].error, None);
+
+        let present = decode(java_record(Some(J::M(vec![
+            ("count", J::I(5)),
+            ("first", J::S("build.gradle:190")),
+        ]))))
+        .unwrap();
+        assert_eq!(
+            present[0].undetermined_blocks,
+            Some(UndeterminedBlocks {
+                count: 5,
+                first: "build.gradle:190".to_string()
+            })
+        );
+
+        for (label, malformed) in [
+            (
+                "non-integer count",
+                J::M(vec![("count", J::S("five")), ("first", J::S("b:1"))]),
+            ),
+            ("missing first", J::M(vec![("count", J::I(5))])),
+            (
+                "negative count",
+                J::M(vec![("count", J::I(-1)), ("first", J::S("b:1"))]),
+            ),
+        ] {
+            assert!(
+                decode(java_record(Some(malformed))).is_err(),
+                "a malformed marking must fail the decode, never default: {label}"
+            );
+        }
+    }
+
+    fn one_record(fields: Vec<(&'static str, J)>) -> J {
+        J::A(vec![J::M(fields)])
+    }
+
+    /// D-DGC-BOUNDARY-1 (9): the failure kind on the wire. ABSENT on a FAILED record → `parse`
+    /// (every record a store holds today); `"parse"` → parse; `"attribution"` → attribution, worded
+    /// as such; an unknown value, or the key on a record WITHOUT `error`, fails the whole
+    /// `deps_manifests` decode (the caller's `Unavailable` path) — never a default.
+    #[test]
+    fn manifest_provenance_error_kind_absent_reads_as_parse_and_malformed_is_rejected() {
+        let base = || {
+            vec![
+                ("path", J::S("a/build.gradle")),
+                ("dir", J::S("a")),
+                ("ecosystem", J::S("java")),
+            ]
+        };
+        let with = |extra: Vec<(&'static str, J)>| {
+            let mut f = base();
+            f.extend(extra);
+            one_record(f)
+        };
+        let today = decode(with(vec![("error", J::S("unreadable: x"))])).unwrap();
+        assert_eq!(today[0].error_kind, None);
+        assert_eq!(
+            today[0].failure_note().as_deref(),
+            Some("manifest a/build.gradle present but not parsed: unreadable: x")
+        );
+        let parse = decode(with(vec![
+            ("error", J::S("unreadable: x")),
+            ("error_kind", J::S("parse")),
+        ]))
+        .unwrap();
+        assert_eq!(
+            parse[0].failure_note().as_deref(),
+            Some("manifest a/build.gradle present but not parsed: unreadable: x")
+        );
+        assert_eq!(
+            parse[0], today[0],
+            "`parse` is normalised to the absent key"
+        );
+        let attribution = decode(with(vec![
+            ("error", J::S("unreadable: x")),
+            ("error_kind", J::S("attribution")),
+        ]))
+        .unwrap();
+        assert_eq!(
+            attribution[0].failure_note().as_deref(),
+            Some("manifest a/build.gradle — dependency attribution failed: unreadable: x")
+        );
+        let parsed = decode(with(vec![])).unwrap();
+        assert_eq!(parsed[0].failure_note(), None);
+
+        assert!(
+            decode(with(vec![
+                ("error", J::S("unreadable: x")),
+                ("error_kind", J::S("guess")),
+            ]))
+            .is_err(),
+            "an unknown kind fails the decode"
+        );
+        assert!(
+            decode(with(vec![("error_kind", J::S("attribution"))])).is_err(),
+            "a kind without `error` fails the decode"
+        );
+
+        // A parse failure re-serializes without `error_kind` (field presence via a
+        // `Serialize`-agnostic probe: the Option stays `None`, which `skip_serializing_if` omits).
+        assert!(today[0].error_kind.is_none() && parse[0].error_kind.is_none());
     }
 }

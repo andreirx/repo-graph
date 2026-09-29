@@ -16,7 +16,7 @@
 //! [build-dependencies]. Sorted unique names, hyphen-normalized
 //! to match Rust's `foo-bar` → `foo_bar` crate naming convention.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use repo_graph_classification::types::{PackageDependencySet, TsconfigAliasEntry, TsconfigAliases};
@@ -30,10 +30,15 @@ pub struct RepoConfigContext {
     tsconfig_cache: HashMap<String, TsconfigAliases>,
     /// Directory → PackageDependencySet cache (for Rust via Cargo.toml).
     cargo_cache: HashMap<String, PackageDependencySet>,
-    /// Directory → PackageDependencySet cache (for Java via build.gradle[.kts]).
-    /// `pub(crate)`: the Gradle resolver body lives in `manifest_deps.rs` (guardrail — config.rs is
-    /// not grown by this slice), and reaches this cache from that sibling module.
+    /// Java FILE directory → its Gradle declared set (DEPS-GRADLE-CATALOG-1A: keyed by the file's
+    /// OWN directory only — the declared set is a function of that directory; a walked-up probe
+    /// directory is never given another file's result). `pub(crate)`: the Gradle resolver body lives
+    /// in `manifest_deps.rs` (guardrail — config.rs is not grown), and reaches this cache from there.
     pub(crate) gradle_cache: HashMap<String, PackageDependencySet>,
+    /// DEPS-GRADLE-CATALOG-1A: the parsed Gradle settings files, build-script scopes, builds and
+    /// per-project declared sets the Gradle resolver has read (each read once per path). Owned by
+    /// `manifest_deps.rs`, where the resolver lives.
+    pub(crate) gradle_reads: crate::manifest_deps::GradleReadCache,
     /// Directory → PackageDependencySet cache (for Python via pyproject.toml). `pub(crate)` for the
     /// same reason as `gradle_cache` (the pyproject resolver lives in `manifest_deps.rs`).
     pub(crate) pyproject_cache: HashMap<String, PackageDependencySet>,
@@ -59,6 +64,7 @@ impl RepoConfigContext {
             tsconfig_cache: HashMap::new(),
             cargo_cache: HashMap::new(),
             gradle_cache: HashMap::new(),
+            gradle_reads: crate::manifest_deps::GradleReadCache::default(),
             pyproject_cache: HashMap::new(),
             manifest_provenance: crate::manifest_deps::ManifestProvenanceCollector::default(),
         }
@@ -429,8 +435,138 @@ pub fn extract_cargo_dependencies(content: &str) -> Option<PackageDependencySet>
 
 // ── build.gradle / build.gradle.kts reader (GRADLE-DEP-READER-1) ──
 
-/// Extract declared dependency GROUP IDs from a Gradle build script —
-/// `build.gradle` (Groovy DSL) or `build.gradle.kts` (Kotlin DSL).
+/// Declared dependency GROUP ids of ONE Gradle build script, by the Gradle scope that declares
+/// them (DEPS-GRADLE-CATALOG-1A; RG-REQ-006-L13), plus the lines of the `dependencies` blocks the
+/// reader skipped because it cannot attribute them statically (D-DGC-CONDITIONAL-1;
+/// RG-REQ-002-L11). Every group list is sorted and unique. Which PROJECT each scope reaches is the
+/// resolver's decision (`manifest_deps::resolve_gradle_deps`, through the build's settings file),
+/// not this reader's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GradleScriptScopes {
+    /// Groups of the `dependencies {` blocks at the script's TOP LEVEL — the script's own project.
+    pub own: Vec<String>,
+    /// Groups of the `dependencies {` blocks that are direct children of a top-level
+    /// `allprojects {` block.
+    pub allprojects: Vec<String>,
+    /// Groups of the `dependencies {` blocks that are direct children of a top-level
+    /// `subprojects {` block.
+    pub subprojects: Vec<String>,
+    /// Groups of the `dependencies {` blocks that are direct children of a top-level
+    /// `project('<path>') {` block, keyed by the Gradle path AS WRITTEN (absolute `:a:b` or
+    /// relative `b`). Only paths whose blocks carry ≥1 coordinate are present.
+    pub projects: BTreeMap<String, Vec<String>>,
+    /// 1-based lines of every COUNTED `dependencies` block, in line order: a `dependencies` head
+    /// that is not DIRECT (bare under any other enclosing block, or receiver-qualified) and whose
+    /// chain of enclosing heads holds no tooling head and no task/extension head. A count of skipped
+    /// BLOCKS, not of declarations.
+    pub undetermined_block_lines: Vec<u32>,
+}
+
+impl GradleScriptScopes {
+    /// True iff the script declares no group in any scope and has no counted block.
+    fn is_empty(&self) -> bool {
+        self.own.is_empty()
+            && self.allprojects.is_empty()
+            && self.subprojects.is_empty()
+            && self.projects.is_empty()
+            && self.undetermined_block_lines.is_empty()
+    }
+}
+
+/// The scope a DIRECT `dependencies` block declares for.
+#[derive(Debug, Clone)]
+enum DirectScope {
+    Own,
+    AllProjects,
+    SubProjects,
+    Project(String),
+}
+
+/// The group sets under construction, one per scope.
+#[derive(Default)]
+struct ScopeSets {
+    own: BTreeSet<String>,
+    allprojects: BTreeSet<String>,
+    subprojects: BTreeSet<String>,
+    projects: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl ScopeSets {
+    /// Mine one buffered in-block line segment into the set of `scope`, then clear the buffer.
+    fn mine(&mut self, buffered: &mut String, scope: &DirectScope) {
+        if buffered.is_empty() {
+            return;
+        }
+        let set = match scope {
+            DirectScope::Own => &mut self.own,
+            DirectScope::AllProjects => &mut self.allprojects,
+            DirectScope::SubProjects => &mut self.subprojects,
+            DirectScope::Project(path) => self.projects.entry(path.clone()).or_default(),
+        };
+        extract_gradle_coordinates(buffered, set);
+        buffered.clear();
+    }
+}
+
+/// One open `{` of the brace walk: the trimmed text on its line before it (its HEAD) and whether
+/// the word right before it is `dependencies` (bare or receiver-qualified).
+struct GradleFrame {
+    head: String,
+    is_dependencies_head: bool,
+}
+
+/// A head that encloses the build tool's own classpath — never a project declaration (L13 excludes
+/// the tooling classpath by name). Closed list.
+fn is_tooling_head(head: &str) -> bool {
+    matches!(head, "buildscript" | "pluginManagement")
+}
+
+/// A task or plugin-extension head — a `dependencies` block under it is a filter (shadow-jar
+/// include/exclude), not a declaration. Closed list: `shadowJar`, `tasks.…`, `task <name>`,
+/// `task(<…>)`.
+fn is_task_head(head: &str) -> bool {
+    head == "shadowJar"
+        || head.starts_with("tasks.")
+        || head.starts_with("task ")
+        || head.starts_with("task(")
+}
+
+/// The Gradle path of a `project('<path>')` / `project("<path>")` scope head — `project`, `(`, one
+/// quoted path, `)` and nothing else — kept as written. `from(project(':tools').jar)` is not one.
+fn project_block_path(head: &str) -> Option<String> {
+    let rest = head.strip_prefix("project")?.trim_start();
+    let rest = rest.strip_prefix('(')?.trim_start();
+    let quote = rest.chars().next().filter(|c| *c == '\'' || *c == '"')?;
+    let rest = &rest[1..];
+    let end = rest.find(quote)?;
+    let path = &rest[..end];
+    if path.is_empty() || path.contains(['\'', '"']) {
+        return None;
+    }
+    let tail = rest[end + 1..].trim_start().strip_prefix(')')?;
+    tail.trim().is_empty().then(|| path.to_string())
+}
+
+/// The scope of a `dependencies` block whose head is exactly `dependencies`, given the heads of
+/// its enclosing blocks: DIRECT only at the script top level or as a direct child of a TOP-LEVEL
+/// `allprojects` / `subprojects` / `project('<path>')` block; `None` otherwise.
+fn direct_scope(head: &str, enclosing: &[GradleFrame]) -> Option<DirectScope> {
+    if head != "dependencies" {
+        return None;
+    }
+    match enclosing {
+        [] => Some(DirectScope::Own),
+        [only] => match only.head.as_str() {
+            "allprojects" => Some(DirectScope::AllProjects),
+            "subprojects" => Some(DirectScope::SubProjects),
+            h => project_block_path(h).map(DirectScope::Project),
+        },
+        _ => None,
+    }
+}
+
+/// Extract the declared dependency GROUP ids of a Gradle build script — `build.gradle` (Groovy
+/// DSL) or `build.gradle.kts` (Kotlin DSL) — BY SCOPE (DEPS-GRADLE-CATALOG-1A; RG-REQ-006-L13).
 ///
 /// ## What it captures, and why the GROUP ID
 ///
@@ -451,118 +587,127 @@ pub fn extract_cargo_dependencies(content: &str) -> Option<PackageDependencySet>
 /// (`org.springframework.boot` → `org.springframework.boot.autoconfigure.*`)
 /// and DEGRADES HONESTLY where it does not: `com.google.guava`'s packages live
 /// under `com.google.common.*`, so guava imports fall to the honest
-/// "dependency not identified" bucket rather than being force-attributed. This
-/// is the deliberate, VISION-aligned degradation (unknown never fabricated),
-/// not a bug — the group-vs-namespace gap is real and named.
+/// "dependency not identified" bucket rather than being force-attributed.
 ///
-/// ## Parsing (single character pass, no build-tool dependency — mirrors cargo)
+/// ## Which blocks declare — only DIRECT blocks (RG-REQ-006-L13)
 ///
-/// Comments (`//`, `/* */`) are stripped first (a commented-out dependency must
-/// never be captured). The cleaned source is then walked in ONE character pass
-/// that maintains a brace stack — each `{` tagged with whether the word right
-/// before it is `dependencies` — so at every character we know whether we are
-/// inside a `dependencies { … }` block (nesting handled:
-/// `subprojects { dependencies { … } }`). Characters that fall INSIDE a
-/// dependencies block are buffered per line and mined for coordinates at each
-/// line boundary, in two forms:
-///   - **string form** — `implementation 'g:a:v'` / `api("g:a:v")` (Groovy or
-///     Kotlin, single or double quotes, parens optional). Any quoted token
-///     shaped `group:artifact[:version…]` contributes its group.
-///   - **map form** — Groovy `group: 'g', name: 'a', version: 'v'` or Kotlin
-///     `group = "g", name = "a"`. The `group` value is captured ONLY when a
-///     `name` key is also present, which distinguishes a dependency declaration
-///     from an `exclude group: 'g', module: 'm'` closure (exclusions use
-///     `module`, never `name`) — so excluded groups are not mistaken for deps.
+/// Comments (`//`, `/* */`) are stripped first. The cleaned source is walked in ONE character pass
+/// that keeps a brace stack; each `{` records its HEAD (the trimmed text before it on its line,
+/// after the last `{`, `}` or `;`) and whether the word right before it is `dependencies`. A
+/// `dependencies {` block is DIRECT only when `dependencies` is its whole head AND it sits at the
+/// script's top level (`own`) or directly inside a TOP-LEVEL `allprojects {` / `subprojects {` /
+/// `project('<path>') {` block (those scopes). Everything inside a direct block — nested closures
+/// included — is buffered per line and mined for coordinates exactly as before, in two forms:
+///   - **string form** — `implementation 'g:a:v'` / `api("g:a:v")`: any quoted token shaped
+///     `group:artifact[:version…]` contributes its group;
+///   - **map form** — `group: 'g', name: 'a'` / `group = "g", name = "a"`: the `group` value is
+///     captured ONLY when a `name` key is also present, so `exclude group: 'g', module: 'm'` is not.
 ///
-/// Buffering the in-block characters (rather than testing block state only at
-/// each line's START) is what lets a ONE-LINE block —
-/// `dependencies { implementation 'g:a:v' }` — be mined: the coordinate sits
-/// between the `{` and `}` on the same line, and only the text between them is
-/// buffered, so a coordinate-shaped token OUTSIDE the block on that line is not
-/// captured.
+/// The scan is verb-agnostic inside the block (every configuration verb is covered) and a
+/// one-line block is mined (only the text between its braces is buffered).
 ///
-/// The scan is verb-agnostic inside the block: any line with a valid coordinate
-/// is a dependency, so ALL configuration verbs (`implementation`, `api`,
-/// `compileOnly`, `runtimeOnly`, `testImplementation`, `checkstyle`,
-/// `annotationProcessor`, and project-defined custom configurations) are
-/// covered without an enumerated allowlist.
+/// Every OTHER `dependencies` block declares nothing — the index cannot establish that it applies
+/// to any project:
+///   - under a TOOLING head (`buildscript`, `pluginManagement`) or a TASK/EXTENSION head
+///     (`shadowJar`, `tasks.…`, `task <name>`, `task(<…>)`): the build tool's classpath or a
+///     shadow-jar filter — excluded SILENTLY (not a declaration site of any project);
+///   - anywhere else — under a condition (`if`/`else`), a callback (`afterEvaluate`,
+///     `plugins.withId(…)`, `gradle.projectsEvaluated`), control flow (`try`), a scope head below
+///     the top level (`subprojects { project(':x') { … } }`), any unlisted head, or with a
+///     receiver-qualified head (`subproject.dependencies {` — receivers are not resolved): COUNTED
+///     in [`GradleScriptScopes::undetermined_block_lines`], so an unknown head is over-marked,
+///     never silently lost (D-DGC-CONDITIONAL-1; `deps list` states the declared set may be
+///     incomplete).
 ///
-/// Returns `None` when the source is malformed or carries no coordinate:
-///   - an UNCLOSED dependencies block (a `dependencies {` with no matching `}`
-///     at end of input) — the block's extent is untrustworthy, so its
-///     coordinates are discarded rather than guessed (honest degradation);
-///   - no coordinate found at all (empty/absent `dependencies` block, or a
-///     script using only version catalogs / project deps).
+/// The cost of not declaring a counted block is a false NEGATIVE on the declared set — stated on
+/// `deps list`, never a fabricated declaration.
 ///
-/// Either way a broken or dependency-less leaf script yields no set, and the
-/// walk-up resolver treats that as "owns the manifest, empty deps" — never
-/// inherits a parent (same broken-leaf rule as cargo/npm).
+/// Returns `None` when:
+///   - a `dependencies` block (of any kind) is UNCLOSED at end of input — the block extents are
+///     untrustworthy, so nothing is trusted (honest degradation);
+///   - the script has neither a direct block carrying a coordinate nor a counted block (a
+///     buildscript-only script, an empty or catalog-only script).
 ///
 /// ## Known limitations (honest degradation, documented)
 ///   - Version catalogs (`implementation libs.guava` / `libraries.guava`),
 ///     `project(':core')` deps, and the `kotlin("stdlib")` helper carry no
-///     literal coordinate on the line → not resolved (no fabrication).
-///   - A subproject script does not inherit the root's `subprojects {}` /
-///     `allprojects {}` dependency blocks (nearest-manifest rule, same as the
-///     base cargo reader).
-///   - Brace tracking is not string-aware (matches the prior behavior): a
-///     `{`/`}` inside a coordinate's `${…}` version interpolation is balanced
-///     and harmless, but a lone brace inside a string literal would miscount.
-///     Coordinate strings never contain lone braces, so real dependency blocks
-///     are unaffected.
-pub fn extract_gradle_dependencies(content: &str) -> Option<PackageDependencySet> {
+///     literal coordinate on the line → not resolved (no fabrication; DEPS-GRADLE-CATALOG-1B).
+///   - A head is read from its own line only: an Allman-style `{` on the next line has an empty
+///     head, so a `dependencies` word on the line above it is not a block head (as before).
+///   - Brace tracking is not string-aware: a `{`/`}` inside a coordinate's `${…}` version
+///     interpolation is balanced and harmless, but a lone brace inside a string literal would
+///     miscount. Coordinate strings never contain lone braces.
+pub fn extract_gradle_dependencies(content: &str) -> Option<GradleScriptScopes> {
     let cleaned = strip_gradle_comments(content);
-    let mut names = BTreeSet::new();
+    let mut sets = ScopeSets::default();
+    let mut undetermined_block_lines: Vec<u32> = Vec::new();
 
-    // Brace stack: one bool per open `{`, true iff it opened a `dependencies`
-    // block. `deps_frames` counts the `true` frames on the stack, so it is > 0
-    // exactly while we are inside ≥1 dependencies block (nesting handled).
-    let mut brace_stack: Vec<bool> = Vec::new();
-    let mut deps_frames: usize = 0;
-    // In-block characters seen so far on the current line, flushed to the
-    // coordinate miner at each line boundary. Only the portion of a line inside
-    // a dependencies block is buffered — this is what makes a one-line block
-    // work and keeps out-of-block tokens on a block-opening line out.
+    let mut stack: Vec<GradleFrame> = Vec::new();
+    // The open DIRECT block: its stack index and the scope it declares for. At most one is open
+    // at a time — anything nested inside a direct block is its content.
+    let mut direct: Option<(usize, DirectScope)> = None;
+    // In-block characters of the open direct block seen so far on the current line, mined at each
+    // line boundary and when the direct block closes.
     let mut in_block_line = String::new();
-    // Word-boundary tracking for the sole purpose of tagging a `{` as a
-    // dependencies block: `cur_word` accumulates the current word, `last_word`
-    // holds the completed word immediately before the current position. Reset
-    // at each newline, preserving the documented "same-line `dependencies {`
-    // only" rule (an Allman-style `{` on the next line is not a deps block).
+    // Word-boundary tracking to recognize a `dependencies` head (`last_word` is the completed word
+    // immediately before the current position); reset at each newline (same-line heads only).
     let mut cur_word = String::new();
     let mut last_word = String::new();
+    // The text since the last `{`, `}`, `;` or newline — the head of the next `{`.
+    let mut head = String::new();
+    let mut line: u32 = 1;
 
     for ch in cleaned.chars() {
         match ch {
             '\n' => {
-                if !in_block_line.is_empty() {
-                    extract_gradle_coordinates(&in_block_line, &mut names);
-                    in_block_line.clear();
+                if let Some((_, scope)) = &direct {
+                    sets.mine(&mut in_block_line, scope);
                 }
                 cur_word.clear();
                 last_word.clear();
+                head.clear();
+                line += 1;
             }
             '{' => {
                 if !cur_word.is_empty() {
                     last_word = std::mem::take(&mut cur_word);
                 }
-                let is_deps = last_word == "dependencies";
-                brace_stack.push(is_deps);
-                if is_deps {
-                    deps_frames += 1;
+                let is_dependencies_head = last_word == "dependencies";
+                let frame_head = head.trim().to_string();
+                head.clear();
+                if is_dependencies_head && direct.is_none() {
+                    match direct_scope(&frame_head, &stack) {
+                        Some(scope) => direct = Some((stack.len(), scope)),
+                        None => {
+                            let excluded = stack
+                                .iter()
+                                .any(|f| is_tooling_head(&f.head) || is_task_head(&f.head));
+                            if !excluded {
+                                undetermined_block_lines.push(line);
+                            }
+                        }
+                    }
                 }
+                stack.push(GradleFrame {
+                    head: frame_head,
+                    is_dependencies_head,
+                });
                 last_word.clear();
             }
             '}' => {
                 if !cur_word.is_empty() {
                     last_word = std::mem::take(&mut cur_word);
                 }
-                if let Some(was_deps) = brace_stack.pop() {
-                    if was_deps {
-                        deps_frames = deps_frames.saturating_sub(1);
+                if stack.pop().is_some() {
+                    if let Some((depth, scope)) = &direct {
+                        if *depth == stack.len() {
+                            sets.mine(&mut in_block_line, scope);
+                            direct = None;
+                        }
                     }
                 }
                 last_word.clear();
+                head.clear();
             }
             c => {
                 if c.is_ascii_alphanumeric() || c == '_' {
@@ -570,30 +715,43 @@ pub fn extract_gradle_dependencies(content: &str) -> Option<PackageDependencySet
                 } else if !cur_word.is_empty() {
                     last_word = std::mem::take(&mut cur_word);
                 }
-                if deps_frames > 0 {
+                if direct.is_some() {
                     in_block_line.push(c);
+                }
+                if c == ';' {
+                    head.clear();
+                } else {
+                    head.push(c);
                 }
             }
         }
     }
     // Flush a trailing (newline-less) final line.
-    if !in_block_line.is_empty() {
-        extract_gradle_coordinates(&in_block_line, &mut names);
+    if let Some((_, scope)) = &direct {
+        sets.mine(&mut in_block_line, scope);
     }
 
-    // An unclosed dependencies block (still inside one at end of input) is
-    // malformed: the block's extent is untrustworthy, so discard everything and
-    // degrade honestly rather than trust coordinates from a block whose end we
-    // had to guess.
-    if deps_frames > 0 {
+    // An unclosed `dependencies` block (still open at end of input) is malformed: its extent is
+    // untrustworthy, so discard everything rather than trust coordinates from a guessed end.
+    if stack.iter().any(|f| f.is_dependencies_head) {
         return None;
     }
-    if names.is_empty() {
+    let scopes = GradleScriptScopes {
+        own: sets.own.into_iter().collect(),
+        allprojects: sets.allprojects.into_iter().collect(),
+        subprojects: sets.subprojects.into_iter().collect(),
+        projects: sets
+            .projects
+            .into_iter()
+            .filter(|(_, groups)| !groups.is_empty())
+            .map(|(path, groups)| (path, groups.into_iter().collect()))
+            .collect(),
+        undetermined_block_lines,
+    };
+    if scopes.is_empty() {
         return None;
     }
-    Some(PackageDependencySet {
-        names: names.into_iter().collect(),
-    })
+    Some(scopes)
 }
 
 /// Extract dependency group ids from one comment-free line inside a
@@ -1293,7 +1451,7 @@ dependencies {
 "#;
         let deps = extract_gradle_dependencies(content).unwrap();
         assert_eq!(
-            deps.names,
+            deps.own,
             vec![
                 "io.spring.javaformat",
                 "jakarta.xml.bind",
@@ -1328,7 +1486,7 @@ dependencies {
 "#;
         let deps = extract_gradle_dependencies(content).unwrap();
         assert_eq!(
-            deps.names,
+            deps.own,
             vec![
                 "g.annotationprocessor",
                 "g.api",
@@ -1355,10 +1513,10 @@ dependencies {
 }
 "#;
         let deps = extract_gradle_dependencies(content).unwrap();
-        assert_eq!(deps.names, vec!["com.google.guava"]);
-        assert!(!deps.names.contains(&"guava".to_string()));
+        assert_eq!(deps.own, vec!["com.google.guava"]);
+        assert!(!deps.own.contains(&"guava".to_string()));
         assert!(!deps
-            .names
+            .own
             .contains(&"com.google.guava:guava:31.0".to_string()));
     }
 
@@ -1374,7 +1532,7 @@ dependencies {
 "#;
         let deps = extract_gradle_dependencies(content).unwrap();
         assert_eq!(
-            deps.names,
+            deps.own,
             vec!["io.grpc", "org.junit.jupiter", "org.springframework.boot"]
         );
     }
@@ -1389,7 +1547,7 @@ dependencies {
 }
 "#;
         assert_eq!(
-            extract_gradle_dependencies(groovy).unwrap().names,
+            extract_gradle_dependencies(groovy).unwrap().own,
             vec!["com.google.guava"]
         );
 
@@ -1399,7 +1557,7 @@ dependencies {
 }
 "#;
         assert_eq!(
-            extract_gradle_dependencies(kotlin).unwrap().names,
+            extract_gradle_dependencies(kotlin).unwrap().own,
             vec!["org.apache.commons"]
         );
     }
@@ -1417,9 +1575,9 @@ dependencies {
 }
 "#;
         let deps = extract_gradle_dependencies(content).unwrap();
-        assert_eq!(deps.names, vec!["org.mockito"]);
+        assert_eq!(deps.own, vec!["org.mockito"]);
         assert!(
-            !deps.names.contains(&"net.bytebuddy".to_string()),
+            !deps.own.contains(&"net.bytebuddy".to_string()),
             "excluded group must not be captured as a declared dependency"
         );
     }
@@ -1459,9 +1617,9 @@ dependencies {
 }
 "#;
         let deps = extract_gradle_dependencies(content).unwrap();
-        assert_eq!(deps.names, vec!["real"]);
-        assert!(!deps.names.iter().any(|n| n == "commented"));
-        assert!(!deps.names.iter().any(|n| n == "not"));
+        assert_eq!(deps.own, vec!["real"]);
+        assert!(!deps.own.iter().any(|n| n == "commented"));
+        assert!(!deps.own.iter().any(|n| n == "not"));
     }
 
     /// Only coordinates INSIDE a `dependencies { … }` block are mined: plugin
@@ -1481,17 +1639,16 @@ dependencies {
 }
 "#;
         let deps = extract_gradle_dependencies(content).unwrap();
-        assert_eq!(deps.names, vec!["org.real"]);
+        assert_eq!(deps.own, vec!["org.real"]);
         // Plugin id (no colon), project group (no colon), and the repo URL
         // (`https` split, artifact segment has `/`) are all excluded.
-        assert!(!deps.names.iter().any(|n| n == "https"));
-        assert!(!deps
-            .names
-            .iter()
-            .any(|n| n == "org.springframework.samples"));
+        assert!(!deps.own.iter().any(|n| n == "https"));
+        assert!(!deps.own.iter().any(|n| n == "org.springframework.samples"));
     }
 
-    /// A dependencies block nested under `subprojects { … }` is still mined.
+    /// A dependencies block nested under `subprojects { … }` is still mined — into the
+    /// `subprojects` scope, NOT the script's own (DEPS-GRADLE-CATALOG-1A, stated expectation
+    /// change: RG-REQ-006-L13 — a `subprojects` block does not declare for the root project).
     #[test]
     fn gradle_nested_subprojects_block() {
         let content = r#"
@@ -1501,9 +1658,12 @@ subprojects {
     }
 }
 "#;
-        assert_eq!(
-            extract_gradle_dependencies(content).unwrap().names,
-            vec!["io.grpc"]
+        let scopes = extract_gradle_dependencies(content).unwrap();
+        assert_eq!(scopes.subprojects, vec!["io.grpc"]);
+        assert!(
+            scopes.own.is_empty(),
+            "a subprojects block never declares for the script's own project, got {:?}",
+            scopes.own
         );
     }
 
@@ -1527,7 +1687,7 @@ subprojects {
         assert_eq!(
             extract_gradle_dependencies("dependencies { implementation 'com.example:lib:1.0' }\n")
                 .unwrap()
-                .names,
+                .own,
             vec!["com.example"]
         );
         // Kotlin DSL, parens + double quotes, no trailing newline (final flush).
@@ -1536,7 +1696,7 @@ subprojects {
                 "dependencies { implementation(\"io.grpc:grpc-core:1.60\") }"
             )
             .unwrap()
-            .names,
+            .own,
             vec!["io.grpc"]
         );
         // A coordinate-shaped token OUTSIDE the block, on the same line as the
@@ -1546,7 +1706,7 @@ subprojects {
                 "task x { doFirst { println 'a:b:c' } } ; dependencies { implementation 'org.real:d:1.0' }\n"
             )
             .unwrap()
-            .names,
+            .own,
             vec!["org.real"],
             "only the in-block coordinate is mined, not the one in the task closure"
         );
@@ -1565,9 +1725,344 @@ subprojects {
         );
         let closed = "dependencies {\n    implementation 'com.example:lib:1.0'\n}\n";
         assert_eq!(
-            extract_gradle_dependencies(closed).unwrap().names,
+            extract_gradle_dependencies(closed).unwrap().own,
             vec!["com.example"]
         );
+    }
+
+    // ── DEPS-GRADLE-CATALOG-1A: scope-aware extraction (RG-REQ-006-L13) ──
+
+    fn scopes(content: &str) -> GradleScriptScopes {
+        extract_gradle_dependencies(content).expect("script yields scopes")
+    }
+
+    /// A `buildscript { dependencies { classpath … } }` block is the build tool's classpath, never
+    /// a declaration of any project — beside a real top-level block only the real block is
+    /// declared (kafka build.gradle:25-28), also when the buildscript sits under `allprojects`.
+    #[test]
+    fn gradle_buildscript_dependencies_are_never_declared() {
+        let content = r#"
+buildscript {
+  dependencies {
+    classpath "org.ajoberstar.grgit:grgit-core:$versions.grgit"
+  }
+}
+allprojects {
+  buildscript {
+    dependencies {
+      classpath 'com.tool:plugin:1.0'
+    }
+  }
+}
+dependencies {
+  implementation 'org.real:dep:1.0'
+}
+"#;
+        let s = scopes(content);
+        assert_eq!(s.own, vec!["org.real"]);
+        assert!(s.allprojects.is_empty(), "{:?}", s.allprojects);
+        assert!(s.subprojects.is_empty() && s.projects.is_empty());
+        assert!(
+            s.undetermined_block_lines.is_empty(),
+            "a tooling classpath block is excluded by name, never counted: {:?}",
+            s.undetermined_block_lines
+        );
+    }
+
+    /// `pluginManagement { dependencies { … } }` (settings-style tooling classpath) likewise.
+    #[test]
+    fn gradle_plugin_management_dependencies_are_never_declared() {
+        let content = r#"
+pluginManagement {
+    dependencies {
+        classpath("com.plugin:thing:2.0")
+    }
+}
+dependencies {
+    implementation("org.real:dep:1.0")
+}
+"#;
+        let s = scopes(content);
+        assert_eq!(s.own, vec!["org.real"]);
+        assert!(s.undetermined_block_lines.is_empty());
+    }
+
+    /// A `dependencies` block at the script's top level is the script's OWN project scope.
+    #[test]
+    fn gradle_top_level_block_is_the_scripts_own_scope() {
+        let s = scopes("dependencies {\n  implementation 'org.own:a:1'\n}\n");
+        assert_eq!(s.own, vec!["org.own"]);
+        assert!(s.allprojects.is_empty() && s.subprojects.is_empty() && s.projects.is_empty());
+    }
+
+    /// A direct child of a top-level `allprojects {` block lands in the `allprojects` scope only.
+    #[test]
+    fn gradle_allprojects_block_is_recorded_in_the_allprojects_scope() {
+        let s =
+            scopes("allprojects {\n  dependencies {\n    implementation 'org.all:a:1'\n  }\n}\n");
+        assert_eq!(s.allprojects, vec!["org.all"]);
+        assert!(s.own.is_empty() && s.subprojects.is_empty() && s.projects.is_empty());
+    }
+
+    /// A direct child of a top-level `subprojects {` block lands in the `subprojects` scope only.
+    #[test]
+    fn gradle_subprojects_block_is_recorded_in_the_subprojects_scope() {
+        let s =
+            scopes("subprojects {\n  dependencies {\n    implementation 'org.sub:a:1'\n  }\n}\n");
+        assert_eq!(s.subprojects, vec!["org.sub"]);
+        assert!(s.own.is_empty() && s.allprojects.is_empty() && s.projects.is_empty());
+    }
+
+    /// A top-level `project('<path>') {` block keys its direct `dependencies` under the Gradle path
+    /// AS WRITTEN — both quote styles and the Kotlin form; a relative path stays relative; and
+    /// `from(project(':tools').jar) { … }` is not a scope head (the `{` does not follow the call).
+    #[test]
+    fn gradle_project_block_is_recorded_under_its_gradle_path() {
+        let content = r#"
+project(':a:b') {
+  dependencies {
+    implementation 'org.ab.single:x:1'
+  }
+}
+project(":a:b") {
+  dependencies {
+    implementation "org.ab.double:x:1"
+  }
+}
+project('b') {
+  dependencies {
+    implementation 'org.rel:x:1'
+  }
+}
+tasks.register('dist') {
+  from(project(':tools').jar) {
+    into 'lib'
+  }
+}
+"#;
+        let s = scopes(content);
+        assert_eq!(
+            s.projects.get(":a:b").cloned().unwrap_or_default(),
+            vec!["org.ab.double", "org.ab.single"]
+        );
+        assert_eq!(
+            s.projects.get("b").cloned().unwrap_or_default(),
+            vec!["org.rel"]
+        );
+        assert!(!s.projects.contains_key(":tools"), "{:?}", s.projects);
+        assert_eq!(s.projects.len(), 2, "{:?}", s.projects);
+        assert!(s.own.is_empty());
+
+        let kts = scopes("project(\":a:b\") {\n    dependencies {\n        implementation(\"org.kts:x:1\")\n    }\n}\n");
+        assert_eq!(
+            kts.projects.get(":a:b").cloned().unwrap_or_default(),
+            vec!["org.kts"]
+        );
+    }
+
+    /// A `dependencies` block under any enclosing block other than the three scope heads — a
+    /// condition, a callback, a plugin hook, a task or a plugin extension — declares NOTHING: the
+    /// index cannot establish that it applies.
+    #[test]
+    fn gradle_dependencies_under_any_other_block_are_never_declared() {
+        let content = r#"
+if (x) {
+  dependencies {
+    implementation 'org.cond:a:1'
+  }
+}
+afterEvaluate {
+  dependencies {
+    implementation 'org.after:a:1'
+  }
+}
+subprojects {
+  plugins.withId("java") {
+    dependencies {
+      implementation 'org.withid:a:1'
+    }
+  }
+}
+project(':c') {
+  shadowJar {
+    dependencies {
+      include(dependency('org.shadow:a:1'))
+    }
+  }
+}
+task t {
+  dependencies {
+    implementation 'org.task:a:1'
+  }
+}
+dependencies {
+  implementation 'org.real:a:1'
+}
+"#;
+        let s = scopes(content);
+        assert_eq!(s.own, vec!["org.real"]);
+        assert!(s.allprojects.is_empty(), "{:?}", s.allprojects);
+        assert!(s.subprojects.is_empty(), "{:?}", s.subprojects);
+        assert!(s.projects.is_empty(), "{:?}", s.projects);
+    }
+
+    /// A scope head that is itself NOT at the top level is never attributed (never guessed).
+    #[test]
+    fn gradle_scope_heads_below_the_top_level_are_never_attributed() {
+        let content = r#"
+subprojects {
+  project(':x') {
+    dependencies {
+      implementation 'org.nested:a:1'
+    }
+  }
+}
+if (c) {
+  subprojects {
+    dependencies {
+      implementation 'org.condsub:a:1'
+    }
+  }
+}
+"#;
+        let s = scopes(content);
+        assert!(s.own.is_empty(), "{:?}", s.own);
+        assert!(s.subprojects.is_empty(), "{:?}", s.subprojects);
+        assert!(s.allprojects.is_empty(), "{:?}", s.allprojects);
+        assert!(s.projects.is_empty(), "{:?}", s.projects);
+    }
+
+    /// D-DGC-CONDITIONAL-1 (RG-REQ-002-L11): a `dependencies` block the index cannot evaluate is
+    /// COUNTED with its 1-based line, in line order, never dropped silently — and a direct block
+    /// beside it is still declared.
+    #[test]
+    fn gradle_evaluation_dependent_blocks_are_counted_with_their_lines() {
+        let content = "dependencies {\n\
+  implementation 'org.direct:a:1'\n\
+}\n\
+if (x) {\n\
+  dependencies {\n\
+    implementation 'org.c1:a:1'\n\
+  }\n\
+}\n\
+afterEvaluate {\n\
+  dependencies {\n\
+    implementation 'org.c2:a:1'\n\
+  }\n\
+}\n\
+plugins.withId(\"java\") {\n\
+  dependencies {\n\
+    implementation 'org.c3:a:1'\n\
+  }\n\
+}\n\
+gradle.projectsEvaluated {\n\
+  dependencies {\n\
+    implementation 'org.c4:a:1'\n\
+  }\n\
+}\n\
+subprojects {\n\
+  plugins.withId(\"java\") {\n\
+    try {\n\
+      dependencies {\n\
+        implementation 'org.c5:a:1'\n\
+      }\n\
+    } finally {\n\
+    }\n\
+  }\n\
+}\n";
+        let s = scopes(content);
+        assert_eq!(s.undetermined_block_lines, vec![5, 10, 15, 20, 27]);
+        assert_eq!(s.own, vec!["org.direct"]);
+        assert!(s.subprojects.is_empty(), "{:?}", s.subprojects);
+    }
+
+    /// The two closed exclusion lists — tooling (`buildscript`, `pluginManagement`) and
+    /// task/extension (`shadowJar`, `tasks.…`, `task <name>`) — are never counted; a
+    /// buildscript-only script is `None` (neither a direct coordinate nor a counted block).
+    #[test]
+    fn gradle_tooling_and_task_blocks_are_not_counted() {
+        let content = r#"
+buildscript {
+  dependencies {
+    classpath 'g:a:1'
+  }
+}
+pluginManagement {
+  dependencies {
+    classpath 'g:b:1'
+  }
+}
+shadowJar {
+  dependencies {
+    include(dependency('g:c:1'))
+  }
+}
+tasks.named("shadowJar").configure {
+  dependencies {
+    exclude(dependency('g:d:1'))
+  }
+}
+task t {
+  dependencies {
+    implementation 'g:e:1'
+  }
+}
+dependencies {
+  implementation 'org.real:a:1'
+}
+"#;
+        let s = scopes(content);
+        assert!(
+            s.undetermined_block_lines.is_empty(),
+            "{:?}",
+            s.undetermined_block_lines
+        );
+        assert_eq!(s.own, vec!["org.real"]);
+        assert!(
+            extract_gradle_dependencies(
+                "buildscript {\n  dependencies {\n    classpath 'g:a:1'\n  }\n}\n"
+            )
+            .is_none(),
+            "a buildscript-only script declares nothing and counts nothing"
+        );
+    }
+
+    /// A receiver-qualified head (`<expr>.dependencies {`) is never direct (receivers are not
+    /// resolved) and is counted; so is a composed scope head. None of them declares a group.
+    #[test]
+    fn gradle_receiver_qualified_and_composed_scope_blocks_are_counted_never_declared() {
+        let content = "subprojects {\n\
+  afterEvaluate { subproject ->\n\
+    if (c) {\n\
+      subproject.dependencies {\n\
+        mockitoAgent 'g:a:1'\n\
+      }\n\
+    }\n\
+  }\n\
+}\n\
+rootProject.dependencies {\n\
+  implementation 'g:b:1'\n\
+}\n\
+subprojects {\n\
+  project(':x') {\n\
+    dependencies {\n\
+      implementation 'g:c:1'\n\
+    }\n\
+  }\n\
+}\n\
+if (c) {\n\
+  subprojects {\n\
+    dependencies {\n\
+      implementation 'g:d:1'\n\
+    }\n\
+  }\n\
+}\n";
+        let s = scopes(content);
+        assert_eq!(s.undetermined_block_lines, vec![4, 10, 15, 22]);
+        assert!(s.own.is_empty(), "{:?}", s.own);
+        assert!(s.allprojects.is_empty(), "{:?}", s.allprojects);
+        assert!(s.subprojects.is_empty(), "{:?}", s.subprojects);
+        assert!(s.projects.is_empty(), "{:?}", s.projects);
     }
 
     // ── RepoConfigContext for Gradle ─────────────────────────

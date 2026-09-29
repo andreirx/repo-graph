@@ -42,8 +42,8 @@ pub use deps::{
     deps_runtime_builtins, normalize_cargo_specifier, normalize_npm_specifier,
     npm_runtime_builtins, reconcile_module_dependencies, resolve_import_specifier,
     ComposeDependenciesInput, ComposeDependenciesResult, DependencyCategory, DependencyEntry,
-    DriftEntry, DriftKind, ManifestContext, ManifestProvenance, ModuleDependencySummary,
-    PackageUsage, ProvenanceRead, ReconcileInput,
+    DriftEntry, DriftKind, ManifestContext, ManifestErrorKind, ManifestProvenance,
+    ModuleDependencySummary, PackageUsage, ProvenanceRead, ReconcileInput, UndeterminedBlocks,
 };
 pub use facts::{load_module_graph_facts, ModuleGraphFacts, ModuleQueryError};
 pub use violations::{evaluate_violations_from_facts, DiscoveredModuleViolationsResult};

@@ -95,6 +95,7 @@ const RECOGNIZED_CONFIGS: &[&str] = &[
     "build.gradle",
     "build.gradle.kts",
     "settings.gradle",
+    "settings.gradle.kts",
     "pyproject.toml",
     "compile_commands.json",
 ];
@@ -369,6 +370,35 @@ mod tests {
             plan.counts.unchanged, 1,
             "other/…/Other.java is out of the app/ scope and stays unchanged"
         );
+    }
+
+    /// DEPS-GRADLE-CATALOG-1A (RG-REQ-006-L13, refresh half): the ROOT settings file is an input of
+    /// every Java file's declared set (it maps Gradle paths to project directories), so a changed
+    /// Kotlin-DSL `settings.gradle.kts` widens the refresh to every unchanged file, exactly as a
+    /// changed `settings.gradle` does — the declared set never lags its settings input.
+    #[test]
+    fn settings_gradle_kts_change_widens_all_unchanged() {
+        let parent = make_parent_hashes(
+            &[
+                ("settings.gradle.kts", "old"),
+                ("a/src/main/java/A.java", "h1"),
+                ("b/src/main/java/B.java", "h2"),
+            ],
+            "r1",
+        );
+        let current = vec![
+            make_current("settings.gradle.kts", "new", "r1"),
+            make_current("a/src/main/java/A.java", "h1", "r1"),
+            make_current("b/src/main/java/B.java", "h2", "r1"),
+        ];
+        let plan = build_invalidation_plan("snap1", &parent, &current, "r1");
+        assert_eq!(plan.counts.changed, 1, "settings.gradle.kts itself changed");
+        assert_eq!(
+            plan.counts.config_widened, 2,
+            "a changed root settings.gradle.kts re-extracts every unchanged file"
+        );
+        assert_eq!(plan.counts.unchanged, 0);
+        assert!(plan.files_to_copy.is_empty());
     }
 
     #[test]

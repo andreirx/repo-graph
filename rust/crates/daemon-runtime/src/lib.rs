@@ -83,6 +83,7 @@ mod surface_coverage_read; // ZEROSTATE-SCOPE-1 §2.1/§2.2: the ONE per-repo su
 pub(crate) mod deps_coverage; // DEPS-ATTRIB-2 §2.3: manifest-coverage split (extracted per review-1 item 5)
 pub(crate) mod deps_ecosystem_presence; // DEPS-ATTRIB-2 §2.4: secondary-ecosystem truth (extracted per review-1 item 5)
 pub(crate) mod deps_headline;
+pub(crate) mod deps_undetermined; // DEPS-GRADLE-CATALOG-1A: the declared-set marking (D-DGC-CONDITIONAL-1)
 mod find_facts; // FIND-FACTS-1: the `find` verb's deterministic FACTS tier (crate-private)
 pub(crate) mod find_text; // FIND-GREP-1: the `find --text` live working-tree scan (grep/ignore reuse); crate-private — sole caller is `dispatch_seed::handle_find` (review-2 finding 3)
 pub(crate) mod index_basis_probe;

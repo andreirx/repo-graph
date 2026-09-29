@@ -3010,7 +3010,10 @@ fn persist_cargo_modules(
 /// any module prefix are not assigned (no ownership row).
 ///
 /// Algorithm:
-/// 1. Sort modules by canonical_root_path length descending (longest first)
+/// 1. Sort modules by canonical_root_path length descending (longest first), the repo root `.`
+///    ranked LAST (as length 0): it matches every file, so at length 1 it would tie with a
+///    one-character module directory (`a`) and the stable sort would let input order hand `a`'s
+///    files to the root (D-DGC-BOUNDARY-1 (7)). Every other root keeps its length and order.
 /// 2. For each file, find the first module whose path is a prefix
 /// 3. Create ownership record with assignment_kind = "manifest_prefix"
 fn compute_cargo_file_ownership(
@@ -3034,7 +3037,8 @@ fn compute_cargo_file_ownership(
             )
         })
         .collect();
-    sorted_modules.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    let rank = |root: &str| if root == "." { 0 } else { root.len() };
+    sorted_modules.sort_by(|a, b| rank(b.0).cmp(&rank(a.0)));
 
     let mut ownership = Vec::new();
 
@@ -6262,5 +6266,62 @@ public class AppConfig {
             modules2[0].module_key.contains(":src"),
             "remaining module should be src"
         );
+    }
+
+    // ── D-DGC-BOUNDARY-1 (7): the repo root ranks last in file ownership ──────
+
+    /// The repo root `.` matches every file; it must never tie with a
+    /// one-character module directory (`a`) and win by input order. Files under
+    /// `a/` are owned by `a`, every other file by `.`, whatever the candidates'
+    /// order; `ab/…` is not under `a` (segment boundary).
+    #[test]
+    fn file_ownership_ranks_the_repo_root_last_so_a_one_character_module_owns_its_files() {
+        let cand = |root: &str| CargoModuleCandidateInput {
+            module_candidate_uid: format!("m:{root}"),
+            snapshot_uid: "s1".to_string(),
+            repo_uid: "r1".to_string(),
+            module_key: format!("test:r1:{root}"),
+            module_kind: "declared".to_string(),
+            canonical_root_path: root.to_string(),
+            confidence: 1.0,
+            display_name: root.to_string(),
+            metadata_json: None,
+        };
+        let file = |p: &str| FileInput {
+            rel_path: p.to_string(),
+            content: String::new(),
+            content_hash: String::new(),
+            size_bytes: 0,
+            line_count: 0,
+            package_dependencies: None,
+            tsconfig_aliases: None,
+        };
+        let files = vec![
+            file("a/src/main/java/app/A.java"),
+            file("a/lib.rs"),
+            file("b/src/B.java"),
+            file("ab/C.java"),
+            file("Root.java"),
+        ];
+        let expected: Vec<(String, String)> = vec![
+            ("r1:a/src/main/java/app/A.java".into(), "m:a".into()),
+            ("r1:a/lib.rs".into(), "m:a".into()),
+            ("r1:b/src/B.java".into(), "m:.".into()),
+            ("r1:ab/C.java".into(), "m:.".into()),
+            ("r1:Root.java".into(), "m:.".into()),
+        ];
+        for order in [vec![cand("."), cand("a")], vec![cand("a"), cand(".")]] {
+            let first = order[0].canonical_root_path.clone();
+            let rows = compute_cargo_file_ownership("r1", "s1", &order, &files);
+            let got: Vec<(String, String)> = rows
+                .iter()
+                .map(|r| (r.file_uid.clone(), r.module_candidate_uid.clone()))
+                .collect();
+            assert_eq!(
+                got, expected,
+                "one ownership row per file; `a/…` owned by `a`, the rest by `.` \
+                 (candidates given with `{first}` first)"
+            );
+        }
     }
 }
