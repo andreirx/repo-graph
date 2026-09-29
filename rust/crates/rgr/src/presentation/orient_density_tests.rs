@@ -653,3 +653,111 @@ fn complexity_scope_malformed_renders_the_unreadable_line() {
         );
     }
 }
+
+// ── TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): undetermined ranked files ──
+
+#[test]
+fn complexity_headline_states_undetermined_files_after_the_scope_clause() {
+    use serde_json::json;
+    let top: Vec<_> = (0..4)
+        .map(|i| json!({"symbol": format!("fn{i}"), "file": format!("src/f{i}.c"), "complexity": 40 - i}))
+        .collect();
+    let r = complexity_fixture(json!({
+        "high_complexity_count": 12,
+        "threshold": 20,
+        "top_complex": top,
+        "scope": {"kind": "production", "excluded_count": 10,
+                  "test_status_undetermined": {"count": 2,
+                      "paths": ["CppUnit/src/TestRunner.cpp", "Data/DataTest/src/SQLExecutor.cpp"],
+                      "universe": "ranked_files", "universe_count": 9, "unknown_count": 0}}
+    }));
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains(
+            "(+9 more above threshold — rmap hotspots; 10 generated/vendored/test symbols excluded — \
+             --include-all; 2 files whose test status can't be determined — open them and look \
+             inside (of 9 ranked files))"
+        ),
+        "the undetermined part follows the scope clause in the one parenthetical:\n{out}"
+    );
+}
+
+#[test]
+fn complexity_breakdown_states_undetermined_files() {
+    use serde_json::json;
+    let top: Vec<_> = (0..4)
+        .map(|i| json!({"symbol": format!("fn{i}"), "file": format!("src/f{i}.c"), "complexity": 40 - i}))
+        .collect();
+    let r = complexity_fixture(json!({
+        "high_complexity_count": 4,
+        "threshold": 20,
+        "top_complex": top,
+        "scope": {"kind": "production", "excluded_count": 10,
+                  "test_status_undetermined": {"count": 1, "paths": ["src/f1_test.c"],
+                      "universe": "ranked_files", "universe_count": 4, "unknown_count": 0}}
+    }));
+    let out = r.render_human(OrientDepth::Full);
+    let lines: Vec<&str> = out.lines().collect();
+    let scope = lines
+        .iter()
+        .position(|l| l.contains("- 10 generated/vendored/test symbols excluded — --include-all"))
+        .expect(&out);
+    assert!(
+        lines[scope + 1].contains(
+            "- 1 file whose test status can't be determined — open it and look inside (of 4 ranked files)"
+        ),
+        "the bullet follows the scope bullet:\n{out}"
+    );
+}
+
+#[test]
+fn orient_package_groups_state_undetermined_grouped_files() {
+    use serde_json::json;
+    let groups = json!([
+        {"name": "db", "file_count": 40, "test_file_count": 9},
+        {"name": "util", "file_count": 20, "test_file_count": 3},
+    ]);
+    let block = json!({"count": 4,
+        "paths": ["db/c_test.c", "util/env_posix_test_helper.h",
+                  "util/env_windows_test_helper.h", "util/testutil.cc"],
+        "universe": "grouped_files", "universe_count": 48, "unknown_count": 0});
+    let mut r = nginx_like();
+    for leaf in &mut r.signals {
+        if leaf.value.code == "MODULE_SUMMARY" {
+            if let Some(ev) = leaf.value.evidence.as_mut() {
+                ev["package_groups"] = groups.clone();
+                ev["package_groups_test_status_undetermined"] = block.clone();
+            }
+        }
+    }
+    let out = r.render_human(OrientDepth::Full);
+    let section = out
+        .split("Package groups (directory/package topology")
+        .nth(1)
+        .expect("package-groups section present");
+    let line = "- 4 files whose test status can't be determined — open them and look inside \
+                (of 48 grouped files)";
+    let pos = section.find(line).expect(&out);
+    assert!(
+        pos > section.find("util — ").expect("group row"),
+        "the line closes the package-groups section:\n{section}"
+    );
+    assert_eq!(
+        out.matches("whose test status can't be determined").count(),
+        1,
+        "{out}"
+    );
+    // An older daemon (no block) renders nothing new.
+    for leaf in &mut r.signals {
+        if leaf.value.code == "MODULE_SUMMARY" {
+            if let Some(ev) = leaf.value.evidence.as_mut() {
+                ev.as_object_mut()
+                    .unwrap()
+                    .remove("package_groups_test_status_undetermined");
+            }
+        }
+    }
+    assert!(!r
+        .render_human(OrientDepth::Full)
+        .contains("whose test status can't be determined"));
+}

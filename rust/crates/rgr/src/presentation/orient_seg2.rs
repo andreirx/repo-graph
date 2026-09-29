@@ -82,6 +82,10 @@ pub struct HttpSurfaces {
     pub test_status_unknown: u64,
     #[serde(default)]
     pub unavailable: Option<String>,
+    /// TEST-EDGE-SCOPE-1A: the undetermined-files block over the SAME production rows (the
+    /// block `surfaces list` states). Absent on an older daemon → no clause.
+    #[serde(default)]
+    pub test_status_undetermined: Option<serde_json::Value>,
 }
 
 /// MODULE-EDGES-1 §2.3: reader-side mirror of the daemon's injected top cross-module
@@ -204,12 +208,21 @@ impl OrientResponse {
             // (or kept-but-unknown in) the headline counts — the SAME shape `cycles` and the
             // `surfaces` command render, so the reader sees one story. No clause when there is
             // nothing to disclose ⇒ byte-identical on a repo with no test/unknown surfaces.
-            let disclosure = match crate::presentation::surface_exclusion_clause(
+            // TEST-EDGE-SCOPE-1A: the undetermined files among the production surfaces join the
+            // same disclosure (one parenthetical, `; `-joined).
+            let clauses: Vec<String> = crate::presentation::surface_exclusion_clause(
                 http.test_fixture_excluded,
                 http.test_status_unknown,
-            ) {
-                Some(c) => format!(" ({c})"),
-                None => String::new(),
+            )
+            .into_iter()
+            .chain(super::test_status::undetermined_files_line(
+                http.test_status_undetermined.as_ref(),
+            ))
+            .collect();
+            let disclosure = if clauses.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", clauses.join("; "))
             };
             // Render the headline when there ARE production surfaces (`total > 0`) OR when the only
             // surfaces are test fixtures we excluded (`total == 0` but a disclosure exists). A

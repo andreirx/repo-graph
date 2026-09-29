@@ -83,6 +83,8 @@ pub mod reliability;
 pub mod seed;
 pub mod stats;
 pub mod surfaces;
+// TEST-EDGE-SCOPE-1A: the ONE home of the UNDETERMINED test-status wording + universe nouns.
+pub(crate) mod test_status;
 pub mod trust;
 // TOOLCHAIN-STALENESS-1: the orient/check toolchain-stamp status line.
 pub(crate) mod toolchain_staleness;
@@ -580,7 +582,7 @@ mod http_count_coherence {
         let (p, c) = counts(&rows);
 
         // 1) surfaces list — parse the footer phrase.
-        let surfaces_out = render_surfaces(&to_surfaces_entries(&rows));
+        let surfaces_out = render_surfaces(&to_surfaces_entries(&rows), None);
         let footer = surfaces_out
             .lines()
             .find(|l| l.starts_with('—'))
@@ -613,6 +615,7 @@ mod http_count_coherence {
             test_only: Additive::Absent,
             unknown: Additive::Absent,
             surface_coverage: Default::default(),
+            test_status_undetermined: None,
         };
         let summary_out = summary.render_human();
         let http_line = summary_out
@@ -641,6 +644,7 @@ mod http_count_coherence {
             filter_file_prefix: None,
             filter_symbol: None,
             surface_coverage: Default::default(),
+            test_status_undetermined: None,
         };
         let list_out = list.render_human();
         let (mut lp, mut lc) = (0usize, 0usize);

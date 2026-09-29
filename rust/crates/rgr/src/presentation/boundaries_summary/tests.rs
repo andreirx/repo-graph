@@ -81,6 +81,7 @@ fn sample_summary_response() -> BoundariesSummaryResponse {
         test_only: partition::Additive::Absent,
         unknown: partition::Additive::Absent,
         surface_coverage: sample_coverage(),
+        test_status_undetermined: None,
     }
 }
 
@@ -95,6 +96,7 @@ fn sample_empty_summary_response() -> BoundariesSummaryResponse {
         test_only: partition::Additive::Absent,
         unknown: partition::Additive::Absent,
         surface_coverage: sample_coverage(),
+        test_status_undetermined: None,
         summary: Some(BoundarySummary {
             total_surfaces: 0,
             total_channels: 0,
@@ -386,4 +388,25 @@ fn summary_render_sorts_by_count_desc() {
         http_pos < db_pos,
         "Categories should be sorted by count descending"
     );
+}
+
+// ── TEST-EDGE-SCOPE-1A (RG-REQ-001-L07) ──
+
+#[test]
+fn boundaries_summary_states_undetermined_files_after_the_disclosure() {
+    let mut resp = sample_summary_response();
+    let before = resp.render_human();
+    resp.test_status_undetermined = Some(serde_json::json!({
+        "count": 1, "paths": ["src/test_db.c"], "universe": "boundary_files",
+        "universe_count": 4, "unknown_count": 0
+    }));
+    let out = resp.render_human();
+    let line = "1 file whose test status can't be determined — open it and look inside \
+                (of 4 files with boundary surfaces)";
+    assert_eq!(out.matches(line).count(), 1, "{out}");
+    assert!(
+        out.find(line).unwrap() > out.find("By channel kind").unwrap(),
+        "after the breakdowns and the disclosure:\n{out}"
+    );
+    assert!(!before.contains("test status"), "{before}");
 }

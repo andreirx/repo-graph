@@ -48,14 +48,31 @@ fn read_degraded(context: &str, err: impl std::fmt::Display) -> String {
 /// false count. A genuinely EMPTY ownership table is NOT an error: it leaves
 /// each row's module `None` (rendered as the explicit unknown), honoring
 /// "ownership absent → the explicit unavailable representation".
+///
+/// TEST-EDGE-SCOPE-1A: the fourth value is the undetermined-files block over the SAME rows'
+/// production partition (`surface_files`) — the block orient's HTTP line states too.
 pub(crate) fn unified_http_surfaces_json(
     storage: &StorageConnection,
     repo_uid: &str,
     snapshot_uid: &str,
-) -> Result<(Vec<serde_json::Value>, usize, usize), String> {
+) -> Result<
+    (
+        Vec<serde_json::Value>,
+        usize,
+        usize,
+        repo_graph_agent::UndeterminedTestFiles,
+    ),
+    String,
+> {
     let unified = unified_http_surfaces(storage, repo_uid, snapshot_uid)?;
     let (providers, consumers) = http_surface_union::counts(&unified);
-    Ok((unified_to_json(&unified), providers, consumers))
+    let undetermined = crate::test_status_undetermined::http_surface_block(&unified);
+    Ok((
+        unified_to_json(&unified),
+        providers,
+        consumers,
+        undetermined,
+    ))
 }
 
 /// The typed unified HTTP surfaces (before JSON projection) — the SINGLE read the

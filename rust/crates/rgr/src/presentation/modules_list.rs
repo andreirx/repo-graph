@@ -182,6 +182,10 @@ pub struct ModulesListResponse {
     /// daemon → recommendation omitted. Additive.
     #[serde(default)]
     pub orientation_docs: Option<serde_json::Value>,
+    /// TEST-EDGE-SCOPE-1A: the undetermined files among every listed module's owned
+    /// production files (`owned_files`). `None` = older daemon → no line. Additive.
+    #[serde(default)]
+    pub test_status_undetermined: Option<serde_json::Value>,
 }
 
 impl ModulesListResponse {
@@ -314,6 +318,13 @@ impl ModulesListResponse {
                 kind_conf,
                 width = max_name_len
             ));
+        }
+        // TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): once, after the table — the owned production
+        // files with undetermined test status (shared wording).
+        if let Some(line) =
+            super::test_status::undetermined_files_line(self.test_status_undetermined.as_ref())
+        {
+            out.push_str(&format!("  {line}\n"));
         }
 
         // ── HEADLINE-TRUTH-1 (§2.1, review-4 #1): Σ owned footer, PROVEN ───

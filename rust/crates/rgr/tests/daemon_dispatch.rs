@@ -5039,3 +5039,105 @@ fn orient_and_stats_agree_on_package_groups() {
         "expected alpha/beta package groups, got {names:?}"
     );
 }
+
+#[test]
+fn orient_and_stats_agree_on_stored_package_group_test_counts() {
+    // TEST-EDGE-SCOPE-1A (D-TESA-11, RG-REQ-002-L02): both surfaces take each package group's
+    // TEST count from the stored `files.is_test` (never a directory name) and state the SAME
+    // grouped-files undetermined block — through the real daemon.
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("tesa-repo");
+    std::fs::create_dir_all(repo_dir.join("pkg/testsuite")).unwrap();
+    std::fs::create_dir_all(repo_dir.join("pkg/src")).unwrap();
+    std::fs::write(repo_dir.join("pkg/testsuite/a.ts"), "export const a = 1;\n").unwrap();
+    std::fs::write(repo_dir.join("pkg/src/b.ts"), "export const b = 2;\n").unwrap();
+    std::fs::write(repo_dir.join("pkg/src/testing.ts"), "export const t = 3;\n").unwrap();
+
+    let index_request = format!(
+        r#"{{"id":"ts-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_dir.to_string_lossy()
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let index_parsed: serde_json::Value =
+        serde_json::from_str(results[0].lines().last().unwrap()).unwrap();
+    let canonical_path = index_parsed["result"]["canonical_path"]
+        .as_str()
+        .expect("index returns canonical_path")
+        .to_string();
+
+    let orient_request = format!(
+        r#"{{"id":"ts-2","method":"orient","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&orient_request], Arc::clone(&state));
+    let orient_parsed: serde_json::Value =
+        serde_json::from_str(results[0].lines().last().unwrap()).unwrap();
+    let summary = orient_parsed["result"]["value"]["signals"]
+        .as_array()
+        .expect("orient value.signals is an array")
+        .iter()
+        .find(|leaf| leaf["value"]["code"] == "MODULE_SUMMARY")
+        .map(|leaf| leaf["value"]["evidence"].clone())
+        .expect("MODULE_SUMMARY present");
+
+    let stats_request = format!(
+        r#"{{"id":"ts-3","method":"stats","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&stats_request], state);
+    let stats_parsed: serde_json::Value =
+        serde_json::from_str(results[0].lines().last().unwrap()).unwrap();
+    let stats = &stats_parsed["result"];
+
+    let norm = |arr: &serde_json::Value| -> Vec<(String, u64, u64)> {
+        let mut v: Vec<(String, u64, u64)> = arr
+            .as_array()
+            .expect("package_groups array")
+            .iter()
+            .map(|g| {
+                (
+                    g["name"].as_str().expect("name").to_string(),
+                    g["file_count"].as_u64().expect("file_count"),
+                    g["test_file_count"].as_u64().expect("test_file_count"),
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    let o = norm(&summary["package_groups"]);
+    let s = norm(&stats["package_groups"]);
+    assert_eq!(
+        o, s,
+        "orient and stats state the same (name, files, tests) set"
+    );
+    let testsuite = o
+        .iter()
+        .find(|(n, _, _)| n.ends_with("testsuite"))
+        .unwrap_or_else(|| panic!("a testsuite group: {o:?}"));
+    assert_eq!(
+        testsuite.2, testsuite.1,
+        "the testsuite group's test count is its file count, from the store: {o:?}"
+    );
+    let src = o
+        .iter()
+        .find(|(n, _, _)| n.ends_with("src"))
+        .unwrap_or_else(|| panic!("a src group: {o:?}"));
+    assert_eq!(src.2, 0, "{o:?}");
+
+    let ob = &summary["package_groups_test_status_undetermined"];
+    let sb = &stats["test_status_undetermined"];
+    assert_eq!(ob, sb, "the same grouped-files block on both surfaces");
+    assert_eq!(sb["universe"], "grouped_files", "{sb}");
+    assert_eq!(sb["count"], 1, "{sb}");
+    assert_eq!(
+        sb["paths"],
+        serde_json::json!(["pkg/src/testing.ts"]),
+        "{sb}"
+    );
+    assert_eq!(sb["universe_count"], 2, "{sb}");
+    assert_eq!(sb["unknown_count"], 0, "{sb}");
+}

@@ -87,6 +87,8 @@ pub(crate) fn serve_identity(
     let served = ExplainIdentityEvidence {
         name: Some(name),
         subtype: Some(subtype),
+        // A symbol identity never carries a file's test status (TEST-EDGE-SCOPE-1A).
+        undetermined_test_status: None,
         ..ev
     };
     let replacement = original.adopt_rank_and_scope(Signal::explain_identity(served));

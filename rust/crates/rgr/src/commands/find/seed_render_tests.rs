@@ -552,3 +552,42 @@ fn seed_cursor_stays_full_without_a_header_uid() {
         "full cursor without a header uid, `#`-bearing key quoted: {out}"
     );
 }
+
+#[test]
+fn seed_tier_states_undetermined_files_after_production_candidates() {
+    // TEST-EDGE-SCOPE-1A: the production candidates' files whose test status can't be
+    // determined render right after them, before the test partition header.
+    let cand = |k: &str, path: &str, is_test: bool| {
+        json!({
+            "stable_key": k, "path": path, "line": 14,
+            "qualified_name": format!("leveldb::{k}"), "is_test": is_test,
+            "score": 0.7, "source": "embedding",
+            "model_id": "minishlab/potion-code-16M-v2", "module": {"owning": "util"},
+            "next": {"cmd": "explain", "args": [k], "cwd": "/repo"}
+        })
+    };
+    let mut out = String::new();
+    render_seed_tier(
+        &json!({
+            "seeds_available": true,
+            "candidates": [
+                cand("RandomString", "util/testutil.cc", false),
+                cand("Open", "db/recovery_test.cc", true),
+            ],
+            "test_status_undetermined": {"count": 1, "paths": ["util/testutil.cc"],
+                "universe": "candidate_files", "universe_count": 1, "unknown_count": 0}
+        }),
+        FactTierOutcome::MissNotEstablished,
+        None,
+        &mut out,
+    );
+    let line = "  1 file whose test status can't be determined — open it and look inside \
+                (of 1 candidate files)";
+    let pos = out.find(line).expect(&out);
+    let header = out.find("tests (ranked below production").expect(&out);
+    assert!(pos < header, "before the test partition:\n{out}");
+    assert!(
+        pos > out.find("RandomString").unwrap(),
+        "after production rows:\n{out}"
+    );
+}

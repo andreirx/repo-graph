@@ -156,6 +156,9 @@ pub use dto::{
         TrustStaleSnapshotEvidence,
     },
     source::SourceRef,
+    test_status::{
+        ExplainUndeterminedTestStatus, TestStatusState, TestStatusUniverse, UndeterminedTestFiles,
+    },
 };
 pub use errors::{AgentStorageError, CheckError, ExplainError, OrientError};
 pub use explain::{explain_to_coherent, run_explain, run_explain_cancellable, ExplainLgDecisions};
@@ -172,5 +175,5 @@ pub use storage_port::{
     AgentMemberEntry, AgentModuleSize, AgentModuleSummary, AgentPathResolution,
     AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
     AgentStaleFile, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentSymbolResolution,
-    AgentTrustSummary, AgentUnresolvedCallSite, EnrichmentState,
+    AgentTrustSummary, AgentUnresolvedCallSite, EnrichmentState, TrackedFileTestFlag,
 };

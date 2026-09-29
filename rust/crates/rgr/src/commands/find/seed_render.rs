@@ -177,6 +177,13 @@ pub(super) fn render_seed_tier(
     let rendered_any = !prod.is_empty() || !tests.is_empty() || !unknown.is_empty();
     if rendered_any {
         out.push_str(&prod);
+        // TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): the production candidates' files whose test
+        // status can't be determined, right after them (before the test partition).
+        if let Some(line) = crate::presentation::test_status::undetermined_files_line(
+            result.get("test_status_undetermined"),
+        ) {
+            out.push_str(&format!("  {line}\n"));
+        }
         // The partition header renders ONLY when BOTH partitions are non-empty (spec
         // §2.1): a divider naming the demoted block and restating the moat (production
         // above test). With only one partition present the flat list + per-row labels are

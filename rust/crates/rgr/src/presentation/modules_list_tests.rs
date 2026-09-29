@@ -85,6 +85,7 @@ fn sample_list_response() -> ModulesListResponse {
         root_level_file_count: None,
         modules_method: None,
         orientation_docs: None,
+        test_status_undetermined: None,
     }
 }
 
@@ -105,6 +106,7 @@ fn sample_empty_list_response() -> ModulesListResponse {
         root_level_file_count: None,
         modules_method: None,
         orientation_docs: None,
+        test_status_undetermined: None,
     }
 }
 
@@ -137,6 +139,7 @@ fn two_crate_fixture_response() -> ModulesListResponse {
         root_level_file_count: None,
         modules_method: None,
         orientation_docs: None,
+        test_status_undetermined: None,
     }
 }
 
@@ -1026,6 +1029,7 @@ fn identity_response(results: Vec<ModuleListEntry>) -> ModulesListResponse {
         root_level_file_count: None,
         modules_method: None,
         orientation_docs: None,
+        test_status_undetermined: None,
     }
 }
 
@@ -1421,5 +1425,27 @@ fn method_line_renders_gradle_degradation_and_all_inferred_caveat() {
     assert!(
         out.contains("boundaries are a guess from directory names"),
         "the all-inferred guess caveat renders alongside diagnostics:\n{out}"
+    );
+}
+
+// ── TEST-EDGE-SCOPE-1A (RG-REQ-001-L07) ──
+
+#[test]
+fn modules_list_states_undetermined_owned_files() {
+    let mut resp = sample_list_response();
+    let before = resp.render_human();
+    resp.test_status_undetermined = Some(serde_json::json!({
+        "count": 4,
+        "paths": ["db/c_test.c", "util/env_posix_test_helper.h",
+                  "util/env_windows_test_helper.h", "util/testutil.cc"],
+        "universe": "owned_files", "universe_count": 101, "unknown_count": 0
+    }));
+    let out = resp.render_human();
+    let line = "4 files whose test status can't be determined — open them and look inside \
+                (of 101 owned files)";
+    assert_eq!(out.matches(line).count(), 1, "{out}");
+    assert!(
+        !before.contains("test status"),
+        "absent → unchanged:\n{before}"
     );
 }

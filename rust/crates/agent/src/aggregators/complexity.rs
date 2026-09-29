@@ -7,6 +7,7 @@
 use super::AggregatorOutput;
 use crate::dto::budget::Budget;
 use crate::dto::signal::{ComplexSymbolEvidence, ComplexityScope, HighComplexityEvidence, Signal};
+use crate::dto::test_status::{TestStatusUniverse, UndeterminedTestFiles};
 use crate::errors::AgentStorageError;
 use crate::storage_port::{AgentCancelCheck, AgentStorageRead};
 use repo_graph_classification::is_vendored_path;
@@ -134,8 +135,19 @@ pub fn aggregate_with_threshold_cancellable<S: AgentStorageRead + ?Sized>(
                 .unwrap_or(false);
             !(m.is_test || m.is_generated || vendored)
         });
+        // TEST-EDGE-SCOPE-1A (D-TESA-13 S2): the undetermined files among the ranked
+        // rows, through the shared function, over exactly the rows the ranking keeps.
+        // A row's `file_path` and `is_test` come from the same `files` LEFT JOIN, so a
+        // row with a path has a known flag; a row without a path is outside the file
+        // universe (never evaluated) and stays ranked.
+        let test_status_undetermined = UndeterminedTestFiles::over_partition(
+            TestStatusUniverse::RankedFiles,
+            rows.iter()
+                .filter_map(|m| m.file_path.as_deref().map(|p| (p, Some(m.is_test)))),
+        );
         ComplexityScope::Production {
             excluded_count: (before - rows.len()) as u64,
+            test_status_undetermined,
         }
     };
 

@@ -269,6 +269,10 @@ pub struct SurfacesListResponse {
     /// without it deserializes to the empty default (handled honestly by the renderer).
     #[serde(default)]
     pub surface_coverage: SurfaceCoverage,
+    /// TEST-EDGE-SCOPE-1A: the undetermined files among the production HTTP surfaces
+    /// (`surface_files`). Absent on an older daemon → no line.
+    #[serde(default)]
+    pub test_status_undetermined: Option<serde_json::Value>,
 }
 
 impl SurfacesListResponse {
@@ -385,9 +389,16 @@ impl SurfacesListResponse {
         // crate-private `http_boundary` presenter (kept off this file).
         out.push_str(&http_boundary::render_surfaces(
             &self.http_boundary_surfaces,
+            self.test_status_undetermined.as_ref(),
         ));
         if let Some(reason) = &self.http_boundary_surfaces_degraded {
             out.push_str(&http_boundary::render_surfaces_degraded(reason));
+            // TEST-EDGE-SCOPE-1A: the block is `unavailable` with the same failed read.
+            if let Some(line) =
+                super::test_status::undetermined_files_line(self.test_status_undetermined.as_ref())
+            {
+                out.push_str(&format!("{line}\n"));
+            }
         }
         out
     }
@@ -647,6 +658,7 @@ mod tests {
             filter_module: None,
             degradation: None,
             surface_coverage: sample_coverage(),
+            test_status_undetermined: None,
         }
     }
 
@@ -686,6 +698,7 @@ mod tests {
                 recommendation: "use TypeScript indexer".to_string(),
             }),
             surface_coverage: sample_coverage(),
+            test_status_undetermined: None,
         }
     }
 
@@ -1235,5 +1248,51 @@ mod tests {
             output.contains("src/routes.ts"),
             "path still rendered:\n{output}"
         );
+    }
+
+    /// TEST-EDGE-SCOPE-1A: the undetermined files among the production HTTP surfaces render
+    /// right after the section headline; absent block → the section is unchanged.
+    #[test]
+    fn surfaces_render_states_undetermined_files_after_the_headline() {
+        let mut resp = sample_empty_list_response();
+        resp.degradation = None;
+        resp.http_boundary_surfaces = vec![
+            HttpBoundarySurfaceEntry {
+                direction: "provider".to_string(),
+                http_method: "GET".to_string(),
+                route: Some("/api/a".to_string()),
+                source_file: "api/test_routes.py".to_string(),
+                line: None,
+                is_test: Some(false),
+                ..Default::default()
+            },
+            HttpBoundarySurfaceEntry {
+                direction: "provider".to_string(),
+                http_method: "GET".to_string(),
+                route: Some("/api/b".to_string()),
+                source_file: "api/routes.py".to_string(),
+                line: None,
+                is_test: Some(false),
+                ..Default::default()
+            },
+        ];
+        let before = resp.render_human();
+        resp.test_status_undetermined = Some(serde_json::json!({
+            "count": 1, "paths": ["api/test_routes.py"], "universe": "surface_files",
+            "universe_count": 2, "unknown_count": 0
+        }));
+        let output = resp.render_human();
+        let lines: Vec<&str> = output.lines().collect();
+        let head = lines
+            .iter()
+            .position(|l| l.starts_with("HTTP/REST API surfaces:"))
+            .expect(&output);
+        assert_eq!(
+            lines[head + 1],
+            "1 file whose test status can't be determined — open it and look inside \
+             (of 2 files with HTTP surfaces)",
+            "{output}"
+        );
+        assert!(!before.contains("test status"), "{before}");
     }
 }

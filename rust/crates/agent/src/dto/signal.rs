@@ -711,6 +711,13 @@ pub struct ModuleSummaryEvidence {
     /// honest-degradation VISIBLE on the primary surface, not buried in a comment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_manifest_limitation: Option<String>,
+
+    /// TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): the grouped files whose test status can't
+    /// be determined, against `grouped_files` — the SAME block `stats` states for the
+    /// same groups. `None` (omitted) when there are no package groups (file/path scope).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package_groups_test_status_undetermined:
+        Option<crate::dto::test_status::UndeterminedTestFiles>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -747,8 +754,13 @@ pub struct HighComplexityEvidence {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ComplexityScope {
     /// Ranking covers production code only; `excluded_count` generated/vendored/test
-    /// symbols above the threshold were set aside.
-    Production { excluded_count: u64 },
+    /// symbols above the threshold were set aside. `test_status_undetermined`
+    /// (TEST-EDGE-SCOPE-1A) states how many of the ranked files' test status can't
+    /// be determined, against `ranked_files`.
+    Production {
+        excluded_count: u64,
+        test_status_undetermined: crate::dto::test_status::UndeterminedTestFiles,
+    },
     /// Ranking covers every above-threshold symbol (`--include-all`).
     All,
 }
@@ -874,6 +886,12 @@ pub struct ExplainIdentityEvidence {
     pub file_count: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol_count: Option<u64>,
+    /// TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): `test_status: "undetermined"` +
+    /// `test_status_word` for a file whose test status can't be determined, flattened
+    /// (the `ExplainMemberItem.undetermined_identity` precedent); absent for every
+    /// determined file and every non-file target, so their JSON is byte-identical.
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub undetermined_test_status: Option<crate::dto::test_status::ExplainUndeterminedTestStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -2256,6 +2274,7 @@ mod tests {
             top_modules: Vec::new(),
             package_groups: Vec::new(),
             root_manifest_limitation: None,
+            package_groups_test_status_undetermined: None,
         });
         assert_eq!(s.code, SignalCode::ModuleSummary);
         assert_eq!(s.category, SignalCategory::Informational);
@@ -2293,6 +2312,7 @@ mod tests {
             ],
             package_groups: Vec::new(),
             root_manifest_limitation: None,
+            package_groups_test_status_undetermined: None,
         });
         assert_eq!(s.code, SignalCode::ModuleSummary);
         assert!(s.summary.contains("50 files"));

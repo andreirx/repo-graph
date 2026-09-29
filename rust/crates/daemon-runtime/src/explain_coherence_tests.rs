@@ -313,6 +313,7 @@ fn explain_identity_symbol_focus_without_livegraph_is_labelled_sqlite_fallback()
             module_path: Some("src".to_string()),
             file_count: None,
             symbol_count: None,
+            undetermined_test_status: None,
         })],
     );
     let env = build_explain_envelope(&state, REPO, result, false, false);

@@ -62,6 +62,10 @@ pub struct ModuleRollups {
     /// estimate). Absent unless measured and nonzero (R-0).
     #[serde(default)]
     pub unref_reduction: Option<serde_json::Value>,
+    /// TEST-EDGE-SCOPE-1A: the undetermined files among this module's owned production files
+    /// (`owned_files`). Absent on an older daemon → no line.
+    #[serde(default)]
+    pub test_status_undetermined: Option<serde_json::Value>,
 }
 
 /// Module dependency edge (from daemon inbound/outbound_dependencies).
@@ -169,6 +173,13 @@ impl ModulesShowResponse {
                 "  {}\n",
                 format_count(total_files, "owned file", "owned files")
             ));
+        }
+        // TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): after the ownership count — the owned production
+        // files with undetermined test status (shared wording).
+        if let Some(line) = super::test_status::undetermined_files_line(
+            self.rollups.test_status_undetermined.as_ref(),
+        ) {
+            out.push_str(&format!("  {line}\n"));
         }
 
         // ── Relationships ──────────────────────────────────────────
@@ -351,6 +362,7 @@ mod tests {
                 dead_symbol_count: 25,
                 dead_test_symbol_count: 5,
                 unref_reduction: None,
+                test_status_undetermined: None,
             },
             outbound_dependencies: vec![ModuleDependency {
                 module_uid: "mod-lib".to_string(),
@@ -409,6 +421,7 @@ mod tests {
                 dead_symbol_count: 10,
                 dead_test_symbol_count: 0,
                 unref_reduction: None,
+                test_status_undetermined: None,
             },
             outbound_dependencies: vec![],
             inbound_dependencies: vec![],
@@ -588,5 +601,28 @@ mod tests {
         let output = resp.render_human();
         assert!(output.contains("No dependencies detected"));
         assert!(output.contains("appears isolated"));
+    }
+
+    /// TEST-EDGE-SCOPE-1A: after `(N test files)`, the module's owned production files
+    /// with undetermined test status.
+    #[test]
+    fn modules_show_states_undetermined_owned_files() {
+        let mut resp = sample_show_response();
+        resp.rollups.test_status_undetermined = Some(serde_json::json!({
+            "count": 1, "paths": ["src/test_helpers.c"], "universe": "owned_files",
+            "universe_count": 100, "unknown_count": 0
+        }));
+        let output = resp.render_human();
+        let lines: Vec<&str> = output.lines().collect();
+        let own = lines
+            .iter()
+            .position(|l| l.contains("110 owned files (10 test files)"))
+            .expect(&output);
+        assert_eq!(
+            lines[own + 1].trim(),
+            "1 file whose test status can't be determined — open it and look inside \
+             (of 100 owned files)",
+            "{output}"
+        );
     }
 }

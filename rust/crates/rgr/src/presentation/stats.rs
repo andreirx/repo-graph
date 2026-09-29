@@ -130,6 +130,11 @@ pub struct StatsResponse {
     /// suppressed — a genuine single-package or manifest-less repo carries no marker.
     #[serde(default)]
     pub root_manifest_limitation: Option<String>,
+    /// TEST-EDGE-SCOPE-1A: the grouped files with undetermined test status
+    /// (`grouped_files`) — the SAME block `orient`'s package groups state. `None` (absent on
+    /// the wire) on an older daemon → no line.
+    #[serde(default)]
+    pub test_status_undetermined: Option<serde_json::Value>,
     /// RECON-M-R3a (g1u): the daemon's ADDITIVE union-accounting call block (opaque JSON —
     /// rendered through the shared `presentation::witnesses` projection). Present ONLY in
     /// W-BOTH with a current measured ledger; absent on the wire otherwise (R-0).
@@ -329,6 +334,13 @@ impl StatsResponse {
         {
             out.push_str(&line);
         }
+        // TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): after the package-group rows and their omission
+        // line — the grouped files with undetermined test status (shared wording).
+        if let Some(line) =
+            super::test_status::undetermined_files_line(self.test_status_undetermined.as_ref())
+        {
+            out.push_str(&format!("  {line}\n"));
+        }
         out.push('\n');
 
         // ── Dependency-section reliability caveat (HONEST-DEGRADATION-IMPL-1 D1) ──
@@ -508,6 +520,7 @@ mod tests {
             import_graph_reliability: None,
             relationship_next_action: None,
             root_manifest_limitation: None,
+            test_status_undetermined: None,
             witnesses: None,
             indexed_file_count: None,
             repo_summary_unavailable: false,
@@ -722,6 +735,7 @@ mod tests {
             import_graph_reliability: None,
             relationship_next_action: None,
             root_manifest_limitation: None,
+            test_status_undetermined: None,
             witnesses: None,
             indexed_file_count: None,
             repo_summary_unavailable: false,
@@ -745,6 +759,7 @@ mod tests {
             import_graph_reliability: None,
             relationship_next_action: None,
             root_manifest_limitation: None,
+            test_status_undetermined: None,
             witnesses: None,
             indexed_file_count: None,
             repo_summary_unavailable: false,
@@ -900,6 +915,7 @@ mod tests {
             import_graph_reliability: Some(axis("LOW", &["unresolved_imports=1090"])),
             relationship_next_action: None,
             root_manifest_limitation: None,
+            test_status_undetermined: None,
             witnesses: None,
             indexed_file_count: None,
             repo_summary_unavailable: false,
@@ -943,6 +959,7 @@ mod tests {
             import_graph_reliability: Some(axis("LOW", &["unresolved_imports=1090"])),
             relationship_next_action: None,
             root_manifest_limitation: None,
+            test_status_undetermined: None,
             witnesses: None,
             indexed_file_count: None,
             repo_summary_unavailable: false,
@@ -1312,5 +1329,34 @@ mod tests {
             !output.contains("not folded"),
             "no marker when nothing is suppressed:\n{output}"
         );
+    }
+
+    /// TEST-EDGE-SCOPE-1A: after the package-group rows (and their omission line), the grouped
+    /// files with undetermined test status — once.
+    #[test]
+    fn stats_render_states_undetermined_grouped_files_after_the_package_groups() {
+        let mut resp = sample_stats();
+        let before = resp.render_human();
+        resp.test_status_undetermined = Some(serde_json::json!({
+            "count": 4,
+            "paths": ["db/c_test.c", "util/env_posix_test_helper.h",
+                      "util/env_windows_test_helper.h", "util/testutil.cc"],
+            "universe": "grouped_files",
+            "universe_count": 93, "unknown_count": 0
+        }));
+        let output = resp.render_human();
+        let line = "4 files whose test status can't be determined — open them and look inside \
+                    (of 93 grouped files)";
+        assert_eq!(output.matches(line).count(), 1, "{output}");
+        let pkg = output.find("Package groups (by size").expect(&output);
+        let pos = output.find(line).unwrap();
+        assert!(pos > pkg, "{output}");
+        for name in ["handlers", "models", "utils"] {
+            assert!(
+                output[pkg..pos].contains(name),
+                "after every group row:\n{output}"
+            );
+        }
+        assert!(!before.contains("test status"), "{before}");
     }
 }

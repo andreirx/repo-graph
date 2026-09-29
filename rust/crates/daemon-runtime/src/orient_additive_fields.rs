@@ -93,14 +93,7 @@ pub(crate) fn inject<D: Serialize>(
     // are the PRODUCTION (non-fixture) figures — byte-identical on a repo with no test surfaces.
     match crate::http_boundary_read::unified_http_surfaces(storage, repo_uid, snapshot_uid) {
         Ok(rows) if !rows.is_empty() => {
-            let part = crate::http_surface_union::counts_partitioned(&rows);
-            let block = serde_json::json!({
-                "total": part.providers + part.consumers,
-                "providers": part.providers,
-                "consumers": part.consumers,
-                "test_fixture_excluded": part.test_fixture_excluded,
-                "test_status_unknown": part.test_status_unknown,
-            });
+            let block = http_surfaces_headline_json(&rows);
             inject_value_field(output, "http_surfaces", &block, repo_uid);
         }
         Ok(_) => {}
@@ -125,6 +118,25 @@ pub(crate) fn inject<D: Serialize>(
     // discovery) and the doc inventory. Always injected (the fields are ADDITIVE; the
     // presenter skips rendering when absent — an older daemon's orient is byte-identical).
     inject_modules_method(output, storage, repo_uid, snapshot_uid);
+}
+
+/// COHERENCE-3 §2.2 + TEST-EDGE-SCOPE-1A (D-TESA-13 S6): orient's `http_surfaces` block over
+/// the unified rows — the production counts, the fixture/unknown tallies and the undetermined
+/// files of the SAME production rows `surfaces list` states (one block, RG-REQ-002-L02).
+pub(crate) fn http_surfaces_headline_json(
+    rows: &[crate::http_surface_union::UnifiedHttpSurface],
+) -> Value {
+    let part = crate::http_surface_union::counts_partitioned(rows);
+    serde_json::json!({
+        "total": part.providers + part.consumers,
+        "providers": part.providers,
+        "consumers": part.consumers,
+        "test_fixture_excluded": part.test_fixture_excluded,
+        "test_status_unknown": part.test_status_unknown,
+        "test_status_undetermined": crate::test_status_undetermined::to_json(
+            &crate::test_status_undetermined::http_surface_block(rows),
+        ),
+    })
 }
 
 /// MODULES-METHOD-1: compute + inject the `modules_method` and `orientation_docs`

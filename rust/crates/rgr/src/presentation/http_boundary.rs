@@ -157,7 +157,13 @@ impl HttpSurfaceAggregation {
 /// (`[test]`, a Spring REST/MVC basis note, a dual-implementation note, an
 /// unknown-route reason). A dynamic URL shows `<dynamic>`, never fabricated.
 /// Empty input → empty string (caller decides the empty/degraded messaging).
-pub(crate) fn render_surfaces(surfaces: &[HttpBoundarySurfaceEntry]) -> String {
+///
+/// TEST-EDGE-SCOPE-1A: `test_status_undetermined` is the response's undetermined-files block over
+/// the SAME production rows; its line renders right after the headline (`None` → no line).
+pub(crate) fn render_surfaces(
+    surfaces: &[HttpBoundarySurfaceEntry],
+    test_status_undetermined: Option<&serde_json::Value>,
+) -> String {
     if surfaces.is_empty() {
         return String::new();
     }
@@ -175,6 +181,9 @@ pub(crate) fn render_surfaces(surfaces: &[HttpBoundarySurfaceEntry]) -> String {
             clause
         )),
         None => out.push_str(&format!("\nHTTP/REST API surfaces: {}\n", agg.phrase())),
+    }
+    if let Some(line) = super::test_status::undetermined_files_line(test_status_undetermined) {
+        out.push_str(&format!("{line}\n"));
     }
 
     // §2.5 dual-implementation (review-3 item 3): a (method, route) served by ≥2
@@ -657,7 +666,7 @@ mod tests {
             entry("provider", "GET", None, "backend/C.java"),
             entry("consumer", "GET", Some("/a"), "web/a.ts"),
         ];
-        let out = render_surfaces(&surfaces);
+        let out = render_surfaces(&surfaces, None);
         let lines: Vec<&str> = out.lines().collect();
         let headline = lines
             .iter()
@@ -688,7 +697,7 @@ mod tests {
             fixture,                                                // test-fixture (excluded)
             entry("consumer", "GET", Some("/a"), "web/a.ts"),       // production
         ];
-        let out = render_surfaces(&surfaces);
+        let out = render_surfaces(&surfaces, None);
         assert!(
             out.contains(
                 "HTTP/REST API surfaces: 1 provider, 1 consumer (+1 test-fixture excluded)"
@@ -726,7 +735,7 @@ mod tests {
             fixture,                                          // test-fixture
             entry("provider", "GET", Some("/b"), "backend/B.java"), // provider
         ];
-        let out = render_surfaces(&surfaces);
+        let out = render_surfaces(&surfaces, None);
         let provider_pos = out.find("[provider]").expect("provider row");
         let consumer_pos = out.find("[consumer]").expect("consumer row");
         let fixture_header_pos = out
@@ -762,7 +771,7 @@ mod tests {
             fx1,                                                    // fixture (excluded)
             fx2,                                                    // fixture (excluded)
         ];
-        let out = render_surfaces(&surfaces);
+        let out = render_surfaces(&surfaces, None);
         // Three rows render (incl. both `[test]` fixtures); the footer counts only the 1 production
         // surface but discloses the 2 excluded — so the reader can reconcile rows vs count.
         let row_count = out
@@ -785,10 +794,13 @@ mod tests {
         // DISCLOSED, never silently treated as production (RULE #1).
         let mut unknown = entry("provider", "GET", Some("/u"), "gen/x.ts");
         unknown.is_test = None;
-        let out = render_surfaces(&[
-            entry("provider", "GET", Some("/a"), "backend/A.java"),
-            unknown,
-        ]);
+        let out = render_surfaces(
+            &[
+                entry("provider", "GET", Some("/a"), "backend/A.java"),
+                unknown,
+            ],
+            None,
+        );
         assert!(
             out.contains("2 providers, 0 consumers (test-status unknown for 1)"),
             "unknown stays counted but is disclosed:\n{out}"
@@ -799,10 +811,13 @@ mod tests {
     fn test_file_consumer_is_labelled() {
         let mut surfaces = vec![entry("consumer", "GET", Some("/a"), "src/test/ApiIT.java")];
         surfaces[0].is_test = Some(true);
-        let out = render_surfaces(&surfaces);
+        let out = render_surfaces(&surfaces, None);
         assert!(out.contains("[test]"), "{out}");
         // A non-test surface (is_test None/false) carries no [test].
-        let prod = render_surfaces(&[entry("provider", "GET", Some("/a"), "backend/A.java")]);
+        let prod = render_surfaces(
+            &[entry("provider", "GET", Some("/a"), "backend/A.java")],
+            None,
+        );
         assert!(!prod.contains("[test]"), "{prod}");
     }
 
@@ -812,7 +827,7 @@ mod tests {
         rest.framework = Some("spring".to_string());
         let mut mvc = entry("provider", "GET", Some("/owners"), "backend/OwnerC.java");
         mvc.framework = Some("spring_mvc".to_string());
-        let out = render_surfaces(&[rest, mvc]);
+        let out = render_surfaces(&[rest, mvc], None);
         assert!(out.contains("(REST)"), "{out}");
         assert!(out.contains("(MVC/view-render)"), "{out}");
     }
@@ -834,7 +849,7 @@ mod tests {
         let mut cdk = entry("provider", "GET", Some("/api/offers"), "serverless/api.ts");
         cdk.framework = Some("aws_cdk_apigwv2".to_string());
         cdk.module = Some("edge-serverless".to_string());
-        let out = render_surfaces(&[spring, cdk]);
+        let out = render_surfaces(&[spring, cdk], None);
         let note_count = out.matches("also provided by").count();
         assert_eq!(note_count, 1, "dual note exactly once:\n{out}");
         // The note names the OTHER real module.
@@ -856,7 +871,7 @@ mod tests {
             "backend/OfferC.java",
         );
         let b = entry("provider", "GET", Some("/api/offers"), "serverless/api.ts");
-        let out = render_surfaces(&[a, b]);
+        let out = render_surfaces(&[a, b], None);
         assert!(
             out.contains("dual implementation undetermined"),
             "undetermined stated: {out}"
@@ -882,7 +897,7 @@ mod tests {
         a.module = Some("core-api".to_string());
         let mut b = entry("provider", "GET", Some("/api/offers"), "backend/B.java");
         b.module = Some("core-api".to_string());
-        let out = render_surfaces(&[a, b]);
+        let out = render_surfaces(&[a, b], None);
         assert_eq!(out.matches("also provided by").count(), 0, "{out}");
         assert!(!out.contains("undetermined"), "{out}");
     }
@@ -892,7 +907,7 @@ mod tests {
         // §2.3 (Option B): a union direction-conflict is labeled inline.
         let mut s = entry("provider", "GET", Some("/api/x"), "svc.ts");
         s.conflict = Some("identity also recorded as consumer".to_string());
-        let out = render_surfaces(&[s]);
+        let out = render_surfaces(&[s], None);
         assert!(out.contains("[conflict:"), "{out}");
         assert!(out.contains("also recorded as consumer"), "{out}");
     }
@@ -902,7 +917,7 @@ mod tests {
         // §3: an unknown route renders its reason, never a bare `<dynamic>`.
         let mut s = entry("provider", "GET", None, "src/app/api/[...slug]/route.ts");
         s.route_unknown_reason = Some("catch-all segment".to_string());
-        let out = render_surfaces(&[s]);
+        let out = render_surfaces(&[s], None);
         assert!(out.contains("<dynamic — catch-all segment>"), "{out}");
     }
 
@@ -917,7 +932,7 @@ mod tests {
             ),
             entry("consumer", "GET", None, "frontend/api.ts"),
         ];
-        let out = render_surfaces(&surfaces);
+        let out = render_surfaces(&surfaces, None);
         assert!(
             out.contains("HTTP/REST API surfaces: 1 provider, 1 consumer"),
             "{out}"
@@ -931,7 +946,7 @@ mod tests {
 
     #[test]
     fn render_surfaces_empty_is_empty_string() {
-        assert!(render_surfaces(&[]).is_empty());
+        assert!(render_surfaces(&[], None).is_empty());
     }
 
     /// ANCHORS-EVERYWHERE-1 (§4): an individual surface row anchors `source_file:line` when a line
@@ -941,11 +956,14 @@ mod tests {
     fn surface_row_anchors_line_and_distinct_lines_do_not_collapse() {
         let mut a = entry("consumer", "GET", Some("/api/x"), "web/a.ts");
         a.line = Some(12);
-        let out = render_surfaces(&[a.clone()]);
+        let out = render_surfaces(&[a.clone()], None);
         assert!(out.contains("web/a.ts:12"), "row anchors path:line:\n{out}");
 
         // Absent line → bare path (byte-identical to the pre-anchor row).
-        let bare = render_surfaces(&[entry("consumer", "GET", Some("/api/x"), "web/a.ts")]);
+        let bare = render_surfaces(
+            &[entry("consumer", "GET", Some("/api/x"), "web/a.ts")],
+            None,
+        );
         assert!(
             bare.contains("web/a.ts  [consumer]"),
             "absent line → bare path:\n{bare}"
@@ -954,7 +972,7 @@ mod tests {
         // Same identity, different lines → two separate rows (no ×N collapse).
         let mut b = entry("consumer", "GET", Some("/api/x"), "web/a.ts");
         b.line = Some(30);
-        let two = render_surfaces(&[a, b]);
+        let two = render_surfaces(&[a, b], None);
         let rows: Vec<&str> = two
             .lines()
             .filter(|l| l.starts_with("  ") && l.contains('['))
@@ -971,7 +989,7 @@ mod tests {
         let surfaces: Vec<HttpBoundarySurfaceEntry> = (0..46)
             .map(|_| entry("consumer", "GET", None, "tools/mcp-server/src/index.ts"))
             .collect();
-        let out = render_surfaces(&surfaces);
+        let out = render_surfaces(&surfaces, None);
         // Exactly one indented surface row is printed.
         let row_lines: Vec<&str> = out
             .lines()
@@ -994,7 +1012,7 @@ mod tests {
             entry("consumer", "GET", Some("/a"), "web/a.ts"),
             entry("consumer", "GET", Some("/b"), "web/a.ts"),
         ];
-        let out = render_surfaces(&surfaces);
+        let out = render_surfaces(&surfaces, None);
         let row_lines: Vec<&str> = out
             .lines()
             .filter(|l| l.starts_with("  ") && l.contains('['))
@@ -1014,7 +1032,7 @@ mod tests {
         let mut a = entry("consumer", "GET", Some("/a"), "web/a.ts");
         a.is_test = Some(true);
         let b = entry("consumer", "GET", Some("/a"), "web/a.ts"); // is_test None
-        let out = render_surfaces(&[a, b]);
+        let out = render_surfaces(&[a, b], None);
         let row_lines: Vec<&str> = out
             .lines()
             .filter(|l| l.starts_with("  ") && l.contains('['))

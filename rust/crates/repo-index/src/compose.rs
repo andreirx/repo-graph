@@ -1440,7 +1440,8 @@ fn persist_config_file_versions(
             repo_uid: repo_uid.into(),
             path: f.rel_path.clone(),
             language: None, // Config files have no language
-            is_test: false,
+            // D-TESA-10: every tracked-file writer takes the test conventions.
+            is_test: routing::is_test_file(&f.rel_path),
             is_generated: false,
             is_excluded: false,
         })

@@ -77,6 +77,16 @@ fn complexity_scope_clause(ev: &serde_json::Value) -> Option<String> {
     }
 }
 
+/// TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): the ranked files with undetermined test status,
+/// from the production scope's `test_status_undetermined` block (shared wording). `None` when the
+/// scope carries no block (scope `all`, an older daemon) or the count is 0.
+fn complexity_undetermined_part(ev: &serde_json::Value) -> Option<String> {
+    super::test_status::undetermined_files_line(
+        ev.get("scope")
+            .and_then(|s| s.get("test_status_undetermined")),
+    )
+}
+
 /// The labelled declared/inferred-module count phrase from a MODULE_SUMMARY
 /// payload — e.g. `1 declared module`, `5 inferred modules`, `3 modules`. The
 /// `module_candidates` notion (Layer 1/2), kept DISTINCT from the package
@@ -287,6 +297,9 @@ impl OrientResponse {
             if let Some(clause) = complexity_scope_clause(ev) {
                 parts.push(clause);
             }
+            if let Some(undetermined) = complexity_undetermined_part(ev) {
+                parts.push(undetermined);
+            }
             if !parts.is_empty() {
                 line.push_str(&format!(" ({})", parts.join("; ")));
             }
@@ -369,6 +382,10 @@ impl OrientResponse {
         // COMPLEXITY-SCOPE-1: the exclusion/inclusion bullet, last, after the tail.
         if let Some(clause) = &scope_clause {
             out.push_str(&bullet(clause));
+        }
+        // TEST-EDGE-SCOPE-1A: the ranked files with undetermined test status.
+        if let Some(undetermined) = complexity_undetermined_part(ev) {
+            out.push_str(&bullet(&undetermined));
         }
         out
     }
@@ -690,6 +707,13 @@ impl OrientResponse {
                 total - shown,
                 plural((total - shown) as u64)
             )));
+        }
+        // TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): the grouped files whose test status can't be
+        // determined — the SAME block `stats` states for the same groups.
+        if let Some(line) = super::test_status::undetermined_files_line(
+            ev.get("package_groups_test_status_undetermined"),
+        ) {
+            out.push_str(&bullet(&line));
         }
         out
     }

@@ -47,6 +47,7 @@ pub(super) fn identity_symbol() -> Signal {
         module_path: Some("src".to_string()),
         file_count: None,
         symbol_count: None,
+        undetermined_test_status: None,
     })
 }
 

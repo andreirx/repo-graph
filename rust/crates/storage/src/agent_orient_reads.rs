@@ -200,18 +200,31 @@ pub fn manifest_for_module_key(module_key: &str) -> Option<&'static str> {
 /// declared/inferred `module_candidates` surface `module_sizes` reads.
 ///
 /// Order is by path ASC (a total order); the caller folds + re-sorts.
+///
+/// TEST-EDGE-SCOPE-1A (D-TESA-11): each group also carries `test_file_count` — its
+/// OWNS-owned FILE nodes whose stored `files.is_test = 1` — so the package-group
+/// `(N test)` count reads the stored fact, never a directory name. An owned FILE
+/// node with no `files` row has an UNKNOWN test status: the read errors naming the
+/// directory rather than counting it as non-test (RG-REQ-002-L04). `file_count` is
+/// unchanged (the joins are to primary keys, so no OWNS row is duplicated or lost).
 pub(crate) fn directory_groups(
     conn: &Connection,
     snapshot_uid: &str,
 ) -> Result<Vec<AgentDirectoryGroup>, AgentStorageError> {
     let mut stmt = conn
         .prepare(
-            "SELECT m.qualified_name AS path, COUNT(o.target_node_uid) AS file_count \
+            "SELECT m.qualified_name AS path, COUNT(o.target_node_uid) AS file_count, \
+                    COALESCE(SUM(CASE WHEN f.is_test = 1 THEN 1 ELSE 0 END), 0) \
+                      AS test_file_count, \
+                    COALESCE(SUM(CASE WHEN t.kind = 'FILE' AND f.file_uid IS NULL \
+                      THEN 1 ELSE 0 END), 0) AS unknown_test_status \
              FROM nodes m \
              JOIN edges o \
                ON o.source_node_uid = m.node_uid \
                AND o.snapshot_uid = ?1 \
                AND o.type = 'OWNS' \
+             LEFT JOIN nodes t ON t.node_uid = o.target_node_uid \
+             LEFT JOIN files f ON f.file_uid = t.file_uid \
              WHERE m.snapshot_uid = ?1 \
                AND m.kind = 'MODULE' \
                AND m.qualified_name IS NOT NULL \
@@ -223,15 +236,35 @@ pub(crate) fn directory_groups(
 
     let rows = stmt
         .query_map(rusqlite::params![snapshot_uid], |row| {
-            Ok(AgentDirectoryGroup {
-                path: row.get::<_, String>(0)?,
-                file_count: row.get::<_, i64>(1)? as u64,
-            })
+            Ok((
+                AgentDirectoryGroup {
+                    path: row.get::<_, String>(0)?,
+                    file_count: row.get::<_, i64>(1)? as u64,
+                    test_file_count: row.get::<_, i64>(2)? as u64,
+                },
+                row.get::<_, i64>(3)?,
+            ))
         })
         .map_err(map_err("list_directory_groups"))?;
 
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(map_err("list_directory_groups"))
+    let rows = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(map_err("list_directory_groups"))?;
+    let mut groups = Vec::with_capacity(rows.len());
+    for (group, unknown_test_status) in rows {
+        if unknown_test_status > 0 {
+            return Err(AgentStorageError::new(
+                "list_directory_groups",
+                format!(
+                    "directory {} owns {} FILE node(s) with no files row, so its stored \
+                     test count (is_test) is unknown",
+                    group.path, unknown_test_status
+                ),
+            ));
+        }
+        groups.push(group);
+    }
+    Ok(groups)
 }
 
 /// List the manifest-declared package boundaries (crate / workspace-package

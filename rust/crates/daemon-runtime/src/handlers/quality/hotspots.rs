@@ -243,6 +243,22 @@ pub fn handle_hotspots(state: &DaemonState, request: &Request) -> DispatchResult
             "excluded_tests_count": excluded_tests_count,
             "excluded_vendored_count": excluded_vendored_count,
         });
+        // TEST-EDGE-SCOPE-1A (D-TESA-13 S3): with `--exclude-tests` the kept rows are the
+        // production partition; state the undetermined files among them (hotspot_files).
+        if exclude_tests {
+            let flag_by_path: std::collections::HashMap<&str, bool> = indexed_files
+                .iter()
+                .map(|f| (f.path.as_str(), f.is_test))
+                .collect();
+            let kept: Vec<&str> = results
+                .iter()
+                .filter_map(|r| r.get("file_path").and_then(|v| v.as_str()))
+                .collect();
+            response["filtering"]["test_status_undetermined"] =
+                crate::test_status_undetermined::to_json(
+                    &crate::test_status_undetermined::hotspot_block(&kept, &flag_by_path),
+                );
+        }
     }
 
     // METRIC-LANG-COVERAGE-1 (part A): the hotspot score is churn × complexity, so an unmeasured language

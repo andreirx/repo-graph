@@ -1,0 +1,2055 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-TEST-EDGE-SCOPE-1A-2",
+  "workItemId": "TEST-EDGE-SCOPE-1A",
+  "baseline": {
+    "path": "docs/requirements/baselines/TEST-EDGE-SCOPE-1A-INPUT-1.json",
+    "sha256": "sha256:544a15d22d1fb4c905b0c33ac25d5813cab2312c24376ee68658720496517640"
+  },
+  "allocation": {
+    "path": "docs/slices/test-edge-scope-1a.md",
+    "sha256": "sha256:c1b38671ca9b2821ad82266ff6a0ebbdd98737198df4eb69986a938bfaf049a1"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "d8ff6d755314b3c6950e77d43d0092d07ad1399a",
+    "entries": [
+      {
+        "path": "rust/crates/agent/src/aggregators/complexity.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:7815389578d6ac21c0484155530aeea0337c9e2c7b38335429f93818deeb8b6b",
+          "byteLength": 7340
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:a3c9187cef115b28fd30b4ff8933dbb3233e4a3ea544104b5c6bbea18d1619b3",
+          "byteLength": 8100
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/aggregators/complexity_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:96c834c9e1125261b6e1d73a649cc89162b1ffbc0fbe9a9fc3faf3e5ad301f2f",
+          "byteLength": 19755
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:c47f272f1df1e7f690a0042349dbd5d390e08d072b70275502b91f3e3d6ab5f4",
+          "byteLength": 25214
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/aggregators/module_summary.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:911d124f045d3f898430cbbf130b8e578af47fcff0dd1964aca08b7a264bbe8c",
+          "byteLength": 10316
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b4d7b5dbedcc63d1ca6ee68f1ba0f87d68e2a56efe671081c7189b5f9fdc6a77",
+          "byteLength": 12153
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/dto/coherent.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:7cf00c6b29bc629e3b9ebc7934446a5c22ae15514bde5c318f7392bcc09edaa0",
+          "byteLength": 65483
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:be8dd5248524dca7f434714fe7eb18041f045fac0c4d92c8cf4e0a47669ab85d",
+          "byteLength": 65796
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/dto/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:874746e90ff4d7d3f0f3465e3554bd5d9076bbdc6ac60b92d2fdc0d40efe1f14",
+          "byteLength": 1792
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:527b8f61cb84cb9c25534a3d52db619049aa7382f7ed1b6b525a583fcdb79c18",
+          "byteLength": 2015
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/dto/signal.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:140ea0bf798f9ee990ccd2a73a4156aec631bafc7eb910077e31e97bb8ec9a29",
+          "byteLength": 106367
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:bfd61f94edc24c6f5adc806675da19b2b61b1dda1c7849a1429d875f5b3e79ec",
+          "byteLength": 107665
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/dto/test_status.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f47ee554bd8bb97432a192e5b28103cd22bf3f791168b6557bc515e2f5fad859",
+          "byteLength": 10717
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/explain/coherent_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:4f0827cabe1584ae171babf6b0fe06caafe9ac68e4eb54de4131a82adda5b07f",
+          "byteLength": 14176
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:cd250e4103f80cd514a7c493abb695e959f05aeda7fea6d413c986056a7c1546",
+          "byteLength": 14216
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/explain/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d7fbbeae72c7aef013b647feafc83c6f9017286169c209ce3112374b9138fa3d",
+          "byteLength": 59487
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f7954b101a511ed4a8b3cd24198423121a09fafa46cc0f7b36d07eb7c5788f6a",
+          "byteLength": 63461
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:a9a9d4b64eefde1f3014bcd58f67cc3fa7359cad65a4d569b677fe298e29edba",
+          "byteLength": 6963
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:cdc498d28e8ab1e641f014df1335d31109631be87ce4052962e498beaa65d5c8",
+          "byteLength": 7109
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/package_groups.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:16b93f55d3ed42336e9c0b62b64817d6a1ed0403a385f60a9c099f9b08f620a4",
+          "byteLength": 43367
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:0ced972d09b21c0cf7c7efe1e739c5bdd8c5f3756bf689820114945260f4cd40",
+          "byteLength": 44569
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/ranking.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:32a139d1639655c7562f588604ef98ded2b861f5ab2bc1a600557add83bac18c",
+          "byteLength": 16176
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:66eda9f03c539df0b28da78d10e56a91bb369aab94d7314bd3c29b6d06bb4f3e",
+          "byteLength": 16239
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/storage_port.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:7e7ffc840986818329e20bf05209d321863a1b1bd91b2a7a9f7415e17a4d5d58",
+          "byteLength": 68277
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b6acf79ab15693303174b3f3371f67f6947b4891167b07363c1fb0ecc5c65fa9",
+          "byteLength": 69829
+        }
+      },
+      {
+        "path": "rust/crates/agent/tests/common/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:e49eaa7d111b81b9a5a259d085fa31b7d96bd74cd1cc51652a5fab906834b49b",
+          "byteLength": 34437
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:28a9958fc3d50da4fe7749ba045d66dcaa8f1ad132a906c6cf14aa2b43bd090e",
+          "byteLength": 37189
+        }
+      },
+      {
+        "path": "rust/crates/agent/tests/explain_file.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:840715e9a3fa0c544cf436b4d462887e78f627087c9e5e11ce5cfcecf66843d7",
+          "byteLength": 4920
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f149146d31b4392a5751d2c569bcb0c13685d14929d8ad8fa45fddd16ee88869",
+          "byteLength": 14147
+        }
+      },
+      {
+        "path": "rust/crates/classification/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:ab8403b979aa86eb3245add3f9933d04c643a78393c0db177aa73e7145c60dc7",
+          "byteLength": 13672
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:6ee0a3b796ba949e795224f28191558d0998099b1798039f6fa11825c0f792a3",
+          "byteLength": 13691
+        }
+      },
+      {
+        "path": "rust/crates/classification/src/test_path.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:bd6e3b2d2b812cb19803e85e948ba9d7d39a0a3806a0f426ebde78d0417942ca",
+          "byteLength": 11153
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/boundaries_list_read.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:fd09042d2b28b3da618362f72d97fc6952b511ddf5330bef822c74de022a287e",
+          "byteLength": 18624
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:26da62a5a2126fda3fbe92c01ee558b192e1f141f0d4e43833d4b47c715d67ea",
+          "byteLength": 18980
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/boundaries_summary_read.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:1d0892802a19736bd572f9482d47137f05aa01e7d31bb635fd59aad2d0da5dde",
+          "byteLength": 21715
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2167af61ae6d1faf00bcf4e50166f7396917d3d7e85f8a4bf0beb3699bbeceaf",
+          "byteLength": 22686
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:c03eabf68517fec5641c2d553a4a55a56ab53ecceee21695ef762a349e8fb00d",
+          "byteLength": 488555
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:219a69dd3f12260c3f8bb06b1c79abc16ad95f13d78cefba9f5caa7400799334",
+          "byteLength": 494278
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_coherence_served_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:816969010f1cfaa68feff8baec26dad94592f8c5cb0ee0244bc204dbe9e96bd4",
+          "byteLength": 19475
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f19877d89522157b39ba1b9abe45ae7238efe2e112d210cd1ac35f321aa1b2cf",
+          "byteLength": 19563
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_coherence_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:0899aefbfc25a086f35efc0b9834625c5426f098b9e1bf92a0ac1128353fa505",
+          "byteLength": 18108
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:5b02418613c03017cbbbdf557bd04d4717ef0f81916b8c6cb88d0f306dcfb92b",
+          "byteLength": 18152
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_lg_identity.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:1ed29dba0a6ac3cecef89ee91216ca045dddde857939f5002ab99f5770776713",
+          "byteLength": 6590
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ee5e9650c42e555d3c7e6b4cb753b4e191a0a01693a7a4fa15294152262e204d",
+          "byteLength": 6716
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_serve_tests/spy.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:3b846c2ff405bb5a324f26902b44a15b8b50acfaa0e194561c1942e230fbbc91",
+          "byteLength": 16847
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:89a5cc39674ca118e3cbcb7a979c8c3271aa0d4aecb3339b6fa62a18322cecb9",
+          "byteLength": 17184
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/handlers/quality/dead_causes.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:e4be32ec26bcf746b02e476c277516e552f9a3cb7bef9bf4b46aea13b6f526c8",
+          "byteLength": 9436
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:67d51e336de82dbeadb1a9d30530f0ef102ef66dc71e292fe1c5d95f362dc570",
+          "byteLength": 9774
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/handlers/quality/hotspots.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:f37de218082ae98831d20202e4bd13d0f7166932db296272031926faa7d53ee4",
+          "byteLength": 9441
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7efd6d819cb81c16f2499e9238ebe68f6b7ea92fc9f7e7135b130f55bf12146f",
+          "byteLength": 10253
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/handlers/reliability.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:ef7c50e7425bd76b40db4c52c73d7e9114520154ebf1aaa9640ba0b73d193a24",
+          "byteLength": 11436
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:dad33809e2c401bd8b363873997660e6ee58046576c00e20d5ebaeba864f6cce",
+          "byteLength": 12082
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/http_boundary_read.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:418bd7678a8dc2ae0ff0eafacb7ef45a5cd8eca2f30c89c1d3fae98a050135a7",
+          "byteLength": 26488
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:d3bf25e16134c045da8f08b2ed2bc6d43eaa0995c57c71f82ebed9d4a03e14ae",
+          "byteLength": 26903
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/inferences_serve.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:611c6eba90dcdeaeeb159ec3f628268b57fc6c1a4b11d0ee45b017fd4abbd184",
+          "byteLength": 30574
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b4f1e3b94665df536252142a0699531daa4a5d10f0e6b23e6bcc3705b08becfa",
+          "byteLength": 34025
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:2c170d76f0f4e86a2870363fdd19d6bf1060b8716fc02217b17c0852f9e1595c",
+          "byteLength": 19780
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:18c90fb3e57415c1a7915e63ae13614f27d6bfee1efac312e0c80a99f7746e9b",
+          "byteLength": 19919
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_additive_fields.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:62e9585f9a717ced6ca47abbcc282d11567e79bda92fc6ea9df4ff076eae39e8",
+          "byteLength": 23831
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:494a1cce2dba785c1fe88b5ebbc3674fddd6fcedf36132a641d4af8e8c9ef095",
+          "byteLength": 24375
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_lg_decisions/served_e2e.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:17ed6412f5a55469589b2852c789b6d2d0645f1883635d126af20ebefb512b7f",
+          "byteLength": 38928
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:11db7df4550cb96e0c444a56c0e630f812b1204eaa0978b517bcdec88cc790a0",
+          "byteLength": 39221
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:a97911377eedbe12175be0cf822b5534332f2ec398d878b539292f16ae5d3cef",
+          "byteLength": 29038
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:1fd3914e2925bec62255116b9c45c505ff69d3a6999589ca0a823dde0fbacb42",
+          "byteLength": 29577
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_serve/tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:b5d8edc8acb03ecc3d4d8b01dd6fa4bd76108cf3e89ee439d7fa9f269c34192d",
+          "byteLength": 79123
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:9756aa47a3720ae9dd75b2389f2866b905e5c976d2bc4b0ca2ba51ef84137ed7",
+          "byteLength": 79601
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/seed/dto.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:fd9f000b93695bc5ef12fcd32d5a26e1cc8e4271d14c28d6a9a566231718bb58",
+          "byteLength": 24913
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2e18171572e16483235dfafd8e411b3d65665e94c1e83f71b45573dc9bcd9fb6",
+          "byteLength": 26305
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/test_status_undetermined.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:673e97c19697ea718902b8441a15507f2c7b5388def9b50180e7a3eab5f1b28a",
+          "byteLength": 33402
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/orchestrator.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:a22ebac5b3d5e981365e1f6748eb018b6cd7118ccd69701f00f92cdf9a067587",
+          "byteLength": 190973
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:cbb12fe676939674d965cb904163e8fe6ef34b39e0be3390e3be320ba1918a20",
+          "byteLength": 191349
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/routing.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:dc4e1794bd652628554ee6d2941a3d27360c7ab2c2c3b7fb9fbf07dbd4371b02",
+          "byteLength": 28984
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:70c36601c163f2fb4188ca2e35a2d1e3b1895f23fd2555373d2809e7674d42d2",
+          "byteLength": 29505
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/src/compose.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:39999f6e269cc04345cedc57ef00876357c18c9f81dd4fce91f929427d870682",
+          "byteLength": 262697
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ca034da7f52e77b0f20033c763ebf25fdbd72040342c05f35d68165ac5b8b23d",
+          "byteLength": 262806
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/tests/test_status_undetermined_reproduction.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2261d6784c088d7964bb67a6b91919d159ad81b44a55ae2ee2c23d767c6e15a7",
+          "byteLength": 10797
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/dead_render.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:ec55b23aecc9aafdbcc6a8e08364b3e6d564f4ecfd8a01147b362ca9ad7a5e9a",
+          "byteLength": 26982
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:0f888b8ecf524c162b43bc93ad12dd76d8f590df36e0b17a5148bb13fcac9ed0",
+          "byteLength": 28799
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/find/seed_render.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:2ff5e8efb8b06992d210ea6a3a60d5eb23c85b2e45897117fc6c75f72c41182a",
+          "byteLength": 15368
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:22b17ac0a333c02a5850798a66e215e90380ccb461a40506c6f8dbf841e187bf",
+          "byteLength": 15756
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/find/seed_render_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:be2cd51f7d6803ad725481473ef9ddd7389b8c174185ce37033fe45d7428ab89",
+          "byteLength": 22138
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:0fe65cedd37b45f3c07e89b2f065a2c50cbc3bffa7245476707e62440efd791e",
+          "byteLength": 23773
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/inferences_render.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:643026d1ddcd90cac006db1de29c34d6dd1e7e3e2bb8ea39bcedcf4f71b180b6",
+          "byteLength": 20515
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b2061baf2ba093eaac4ef76b41649030ba8ab10a23b2829588317e1558c06946",
+          "byteLength": 22478
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/boundaries_list/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:ab870b626a47ad59560202e859491f5d14ba73f50d60c1b68e87eae759220c98",
+          "byteLength": 9217
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:3774fa5e7df3edc6d498c0418e81131901781651e1974927b973e15f78c5d0f9",
+          "byteLength": 9782
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/boundaries_list/tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:403ce94e860bd494425423b5adbb76462a973b2e19438da30fac75925d9c2847",
+          "byteLength": 19485
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:e05e30cfbcf6cab871698d2b283e52ec4e061bddb94866c45308504de783d135",
+          "byteLength": 20539
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/boundaries_summary/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:c9cbb0f0a5d98d932607ad8631c3dca69b18629223729d9547095d27280b2e5f",
+          "byteLength": 16541
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:67a9d155d311e753db51c48ed73a8351e60f9ae120ec94005b02fac691a0e3f5",
+          "byteLength": 17324
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/boundaries_summary/tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:24ead3af4da5ac1c2f26540b11a7f28855c139bea9cef88d0864eddade3425b5",
+          "byteLength": 14676
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:23e2fa526d0b6342ef817b52291647393c3c77f63e258394aa819754fdf3d2c3",
+          "byteLength": 15617
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/explain.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:56f58828c2fd2814d63bd91e8e537779e9fc9f8633a66127e02ed3faf70a9911",
+          "byteLength": 106058
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7af72f4826a30382b7905e131fbf08f8b667fe6e3bb4c3ae27de29e66fcb5304",
+          "byteLength": 108871
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/hotspots.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:b7d1201115096db9e9bf5c945b5ccdad4054d30f5eeb0f06252d38aa6a90d940",
+          "byteLength": 19693
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:139c1be85c48f9311df3073236cc9b83d30a80467f3fd23f2075d4ea774df96b",
+          "byteLength": 21534
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/http_boundary.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:9e84abc1d5208d1e5cbc61db476c983bcbd4703a4d86647b130f7ad851028cac",
+          "byteLength": 51896
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2b4166dc2b5498007f03ccf5474794b5af96cb0ae693f1d210d99266a04b42dd",
+          "byteLength": 52547
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:8b84ce4a6238a2259235d4b01bfe12c1f35e294bf569bbe2ae04509039d3126d",
+          "byteLength": 26099
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:eb8d0f9906090b0c7c29b4f2f6a1460cdd3ba077192721d26fbce814dc6da862",
+          "byteLength": 26315
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/modules_list.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:0e046086a94be1e5b50ddc88777970d7a3fccdaf671310948900d79442d5db8c",
+          "byteLength": 36408
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:6c2a5b26c5e1e1541ce7f44d62f515b9069b5f1b77768363d956f40c606bd893",
+          "byteLength": 37017
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/modules_list_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:039e83876f6376e92b2fb12541973c748aed7fdfd5f0e11e75950559528b4d80",
+          "byteLength": 58692
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:e04097c880a9f8c89a54ae4af788d64ce337169ce3d1ca37fae1fe91d5fa54e6",
+          "byteLength": 59681
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/modules_show.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:f9cb6deb027faad88dfa5afb226f0a8f33b6b0be776cefc7c293eb254c40f921",
+          "byteLength": 23519
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:02661460bfe1a8bde3a070b15d11fdf05b0be02676e79ae6c67d4d3f907fc195",
+          "byteLength": 25157
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/orient_density_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:73fafaf3c3552fdc8289ccc7390bf42ca323011c9e8c8d4de1d0bc0e2d1c6a54",
+          "byteLength": 26905
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:916e006f8c4f46763b45ac96be66d6add410deab255f40c33790138011a5fe6f",
+          "byteLength": 31245
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/orient_sections.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:7f05632620b6323f3a536ae379cad7a2187cb0e41242fe3b31dc71a64f032b43",
+          "byteLength": 44317
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:172c7bba634c40b68d0fb28c030e123778a5641f6bb4f20cf4844a6b2f0d6966",
+          "byteLength": 45513
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/orient_seg2.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:6065733e99fe5b037715e4df3810854bf1a54f8c681f2f2a645b9e6e5f8e5ed2",
+          "byteLength": 29886
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f9bff1ab3b2b52660d29808d7e0936f37646296f9d46cf646f242dd051ec234e",
+          "byteLength": 30561
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/orient_seg2_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:8d08996d59e8fa46c136aa31a9c6da2b2ddf8df01b50c4cb0e40cfa7c547691b",
+          "byteLength": 38399
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:27c79e07530e475a4fb23baec6cbad3e122e644d4b92e08d7fe4d7fb731c4c9b",
+          "byteLength": 39777
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/reliability.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:4f574d3b8a1f18e03d2843a8ebd4a9b4eba668fcd62c86470c25f224a9397da4",
+          "byteLength": 16406
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:85927b40d86cb5b1013dfeee4282e59a35bf48567f1854fb02fab70f41c2bc4c",
+          "byteLength": 17906
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/seed.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:9d2a6ff009dbb25d99af67cd78be2bd8292d43d5f4bf018b9778cf8261860854",
+          "byteLength": 53835
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:a27c5d94bddea46c0d12b434c206ff9f8b217d285c3c2fe291b86ceee14a46e9",
+          "byteLength": 55589
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/stats.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d8e17775d7dfa86335ef8f90462fb9f80fff8c6895dc3c73a918c1e75f9a7a51",
+          "byteLength": 60484
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2f2133b0fc0a8adfffafd6a072c06d11a574849cf56f69390158ce69d4e0bb6e",
+          "byteLength": 62731
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/surfaces.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:4af167be945b1e41df7ace18f238b90e3fad1d2bef1816255985aabfdc68d75b",
+          "byteLength": 49880
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f145f45e7781bc82d61c9ddc7bb0b1faaf0095b2a2bdddbef83bc69b37e96de4",
+          "byteLength": 52481
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/test_status.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:6783ce408edc6c1ed84f253bdfc5931f25469943adc5f7e243ad3be6185d654d",
+          "byteLength": 16758
+        }
+      },
+      {
+        "path": "rust/crates/rgr/tests/daemon_dispatch.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:9d8cf98b54be4a58912c97fedfd75339abf07066e6301a8fcd41240cd894b4ad",
+          "byteLength": 184480
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:897cb5ac064eff170b6f016279ae216b19341d9e681be7674bfac7613fc2d0be",
+          "byteLength": 188663
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/agent_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:293b405b7dea047f978343df2285b811ea865d59e2114b91ef7be8dc81499214",
+          "byteLength": 109309
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:fc213b78b855d34d22325e5c2048fd97cf7d66ecc39036520306605c57ab3861",
+          "byteLength": 109652
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/agent_orient_reads.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:ae3069ed2a160964e482c29e57df7823825d16819216ab7fceb15e8258840973",
+          "byteLength": 27920
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:5fae886770c6ba0e0959ede645019d0d28c6e61cf58271f8cb57b571e4c57e73",
+          "byteLength": 29551
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:ffe57a6e36c49a30647e9484cdc22561b653928ab885c82e94f664c77f75ae3b",
+          "byteLength": 11918
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:9164fec973a0f847948b22f9f2e1803b90177f9134bc074f55a63e6469acfa5d",
+          "byteLength": 12059
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/test_status_reads.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7cd8f437d7f1447e5bd5a550b5e3aa4d5e05578dd347aa7b607116819846381f",
+          "byteLength": 14828
+        }
+      }
+    ],
+    "sha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-TEST-EDGE-SCOPE-1A-2"
+  },
+  "checks": [
+    {
+      "checkId": "TESA-C01",
+      "obligationIds": [
+        "RG-REQ-001-L07",
+        "RG-REQ-002-L11",
+        "RG-REQ-001-L01",
+        "RG-REQ-001-L06",
+        "RG-REQ-001-L09",
+        "P-TESA-01",
+        "P-TESA-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "git -C .. cat-file -e HEAD:docs/assurance/TOOLCHAIN-STALENESS-1/implementation-review.json && git -C .. show HEAD:docs/assurance/TOOLCHAIN-STALENESS-1/implementation-review.json | python3 -c \"import json,sys; d=json.load(sys.stdin); sys.exit(0 if (d.get('workItemId'), d.get('result')) == ('TOOLCHAIN-STALENESS-1', 'accepted') else 1)\" && cargo test -p repo-graph-classification > /tmp/tesa-c01a.txt 2>&1 && grep -qE '^test result: ok\\.' /tmp/tesa-c01a.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/tesa-c01a.txt && for t in slash_separates_a_test_word dot_separates_a_test_word underscore_separates_a_test_word hyphen_separates_a_test_word camel_case_boundary_separates_a_test_word acronym_camel_case_boundary_separates_a_test_word word_test_is_a_test_word word_tests_is_a_test_word word_testing_is_a_test_word word_tester_is_a_test_word word_testutil_is_a_test_word test_word_match_is_case_insensitive letters_inside_a_longer_word_are_not_a_test_word digits_do_not_separate_a_test_word testsuite_token_is_not_a_test_word first_test_word_in_path_order_is_reported every_routing_convention_matches testsuite_directory_is_a_convention testsuite_without_directory_boundary_is_not_a_convention undetermined_needs_a_test_word_no_convention_and_is_test_zero a_test_file_is_never_undetermined a_convention_path_is_never_undetermined_even_when_its_flag_is_zero a_fileless_tracked_path_is_judged_by_path_and_flag_alone; do grep -qE \"^test (.*::)?$t \\.\\.\\. ok$\" /tmp/tesa-c01a.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-classification -- --list 2>/dev/null | grep -c ': test$')\" -ge 300 && cargo test -p repo-graph-indexer > /tmp/tesa-c01.txt 2>&1 && grep -qE '^test result: ok\\.' /tmp/tesa-c01.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/tesa-c01.txt && for t in test_file_nested_testsuite_dir test_file_top_level_testsuite_dir not_test_file_testsuite_without_directory_boundary test_file_double_underscores_dir test_file_dot_test test_file_dot_spec test_file_top_level_test_dir test_file_top_level_tests_dir test_file_nested_test_dir not_test_file_regular_source not_test_file_test_in_name_without_dot build_toolchain_json_lists_extractor_names_in_order_then_the_indexer_version parity_against_shared_indexer_fixture_corpus is_test_path_detection dominant_language_excludes_test_files; do grep -qE \"^test (.*::)?$t \\.\\.\\. ok$\" /tmp/tesa-c01.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-indexer -- --list 2>/dev/null | grep -c ': test$')\" -ge 488 && python3 - <<'PY'\nimport difflib, re, subprocess\ndef sh(*a): return subprocess.run(a, capture_output=True, text=True, check=True).stdout\ndef dl(a, b): return [l for l in difflib.unified_diff(a, b, lineterm=\"\", n=0) if l[:1] in \"+-\" and not l.startswith((\"+++\", \"---\"))]\nMARK = \"\\n#[cfg(test)]\\nmod tests {\"\nO, R = \"crates/indexer/src/orchestrator.rs\", \"crates/indexer/src/routing.rs\"\nCL, TP = \"crates/classification/src/lib.rs\", \"crates/classification/src/test_path.rs\"\noh, oc = sh(\"git\", \"show\", \"HEAD:./\" + O), open(O, encoding=\"utf-8\").read()\npat = re.compile(r'^pub const INDEXER_VERSION: &str = \"(indexer:(\\d+)\\.(\\d+)\\.(\\d+))\";$', re.M)\nh, c = pat.findall(oh), pat.findall(oc)\nassert len(h) == 1 and len(c) == 1, (\"exactly one INDEXER_VERSION declaration\", h, c)\nH, C = h[0][0], c[0][0]\nhv, cv = tuple(map(int, h[0][1:])), tuple(map(int, c[0][1:]))\nassert cv == (hv[0], hv[1] + 1, 0), (\"INDEXER_VERSION moves up exactly one minor from HEAD's\", H, C)\nassert H not in oc and oc.count(C) == oh.count(H) == 4, (\"every occurrence of the old literal is swapped\", H, C)\ni, j = oh.find(MARK), oc.find(MARK)\nassert i > 0 and j > 0 and oc[j:] == oh[i:].replace(H, C), \"the orchestrator test module differs from HEAD only by the version literal\"\nd = dl(oh[:i].splitlines(), oc[:j].splitlines())\nminus = sorted(l[1:].strip() for l in d if l[0] == \"-\")\nplus = sorted(l[1:].strip() for l in d if l[0] == \"+\" and l[1:].strip() and not l[1:].strip().startswith(\"//\"))\nassert minus == sorted(['pub const INDEXER_VERSION: &str = \"%s\";' % H, \"is_test: false,\", \"is_test: false,\"]), (\"orchestrator.rs production removes only the version and the two contract writers' hard-coded is_test\", minus)\nassert plus == sorted(['pub const INDEXER_VERSION: &str = \"%s\";' % C, \"is_test: is_test_file(&f.rel_path),\", \"is_test: is_test_file(&f.rel_path),\"]), (\"orchestrator.rs production adds only the version and the two contract writers taking the conventions (D-TESA-10)\", plus)\nassert \"is_test: false,\" not in oc[:j], \"no production TrackedFile writer in the orchestrator hard-codes is_test\"\nrh, rc = sh(\"git\", \"show\", \"HEAD:./\" + R), open(R, encoding=\"utf-8\").read()\ni, j = rh.find(MARK), rc.find(MARK)\ndef body(src):\n    a = src.index(\"pub fn is_test_file(file_path: &str) -> bool {\")\n    b = src.index(\"\\n}\\n\", a)\n    return a, b\n(ha, hb), (ca, cb) = body(rh[:i]), body(rc[:j])\noutside = [l for l in dl((rh[:ha] + rh[hb:i]).splitlines(), (rc[:ca] + rc[cb:j]).splitlines()) if l[1:].strip() and not l[1:].strip().startswith(\"//\")]\nassert outside == [], (\"routing.rs production changes only inside is_test_file (and its comments)\", outside)\ninner = [l.strip() for l in rc[ca:cb].splitlines()[1:] if l.strip() and not l.strip().startswith(\"//\")]\nassert inner == [\"repo_graph_classification::test_path::matches_test_path_convention(file_path)\"], (\"is_test_file delegates to the ONE convention definition\", inner)\nassert rc[j:] == rh[i:] or all(l[0] == \"+\" for l in dl(rh[i:].splitlines(), rc[j:].splitlines())), \"the routing test module only gains tests\"\nassert '\"__tests__\"' not in rc[:j], \"the convention literals no longer live in routing.rs\"\nt = open(TP, encoding=\"utf-8\").read()\ntprod = t[:t.find(\"\\n#[cfg(test)]\")]\nfor f in (r\"^pub fn matches_test_path_convention\\(path: &str\\) -> bool\", r\"^pub fn path_test_word\\(path: &str\\) -> Option<&str>\", r\"^pub fn undetermined_test_word\\(path: &str, is_test: bool\\) -> Option<&str>\"):\n    assert re.search(f, tprod, re.M), (\"public function\", f)\nfor lit in ('\"__tests__\"', '\".test.\"', '\".spec.\"', '\"/test/\"', '\"/tests/\"', '\"test/\"', '\"tests/\"', '\"__tests__/\"', '\"/testsuite/\"', '\"testsuite/\"', '\"testutil\"'):\n    assert lit in tprod, (\"the one definition holds every L07 convention and word\", lit)\nassert \"extraction_diagnostics\" not in t and \"metadata_json\" not in t, \"nothing is stored (D-TESA-DERIVED-1)\"\ncl = dl(sh(\"git\", \"show\", \"HEAD:./\" + CL).splitlines(), open(CL, encoding=\"utf-8\").read().splitlines())\ncode = [l for l in cl if l[1:].strip() and not l[1:].strip().startswith(\"//\")]\nassert all(l[0] == \"+\" for l in cl) and \"+pub mod test_path;\" in code and all(re.fullmatch(r\"\\+(pub mod test_path;|pub use test_path::(\\{[a-z_, ]+\\}|[a-z_]+);)\", l) for l in code), (\"classification lib.rs only gains the module (and its re-export)\", cl)\nch = lambda p: sorted(sh(\"git\", \"diff\", \"--name-only\", \"--relative\", \"HEAD\", \"--\", p).split())\nun = lambda p: sorted(sh(\"git\", \"ls-files\", \"--others\", \"--exclude-standard\", \"--\", p).split())\nassert ch(\"crates/indexer\") == [O, R] and un(\"crates/indexer\") == [], (\"indexer paths\", ch(\"crates/indexer\"), un(\"crates/indexer\"))\nassert ch(\"crates/classification\") == [CL] and un(\"crates/classification\") == [TP], (\"classification paths\", ch(\"crates/classification\"), un(\"crates/classification\"))\nprint(\"TESA-C01 shape ok:\", H, \"->\", C)\nPY",
+        "cwd": "rust",
+        "environment": "candidate tree; gated on TOOLCHAIN-STALENESS-1's accepted implementation-review record at HEAD (the ratified queue: every indexer slice after it bumps INDEXER_VERSION)",
+        "inputs": "THE ONE FUNCTION and THE CONVENTIONS (D-TESA-DERIVED-1; D-TESA-01). NEW module `classification/src/test_path.rs` (registered in classification lib.rs; the `vendored_path.rs` precedent — `repo-graph-classification` is already a dependency of agent, daemon-runtime, indexer, storage, rgr and repo-index, so no new dependency edge): `pub fn matches_test_path_convention(path: &str) -> bool` — THE one definition of L07's routing conventions: `__tests__`, `.test.`, `.spec.`, `/test/`, `/tests/`, the `test/`, `tests/`, `__tests__/` prefixes (moved verbatim from routing.rs:206-215) plus `testsuite/` as a directory component (`contains(\"/testsuite/\") || starts_with(\"testsuite/\")`, case-sensitive like its siblings); `pub fn path_test_word(path: &str) -> Option<&str>` — the FIRST token, in path order and as written, whose ASCII-lowercase form is `test`, `tests`, `testing`, `tester` or `testutil`, the path split at `/`, `.`, `_`, `-` and each piece at CamelCase boundaries (lowercase letter or digit → uppercase; uppercase → uppercase-then-lowercase, so `XMLTest` → `XML`,`Test`); digits are not separators; `pub fn undetermined_test_word(path: &str, is_test: bool) -> Option<&str>` — THE shared function every partitioned surface and `explain` call: `None` when `is_test` (a convention or marker made the file test), `None` when `matches_test_path_convention(path)`, else `path_test_word(path)`. Pure: nothing is stored, nothing is read. `indexer::routing::is_test_file` keeps its name and signature and delegates to `matches_test_path_convention` (the python pins its body to that one call, the rest of routing.rs production unchanged, no convention literal left there). Tests (module `test_path::tests`): one per separator — `slash_separates_a_test_word`, `dot_separates_a_test_word`, `underscore_separates_a_test_word`, `hyphen_separates_a_test_word`, `camel_case_boundary_separates_a_test_word`, `acronym_camel_case_boundary_separates_a_test_word` (`src/Test/helper.c`, `django/contrib/admin/tests.py`, `db/c_test.c`, `committer-tools/find-unfinished-test.py`, `CppUnit/include/CppUnit/TestCaller.h` → `Test`, `src/XMLTest.cpp` → `Test`); one per word form — `word_test_is_a_test_word`, `word_tests_is_a_test_word`, `word_testing_is_a_test_word`, `word_tester_is_a_test_word`, `word_testutil_is_a_test_word` (`src/core/test.py`, `django/contrib/admin/tests.py`, `django/contrib/staticfiles/testing.py`, `packages/engine/src/nuggets/NuggetTester.ts` → `Tester`, `util/testutil.cc`); `test_word_match_is_case_insensitive` (`src/TESTING.c`, `lib/Tests/x.c`); negatives `letters_inside_a_longer_word_are_not_a_test_word` (`src/contest.c`, `src/latest.h`, `src/attestation.rs`, `src/protest.py`, `src/Testament.h`, `src/testable.c`, `src/detest.go`), `digits_do_not_separate_a_test_word` (`src/test2.c`), `testsuite_token_is_not_a_test_word` (`src/testsuite.c`); `first_test_word_in_path_order_is_reported` (`Data/DataTest/include/Poco/Data/Test/DataTest.h`); conventions — `every_routing_convention_matches` (one path per HEAD pattern), `testsuite_directory_is_a_convention` (`Foundation/testsuite/src/ArrayTest.cpp`, `testsuite/run.c`), `testsuite_without_directory_boundary_is_not_a_convention` (`src/testsuite.c`, `mytestsuite/x.c`, `testsuites/x.c`); the shared function — `undetermined_needs_a_test_word_no_convention_and_is_test_zero` (`CppUnit/include/CppUnit/Test.h`, false → `Test`), `a_test_file_is_never_undetermined` (`util/testutil.h`, true → None), `a_convention_path_is_never_undetermined_even_when_its_flag_is_zero` (`Foundation/testsuite/src/ArrayTest.cpp`, false → None — an older store's flag), `a_fileless_tracked_path_is_judged_by_path_and_flag_alone` (`hadoop-client-modules/hadoop-client-integration-tests/pom.xml`, false → `tests`). Routing: the three new `testsuite` tests and the eight existing `routing::tests` pin the delegation unchanged. INDEXER (D-TESA-10, version): the two contract-file writers of orchestrator.rs (:337 index, :2110 refresh) change `is_test: false,` to `is_test: is_test_file(&f.rel_path),`; `INDEXER_VERSION` (:63) `indexer:1.3.0` → `indexer:1.4.0` because `testsuite/` and the writers change stored `is_test` (the undetermined status itself needs no re-index — D-TESA-DERIVED-1); the literal also swapped on the three pinning lines of `build_toolchain_json_lists_extractor_names_in_order_then_the_indexer_version` (:4409/:4412/:4417); extractor versions NOT bumped (D-TESA-06). The python pins every diff shape above. Bound: `parity_against_shared_indexer_fixture_corpus`, `is_test_path_detection`, `dominant_language_excludes_test_files`. Floors: classification 277 (HEAD 6ee3ef39) + 23; indexer 485 + 3."
+      },
+      "expected": "exit 0: one pure function in the classification crate holds L07's conventions (with `testsuite/`), its five words and its separators, and decides UNDETERMINED from a path and its `is_test` alone; `is_test_file` delegates to the same conventions; every tracked contract file takes them; every pre-existing routing, parity and inferred-module test remains green (no behavior change for paths without `testsuite/`); INDEXER_VERSION moves up exactly one minor; nothing is stored for UNDETERMINED",
+      "candidateSha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "pass (earlier iteration); no code changed in revisions 1–2",
+        "supportingEvidence": [
+          "Builder reports no code changed for this check; no proving log or line was provided."
+        ]
+      }
+    },
+    {
+      "checkId": "TESA-C02",
+      "obligationIds": [
+        "RG-REQ-001-L01",
+        "RG-REQ-001-L04",
+        "RG-REQ-001-L09",
+        "RG-REQ-001-L10",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L09",
+        "RG-REQ-011-L01",
+        "RG-REQ-011-L08",
+        "RG-REQ-011-L09",
+        "RG-REQ-011-L11",
+        "P-TESA-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "git diff --quiet HEAD -- Cargo.lock crates ':(exclude)crates/indexer' ':(exclude)crates/repo-index' ':(exclude)crates/storage' ':(exclude)crates/agent' ':(exclude)crates/daemon-runtime' ':(exclude)crates/rgr' ':(exclude)crates/classification' && test -z \"$(git ls-files --others --exclude-standard -- crates ':(exclude)crates/indexer' ':(exclude)crates/repo-index' ':(exclude)crates/storage' ':(exclude)crates/agent' ':(exclude)crates/daemon-runtime' ':(exclude)crates/rgr' ':(exclude)crates/classification')\" && cargo test -p repo-graph-c-extractor -p repo-graph-cpp-extractor -p repo-graph-java-extractor > /tmp/tesa-c02.txt 2>&1 && grep -qE '^test result: ok\\.' /tmp/tesa-c02.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/tesa-c02.txt && for t in file_node_has_correct_stable_key constructor_stable_key_no_duplication nested_constructor_stable_key; do grep -qE \"^test (.*::)?$t \\.\\.\\. ok$\" /tmp/tesa-c02.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(grep -cE '^test (.*::)?file_node_has_correct_stable_key \\.\\.\\. ok$' /tmp/tesa-c02.txt)\" = 2 && cargo test -p repo-graph-gate quality_assessment_not_comparable_causes_incomplete_exit_2 > /tmp/tesa-c02-gate.txt 2>&1 && grep -qE '^test result: ok\\.' /tmp/tesa-c02-gate.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/tesa-c02-gate.txt && for t in quality_assessment_not_comparable_causes_incomplete_exit_2; do grep -qE \"^test (.*::)?$t \\.\\.\\. ok$\" /tmp/tesa-c02-gate.txt || { echo \"MISSING $t\"; exit 1; }; done && cargo test -p artifact-contracts > /tmp/tesa-c02-ac.txt 2>&1 && grep -qE '^test result: ok\\.' /tmp/tesa-c02-ac.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/tesa-c02-ac.txt && for t in every_family_has_a_contract family_count_matches_expected extracted_facts_have_direct_provenance; do grep -qE \"^test (.*::)?$t \\.\\.\\. ok$\" /tmp/tesa-c02-ac.txt || { echo \"MISSING $t\"; exit 1; }; done",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "Every crate other than indexer, repo-index, storage, agent, daemon-runtime, rgr and classification (TESA-C01 bounds its diff to `test_path.rs` and one lib.rs line), and `Cargo.lock`, are byte-identical to HEAD with no untracked file: the six extractors (the C, C++ and Java extractors call `routing::is_test_file` for the FILE node's `TEST_FILE`/`SOURCE` subtype — c-extractor/src/extractor.rs:151, cpp-extractor :293, java-extractor :125 — so a `testsuite/` file's subtype becomes `TEST_FILE` through the routing change alone, with no extractor edit), gate, artifact-contracts, trust, module-queries, repo-graph-seed, the LiveGraph crates, daemon-transport, platform-paths. The three routing-consuming extractors' suites run (no `testsuite/` fixture exists in them; `file_node_has_correct_stable_key` passes in both the C and C++ crates — count 2 — and the Java stable-key pins pass); the gate's `quality_assessment_not_comparable_causes_incomplete_exit_2` (RG-REQ-001-L09's NOT_COMPARABLE pin) and the artifact-contract registry tests (RG-REQ-001-L10: no new artifact family and no new stored fact — UNDETERMINED is computed when asked by a pure function, D-TESA-DERIVED-1; nothing is written to any node, edge or snapshot column) pass."
+      },
+      "expected": "exit 0: no behavior change outside the seven touched crates — extraction, stable keys, the NOT_COMPARABLE verdict, the artifact-contract registry, gate/policy overlays, the socket/transport/path authorities and the stdio fallback remain as at HEAD (RG-REQ-011-L11 remains withdrawn: no latency floor is asserted or changed); the only extractor-visible movement is the FILE subtype of `testsuite/` files, carried by the routing rule",
+      "candidateSha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "pass (earlier iteration); no code changed in revisions 1–2",
+        "supportingEvidence": [
+          "Builder reports no code changed for this check; no proving log or line was provided."
+        ]
+      }
+    },
+    {
+      "checkId": "TESA-C03",
+      "obligationIds": [
+        "RG-REQ-001-L07",
+        "RG-REQ-002-L11",
+        "RG-REQ-001-L01",
+        "RG-REQ-001-L08",
+        "P-TESA-01",
+        "P-TESA-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-repo-index > /tmp/tesa-c03.txt 2>&1 && grep -qE '^test result: ok\\.' /tmp/tesa-c03.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/tesa-c03.txt && for t in testsuite_directory_files_are_test_files test_worded_files_without_a_convention_or_marker_are_undetermined a_structural_marker_keeps_a_test_worded_file_out_of_undetermined tracked_only_files_take_is_test_from_the_conventions undetermined_status_survives_a_no_change_refresh a_marker_added_later_makes_the_file_test_not_undetermined gtest_marker_drives_is_test_not_filename cfg_test_inclusion_chain_drives_is_test_not_filename structural_is_test_survives_no_change_refresh generated_flag_is_persisted_from_a_first_lines_marker is_generated_survives_no_change_refresh index_rust_crate_extracts_symbols index_python_extracts_symbols; do grep -qE \"^test (.*::)?$t \\.\\.\\. ok$\" /tmp/tesa-c03.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(grep -cE '^test structural_is_test_survives_no_change_refresh \\.\\.\\. ok$' /tmp/tesa-c03.txt)\" = 2 && cargo test -p repo-graph-repo-index --test test_status_undetermined_reproduction > /tmp/tesa-c03b.txt 2>&1 && grep -qE '^test result: ok\\.' /tmp/tesa-c03b.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/tesa-c03b.txt && grep -qE '^test result: ok\\. 6 passed; 0 failed' /tmp/tesa-c03b.txt && test \"$(cargo test -p repo-graph-repo-index -- --list 2>/dev/null | grep -c ': test$')\" -ge 457 && python3 - <<'PY'\nimport difflib, subprocess\ndef sh(*a): return subprocess.run(a, capture_output=True, text=True, check=True).stdout\ndef dl(a, b): return [l for l in difflib.unified_diff(a, b, lineterm=\"\", n=0) if l[:1] in \"+-\" and not l.startswith((\"+++\", \"---\"))]\nMARK = \"\\n#[cfg(test)]\\nmod tests {\"\nP = \"crates/repo-index/src/compose.rs\"\nh, c = sh(\"git\", \"show\", \"HEAD:./\" + P), open(P, encoding=\"utf-8\").read()\ni, j = h.find(MARK), c.find(MARK)\nassert i > 0 and j > 0 and c[j:] == h[i:], \"the compose.rs test module is unchanged\"\nd = [l for l in dl(h[:i].splitlines(), c[:j].splitlines()) if l[1:].strip() and not l[1:].strip().startswith(\"//\")]\nassert sorted(l[1:].strip() for l in d) == [\"is_test: false,\", \"is_test: routing::is_test_file(&f.rel_path),\"] and [l[0] for l in sorted(d, key=lambda x: x[0])] == [\"+\", \"-\"], (\"compose.rs production changes only the config writer's is_test (D-TESA-10)\", d)\nassert \"is_test: false,\" not in c[:j], \"no production TrackedFile writer in compose hard-codes is_test\"\nchanged = sorted(sh(\"git\", \"diff\", \"--name-only\", \"--relative\", \"HEAD\", \"--\", \"crates/repo-index\").split())\nuntracked = sorted(sh(\"git\", \"ls-files\", \"--others\", \"--exclude-standard\", \"--\", \"crates/repo-index\").split())\nassert changed == [P] and untracked == [\"crates/repo-index/tests/test_status_undetermined_reproduction.rs\"], (\"repo-index paths\", changed, untracked)\nprint(\"TESA-C03 shape ok\")\nPY",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "THE WRITE PATH (repo-index). Production (D-TESA-10): `persist_config_file_versions` (compose.rs:1443) sets `is_test` from `routing::is_test_file(&f.rel_path)` instead of `false` — the ONLY production change in repo-index (the python pins it; the compose test module is unchanged; nothing else is written — D-TESA-DERIVED-1). NEW integration test binary `repo-index/tests/test_status_undetermined_reproduction.rs` driving `compose::index_into_storage` then `refresh_into_storage` into `StorageConnection::open_in_memory()`, reading back through `FileCatalogPort::get_files_by_repo` and the storage read `query_tracked_file_test_flags` (TESA-C04), and deciding UNDETERMINED only through `repo_graph_classification::test_path::undetermined_test_word`. Fixture (one `write_fixture`): `Cargo.toml` + `src/lib.rs` declaring `pub mod tests_util;` and `#[cfg(test)] mod test_helpers;`, `src/test_helpers.rs`, `src/tests_util.rs`; `Lib/testsuite/src/FooTest.cpp`, `testsuite/run.c`; `Lib/include/Lib/TestCaller.h` (a C++ class); `util/testutil.cc`; `src/parser_test.cc` (no marker — the IS-TEST-CPP-1 name-trap); `src/with_include_test.cc` (`#include \\\"gtest/gtest.h\\\"` + `TEST(A, B) {}`); `pkg/testing.py`; `web/NuggetTester.ts`; `src/real.cc`; tracked-only files `integration-tests/pom.xml` (config), `tests/requirements.txt` (config), `src/test/proto/api.proto` (contract). Tests: `testsuite_directory_files_are_test_files` (both `testsuite/` files `is_test = true`, C++ FILE node `TEST_FILE`); `test_worded_files_without_a_convention_or_marker_are_undetermined` (the function over the snapshot's tracked files yields exactly `Lib/include/Lib/TestCaller.h`→`Test`, `integration-tests/pom.xml`→`tests` (FILE-less, `has_file_node = false`), `pkg/testing.py`→`testing`, `src/parser_test.cc`→`test`, `src/tests_util.rs`→`tests`, `util/testutil.cc`→`testutil`, `web/NuggetTester.ts`→`Tester`, each `is_test = false`); `a_structural_marker_keeps_a_test_worded_file_out_of_undetermined` (`src/with_include_test.cc`, `src/test_helpers.rs` are test by their markers, so the function yields None); `tracked_only_files_take_is_test_from_the_conventions` (`tests/requirements.txt`, `src/test/proto/api.proto` `is_test = true`; `integration-tests/pom.xml` false); `undetermined_status_survives_a_no_change_refresh` (after the refresh the same tracked flags and the same undetermined set); `a_marker_added_later_makes_the_file_test_not_undetermined` (`src/parser_test.cc` gains the gtest include and a `TEST`, a refresh promotes it, and the function over the served snapshot no longer yields it — the status follows the stored flag it is computed from, D-TESA-DERIVED-1). Existing, bound: the Rust and C++ structural reproductions (`structural_is_test_survives_no_change_refresh` in BOTH binaries — count 2), the `is_generated` reproduction, `index_rust_crate_extracts_symbols`, `index_python_extracts_symbols`. The `--test` run shows exactly 6 passed. Floor 451 + 6."
+      },
+      "expected": "exit 0: through the product's own write path every tracked file — extracted, config, contract — takes the conventions; the shared function over the stored flags yields exactly the test-worded, convention-free, non-test files (FILE-bearing or not) and nothing else; a structural marker keeps a file out; the same answer follows a no-change refresh and follows a marker added later; the structural and generated reproductions remain green (no behavior change for them)",
+      "candidateSha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "pass (earlier iteration); no code changed in revisions 1–2",
+        "supportingEvidence": [
+          "Builder reports no code changed for this check; no proving log or line was provided."
+        ]
+      }
+    },
+    {
+      "checkId": "TESA-C04",
+      "obligationIds": [
+        "RG-REQ-001-L07",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L04",
+        "RG-REQ-001-L03",
+        "RG-REQ-001-L05",
+        "RG-REQ-011-L03",
+        "P-TESA-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-storage > /tmp/tesa-c04.txt 2>&1 && grep -qE '^test result: ok\\.' /tmp/tesa-c04.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/tesa-c04.txt && for t in tracked_file_flags_list_every_tracked_file_of_the_snapshot_with_its_flag_and_file_node tracked_file_flags_filter_by_path tracked_file_flags_use_the_strict_is_test_mapping call_source_file_flags_are_the_files_whose_calls_reliability_counts directory_groups_count_stored_test_files directory_groups_error_on_an_owned_file_without_a_files_row resolve_symbol_accepts_qualified_suffix count_unresolved_by_classification_groups_correctly upsert_files_is_idempotent_and_updates_on_conflict get_files_by_repo_excludes_is_excluded_rows classify_then_prune_preserves_all_protected_classes classify_repo_retention_prunes_beyond_current_and_parent; do grep -qE \"^test (.*::)?$t \\.\\.\\. ok$\" /tmp/tesa-c04.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-storage -- --list 2>/dev/null | grep -c ': test$')\" -ge 776 && python3 - <<'PY'\nimport difflib, subprocess\ndef sh(*a): return subprocess.run(a, capture_output=True, text=True, check=True).stdout\ndef dl(p): return [l for l in difflib.unified_diff(sh(\"git\", \"show\", \"HEAD:./\" + p).splitlines(), open(p, encoding=\"utf-8\").read().splitlines(), lineterm=\"\", n=0) if l[:1] in \"+-\" and not l.startswith((\"+++\", \"---\"))]\nchanged = sorted(sh(\"git\", \"diff\", \"--name-only\", \"--relative\", \"HEAD\", \"--\", \"crates/storage\").split())\nuntracked = sorted(sh(\"git\", \"ls-files\", \"--others\", \"--exclude-standard\", \"--\", \"crates/storage\").split())\nassert changed == [\"crates/storage/src/agent_impl.rs\", \"crates/storage/src/agent_orient_reads.rs\", \"crates/storage/src/lib.rs\"] and untracked == [\"crates/storage/src/test_status_reads.rs\"], (\"storage paths\", changed, untracked)\nd = dl(\"crates/storage/src/agent_impl.rs\")\nassert all(l[0] == \"+\" for l in d) and len([l for l in d if l.strip() not in (\"+\", \"+}\") and not l[1:].strip().startswith(\"//\")]) <= 8, (\"agent_impl.rs only gains the one delegating trait method\", d)\nassert [l for l in dl(\"crates/storage/src/lib.rs\") if l[0] == \"-\"] == [], \"storage lib.rs only gains lines\"\np = \"crates/storage/src/agent_orient_reads.rs\"\nhead, cur = sh(\"git\", \"show\", \"HEAD:./\" + p).splitlines(), open(p, encoding=\"utf-8\").read().splitlines()\ndef fence(ls):\n    a = next(k for k, l in enumerate(ls) if l.startswith(\"pub(crate) fn directory_groups(\"))\n    b = next(k for k in range(a, len(ls)) if ls[k] == \"}\")\n    while a > 0 and ls[a - 1].startswith(\"///\"):\n        a -= 1\n    return a, b\n(ha, hb), (ca, cb) = fence(head), fence(cur)\nassert head[:ha] == cur[:ca] and head[hb + 1:] == cur[cb + 1:], \"agent_orient_reads.rs changes only inside directory_groups (and its doc comment)\"\nassert \"is_test\" in \"\\n\".join(cur[ca:cb + 1]) and \"test_file_count\" in \"\\n\".join(cur[ca:cb + 1]), \"directory_groups reads the stored is_test into test_file_count\"\nt = open(\"crates/storage/src/test_status_reads.rs\", encoding=\"utf-8\").read()\nassert \"file_versions\" in t and \"nodes\" in t and \"extraction_diagnostics_json\" not in t, \"plain reads of the snapshot's tracked files and FILE nodes; nothing stored is read (D-TESA-DERIVED-1)\"\nprint(\"TESA-C04 shape ok\")\nPY",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "THE READS (storage) — plain reads of facts the store already holds; nothing new is written (D-TESA-DERIVED-1). NEW `storage/src/test_status_reads.rs` (registered in lib.rs): `query_tracked_file_test_flags(&self, snapshot_uid, path: Option<&str>) -> Result<Vec<TrackedFileTestFlag>, StorageError>` with `TrackedFileTestFlag { path, is_test, has_file_node }` — the snapshot's tracked files (`files` ⋈ `file_versions` on the snapshot; `is_test` by the strict `== 1` of types.rs:410), optionally one path, sorted, each with whether the snapshot has a FILE node for it; `query_call_source_file_test_flags(&self, snapshot_uid) -> Result<Vec<(String, bool)>, StorageError>` — the distinct source files of the CALLS edges and the unresolved CALLS rows of the snapshot, i.e. the files whose calls `query_call_resolution_by_language`/`_by_module` count (call_resolution_reads.rs:262-374), with their `is_test`. `agent_impl.rs` gains only the one-line delegating `AgentStorageRead::query_tracked_file_test_flags` method. D-TESA-11: `directory_groups` (agent_orient_reads.rs:203-233) adds `test_file_count` = its OWNS-owned files with `files.is_test = 1`, joined so that an owned FILE node with no `files` row errors the read rather than counting as non-test (`directory_groups_error_on_an_owned_file_without_a_files_row`; 0 such rows on the v0.19.0 leveldb and poco stores, EXECUTED) (the python fences every change of that file inside the function). The python also pins that `test_status_reads.rs` reads no `extraction_diagnostics_json`. New tests: `tracked_file_flags_list_every_tracked_file_of_the_snapshot_with_its_flag_and_file_node`, `tracked_file_flags_filter_by_path`, `tracked_file_flags_use_the_strict_is_test_mapping`, `call_source_file_flags_are_the_files_whose_calls_reliability_counts`, `directory_groups_count_stored_test_files`. Bound: `resolve_symbol_accepts_qualified_suffix` (RG-REQ-001-L05), `count_unresolved_by_classification_groups_correctly` (L03), the files CRUD pins and two retention lifecycle pins (RG-REQ-011-L03). Floor 770 + 6."
+      },
+      "expected": "exit 0: the store returns a snapshot's tracked files with their stored flag and FILE-node presence, the files whose calls reliability counts, and the directory groups' stored test counts — plain reads, nothing new stored; every pre-existing storage test remains green (no behavior change in symbol resolution, unresolved classification, file CRUD or retention)",
+      "candidateSha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "pass (earlier iteration); no code changed in revisions 1–2",
+        "supportingEvidence": [
+          "Builder reports no code changed for this check; no proving log or line was provided."
+        ]
+      }
+    },
+    {
+      "checkId": "TESA-C05",
+      "obligationIds": [
+        "RG-REQ-001-L07",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L10",
+        "RG-REQ-001-L05",
+        "RG-REQ-001-L06",
+        "P-TESA-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-agent > /tmp/tesa-c05.txt 2>&1 && grep -qE '^test result: ok\\.' /tmp/tesa-c05.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/tesa-c05.txt && for t in explain_file_marks_an_undetermined_file_with_its_word explain_file_carries_no_test_status_for_a_determined_file explain_file_carries_no_test_status_for_a_test_file explain_tracked_only_undetermined_file_states_its_test_status explain_tracked_only_determined_file_stays_no_match explain_file_without_a_tracked_row_is_an_error_not_determined undetermined_test_status_serializes_flat_as_test_status_and_word determined_identity_json_is_unchanged_by_the_test_status_field undetermined_test_files_serialize_with_count_paths_and_universe_or_unavailable production_scope_counts_undetermined_files_among_all_ranked_rows production_scope_count_equals_the_shared_function_over_its_ranked_files include_all_scope_carries_no_undetermined_count package_group_test_count_is_the_stored_fact_not_the_directory_name a_directory_named_test_with_no_stored_test_files_counts_zero orient_module_summary_states_undetermined_grouped_files orient_module_summary_grouped_count_equals_the_shared_function_over_grouped_files explain_file_has_identity_section explain_file_has_symbols_when_present explain_file_no_path_only_sections explain_file_no_match_returns_empty generated_vendored_and_test_rows_are_excluded_and_counted include_all_keeps_every_row_and_reports_scope_all all_rows_excluded_still_emits_the_signal_with_the_excluded_count high_complexity_count_is_the_filtered_total_not_the_storage_count a_row_without_a_file_stays_ranked is_test_partition_flows_through_the_projection explain_resolves_qualified_suffix_through_shared_resolver symbol_resolves_by_stable_key budgets_change_length_never_numbers index_drift_incomplete_when_basis_unknown petclinic_eleven_dirs_fold_to_six_packages flat_src_layout_no_main_test_split top_level_test_dir_counts_its_stored_test_files rust_workspace_folds_subdirs_into_crate_groups ts_workspace_folds_into_package_groups root_cargo_manifest_folds_whole_tree root_package_json_folds_whole_tree order_is_size_desc_then_name_asc collision_safe_display_names root_dot_manifest_does_not_swallow_when_nested_roots_exist; do grep -qE \"^test (.*::)?$t \\.\\.\\. ok$\" /tmp/tesa-c05.txt || { echo \"MISSING $t\"; exit 1; }; done && ! grep -qE 'top_level_test_dir_counts_as_test' /tmp/tesa-c05.txt && test \"$(cargo test -p repo-graph-agent -- --list 2>/dev/null | grep -c ': test$')\" -ge 505 && python3 - <<'PY'\np = \"crates/agent/src/package_groups.rs\"\nt = open(p, encoding=\"utf-8\").read()\nprod = t[:t.find(\"\\n#[cfg(test)]\")]\nfor bad in ('matches!(first, \"test\"', 'first == \"tests\"', \"fn manifest_test_dir(\"):\n    assert bad not in prod, (\"the package-group test count no longer comes from a directory name (D-TESA-11)\", bad)\nassert \"test_file_count\" in prod, \"the stored count is folded\"\nprint(\"TESA-C05 package-group rule ok\")\nPY",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "POLICY (agent) — every UNDETERMINED decision goes through `repo_graph_classification::test_path::undetermined_test_word` (TESA-C08 pins that no other crate carries the word list). NEW `agent/src/dto/test_status.rs` (registered in dto/mod.rs, re-exported): `TestStatusUniverse` (closed, snake_case: `ranked_files`, `hotspot_files`, `call_files`, `surface_files`, `boundary_files`, `inference_files`, `candidate_files`, `owned_files`, `grouped_files`); `UndeterminedTestFiles` — `{\"count\":N,\"paths\":[…],\"universe\":u,\"universe_count\":M,\"unknown_count\":K}` or `{\"unavailable\":reason,\"universe\":u}` (unavailable only when a read the block needs failed) — ONE shape for every surface; `ExplainUndeterminedTestStatus` — flattened into the explain identity as `test_status: \"undetermined\"` + `test_status_word`. Port: `AgentStorageRead::query_tracked_file_test_flags` (storage_port.rs; every implementor forwards or fakes it — storage agent_impl.rs, the daemon decorator and its three spies, `complexity_tests.rs` FakeStorage, `tests/common/mod.rs` FakeAgentStorage — none defaults it); `AgentDirectoryGroup.test_file_count`. EXPLAIN (S1): `ExplainIdentityEvidence` (signal.rs:855) gains `#[serde(flatten, skip_serializing_if = \\\"Option::is_none\\\")] pub undetermined_test_status: Option<ExplainUndeterminedTestStatus>` (the `ExplainMemberItem.undetermined_identity` precedent, signal.rs:1001-1002 — a determined file's identity JSON is byte-identical); `explain_file` (explain/mod.rs:841) reads the focused file's flag (`query_tracked_file_test_flags(snapshot, Some(path))`, failure propagates with `?`) and sets it iff the function yields a word; a FILE-bearing focus has exactly one tracked row on its snapshot (its FILE node comes from an extracted, hence tracked, file — every FILE node has a `file_versions` row on its snapshot: leveldb 133/133, poco 3,231/3,231 on the v0.19.0 stores), so zero rows is an inconsistency returned as an error, never read as determined (`explain_file_without_a_tracked_row_is_an_error_not_determined`); on the `AgentSymbolResolution::NotFound` arm (:196) a target that is a tracked file of the snapshot with no FILE node and for which the function yields a word renders a file identity (`target_kind` `file`, `path`, the test status) instead of no-match — any other target keeps `build_no_match`; the seven other identity literal sites (explain/mod.rs:484, :987; explain/coherent_tests.rs:38; daemon-runtime explain_coherence_served_tests.rs:217, :438; explain_coherence_tests.rs:304; explain_lg_identity.rs:87) add `undetermined_test_status: None`. COMPLEXITY (S2): `ComplexityScope::Production` gains `test_status_undetermined: UndeterminedTestFiles` (`ranked_files`) computed between complexity.rs:144 and :149 by applying the function to each retained row's `file_path` and `is_test` (the rows already carry both — agent_impl.rs:1969): count = distinct ranked files for which it holds, universe_count = distinct ranked files, unknown_count = 0 by construction — a row's `file_path` and flag come from the same `files` LEFT JOIN (agent_impl.rs:1966-1997), so a row with a path has a known flag and a row without a `files` row has neither: it stays ranked (`a_row_without_a_file_stays_ranked`), outside the FILE universe and never evaluated (D-TESA-13) — the same rows the ranking partitions, so the count cannot disagree with its partition; existing tests whose expectation EXTENDS by that field keep their names: `generated_vendored_and_test_rows_are_excluded_and_counted`, `all_rows_excluded_still_emits_the_signal_with_the_excluded_count`, `a_row_without_a_file_stays_ranked`; fixtures coherent.rs:745 and served_e2e.rs:291 extend likewise. PACKAGE GROUPS (S13, D-TESA-11): `DirGroup.test_file_count` (stored); `rollup_package_groups` sums it; the name-based test flag (`classify_directory`'s `matches!(first, \"test\" | …)`, `manifest_test_dir`) is removed from production (the python greps it out) while the `src/main`↔`src/test` key folding stays; `ModuleSummaryEvidence` gains `package_groups_test_status_undetermined: Option<UndeterminedTestFiles>` (`grouped_files`: the function over the tracked files that have a FILE node — every FILE node is OWNS-owned — with universe_count = Σ group files − Σ group test files; its literal sites module_summary.rs ×4, signal.rs tests ×2, ranking.rs:189, served_e2e.rs:928 extend). The package-group tests' `dg` fixtures supply stored counts equal to the old expectations; `top_level_test_dir_counts_as_test` is renamed `top_level_test_dir_counts_its_stored_test_files` (the old name must not appear). New tests: `explain_file_marks_an_undetermined_file_with_its_word`, `explain_file_carries_no_test_status_for_a_determined_file`, `explain_file_carries_no_test_status_for_a_test_file`, `explain_tracked_only_undetermined_file_states_its_test_status`, `explain_tracked_only_determined_file_stays_no_match`, `undetermined_test_status_serializes_flat_as_test_status_and_word`, `determined_identity_json_is_unchanged_by_the_test_status_field`, `undetermined_test_files_serialize_with_count_paths_and_universe_or_unavailable`, `production_scope_counts_undetermined_files_among_all_ranked_rows`, `production_scope_count_equals_the_shared_function_over_its_ranked_files`, `include_all_scope_carries_no_undetermined_count`, `package_group_test_count_is_the_stored_fact_not_the_directory_name`, `a_directory_named_test_with_no_stored_test_files_counts_zero`, `orient_module_summary_states_undetermined_grouped_files`, `orient_module_summary_grouped_count_equals_the_shared_function_over_grouped_files`. Bound: the explain-file, complexity-scope, reliability-projection, symbol-resolution (RG-REQ-001-L05), budget-identity and index-drift (RG-REQ-001-L06) pins and the package-group fold pins. Floor 489 + 16."
+      },
+      "expected": "exit 0: `explain <file>` marks an undetermined file (FILE-bearing or tracked-only) with its word through the shared function and leaves a determined file's identity JSON unchanged; the production complexity scope states, against `ranked_files`, exactly the ranked files the function marks; package-group test counts are the stored fact, never a directory name, and the grouped count is the function over grouped files; every pre-existing agent test remains green (no behavior change in resolution, budgets, reliability, drift or group folding beyond the test counts)",
+      "candidateSha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "pass (earlier iteration); no code changed in revisions 1–2",
+        "supportingEvidence": [
+          "Builder reports no code changed for this check; no proving log or line was provided."
+        ]
+      }
+    },
+    {
+      "checkId": "TESA-C06",
+      "obligationIds": [
+        "RG-REQ-001-L07",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L05",
+        "RG-REQ-002-L07",
+        "RG-REQ-011-L02",
+        "RG-REQ-011-L04",
+        "RG-REQ-011-L05",
+        "RG-REQ-011-L07",
+        "RG-REQ-011-L10",
+        "P-TESA-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-daemon-runtime --lib > /tmp/tesa-c06.txt 2>&1 && grep -qE '^test result: ok\\.' /tmp/tesa-c06.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/tesa-c06.txt && for t in block_counts_distinct_production_paths_the_shared_function_marks block_is_zero_with_empty_paths_when_the_function_marks_none block_names_a_failed_read_as_unavailable_with_its_universe block_carries_its_universe_and_universe_count block_universe_keeps_unknown_status_rows_and_tallies_them_separately hotspots_exclude_tests_block_counts_kept_rows hotspots_block_is_unavailable_when_a_kept_path_has_no_tracked_row reliability_block_counts_undetermined_call_files surfaces_block_counts_production_rows_only orient_http_block_equals_the_surfaces_list_block boundaries_list_block_counts_main_partition_rows boundaries_summary_block_counts_headline_surfaces inferences_block_counts_production_inferences_before_the_limit dead_causes_block_counts_production_inferences find_seed_block_counts_production_candidates seed_fallback_block_counts_production_candidates modules_list_block_counts_owned_production_files modules_show_block_counts_the_modules_owned_production_files stats_package_group_test_counts_read_the_stored_directory_groups stats_errors_when_stored_directory_groups_disagree_with_its_rows stats_zero_test_count_comes_only_from_a_matching_stored_zero_row stats_block_counts_undetermined_grouped_files m2_no_eager_read_explain_file_and_path_serve_from_livegraph is_test_true_flows_to_record_json is_test_none_renders_as_null total_order_is_deterministic_regardless_of_input_order rule_a_unknown_is_test_ranks_with_non_test_never_demoted partition_excludes_only_proven_exhaust_and_counts_it busy_message_names_registered_holder_class busy_message_is_honest_unknown_with_no_registered_op; do grep -qE \"^test (.*::)?$t \\.\\.\\. ok$\" /tmp/tesa-c06.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-daemon-runtime --lib -- --list 2>/dev/null | grep -c ': test$')\" -ge 829 && git diff --quiet HEAD -- crates/daemon-runtime/tests crates/daemon-runtime/Cargo.toml",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "ADAPTERS (daemon-runtime). NEW `daemon-runtime/src/test_status_undetermined.rs`: `block(universe, rows) -> UndeterminedTestFiles` — `rows` are the (path, `Option<bool>` flag) pairs of the surface's production partition exactly as the surface already partitions them (cycle 6, review-4; the per-surface contract is D-TESA-13): `universe_count` = the distinct paths of ALL those rows, unknown-flag rows included wherever the surface keeps them in production; count/paths = the distinct paths whose flag is KNOWN false and for which `repo_graph_classification::test_path::undetermined_test_word` holds — the function is never applied to an unknown flag, and an unknown flag is never read as false; `unknown_count` = the distinct paths in the universe whose flag is unknown (the separate tally); each surface's existing unknown disclosure is retained unchanged. ONE computation over the SAME rows the surface partitions, so a stated count and its denominator can never disagree with the partition (D-TESA-DERIVED-1). Tests: `block_universe_keeps_unknown_status_rows_and_tallies_them_separately` (a partition with one known-false undetermined file, one known-false determined file and one unknown-flag file: count 1, universe_count 3, unknown_count 1; the unknown file is never in `paths`) and each surface test below asserts its D-TESA-13 row — the full denominator, the count, and `unknown_count` beside the surface's own unknown tally where it has one (HTTP `test_status_unknown`, boundaries-list `test_composition: unknown` rows, boundaries-summary `unknown_composition`). Hotspots: every kept row is a churn entry already filtered to tracked paths (hotspots.rs:125-128), so each flag is known; a kept path absent from the tracked-files read is an inconsistency and makes the block `unavailable` with that reason, never a false flag (`hotspots_block_is_unavailable_when_a_kept_path_has_no_tracked_row`); `unavailable` with its reason only when a read the block needs failed (reliability's call-files read, stats' tracked-flags read). Each handler supplies its universe and rows (§2.3 names them): hotspots `hotspot_files`; reliability `call_files` — `query_call_source_file_test_flags` (TESA-C04), the files whose calls its sections count; surfaces/orient HTTP `surface_files`; boundaries `boundary_files`; inferences/dead `inference_files`; find/seed fallback `candidate_files`; modules list/show `owned_files`; stats `grouped_files` (tracked files with a FILE node from `query_tracked_file_test_flags`, M = Σ group files − Σ group test files). D-TESA-11 in `handle_stats`: the stored directory groups are read beside `list_manifest_roots` (dispatch.rs:1934; a read failure errors the request like that read) and joined to the stats rows (the fold input, dispatch.rs:2249) BY PATH. Both reads cover the same population by construction — MODULE nodes that own at least one file (queries.rs:1745 `AND COALESCE(files.cnt, 0) > 0`; agent_orient_reads.rs:219 `HAVING file_count > 0`) — so the two successful reads must agree exactly: the same directory paths and, per path, the same file count. Each row's test count is its matching stored row's `test_file_count`; a zero comes only from a matching stored row that says zero. A stats row with no matching stored row, a stored row with no matching stats row, or a path whose two file counts differ errors the request (`InternalError` naming the first differing path and both counts) — never a zero, never a guessed count. Group names and file counts still come from the rows (dispatch.rs:2247-2266). New tests: `block_counts_distinct_production_paths_the_shared_function_marks`, `block_is_zero_with_empty_paths_when_the_function_marks_none`, `block_names_a_failed_read_as_unavailable_with_its_universe`, `block_carries_its_universe_and_universe_count`, `block_universe_keeps_unknown_status_rows_and_tallies_them_separately`, `hotspots_exclude_tests_block_counts_kept_rows`, `hotspots_block_is_unavailable_when_a_kept_path_has_no_tracked_row`, `reliability_block_counts_undetermined_call_files`, `surfaces_block_counts_production_rows_only`, `orient_http_block_equals_the_surfaces_list_block`, `boundaries_list_block_counts_main_partition_rows`, `boundaries_summary_block_counts_headline_surfaces`, `inferences_block_counts_production_inferences_before_the_limit`, `dead_causes_block_counts_production_inferences`, `find_seed_block_counts_production_candidates`, `seed_fallback_block_counts_production_candidates`, `modules_list_block_counts_owned_production_files`, `modules_show_block_counts_the_modules_owned_production_files`, `stats_package_group_test_counts_read_the_stored_directory_groups`, `stats_errors_when_stored_directory_groups_disagree_with_its_rows` (three cases — a stats row with no stored row, a stored row with no stats row, a file-count mismatch on one path: each an error naming the path, no package groups emitted), `stats_zero_test_count_comes_only_from_a_matching_stored_zero_row` (a matching stored row with `test_file_count` 0 yields 0; the same directory with no stored row is the mismatch error), `stats_block_counts_undetermined_grouped_files` — each surface test asserts the block equals the function applied to that surface's own partition rows. `orient_http_block_equals_the_surfaces_list_block` pins RG-REQ-002-L02. The decorator (orient_serve/storage_port_impl.rs:133) DELEGATES the new port method to SQLite on every posture — `m2_no_eager_read_explain_file_and_path_serve_from_livegraph` (explain_serve_tests/mod.rs:684) stays green unchanged. Bound: inferences `is_test` JSON pins, find-facts ranking pins (RG-REQ-002-L05), the exhaust partition (RG-REQ-011-L07), the named-Busy pins (L02). Integration tests and Cargo.toml unchanged. Floor 807 + 22."
+      },
+      "expected": "exit 0: every allocated surface attaches the same-shaped block, naming its universe, computed by the one shared function over exactly the rows it partitions — the denominator keeps every production row including unknown-flag ones, the count evaluates only known-false flags, and `unknown_count` tallies the unknown ones beside the surface's retained disclosure (D-TESA-13); a failed read is `unavailable` with its reason (never zero, never a dropped key); orient's HTTP line and `surfaces list` state the same block; `stats` takes each test count from the matching stored row (a zero only where that row says zero) and errors on any path or file-count disagreement between the two reads, without changing its rows, names or file counts; the explain green-cert path still serves the file summary from the LiveGraph; every pre-existing daemon-runtime unit test remains green (no behavior change in find ranking, exhaust exclusion, Busy naming, rebuild, crash recovery or background passes)",
+      "candidateSha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "pass (earlier iteration); no code changed in revisions 1–2",
+        "supportingEvidence": [
+          "Builder reports no code changed for this check; no proving log or line was provided."
+        ]
+      }
+    },
+    {
+      "checkId": "TESA-C07",
+      "obligationIds": [
+        "RG-REQ-001-L07",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L07",
+        "RG-REQ-002-L08",
+        "RG-REQ-011-L08",
+        "P-TESA-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo test -p repo-graph-rgr --lib > /tmp/tesa-c07.txt 2>&1 && grep -qE '^test result: ok\\.' /tmp/tesa-c07.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/tesa-c07.txt && for t in undetermined_line_is_plural_singular_and_absent_at_zero undetermined_line_carries_each_universe_with_its_count undetermined_line_names_an_unavailable_reason_and_universe undetermined_line_malformed_or_unknown_universe_is_unreadable_never_zero undetermined_line_absent_field_renders_nothing undetermined_line_states_the_unknown_status_files_of_its_universe render_file_target_states_undetermined_test_status render_file_target_without_test_status_is_unchanged render_tracked_only_file_target_states_undetermined_test_status complexity_headline_states_undetermined_files_after_the_scope_clause complexity_breakdown_states_undetermined_files http_headline_states_undetermined_files_in_the_disclosure render_with_exclude_tests_states_undetermined_files reliability_states_undetermined_files_once_after_the_sections surfaces_render_states_undetermined_files_after_the_headline boundaries_list_states_undetermined_files_after_the_headline boundaries_summary_states_undetermined_files_after_the_disclosure inferences_render_states_undetermined_files dead_causes_render_states_undetermined_files seed_tier_states_undetermined_files_after_production_candidates semantic_fallback_states_undetermined_files modules_list_states_undetermined_owned_files modules_show_states_undetermined_owned_files stats_render_states_undetermined_grouped_files_after_the_package_groups orient_package_groups_state_undetermined_grouped_files render_shows_file_target complexity_headline_states_the_excluded_count_with_the_include_all_flag complexity_breakdown_states_the_excluded_count_with_the_include_all_flag complexity_scope_all_names_the_included_scope complexity_all_symbols_excluded_states_the_exclusion_without_centers complexity_scope_absent_renders_as_before complexity_scope_malformed_renders_the_unreadable_line render_with_filtering_tests_only render_with_filtering_both render_with_filtering_single_file_grammar test_files_render_in_their_own_partition renders_both_axes_by_default by_language_flag_hides_module_section headline_excludes_test_fixtures_and_discloses_but_still_lists_them d6_row_order_providers_then_consumers_then_fixtures footer_count_is_the_production_partition_and_discloses_excluded_fixtures unknown_is_test_kept_in_headline_but_disclosed_never_invisible test_file_consumer_is_labelled http_headline_discloses_test_fixture_and_unknown_partition http_headline_no_clause_when_no_fixtures_or_unknown http_headline_fixture_only_still_discloses_when_production_zero http_headline_clean_zero_with_nothing_to_disclose_is_none http_headline_absent_when_field_missing list_render_demotes_test_only_groups_below_main list_render_unknown_rows_stay_in_main_with_marker list_render_all_test_only_shows_empty_main_headline list_render_headline_counts_groups_not_rows summary_headline_excludes_test_only_and_discloses_it_trailing summary_discloses_unknown_composition_without_demoting summary_degraded_test_only_shows_full_headline_and_says_so summary_no_test_only_is_unchanged test_only_partial_payload_degrades_not_zeroes unknown_disclosure_names_count_and_reasons test_fixture_inference_renders_test_label non_test_inference_has_no_test_label d9_framework_line_annotates_detector_with_test_count d9_all_test_fixtures_does_not_cite_dead_code_cause d9_mixed_test_and_production_keeps_not_wired_message d9_absent_test_count_defaults_to_zero_no_annotation chunk_seed_renders_path_line_anchor_qualified_name_and_test_label partition_header_absent_when_only_production_candidates partition_header_absent_when_only_test_candidates missing_is_test_renders_unknown_marker_never_blank_like_production test_classified_chunk_is_labeled_and_anchored show_render_shows_ownership_with_test_as_subset show_render_shows_unreferenced_symbols_with_caveat format_files_compact_with_test_is_a_subset list_render_file_count_is_total_with_test_subset modules_list_rendered_file_totals_sum_to_the_check_indexed_basis execute_or_fallback_fails_for_daemon_required_when_unavailable execute_or_fallback_uses_fallback_for_readonly_when_unavailable render_human_names_package_groups render_human_package_group_test_count_is_a_subset_of_the_total render_human_bounds_package_groups_with_true_omission orient_package_group_absent_test_count_renders_unavailable_not_silent_zero; do grep -qE \"^test (.*::)?$t \\.\\.\\. ok$\" /tmp/tesa-c07.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-rgr --lib -- --list 2>/dev/null | grep -c ': test$')\" -ge 1347 && cargo test -p repo-graph-rgr --test daemon_dispatch orient_and_stats_agree > /tmp/tesa-c07b.txt 2>&1 && grep -qE '^test result: ok\\.' /tmp/tesa-c07b.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/tesa-c07b.txt && grep -qE '^test result: ok\\. 2 passed; 0 failed' /tmp/tesa-c07b.txt && for t in orient_and_stats_agree_on_package_groups orient_and_stats_agree_on_stored_package_group_test_counts; do grep -qE \"^test (.*::)?$t \\.\\.\\. ok$\" /tmp/tesa-c07b.txt || { echo \"MISSING $t\"; exit 1; }; done && python3 - <<'PY'\nimport subprocess\ndef sh(*a): return subprocess.run(a, capture_output=True, text=True, check=True).stdout\nSHARED = \"crates/rgr/src/presentation/test_status.rs\"\nnew = sorted(sh(\"git\", \"ls-files\", \"--others\", \"--exclude-standard\", \"--\", \"crates/rgr\").split())\nassert new == [SHARED], (\"rgr new files\", new)\nsrc = open(SHARED, encoding=\"utf-8\").read()\nfor lit in (\"files whose test status can't be determined — open them and look inside\",\n            \"file whose test status can't be determined — open it and look inside\",\n            \"test status: can't determine — open it and look inside\", \"with unknown test status\",\n            \"ranked files\", \"hotspot files\", \"files with measured calls\", \"files with HTTP surfaces\", \"files with boundary surfaces\",\n            \"files with inferences\", \"candidate files\", \"owned files\", \"grouped files\"):\n    assert lit in src, (\"the L07 wording and every universe noun live in the shared module\", lit)\ndef production(p):\n    if p.endswith((\"_tests.rs\", \"/tests.rs\")):\n        return \"\"\n    t = open(p, encoding=\"utf-8\").read()\n    i = t.find(\"\\n#[cfg(test)]\")\n    return t if i < 0 else t[:i]\nfiles = sorted(p for p in set(sh(\"git\", \"ls-files\", \"--\", \"crates/rgr/src\").split()) | set(new) if p.endswith(\".rs\"))\nretyped = [p for p in files if p != SHARED and any(w in production(p) for w in (\"whose test status can't be determined\", \"test status: can't determine\"))]\nassert not retyped, (\"the wording is typed only in the shared module's production code — renderers call it\", retyped)\nleak = [p for p in files if any(k in open(p, encoding=\"utf-8\").read() for k in (\"test_status_undetermined_files\", \"TEST_STATUS_UNDETERMINED_RECORD_KEY\"))]\nassert not leak, (\"no stored UNDETERMINED carrier exists, so none reaches the CLI (D-TESA-DERIVED-1; RG-REQ-002-L08)\", leak)\nprint(\"TESA-C07 wording ok:\", len(files), \"rgr sources scanned\")\nPY",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "RENDER (rgr). NEW `rgr/src/presentation/test_status.rs` (registered in presentation/mod.rs) is the only home of the wording and the universe nouns: `undetermined_files_line(block: Option<&serde_json::Value>) -> Option<String>` — absent → None; count 0 → None; count 1 → `1 file whose test status can't be determined — open it and look inside (of M <noun>)`; count N ≥ 2 → `N files whose test status can't be determined — open them and look inside (of M <noun>)`; when `unknown_count` K ≥ 1 the parenthesis reads `(of M <noun>; K with unknown test status)` (`undetermined_line_states_the_unknown_status_files_of_its_universe`); `unavailable` (a failed read) → `files whose test status can't be determined: unknown — <reason> (among the <noun>)`; a malformed block or an unknown universe → `files whose test status can't be determined: unreadable on this response` (never a defaulted zero); nouns: `ranked files`, `hotspot files`, `files with measured calls`, `files with HTTP surfaces`, `files with boundary surfaces`, `files with inferences`, `candidate files`, `owned files`, `grouped files`; explain: `test status: can't determine — open it and look inside`. Each renderer calls it at the site §2.3 names; the python greps the wording out of every other rgr production source (test assertions allowed) and any stored-carrier name out of all of rgr (nothing is stored — D-TESA-DERIVED-1; RG-REQ-002-L08). New tests: `undetermined_line_is_plural_singular_and_absent_at_zero`, `undetermined_line_carries_each_universe_with_its_count`, `undetermined_line_names_an_unavailable_reason_and_universe`, `undetermined_line_malformed_or_unknown_universe_is_unreadable_never_zero`, `undetermined_line_absent_field_renders_nothing`, `undetermined_line_states_the_unknown_status_files_of_its_universe`, `render_file_target_states_undetermined_test_status`, `render_file_target_without_test_status_is_unchanged`, `render_tracked_only_file_target_states_undetermined_test_status`, `complexity_headline_states_undetermined_files_after_the_scope_clause`, `complexity_breakdown_states_undetermined_files`, `http_headline_states_undetermined_files_in_the_disclosure`, `render_with_exclude_tests_states_undetermined_files`, `reliability_states_undetermined_files_once_after_the_sections`, `surfaces_render_states_undetermined_files_after_the_headline`, `boundaries_list_states_undetermined_files_after_the_headline`, `boundaries_summary_states_undetermined_files_after_the_disclosure`, `inferences_render_states_undetermined_files`, `dead_causes_render_states_undetermined_files`, `seed_tier_states_undetermined_files_after_production_candidates`, `semantic_fallback_states_undetermined_files`, `modules_list_states_undetermined_owned_files`, `modules_show_states_undetermined_owned_files`, `stats_render_states_undetermined_grouped_files_after_the_package_groups`, `orient_package_groups_state_undetermined_grouped_files`. Bound: every allocated surface's existing partition statement, the `stats` package-group pins (`render_human_names_package_groups`, `render_human_package_group_test_count_is_a_subset_of_the_total`, `render_human_bounds_package_groups_with_true_omission`), `orient_package_group_absent_test_count_renders_unavailable_not_silent_zero`, the stdio-fallback pins (RG-REQ-011-L08) — the list in the command. Integration seam (rgr `daemon_dispatch` binary, through the real daemon): `orient_and_stats_agree_on_package_groups` (:4953, unchanged) and NEW `orient_and_stats_agree_on_stored_package_group_test_counts` (a fixture with `pkg/testsuite/a.ts`, `pkg/src/b.ts`, `pkg/src/testing.ts`: both surfaces report the `testsuite` group's test count = its file count from the store, the same (name, file_count, test_file_count) set, and the same `grouped_files` block naming `pkg/src/testing.ts`) — exactly 2 passed. Floor 1322 + 25."
+      },
+      "expected": "exit 0: every allocated surface prints the fixed L07 sentence with its universe (count ≥ 1), a named unknown (a failed read), or nothing (count 0 / older daemon) at its named site; `explain` prints the per-file sentence; the wording lives in one module; `orient` and `stats` agree on package groups including stored test counts; every existing partition line, clause, label and budget test remains green (no behavior change for a response whose block is absent or zero)",
+      "candidateSha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "TESA-C07 wording ok: 170 rgr sources scanned; test result: ok. 1349 passed; 2 passed",
+        "supportingEvidence": [
+          "/tmp/tesa-run-r2-TESA-C07.txt",
+          "/tmp/tesa-c07.txt",
+          "/tmp/tesa-c07b.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "TESA-C08",
+      "obligationIds": [
+        "P-TESA-04",
+        "RG-REQ-001-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo fmt --check -p repo-graph-classification -p repo-graph-indexer -p repo-graph-storage -p repo-graph-agent -p repo-graph-daemon-runtime -p repo-graph-rgr -p repo-graph-repo-index && cargo clippy -p repo-graph-classification -p repo-graph-indexer -p repo-graph-storage -p repo-graph-agent -p repo-graph-daemon-runtime -p repo-graph-rgr -p repo-graph-repo-index --all-targets -- -D warnings > /tmp/tesa-c08.txt 2>&1 && git -C .. diff HEAD --check && for f in $(git ls-files --others --exclude-standard -- crates); do ! grep -nE '[[:space:]]+$' \"$f\" || { echo \"TRAILING WHITESPACE $f\"; exit 1; }; done && python3 - <<'PY'\nimport subprocess\ndef sh(*a): return subprocess.run(a, capture_output=True, text=True, check=True).stdout\nONE = \"crates/classification/src/test_path.rs\"\nfiles = [p for p in sh(\"git\", \"ls-files\", \"--\", \"crates\").split() + sh(\"git\", \"ls-files\", \"--others\", \"--exclude-standard\", \"--\", \"crates\").split() if p.endswith(\".rs\") and p != ONE and not p.endswith((\"_tests.rs\", \"/tests.rs\")) and \"/tests/\" not in p]\ndef prod(p):\n    t = open(p, encoding=\"utf-8\").read()\n    i = t.find(\"\\n#[cfg(test)]\")\n    return t if i < 0 else t[:i]\ndup = [p for p in files if '\"testutil\"' in prod(p)]\nassert not dup, (\"the L07 word list lives only in the shared function's module\", dup)\ncallers = sorted({p.split(\"/\")[1] for p in files if \"undetermined_test_word(\" in prod(p)})\nassert set(callers) >= {\"agent\", \"daemon-runtime\"}, (\"the partitioned surfaces call the one shared function\", callers)\nprint(\"TESA-C08 one-function ok:\", callers)\nPY",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "formatter over the seven touched crates (classification added); clippy over them with all targets, warnings denied; whitespace hygiene of the tracked diff and of every new file; and the one-function guard (D-TESA-DERIVED-1): no production source outside `classification/src/test_path.rs` carries the word list (`\"testutil\"`), and agent and daemon-runtime call `undetermined_test_word`."
+      },
+      "expected": "exit 0: no formatting, lint or whitespace debt enters with the candidate, and UNDETERMINED has one definition that the surfaces call",
+      "candidateSha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "TESA-C08 one-function ok: ['agent', 'daemon-runtime']",
+        "supportingEvidence": [
+          "/tmp/tesa-run-r2-TESA-C08.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "TESA-C09",
+      "obligationIds": [
+        "RG-REQ-001-L07",
+        "RG-REQ-002-L11",
+        "RG-REQ-001-L01",
+        "RG-REQ-001-L02",
+        "RG-REQ-001-L03",
+        "RG-REQ-001-L04",
+        "RG-REQ-001-L06",
+        "RG-REQ-001-L09",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L02",
+        "RG-REQ-011-L06",
+        "P-TESA-01",
+        "P-TESA-02",
+        "P-TESA-03",
+        "P-TESA-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "S=TEST-EDGE-SCOPE-1A; R=/private/tmp/$S; L='/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases'; BW=$R-before; CAND=\"$PWD/rust/target/release\"; BB=\"$BW/rust/target/release\"; q() { local root=\"$1\" bin=\"$2\" dir=\"$3\" out=\"$4\"; shift 4; ( cd \"$dir\" && env RMAP_STATE_ROOT=\"$root\" RMAP_SOCKET_PATH=\"$root/d.sock\" RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off PATH=\"$bin:$PATH\" \"$bin/rmap\" \"$@\" > \"$out\" 2> \"$out.err\"; echo $? > \"$out.rc\" ); }; rm -f /tmp/tesa-c09-*; test \"$(git -C \"$L/leveldb\" rev-parse HEAD)\" = 7ee830d02b623e8ffe0b95d59a74db1e58da04c5 && test -z \"$(git -C \"$L/leveldb\" status --porcelain)\" && test ! -e \"$BW\" && test ! -e $R-leveldb-before && test ! -e $R-leveldb-after && trap 'git worktree remove --force \"$BW\" >/dev/null 2>&1; rm -rf \"$BW\" $R-leveldb-before $R-leveldb-after' EXIT && git worktree add --detach \"$BW\" HEAD > /tmp/tesa-c09-worktree.txt 2>&1 && git -C \"$BW\" diff --quiet HEAD && grep -q 'pub const INDEXER_VERSION: &str = \"indexer:1.3.0\";' \"$BW/rust/crates/indexer/src/orchestrator.rs\" && (cd \"$BW/rust\" && cargo build --release --bin rmap --bin rmapd > /tmp/tesa-c09-build-before.txt 2>&1) && (cd rust && cargo build --release --bin rmap --bin rmapd > /tmp/tesa-c09-build-cand.txt 2>&1) && mkdir -p $R-leveldb-before $R-leveldb-after && LD=\"$L/leveldb\" && q $R-leveldb-before \"$BB\" \"$LD\" /tmp/tesa-c09-idx-before.txt index && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-idx-after.txt index && q $R-leveldb-before \"$BB\" \"$LD\" /tmp/tesa-c09-stats-before.json stats --json && q $R-leveldb-before \"$BB\" \"$LD\" /tmp/tesa-c09-orient-before.json orient --full --json && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-ex-testutil.txt explain util/testutil.cc && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-ex-testutil.json explain util/testutil.cc --json && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-ex-testutil-h.txt explain util/testutil.h && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-ex-testutil-h.json explain util/testutil.h --json && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-ex-dbimpl.txt explain db/db_impl.cc && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-ex-dbimpl.json explain db/db_impl.cc --json && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-mod.txt modules list && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-mod.json modules list --json && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-rel.txt reliability && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-rel.json reliability --json && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-stats-after.json stats --json && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-stats-after.txt stats && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-orient-after.json orient --full --json && q $R-leveldb-after \"$CAND\" \"$LD\" /tmp/tesa-c09-orient-after.txt orient --full && python3 '/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager/scripts/rg-store-diff.py' $R-leveldb-before $R-leveldb-after > /tmp/tesa-c09-diff.txt 2>&1 && grep -q '^RG-STORE-DIFF PASS$' /tmp/tesa-c09-diff.txt && python3 - <<'PY'\n\nimport glob, json, os, re, sqlite3\nWORDS = {\"test\", \"tests\", \"testing\", \"tester\", \"testutil\"}\ndef word(p):\n    for piece in re.split(r\"[/._\\-]\", p):\n        s = re.sub(r\"(?<=[a-z0-9])(?=[A-Z])\", \" \", piece)\n        s = re.sub(r\"(?<=[A-Z])(?=[A-Z][a-z])\", \" \", s)\n        for t in s.split():\n            if t.lower() in WORDS:\n                return t\n    return None\ndef conv(p):\n    return any(x in p for x in (\"__tests__\", \".test.\", \".spec.\", \"/test/\", \"/tests/\", \"/testsuite/\")) or p.startswith((\"test/\", \"tests/\", \"__tests__/\", \"testsuite/\"))\ndef rd(p): return open(p, encoding=\"utf-8\").read()\ndef rc(p): return int(open(p + \".rc\").read().strip())\ndef js(p): return json.load(open(p))\ndef walk(o):\n    if isinstance(o, dict):\n        yield o\n        for v in o.values(): yield from walk(v)\n    elif isinstance(o, list):\n        for v in o: yield from walk(v)\ndef signal(doc, code):\n    s = [d for d in walk(doc) if d.get(\"code\") == code and \"evidence\" in d]\n    assert len(s) == 1, (\"one signal\", code, len(s))\n    return s[0][\"evidence\"]\ndef only(doc, k):\n    v = [d[k] for d in walk(doc) if k in d]\n    assert len(v) == 1, (\"exactly one\", k, len(v))\n    return v[0]\ndef one_db(root):\n    d = glob.glob(root + \"/databases/*.db\")\n    assert len(d) == 1, (root, d)\n    assert not (os.path.exists(d[0] + \"-wal\") and os.path.getsize(d[0] + \"-wal\") > 0), (\"uncheckpointed WAL\", root)\n    return d[0]\ndef ro(p): return sqlite3.connect(\"file:\" + p + \"?immutable=1\", uri=True)\ndef snap(c): return c.execute(\"select snapshot_uid, basis_commit, toolchain_json, extraction_diagnostics_json, kind from snapshots where status='ready' order by created_at desc limit 1\").fetchone()\ndef files(c, s): return {p: t for p, t in c.execute(\"select f.path, f.is_test from files f join file_versions v on v.file_uid=f.file_uid where v.snapshot_uid=?\", (s,))}\ndef filenodes(c, s): return {p: (st, md) for p, st, md in c.execute(\"select f.path, n.subtype, n.metadata_json from nodes n join files f on f.file_uid=n.file_uid where n.snapshot_uid=? and n.kind='FILE'\", (s,))}\ndef owned_test(c, s): return c.execute(\"select count(distinct t.file_uid) from edges e join nodes m on m.node_uid=e.source_node_uid join nodes t on t.node_uid=e.target_node_uid join files f on f.file_uid=t.file_uid where e.snapshot_uid=? and e.type='OWNS' and m.kind='MODULE' and t.kind='FILE' and f.is_test=1\", (s,)).fetchone()[0]\ndef owned_prod(c, s): return c.execute(\"select count(distinct f.file_uid) from module_file_ownership o join files f on f.file_uid=o.file_uid where o.snapshot_uid=? and f.is_test<>1\", (s,)).fetchone()[0]\ndef groups(doc): return sorted((g[\"name\"], g[\"file_count\"], g[\"test_file_count\"]) for g in doc[\"package_groups\"]) if \"package_groups\" in doc else sorted((g[\"name\"], g[\"file_count\"], g[\"test_file_count\"]) for g in only(doc, \"package_groups\"))\nSENT = \"whose test status can't be determined\"\nPLURAL = \"files whose test status can't be determined — open them and look inside\"\nEXPLAIN_LINE = \"test status: can't determine — open it and look inside\"\n\nR = \"/private/tmp/TEST-EDGE-SCOPE-1A\"\nT = \"/tmp/tesa-c09-\"\nfor n in (\"idx-before.txt\", \"idx-after.txt\", \"ex-testutil.txt\", \"ex-testutil.json\", \"ex-testutil-h.txt\", \"ex-testutil-h.json\", \"ex-dbimpl.txt\", \"ex-dbimpl.json\",\n          \"mod.txt\", \"mod.json\", \"rel.txt\", \"rel.json\", \"stats-before.json\", \"stats-after.json\", \"stats-after.txt\", \"orient-before.json\", \"orient-after.json\", \"orient-after.txt\"):\n    assert rc(T + n) == 0, (\"exit\", n, rc(T + n), rd(T + n + \".err\")[-400:])\nb, a = ro(one_db(R + \"-leveldb-before\")), ro(one_db(R + \"-leveldb-after\"))\nbs, as_ = snap(b), snap(a)\nassert bs[1] == as_[1] == \"7ee830d02b623e8ffe0b95d59a74db1e58da04c5\", (\"basis\", bs[1], as_[1])\ntb, ta = json.loads(bs[2]), json.loads(as_[2])\nassert (tb[\"indexer\"], ta[\"indexer\"]) == (\"indexer:1.3.0\", \"indexer:1.4.0\") and tb[\"extractors\"] == ta[\"extractors\"], (\"stamps\", tb, ta)\nfa = files(a, as_[0])\nassert \"test_status\" not in (as_[3] or \"\") and \"test_status\" not in (bs[3] or \"\"), \"nothing is stored for UNDETERMINED (D-TESA-DERIVED-1)\"\nworded = {p: word(p) for p in fa if word(p) and not conv(p)}\nUW = {p: w for p, w in worded.items() if fa[p] != 1}\nassert len(worded) == 35, (\"35 test-worded, convention-free tracked paths\", len(worded))\nU = sorted(UW)\nassert U == [\"db/c_test.c\", \"util/env_posix_test_helper.h\", \"util/env_windows_test_helper.h\", \"util/testutil.cc\"], (\"undetermined (the shared rule over the stored flags)\", U)\nassert fa[\"util/testutil.h\"] == 1 and worded[\"util/testutil.h\"] == \"testutil\", \"a gtest-promoted test-worded header is test, so not undetermined\"\nassert all(md is None or \"test_status\" not in md for (_, md) in filenodes(a, as_[0]).values()), \"nothing is stamped on a FILE node\"\nex = signal(js(T + \"ex-testutil.json\"), \"EXPLAIN_IDENTITY\")\nassert ex.get(\"test_status\") == \"undetermined\" and ex.get(\"test_status_word\") == \"testutil\", ex\nassert any(l.strip() == EXPLAIN_LINE for l in rd(T + \"ex-testutil.txt\").splitlines()), \"explain line for util/testutil.cc\"\nfor f in (\"testutil-h\", \"dbimpl\"):\n    e = signal(js(T + \"ex-%s.json\" % f), \"EXPLAIN_IDENTITY\")\n    assert \"test_status\" not in e and \"test status\" not in rd(T + \"ex-%s.txt\" % f), (\"no mark on a determined file\", f, e)\ndef owned_prod_paths(c, s): return {p for (p,) in c.execute(\"select distinct f.path from module_file_ownership o join files f on f.file_uid=o.file_uid where o.snapshot_uid=? and f.is_test<>1\", (s,))}\ndef call_prod_paths(c, s): return {p for (p,) in c.execute(\"select distinct f.path from edges e join nodes n on n.node_uid=e.source_node_uid join files f on f.file_uid=n.file_uid where e.snapshot_uid=? and e.type='CALLS' and f.is_test<>1 union select distinct f.path from unresolved_edges u join nodes n on n.node_uid=u.source_node_uid join files f on f.file_uid=n.file_uid where u.snapshot_uid=? and u.category in ('calls_this_wildcard_method_needs_type_info', 'calls_this_method_needs_class_context', 'calls_obj_method_needs_type_info', 'calls_function_ambiguous_or_missing') and f.is_test<>1\", (s, s))}\nchecks = ((\"mod\", \"owned_files\", owned_prod_paths(a, as_[0]), \"owned files\"), (\"rel\", \"call_files\", call_prod_paths(a, as_[0]), \"files with measured calls\"))\nfor f, uni, univ, noun in checks:\n    exp = sorted(p for p in U if p in univ)\n    blk = only(js(T + f + \".json\"), \"test_status_undetermined\")\n    assert blk == {\"count\": len(exp), \"paths\": exp, \"universe\": uni, \"universe_count\": len(univ), \"unknown_count\": 0}, (\"the stated count is the shared rule over the surface's own partition\", f, blk, len(exp), len(univ))\n    if exp:\n        line = \"%d %s (of %d %s)\" % (len(exp), PLURAL if len(exp) > 1 else \"file whose test status can't be determined — open it and look inside\", len(univ), noun)\n        assert rd(T + f + \".txt\").count(line) == 1, (f, \"human line exactly once\", line)\n    else:\n        assert SENT not in rd(T + f + \".txt\"), (f, \"no line at zero\")\nassert only(js(T + \"mod.json\"), \"test_status_undetermined\")[\"count\"] == 4, \"all four are owned (measured on the v0.19.0 store)\"\nsb, sa = js(T + \"stats-before.json\"), js(T + \"stats-after.json\")\ngb, ga = groups(sb), groups(sa)\nassert [(n, fc) for n, fc, _ in gb] == [(n, fc) for n, fc, _ in ga], (\"package-group names and file counts unchanged\", gb, ga)\nassert sum(t for _, _, t in ga) == owned_test(a, as_[0]), (\"stats' package-group test counts are the stored fact\", ga, owned_test(a, as_[0]))\nog = sorted((g[\"name\"], g[\"file_count\"], g[\"test_file_count\"]) for g in signal(js(T + \"orient-after.json\"), \"MODULE_SUMMARY\")[\"package_groups\"])\nassert og == ga, (\"orient and stats package groups agree\", og, ga)\nsblk = only(sa, \"test_status_undetermined\")\nm = sum(fc for _, fc, _ in ga) - sum(t for _, _, t in ga)\nassert sblk == {\"count\": 4, \"paths\": U, \"universe\": \"grouped_files\", \"universe_count\": m, \"unknown_count\": 0}, (sblk, m)\nassert signal(js(T + \"orient-after.json\"), \"MODULE_SUMMARY\")[\"package_groups_test_status_undetermined\"] == sblk, \"orient states the same grouped-files block\"\nassert rd(T + \"stats-after.txt\").count(\"4 %s (of %d grouped files)\" % (PLURAL, m)) == 1, \"stats human line\"\no = rd(T + \"orient-after.txt\")\nassert o.count(SENT) == 1 and (\"4 %s (of %d grouped files)\" % (PLURAL, m)) in o, \"leveldb orient --full: the one grouped-files line; no complexity or HTTP line (no ranked center or HTTP row sits in an undetermined file)\"\nprint(\"TESA-C09 ok: indexer 1.3.0 -> 1.4.0; whole store identical; 35 test-worded, 4 undetermined (derived); package groups: names/file counts unchanged, test %d -> %d (stored)\" % (sum(t for _, _, t in gb), sum(t for _, _, t in ga)))\nPY",
+        "cwd": ".",
+        "environment": "an ATTESTED before-binary: `git worktree add --detach /private/tmp/TEST-EDGE-SCOPE-1A-before HEAD` built `--release` inside the worktree (CLAUDE.md's sanctioned baseline; asserted clean and carrying `indexer:1.3.0`), and the candidate's release build (`rust/target/release`), each indexing leveldb (7ee830d, clean checkout, 133 files) into its OWN new builder root (`/private/tmp/TEST-EDGE-SCOPE-1A-leveldb-before`, `-leveldb-after`); every invocation `RMAP_STATE_ROOT`/`RMAP_SOCKET_PATH` isolated, `RMAP_TRANSPORT=stdio`, `RMAP_AUTO_ENRICH=off`, `RMAP_AUTO_REINDEX=off`, `RMAP_AUTO_RETENTION=off`, the binary's own directory first on PATH (its sibling rmapd serves stdio). A bash command (run it as `bash -c '<command>'`): `q` passes its arguments as `\"$@\"`. The stdio daemon exits after each command, checkpointing its WAL; a non-empty `-wal` makes a store read refuse — STOP and report, never bypass. The worktree and both roots are removed by the EXIT trap.",
+        "inputs": "leveldb is the smallest real C++ corpus with undetermined files and no `testsuite/`. ORACLES: (a) `rg-store-diff.py` (agent-manager's standard oracle: files, nodes, edges, unresolved as normalized sets keyed by stable identity) with every table expected 0 — the slice writes no node, edge or unresolved fact on leveldb and moves no leveldb `is_test` (no config/contract file under a convention there); (b) stamps: before `indexer:1.3.0`, after `indexer:1.4.0`, extractor versions equal; (c) nothing is stored for UNDETERMINED on either snapshot, and no node, edge, file or unresolved row moves; of leveldb's 35 test-worded, convention-free tracked paths (the trailing python's own tokenizer) 31 are gtest-promoted, so the shared rule over the stored flags marks exactly the other 4; (d) the undetermined set is exactly `db/c_test.c`, `util/env_posix_test_helper.h`, `util/env_windows_test_helper.h`, `util/testutil.cc` (D-TEST-UNDETERMINED-1's 4); `util/testutil.h` (word `testutil`) is test, so not undetermined; (e) CLI: `explain util/testutil.cc` prints `test status: can't determine — open it and look inside` and carries `test_status_word: \\\"testutil\\\"`; `explain util/testutil.h` and `explain db/db_impl.cc` carry no test status; `modules list` (--json) carries `{count 4, paths [the four], universe owned_files, universe_count M, unknown_count 0}` and `reliability` carries `universe call_files` with count/paths = the four ∩ the store's non-test call-source files universe_count = those files and unknown_count 0 (owned, call and grouped files all come through a `files` join, so every flag is known — D-TESA-13) — each equal to the python's own computation over the surface's partition — and each prints its line (with its universe) exactly once when its count ≥ 1, none at 0; `stats --json` before (HEAD binary) and after keep the same package-group names and file counts, the after test counts sum to the store's owned test files, `orient --full --json`'s MODULE_SUMMARY package groups equal `stats`', both state the same `grouped_files` block (count 4), and the human `stats` and `orient --full` print that line once — orient prints no other undetermined line (no ranked center ≥ 20 and no HTTP row sits in an undetermined file). Every exit code 0."
+      },
+      "expected": "exit 0: on a real corpus the whole store is unchanged (no behavior change in files, nodes, edges or unresolved rows); nothing new is stored and the shared rule marks exactly the four; leveldb's four undetermined files are marked, explained per file and counted with their universe on the partitioned surfaces that include them; `stats` and `orient` keep their package groups (names, file counts remain) and state the stored test counts, agreeing with each other",
+      "candidateSha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "TESA-C09 ok: indexer 1.3.0 -> 1.4.0; whole store identical; 35 test-worded, 4 undetermined (derived); package groups: names/file counts unchanged, test 0 -> 32 (stored); RG-STORE-DIFF PASS",
+        "supportingEvidence": [
+          "/tmp/tesa-run-r2-TESA-C09.txt",
+          "/tmp/tesa-c09-diff.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "TESA-C10",
+      "obligationIds": [
+        "RG-REQ-001-L07",
+        "RG-REQ-002-L11",
+        "RG-REQ-001-L01",
+        "RG-REQ-001-L08",
+        "RG-REQ-002-L10",
+        "RG-REQ-011-L06",
+        "P-TESA-01",
+        "P-TESA-02",
+        "P-TESA-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "S=TEST-EDGE-SCOPE-1A; R=/private/tmp/$S; L='/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases'; CAND=\"$PWD/rust/target/release\"; RET=\"$HOME/repo-graph-retained/audit-v0.19.0\"; PD=\"$L/poco\"; q() { local root=\"$1\" bin=\"$2\" dir=\"$3\" out=\"$4\"; shift 4; ( cd \"$dir\" && env RMAP_STATE_ROOT=\"$root\" RMAP_SOCKET_PATH=\"$root/d.sock\" RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off PATH=\"$bin:$PATH\" \"$bin/rmap\" \"$@\" > \"$out\" 2> \"$out.err\"; echo $? > \"$out.rc\" ); }; FP() { shasum -a 256 \"$RET/registry.json\"; stat -f '%N %z %m' \"$RET/databases/9858deeeefef8599.db\" \"$RET/databases/1196d1380537d43e.db\"; find \"$RET/databases\" -name '*-wal' | wc -l; }; rm -f /tmp/tesa-c10-*; test \"$(git -C \"$PD\" rev-parse HEAD)\" = 49af4000f99f641920477c8441b4a42840804c19 && test -z \"$(git -C \"$PD\" status --porcelain)\" && test -x \"$CAND/rmap\" && test -x \"$CAND/rmapd\" && test ! -e $R-poco-after && test ! -e $R-poco-v019copy && trap 'rm -rf $R-poco-after $R-poco-v019copy' EXIT && FP0=\"$(FP)\" && mkdir -p $R-poco-after $R-poco-v019copy/databases && cp \"$RET/databases/9858deeeefef8599.db\" $R-poco-v019copy/databases/ && python3 -c 'import json, sys; r = json.load(open(sys.argv[1])); e = [x for x in r[\"repos\"] if x[\"db_path\"].endswith(\"/9858deeeefef8599.db\")]; assert len(e) == 1; e[0][\"db_path\"] = sys.argv[2] + \"/databases/9858deeeefef8599.db\"; json.dump({\"version\": r[\"version\"], \"repos\": e}, open(sys.argv[2] + \"/registry.json\", \"w\"), indent=2)' \"$RET/registry.json\" $R-poco-v019copy && grep -q \"$R-poco-v019copy/databases/9858deeeefef8599.db\" $R-poco-v019copy/registry.json && ! grep -q repo-graph-retained $R-poco-v019copy/registry.json && q $R-poco-v019copy \"$CAND\" \"$PD\" /tmp/tesa-c10-orient-before.json orient --full --json && q $R-poco-v019copy \"$CAND\" \"$PD\" /tmp/tesa-c10-mod-before.json modules list --json && q $R-poco-v019copy \"$CAND\" \"$PD\" /tmp/tesa-c10-stats-before.json stats --json && q $R-poco-after \"$CAND\" \"$PD\" /tmp/tesa-c10-idx.txt index && q $R-poco-after \"$CAND\" \"$PD\" /tmp/tesa-c10-orient-after.json orient --full --json && q $R-poco-after \"$CAND\" \"$PD\" /tmp/tesa-c10-orient-after.txt orient && q $R-poco-after \"$CAND\" \"$PD\" /tmp/tesa-c10-ex-test-h.txt explain CppUnit/include/CppUnit/Test.h && q $R-poco-after \"$CAND\" \"$PD\" /tmp/tesa-c10-ex-test-h.json explain CppUnit/include/CppUnit/Test.h --json && q $R-poco-after \"$CAND\" \"$PD\" /tmp/tesa-c10-ex-arraytest.txt explain Foundation/testsuite/src/ArrayTest.cpp && q $R-poco-after \"$CAND\" \"$PD\" /tmp/tesa-c10-ex-arraytest.json explain Foundation/testsuite/src/ArrayTest.cpp --json && q $R-poco-after \"$CAND\" \"$PD\" /tmp/tesa-c10-ex-array-h.txt explain Foundation/include/Poco/Array.h && q $R-poco-after \"$CAND\" \"$PD\" /tmp/tesa-c10-ex-array-h.json explain Foundation/include/Poco/Array.h --json && q $R-poco-after \"$CAND\" \"$PD\" /tmp/tesa-c10-mod-after.json modules list --json && q $R-poco-after \"$CAND\" \"$PD\" /tmp/tesa-c10-stats-after.json stats --json && test \"$(FP)\" = \"$FP0\" && python3 - <<'PY'\n\nimport glob, json, os, re, sqlite3\nWORDS = {\"test\", \"tests\", \"testing\", \"tester\", \"testutil\"}\ndef word(p):\n    for piece in re.split(r\"[/._\\-]\", p):\n        s = re.sub(r\"(?<=[a-z0-9])(?=[A-Z])\", \" \", piece)\n        s = re.sub(r\"(?<=[A-Z])(?=[A-Z][a-z])\", \" \", s)\n        for t in s.split():\n            if t.lower() in WORDS:\n                return t\n    return None\ndef conv(p):\n    return any(x in p for x in (\"__tests__\", \".test.\", \".spec.\", \"/test/\", \"/tests/\", \"/testsuite/\")) or p.startswith((\"test/\", \"tests/\", \"__tests__/\", \"testsuite/\"))\ndef rd(p): return open(p, encoding=\"utf-8\").read()\ndef rc(p): return int(open(p + \".rc\").read().strip())\ndef js(p): return json.load(open(p))\ndef walk(o):\n    if isinstance(o, dict):\n        yield o\n        for v in o.values(): yield from walk(v)\n    elif isinstance(o, list):\n        for v in o: yield from walk(v)\ndef signal(doc, code):\n    s = [d for d in walk(doc) if d.get(\"code\") == code and \"evidence\" in d]\n    assert len(s) == 1, (\"one signal\", code, len(s))\n    return s[0][\"evidence\"]\ndef only(doc, k):\n    v = [d[k] for d in walk(doc) if k in d]\n    assert len(v) == 1, (\"exactly one\", k, len(v))\n    return v[0]\ndef one_db(root):\n    d = glob.glob(root + \"/databases/*.db\")\n    assert len(d) == 1, (root, d)\n    assert not (os.path.exists(d[0] + \"-wal\") and os.path.getsize(d[0] + \"-wal\") > 0), (\"uncheckpointed WAL\", root)\n    return d[0]\ndef ro(p): return sqlite3.connect(\"file:\" + p + \"?immutable=1\", uri=True)\ndef snap(c): return c.execute(\"select snapshot_uid, basis_commit, toolchain_json, extraction_diagnostics_json, kind from snapshots where status='ready' order by created_at desc limit 1\").fetchone()\ndef files(c, s): return {p: t for p, t in c.execute(\"select f.path, f.is_test from files f join file_versions v on v.file_uid=f.file_uid where v.snapshot_uid=?\", (s,))}\ndef filenodes(c, s): return {p: (st, md) for p, st, md in c.execute(\"select f.path, n.subtype, n.metadata_json from nodes n join files f on f.file_uid=n.file_uid where n.snapshot_uid=? and n.kind='FILE'\", (s,))}\ndef owned_test(c, s): return c.execute(\"select count(distinct t.file_uid) from edges e join nodes m on m.node_uid=e.source_node_uid join nodes t on t.node_uid=e.target_node_uid join files f on f.file_uid=t.file_uid where e.snapshot_uid=? and e.type='OWNS' and m.kind='MODULE' and t.kind='FILE' and f.is_test=1\", (s,)).fetchone()[0]\ndef owned_prod(c, s): return c.execute(\"select count(distinct f.file_uid) from module_file_ownership o join files f on f.file_uid=o.file_uid where o.snapshot_uid=? and f.is_test<>1\", (s,)).fetchone()[0]\ndef groups(doc): return sorted((g[\"name\"], g[\"file_count\"], g[\"test_file_count\"]) for g in doc[\"package_groups\"]) if \"package_groups\" in doc else sorted((g[\"name\"], g[\"file_count\"], g[\"test_file_count\"]) for g in only(doc, \"package_groups\"))\nSENT = \"whose test status can't be determined\"\nPLURAL = \"files whose test status can't be determined — open them and look inside\"\nEXPLAIN_LINE = \"test status: can't determine — open it and look inside\"\n\nR = \"/private/tmp/TEST-EDGE-SCOPE-1A\"\nT = \"/tmp/tesa-c10-\"\nRET = os.path.expanduser(\"~/repo-graph-retained/audit-v0.19.0/databases/9858deeeefef8599.db\")\nU25 = ['CppUnit/include/CppUnit/RepeatedTest.h', 'CppUnit/include/CppUnit/Test.h', 'CppUnit/include/CppUnit/TestCaller.h', 'CppUnit/include/CppUnit/TestCase.h', 'CppUnit/include/CppUnit/TestDecorator.h', 'CppUnit/include/CppUnit/TestFailure.h', 'CppUnit/include/CppUnit/TestResult.h', 'CppUnit/include/CppUnit/TestRunner.h', 'CppUnit/include/CppUnit/TestSetup.h', 'CppUnit/include/CppUnit/TestSuite.h', 'CppUnit/include/CppUnit/TextTestResult.h', 'CppUnit/src/TestCase.cpp', 'CppUnit/src/TestDecorator.cpp', 'CppUnit/src/TestFailure.cpp', 'CppUnit/src/TestResult.cpp', 'CppUnit/src/TestRunner.cpp', 'CppUnit/src/TestSuite.cpp', 'CppUnit/src/TextTestResult.cpp', 'Data/DataTest/include/Poco/Data/Test/DataTest.h', 'Data/DataTest/include/Poco/Data/Test/SQLExecutor.h', 'Data/DataTest/src/SQLExecutor.cpp', 'Net/samples/HTTPLoadTest/src/HTTPLoadTest.cpp', 'cmake/test_compiler.cpp', 'cmake/test_compiler_cxx20.cpp', 'modules/samples/src/ModuleTest.cpp']\nfor n in (\"idx.txt\", \"orient-before.json\", \"orient-after.json\", \"orient-after.txt\", \"ex-test-h.txt\", \"ex-test-h.json\", \"ex-arraytest.txt\", \"ex-arraytest.json\",\n          \"ex-array-h.txt\", \"ex-array-h.json\", \"mod-before.json\", \"mod-after.json\", \"stats-before.json\", \"stats-after.json\"):\n    assert rc(T + n) == 0, (\"exit\", n, rc(T + n), rd(T + n + \".err\")[-400:])\nb, a = ro(RET), ro(one_db(R + \"-poco-after\"))\nbs, as_ = snap(b), snap(a)\nassert bs[1] == as_[1] == \"49af4000f99f641920477c8441b4a42840804c19\", (\"basis\", bs[1], as_[1])\nassert json.loads(as_[2])[\"indexer\"] == \"indexer:1.4.0\", as_[2]\nfb, fa = files(b, bs[0]), files(a, as_[0])\nassert set(fb) == set(fa), (\"file universe\", sorted(set(fb) ^ set(fa))[:10])\nT788 = sorted(p for p in fa if \"/testsuite/\" in p or p.startswith(\"testsuite/\"))\nflipped = sorted(p for p in fa if fb[p] != fa[p])\nassert len(T788) == 788 and flipped == T788 and all(fb[p] == 0 and fa[p] == 1 for p in T788), (\"exactly the 788 testsuite files flip 0 -> 1\", len(T788), len(flipped), sorted(set(flipped) ^ set(T788))[:5])\nnb, na = filenodes(b, bs[0]), filenodes(a, as_[0])\nassert set(nb) == set(na), (\"FILE node set\", sorted(set(nb) ^ set(na))[:10])\nassert all(nb[p][0] == \"SOURCE\" and na[p][0] == \"TEST_FILE\" for p in T788), \"testsuite FILE nodes SOURCE -> TEST_FILE\"\nassert not [p for p in na if p not in T788 and na[p][0] != nb[p][0]], \"no FILE subtype moves outside testsuite\"\nassert \"test_status\" not in (as_[3] or \"\"), \"nothing is stored for UNDETERMINED (D-TESA-DERIVED-1)\"\nev = {p: word(p) for p in fa if word(p) and not conv(p) and fa[p] != 1}\nU = sorted(ev)\nassert U == U25 and all(fa[p] == 0 for p in U), (\"the 25 undetermined files, production partition\", sorted(set(U) ^ set(U25)))\nassert ev[\"CppUnit/include/CppUnit/Test.h\"] == \"Test\" and \"Foundation/testsuite/src/ArrayTest.cpp\" not in ev and \"Foundation/include/Poco/Array.h\" not in ev\ne = signal(js(T + \"ex-test-h.json\"), \"EXPLAIN_IDENTITY\")\nassert e.get(\"test_status\") == \"undetermined\" and e.get(\"test_status_word\") == \"Test\", e\nassert any(l.strip() == EXPLAIN_LINE for l in rd(T + \"ex-test-h.txt\").splitlines()), \"explain CppUnit/include/CppUnit/Test.h states the line\"\nfor f in (\"arraytest\", \"array-h\"):\n    e = signal(js(T + \"ex-%s.json\" % f), \"EXPLAIN_IDENTITY\")\n    assert \"test_status\" not in e and \"test status\" not in rd(T + \"ex-%s.txt\" % f), (f, e)\ncb, ca = signal(js(T + \"orient-before.json\"), \"HIGH_COMPLEXITY\"), signal(js(T + \"orient-after.json\"), \"HIGH_COMPLEXITY\")\nranked = sorted({x[\"file\"] for x in ca[\"top_complex\"] if x.get(\"file\")})\nassert ca[\"scope\"][\"kind\"] == \"production\" and ca[\"scope\"][\"test_status_undetermined\"] == {\"count\": 2, \"paths\": [\"CppUnit/src/TestRunner.cpp\", \"Data/DataTest/src/SQLExecutor.cpp\"], \"universe\": \"ranked_files\", \"universe_count\": len(ranked), \"unknown_count\": 0}, (ca[\"scope\"], len(ranked))\nranked_b = sorted({x[\"file\"] for x in cb[\"top_complex\"] if x.get(\"file\")})\nund_b = sorted(p for p in ranked_b if word(p) and not conv(p) and fb[p] != 1)\nassert cb[\"scope\"][\"test_status_undetermined\"] == {\"count\": len(und_b), \"paths\": und_b, \"universe\": \"ranked_files\", \"universe_count\": len(ranked_b), \"unknown_count\": 0} and not [p for p in und_b if \"/testsuite/\" in p], (\"computed when asked: the older store is answered by the same rule over its own ranked partition; a testsuite path is never undetermined even where its old flag is 0\", cb[\"scope\"], und_b, len(ranked_b))\nassert any(\"/testsuite/\" in (x.get(\"file\") or \"\") for x in cb[\"top_complex\"]) and not any(\"/testsuite/\" in (x.get(\"file\") or \"\") for x in ca[\"top_complex\"]), \"testsuite centers leave the production ranking\"\nassert ca[\"scope\"][\"excluded_count\"] > cb[\"scope\"][\"excluded_count\"], (\"the excluded count rises\", cb[\"scope\"][\"excluded_count\"], ca[\"scope\"][\"excluded_count\"])\nassert (\"2 %s (of %d ranked files)\" % (PLURAL, len(ranked))) in rd(T + \"orient-after.txt\"), \"orient states the two ranked undetermined files against their universe\"\nmb, ma = only(js(T + \"mod-before.json\"), \"test_status_undetermined\"), only(js(T + \"mod-after.json\"), \"test_status_undetermined\")\ndef owned_prod_paths(c, sn): return {p for (p,) in c.execute(\"select distinct f.path from module_file_ownership o join files f on f.file_uid=o.file_uid where o.snapshot_uid=? and f.is_test<>1\", (sn,))}\nob, oa = owned_prod_paths(b, bs[0]), owned_prod_paths(a, as_[0])\nfb_und = sorted(p for p in ob if word(p) and not conv(p) and fb[p] != 1)\nassert mb == {\"count\": len(fb_und), \"paths\": fb_und, \"universe\": \"owned_files\", \"universe_count\": len(ob), \"unknown_count\": 0}, (\"the before block is the shared rule over the before store's owned partition\", mb, len(fb_und), len(ob))\nfa_und = sorted(p for p in oa if p in ev)\nassert ma == {\"count\": len(fa_und), \"paths\": fa_und, \"universe\": \"owned_files\", \"universe_count\": len(oa), \"unknown_count\": 0} and \"CppUnit/include/CppUnit/Test.h\" in fa_und, (\"the after block is the shared rule over the after store's owned partition\", ma, len(fa_und), len(oa))\nsb, sa = js(T + \"stats-before.json\"), js(T + \"stats-after.json\")\ntb_, ta_ = sum(t for _, _, t in groups(sb)), sum(t for _, _, t in groups(sa))\nassert tb_ == owned_test(b, bs[0]) and ta_ == owned_test(a, as_[0]) and ta_ - tb_ == 788, (\"stats' package-group test counts are the stored fact on both stores, and rise by exactly the 788\", tb_, ta_, owned_test(b, bs[0]), owned_test(a, as_[0]))\nprint(\"TESA-C10 ok: 788 testsuite files is_test 0->1 / TEST_FILE; 25 undetermined; complexity excluded %d -> %d, undetermined 2 of %d ranked files; stats test files %d -> %d; modules list %d of %d owned\" % (cb[\"scope\"][\"excluded_count\"], ca[\"scope\"][\"excluded_count\"], len(ranked), tb_, ta_, ma[\"count\"], ma[\"universe_count\"]))\nPY",
+        "cwd": ".",
+        "environment": "the candidate's release build (TESA-C09 built it) indexes poco (49af400, clean checkout, 3,235 tracked files) into a NEW builder root `/private/tmp/TEST-EDGE-SCOPE-1A-poco-after`; the BEFORE facts are the retained v0.19.0 store `~/repo-graph-retained/audit-v0.19.0/databases/9858deeeefef8599.db`, read by python `sqlite3 ?immutable=1` only and NEVER served; the before SURFACES come from the candidate serving a COPY of that store in a builder root `/private/tmp/TEST-EDGE-SCOPE-1A-poco-v019copy` whose one-entry registry points `db_path` at the copy (asserted). The retained originals' fingerprint (registry sha256, both store sizes and mtimes, the count of `-wal` files) is equal before and after. Both builder roots are removed by the EXIT trap (~1.2 GB transient). every invocation `RMAP_STATE_ROOT`/`RMAP_SOCKET_PATH` isolated, `RMAP_TRANSPORT=stdio`, `RMAP_AUTO_ENRICH=off`, `RMAP_AUTO_REINDEX=off`, `RMAP_AUTO_RETENTION=off`, the binary's own directory first on PATH (its sibling rmapd serves stdio). A bash command (run it as `bash -c '<command>'`): `q` passes its arguments as `\"$@\"`. The stdio daemon exits after each command, checkpointing its WAL; a non-empty `-wal` makes a store read refuse — STOP and report, never bypass. The source that built the retained store is not attested; the before-FACTS it holds are compared, and `git diff --stat v0.19.0 HEAD` over routing.rs, both reclassify postpasses, rust_test_classifier.rs, scanner.rs, gtest_marker.rs, language_sniff.rs, generated_sniff.rs and crud/files.rs is EMPTY (EXECUTED 2026-09-29) — so a files-table movement other than the 788 is a STOP-and-report. The whole-store oracle is not run on poco: the v0.19.0 store predates CPP-ATTRIBUTE-MACRO-1A, the Python and Gradle slices and TOOLCHAIN-STALENESS-1; poco is compared on exactly the facts this slice owns.",
+        "inputs": "poco is the packet's named witness. STORE: the file universe is equal; EXACTLY the 788 `**/testsuite/**` files flip `is_test` 0 → 1 (poco has no config or contract file under a convention) and no other file moves (`is_generated`, language, exclusion untouched — RG-REQ-001-L08 preserved); their FILE nodes go `SOURCE` → `TEST_FILE`, no other FILE subtype moves; nothing is stored for UNDETERMINED; the shared rule over the candidate store's flags marks exactly the independent computation (a test word, no convention, not test); the undetermined set is exactly the 25 D-TEST-UNDETERMINED-1 counted, all `is_test = 0`. CLI: `explain CppUnit/include/CppUnit/Test.h` prints the per-file line with `test_status_word: \\\"Test\\\"`; `explain Foundation/testsuite/src/ArrayTest.cpp` and `explain Foundation/include/Poco/Array.h` carry nothing. ORIENT complexity (`--full --json`): before (the copy) ranks at least one `/testsuite/` center (e.g. `Foundation/testsuite/src/TestApp.cpp main (cx 42)`) and — computed when asked — states the undetermined files of ITS OWN ranked partition by the same rule (the python recomputes them from the copy's flags) (a `testsuite/` path is never undetermined: it matches a convention even where an older flag is 0); after ranks none, `excluded_count` rises (RG-REQ-002-L10: both printed), and states exactly `{count 2, paths [CppUnit/src/TestRunner.cpp, Data/DataTest/src/SQLExecutor.cpp], universe ranked_files, universe_count = the distinct files ranked, unknown_count 0}`; the human orient prints `2 files whose test status can't be determined — open them and look inside (of M ranked files)`. `modules list --json`: before and after, `owned_files` blocks equal to the python's own computation over each store's owned non-test files (after contains `CppUnit/include/CppUnit/Test.h`). `stats --json`: the package-group test counts equal the store's owned test files on BOTH stores and rise by exactly 788. A differing literal is a STOP with the file-level reason; never bend an oracle."
+      },
+      "expected": "exit 0: poco's CppUnit test suites are test code on the product's own store and surfaces, its CppUnit framework and test-helper files are marked undetermined and stay production, orient names the two undetermined files among its ranked complexity centers against their universe, `stats` counts the stored test files, an older store is answered by the same rule, and the retained v0.19.0 root remains untouched (no behavior change outside the builder's roots)",
+      "candidateSha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "TESA-C10 ok: 788 testsuite files is_test 0->1 / TEST_FILE; 25 undetermined; complexity excluded 218 -> 229, undetermined 2 of 97 ranked files; stats test files 8 -> 796; modules list 23 of 1955 owned",
+        "supportingEvidence": [
+          "/tmp/tesa-run-r2-TESA-C10.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "TESA-C12",
+      "obligationIds": [
+        "RG-REQ-001-L07",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L04",
+        "RG-REQ-011-L06",
+        "P-TESA-01",
+        "P-TESA-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "R=/private/tmp/TEST-EDGE-SCOPE-1A-fileless; CAND=\"$PWD/rust/target/release\"; q() { local root=\"$1\" bin=\"$2\" dir=\"$3\" out=\"$4\"; shift 4; ( cd \"$dir\" && env RMAP_STATE_ROOT=\"$root\" RMAP_SOCKET_PATH=\"$root/d.sock\" RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off PATH=\"$bin:$PATH\" \"$bin/rmap\" \"$@\" > \"$out\" 2> \"$out.err\"; echo $? > \"$out.rc\" ); }; rm -f /tmp/tesa-c12-*; test -x \"$CAND/rmap\" && test -x \"$CAND/rmapd\" && test ! -e $R && trap 'rm -rf $R' EXIT && mkdir -p $R/state $R/corpus/integration-tests $R/corpus/src/main/java $R/corpus/src/test/proto $R/corpus/tests && printf '<project>\\n  <modelVersion>4.0.0</modelVersion>\\n</project>\\n' > $R/corpus/integration-tests/pom.xml && printf 'public class App {}\\n' > $R/corpus/src/main/java/App.java && printf 'syntax = \"proto3\";\\nmessage Ping {}\\n' > $R/corpus/src/test/proto/api.proto && printf 'pytest\\n' > $R/corpus/tests/requirements.txt && printf 'int parse(const char* s) { return s ? 1 : 0; }\\n' > $R/corpus/src/parser_test.cc && git -C $R/corpus init -q && git -C $R/corpus add -A && git -C $R/corpus -c user.email=tesa@example.invalid -c user.name=tesa commit -qm c1 && q $R/state \"$CAND\" $R/corpus /tmp/tesa-c12-idx.txt index && q $R/state \"$CAND\" $R/corpus /tmp/tesa-c12-ex1.txt explain integration-tests/pom.xml && q $R/state \"$CAND\" $R/corpus /tmp/tesa-c12-ex1.json explain integration-tests/pom.xml --json && q $R/state \"$CAND\" $R/corpus /tmp/tesa-c12-app.json explain src/main/java/App.java --json && q $R/state \"$CAND\" $R/corpus /tmp/tesa-c12-req.txt explain tests/requirements.txt && q $R/state \"$CAND\" $R/corpus /tmp/tesa-c12-req.json explain tests/requirements.txt --json && q $R/state \"$CAND\" $R/corpus /tmp/tesa-c12-ref.txt refresh && q $R/state \"$CAND\" $R/corpus /tmp/tesa-c12-ex2.txt explain integration-tests/pom.xml && q $R/state \"$CAND\" $R/corpus /tmp/tesa-c12-ex2.json explain integration-tests/pom.xml --json && q $R/state \"$CAND\" $R/corpus /tmp/tesa-c12-parser0.json explain src/parser_test.cc --json && printf '#include \"gtest/gtest.h\"\\nint parse(const char* s) { return s ? 1 : 0; }\\nTEST(Parse, Works) {}\\n' > $R/corpus/src/parser_test.cc && git -C $R/corpus -c user.email=tesa@example.invalid -c user.name=tesa commit -qam c2 && q $R/state \"$CAND\" $R/corpus /tmp/tesa-c12-ref2.txt refresh && q $R/state \"$CAND\" $R/corpus /tmp/tesa-c12-parser.json explain src/parser_test.cc --json && python3 - <<'PY'\n\nimport glob, json, os, re, sqlite3\nWORDS = {\"test\", \"tests\", \"testing\", \"tester\", \"testutil\"}\ndef word(p):\n    for piece in re.split(r\"[/._\\-]\", p):\n        s = re.sub(r\"(?<=[a-z0-9])(?=[A-Z])\", \" \", piece)\n        s = re.sub(r\"(?<=[A-Z])(?=[A-Z][a-z])\", \" \", s)\n        for t in s.split():\n            if t.lower() in WORDS:\n                return t\n    return None\ndef conv(p):\n    return any(x in p for x in (\"__tests__\", \".test.\", \".spec.\", \"/test/\", \"/tests/\", \"/testsuite/\")) or p.startswith((\"test/\", \"tests/\", \"__tests__/\", \"testsuite/\"))\ndef rd(p): return open(p, encoding=\"utf-8\").read()\ndef rc(p): return int(open(p + \".rc\").read().strip())\ndef js(p): return json.load(open(p))\ndef walk(o):\n    if isinstance(o, dict):\n        yield o\n        for v in o.values(): yield from walk(v)\n    elif isinstance(o, list):\n        for v in o: yield from walk(v)\ndef signal(doc, code):\n    s = [d for d in walk(doc) if d.get(\"code\") == code and \"evidence\" in d]\n    assert len(s) == 1, (\"one signal\", code, len(s))\n    return s[0][\"evidence\"]\ndef only(doc, k):\n    v = [d[k] for d in walk(doc) if k in d]\n    assert len(v) == 1, (\"exactly one\", k, len(v))\n    return v[0]\ndef one_db(root):\n    d = glob.glob(root + \"/databases/*.db\")\n    assert len(d) == 1, (root, d)\n    assert not (os.path.exists(d[0] + \"-wal\") and os.path.getsize(d[0] + \"-wal\") > 0), (\"uncheckpointed WAL\", root)\n    return d[0]\ndef ro(p): return sqlite3.connect(\"file:\" + p + \"?immutable=1\", uri=True)\ndef snap(c): return c.execute(\"select snapshot_uid, basis_commit, toolchain_json, extraction_diagnostics_json, kind from snapshots where status='ready' order by created_at desc limit 1\").fetchone()\ndef files(c, s): return {p: t for p, t in c.execute(\"select f.path, f.is_test from files f join file_versions v on v.file_uid=f.file_uid where v.snapshot_uid=?\", (s,))}\ndef filenodes(c, s): return {p: (st, md) for p, st, md in c.execute(\"select f.path, n.subtype, n.metadata_json from nodes n join files f on f.file_uid=n.file_uid where n.snapshot_uid=? and n.kind='FILE'\", (s,))}\ndef owned_test(c, s): return c.execute(\"select count(distinct t.file_uid) from edges e join nodes m on m.node_uid=e.source_node_uid join nodes t on t.node_uid=e.target_node_uid join files f on f.file_uid=t.file_uid where e.snapshot_uid=? and e.type='OWNS' and m.kind='MODULE' and t.kind='FILE' and f.is_test=1\", (s,)).fetchone()[0]\ndef owned_prod(c, s): return c.execute(\"select count(distinct f.file_uid) from module_file_ownership o join files f on f.file_uid=o.file_uid where o.snapshot_uid=? and f.is_test<>1\", (s,)).fetchone()[0]\ndef groups(doc): return sorted((g[\"name\"], g[\"file_count\"], g[\"test_file_count\"]) for g in doc[\"package_groups\"]) if \"package_groups\" in doc else sorted((g[\"name\"], g[\"file_count\"], g[\"test_file_count\"]) for g in only(doc, \"package_groups\"))\nSENT = \"whose test status can't be determined\"\nPLURAL = \"files whose test status can't be determined — open them and look inside\"\nEXPLAIN_LINE = \"test status: can't determine — open it and look inside\"\n\nR = \"/private/tmp/TEST-EDGE-SCOPE-1A-fileless\"\nT = \"/tmp/tesa-c12-\"\nfor n in (\"idx.txt\", \"ex1.txt\", \"ex1.json\", \"app.json\", \"req.txt\", \"req.json\", \"ref.txt\", \"ex2.txt\", \"ex2.json\", \"ref2.txt\", \"parser0.json\", \"parser.json\"):\n    assert rc(T + n) == 0, (\"exit\", n, rc(T + n), rd(T + n + \".err\")[-400:])\nc = ro(one_db(R + \"/state\"))\nsnaps = c.execute(\"select snapshot_uid, kind, extraction_diagnostics_json, parent_snapshot_uid from snapshots where status='ready' order by created_at\").fetchall()\nlast = snaps[-1]\nassert last[1] == \"refresh\" and last[3], (\"the latest snapshot is the changed-content refresh\", [(s[0], s[1]) for s in snaps])\nassert all(\"test_status\" not in (sn[2] or \"\") for sn in snaps), \"nothing is stored for UNDETERMINED on any snapshot (D-TESA-DERIVED-1)\"\nfa = files(c, last[0])\nassert fa == {\"integration-tests/pom.xml\": 0, \"src/main/java/App.java\": 0, \"src/parser_test.cc\": 1, \"src/test/proto/api.proto\": 1, \"tests/requirements.txt\": 1}, (\"every tracked file takes the conventions and the markers; the FILE-less pom stays production\", fa)\nassert \"integration-tests/pom.xml\" not in filenodes(c, last[0]), \"the pom has no FILE node (tracked only)\"\nassert {p: word(p) for p in fa if word(p) and not conv(p) and fa[p] != 1} == {\"integration-tests/pom.xml\": \"tests\"}, \"after the marker, the shared rule marks only the FILE-less pom\"\nfor f in (\"ex1\", \"ex2\"):\n    e = signal(js(T + f + \".json\"), \"EXPLAIN_IDENTITY\")\n    assert e.get(\"target_kind\") == \"file\" and e.get(\"path\") == \"integration-tests/pom.xml\" and e.get(\"test_status\") == \"undetermined\" and e.get(\"test_status_word\") == \"tests\", (f, e)\n    assert any(l.strip() == EXPLAIN_LINE for l in rd(T + f + \".txt\").splitlines()), (f, \"explain line\")\nassert \"test_status\" not in signal(js(T + \"app.json\"), \"EXPLAIN_IDENTITY\"), \"a determined extracted file carries no mark\"\np0 = signal(js(T + \"parser0.json\"), \"EXPLAIN_IDENTITY\")\nassert p0.get(\"test_status\") == \"undetermined\" and p0.get(\"test_status_word\") == \"test\", (\"before the marker, src/parser_test.cc (FILE-bearing, no marker) is undetermined\", p0)\nassert \"test_status\" not in signal(js(T + \"parser.json\"), \"EXPLAIN_IDENTITY\"), \"after the marker, src/parser_test.cc is test and unmarked on the latest snapshot\"\nreq = js(T + \"req.json\")\nfoc = [d for d in walk(req) if \"resolved\" in d and \"reason\" in d and \"input\" in d]\nassert len(foc) == 1 and foc[0][\"resolved\"] is False and foc[0][\"reason\"] == \"no_match\" and foc[0][\"input\"] == \"tests/requirements.txt\", (\"the determined FILE-less file keeps today's structured no-match\", foc)\nassert not [d for d in walk(req) if d.get(\"code\") == \"EXPLAIN_IDENTITY\"], \"no identity is fabricated for it\"\nassert \"Target: tests/requirements.txt (unresolved: no_match)\" in rd(T + \"req.txt\").splitlines(), \"the human no-match line\"\nassert \"test status\" not in rd(T + \"req.txt\") and \"test_status\" not in rd(T + \"req.json\"), \"no test-status line for a determined file\"\nprint(\"TESA-C12 ok: FILE-less pom marked and explained across both refreshes; the marker made src/parser_test.cc test, so it is no longer undetermined; the determined FILE-less file keeps its exit-0 no-match\")\nPY",
+        "cwd": ".",
+        "environment": "the candidate's release build (TESA-C09 built it) on a builder-made git corpus in `/private/tmp/TEST-EDGE-SCOPE-1A-fileless` (`corpus/`, `state/`), created and removed by the command (EXIT trap); every invocation `RMAP_STATE_ROOT`/`RMAP_SOCKET_PATH` isolated, `RMAP_TRANSPORT=stdio`, `RMAP_AUTO_ENRICH=off`, `RMAP_AUTO_REINDEX=off`, `RMAP_AUTO_RETENTION=off`, the binary's own directory first on PATH (its sibling rmapd serves stdio). A bash command (run it as `bash -c '<command>'`): `q` passes its arguments as `\"$@\"`. The stdio daemon exits after each command, checkpointing its WAL; a non-empty `-wal` makes a store read refuse — STOP and report, never bypass.",
+        "inputs": "review-0's class — a tracked file with no FILE node — and a marker added later (the status follows the stored flag it is computed from) at the CLI (hadoop's `…-integration-tests/pom.xml` shape, without indexing hadoop): the corpus holds `integration-tests/pom.xml` (config, tracked only), `src/main/java/App.java`, `src/parser_test.cc` (C++, no marker), `src/test/proto/api.proto` (contract under a convention) and `tests/requirements.txt` (config under a convention), committed. `index` (S1); `explain integration-tests/pom.xml` (human + --json); `explain src/main/java/App.java --json`; `explain tests/requirements.txt` (human + --json); a no-change `refresh` (S2); `explain integration-tests/pom.xml` again; `explain src/parser_test.cc --json`; then `src/parser_test.cc` gains `#include \"gtest/gtest.h\"` and a `TEST`, committed, and a second `refresh` (S3, changed content); `explain src/parser_test.cc --json`. The python asserts: every exit code 0 (explain of a no-match exits 0 — orient.rs:562-598); the latest snapshot is the changed-content refresh; nothing is stored for UNDETERMINED on any snapshot; the stored `is_test` on it is pom 0, App.java 0, parser_test.cc 1, api.proto 1, requirements.txt 1 (D-TESA-10); the pom has no FILE node; the shared rule over the stored flags marks only the pom; both explains of the pom render a file identity with `test_status: \\\"undetermined\\\"`, `test_status_word: \\\"tests\\\"` and the line `test status: can't determine — open it and look inside`; before S3 `src/parser_test.cc` is undetermined with word `test`; App.java and (after S3) parser_test.cc carry no test status; `tests/requirements.txt` (determined, tracked only) keeps today's no-match EXACTLY — JSON `focus` with `input` = that path, `resolved: false`, `reason: \\\"no_match\\\"`, no EXPLAIN_IDENTITY signal; human line `Target: tests/requirements.txt (unresolved: no_match)` — and no test-status text in either mode."
+      },
+      "expected": "exit 0: a tracked file with no FILE node is marked UNDETERMINED by the shared function, stays production and is explained with L07's per-file sentence across refreshes; a marker added later makes a file test and no longer undetermined; tracked-only files under a convention are test; a determined tracked-only file keeps today's exit-0 structured no-match (no behavior change); nothing is stored",
+      "candidateSha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "TESA-C12 ok: FILE-less pom marked and explained across both refreshes; …",
+        "supportingEvidence": [
+          "/tmp/tesa-run-r2-TESA-C12.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "TESA-C11",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "RG-REQ-011-L04",
+        "RG-REQ-011-L05",
+        "RG-REQ-011-L10",
+        "P-TESA-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "test \"$(grep -E '^registry-before [0-9a-f]{64}$' .agent-manager/slices/TEST-EDGE-SCOPE-1A/build-progress.md | tail -1 | cut -d' ' -f2)\" = \"$(shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -d' ' -f1)\" && PIDS=$(pgrep -x rmapd | paste -sd, -); { [ -z \"$PIDS\" ] || ! ps -o command= -p \"$PIDS\" | grep -v '/\\.local/bin/rmapd' | grep -q .; } && for d in before leveldb-before leveldb-after poco-after poco-v019copy fileless; do test ! -e /private/tmp/TEST-EDGE-SCOPE-1A-$d || { echo \"LEFT $d\"; exit 1; }; done && ! git worktree list | grep -q 'TEST-EDGE-SCOPE-1A' && python3 - <<'PY'\nimport json, subprocess\nt = open('docs/slices/test-edge-scope-1a.md', encoding='utf-8').read()\nend = t.index('\\n' + '--' + '>')\nallowed = set(json.loads(t[t.index('{'):end])['candidatePaths'])\nst = subprocess.run(['git', 'status', '--porcelain', '--untracked-files=all'], capture_output=True, text=True, check=True).stdout.splitlines()\npaths = sorted(l[3:] for l in st if not l[3:].startswith('.agent-manager/'))\nextra = [p for p in paths if p not in allowed]\nassert not extra, ('paths outside the allocation', extra)\nprint('TESA-C11 ok:', len(paths), 'changed paths, all allocated')\nPY",
+        "cwd": ".",
+        "environment": "candidate tree, after every other check",
+        "inputs": "the full sha256 of the operator registry recorded as `registry-before <digest>` in .agent-manager/slices/TEST-EDGE-SCOPE-1A/build-progress.md at §5 step 0 equals the current one; no rmapd process other than the operator's installed `~/.local/bin/rmapd`; none of the builder roots `/private/tmp/TEST-EDGE-SCOPE-1A-{before,leveldb-before,leveldb-after,poco-after,poco-v019copy,fileless}` remains (narrow names — the prior document item's `/private/tmp/TEST-EDGE-SCOPE-1A-PREP-*` files are not the builder's and are never deleted); no `TEST-EDGE-SCOPE-1A` worktree remains; every changed or untracked path outside `.agent-manager/` is one of the allocation's candidate paths — so daemon-runtime's rebuild, crash-recovery and background-pass sources (not allocated) are unchanged."
+      },
+      "expected": "exit 0: every proof was isolated (the operator's registry unchanged — no behavior change outside the isolated roots), nothing the builder created remains, rebuild/crash-recovery/background-pass code remains untouched, and the tree holds only allocated paths",
+      "candidateSha256": "sha256:2653c43a9f1c870086e0227af4c1e771644002bc1199b3736802c09d61aacf1f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "TESA-C11 ok: 69 changed paths, all allocated",
+        "supportingEvidence": [
+          "/tmp/tesa-run-r2-TESA-C11.txt"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/agent/src/aggregators/complexity.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/src/aggregators/complexity_tests.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/src/aggregators/module_summary.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/src/dto/coherent.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/src/dto/mod.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/src/dto/signal.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/src/dto/test_status.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/src/explain/coherent_tests.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/src/explain/mod.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/src/package_groups.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/src/ranking.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/src/storage_port.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/tests/common/mod.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/agent/tests/explain_file.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/classification/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/classification/src/test_path.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/boundaries_list_read.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/boundaries_summary_read.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_coherence_served_tests.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_coherence_tests.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_lg_identity.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_serve_tests/spy.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/quality/dead_causes.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/quality/hotspots.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/reliability.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/http_boundary_read.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/inferences_serve.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_additive_fields.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_lg_decisions/served_e2e.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/tests.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/seed/dto.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/test_status_undetermined.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/indexer/src/orchestrator.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/indexer/src/routing.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/repo-index/src/compose.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/repo-index/tests/test_status_undetermined_reproduction.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/dead_render.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/find/seed_render.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/find/seed_render_tests.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/inferences_render.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/boundaries_list/mod.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/boundaries_list/tests.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/boundaries_summary/mod.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/boundaries_summary/tests.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/hotspots.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/http_boundary.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/mod.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/modules_list.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/modules_list_tests.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/modules_show.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/orient_density_tests.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/orient_sections.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/orient_seg2.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/orient_seg2_tests.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/reliability.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/seed.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/stats.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/surfaces.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/test_status.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L11",
+        "P-TESA-03"
+      ],
+      "summary": "The renderer's bound now uses checked addition so overflow renders the block as unreadable; test coverage includes overflow and serialized producer cases."
+    },
+    {
+      "path": "rust/crates/rgr/tests/daemon_dispatch.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/storage/src/agent_impl.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/storage/src/agent_orient_reads.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/storage/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/storage/src/test_status_reads.rs",
+      "obligationIds": [
+        "RG-REQ-001-L07"
+      ],
+      "summary": "not stated by the builder"
+    }
+  ],
+  "completedAt": "2026-09-29T20:07:02.962Z",
+  "limitations": [
+    "I did not run cargo test --workspace or the dogfood; those are the operator's gates after acceptance.",
+    "Everything I created under /private/tmp is removed. The prior document item's TEST-EDGE-SCOPE-1A-PREP-* files are not mine and were left in place.",
+    "Earlier TESA-C01–C06 checks have no proving logs or lines cited; their code did not change in revisions 1–2.",
+    "The producer-side grouped-files universe still uses saturating subtraction; if a store has more test files than files, the universe is 0 and the renderer shows the block as unreadable rather than a false count."
+  ],
+  "report": "Review-1's finding is fixed, and every check I re-ran on the revised candidate passes. Nothing is committed; there are still 69 changed paths, all allocated.\n\n## The fix (review-1 F-1, in `rgr/src/presentation/test_status.rs`)\n- **Overflow bound:** the renderer's bound check used saturating addition, so a block with `unknown_count` near `u64::MAX` could appear to fit its universe. It now uses checked addition: if `count + unknown_count` overflows, the block renders `files whose test status can't be determined: unreadable on this response`.\n- **Failing test first:** I added that overflow case to `undetermined_line_malformed_or_unknown_universe_is_unreadable_never_zero`. It failed against the saturating version (EXECUTED: `FAILED. 0 passed; 1 failed`), then passed after the fix.\n- **Misnamed test:** I replaced it with `producer_serialized_blocks_pass_the_renderer_validation`, which serializes the real agent type `UndeterminedTestFiles` and checks the rendered line for four cases:\n  - a counted block with one unknown file;\n  - a zero block (no line);\n  - a grouped-files block;\n  - an unavailable block.\n\n  The daemon's `block` is already pinned equal to that same agent computation by a daemon-runtime test.\n- **Same defect elsewhere:** my other new rgr code has no other saturating or unchecked arithmetic on response numbers. On the producer side, the grouped-files universe (total files minus test files) still uses saturating subtraction; if a store ever had more test files than files, the universe would be 0 and the renderer would show the block as unreadable rather than a false count.\n\n## Checks (EXECUTED)\n| Check | Result | Log and proving line |\n|---|---|---|\n| TESA-C01–C06 | pass (earlier iteration) | none of their code changed in revisions 1–2; only `rgr/src/presentation/test_status.rs` and `stats.rs` changed |\n| TESA-C07 | pass | `/tmp/tesa-run-r2-TESA-C07.txt`: `TESA-C07 wording ok: 170 rgr sources scanned`; `/tmp/tesa-c07.txt`: `test result: ok. 1349 passed`; `/tmp/tesa-c07b.txt`: `2 passed` |\n| TESA-C08 | pass | `/tmp/tesa-run-r2-TESA-C08.txt`: `TESA-C08 one-function ok: ['agent', 'daemon-runtime']` |\n| TESA-C09 | pass | `/tmp/tesa-run-r2-TESA-C09.txt`: `TESA-C09 ok: indexer 1.3.0 -> 1.4.0; whole store identical; 35 test-worded, 4 undetermined (derived); package groups: names/file counts unchanged, test 0 -> 32 (stored)`; `/tmp/tesa-c09-diff.txt`: `RG-STORE-DIFF PASS` |\n| TESA-C10 | pass | `/tmp/tesa-run-r2-TESA-C10.txt`: `TESA-C10 ok: 788 testsuite files is_test 0->1 / TEST_FILE; 25 undetermined; complexity excluded 218 -> 229, undetermined 2 of 97 ranked files; stats test files 8 -> 796; modules list 23 of 1955 owned` |\n| TESA-C12 | pass | `/tmp/tesa-run-r2-TESA-C12.txt`: `TESA-C12 ok: FILE-less pom marked and explained across both refreshes; …` |\n| TESA-C11 | pass (run last) | `/tmp/tesa-run-r2-TESA-C11.txt`: `TESA-C11 ok: 69 changed paths, all allocated` |\n\n## Changed path this revision\n- `rust/crates/rgr/src/presentation/test_status.rs`: the checked bound and the two test changes. It serves RG-REQ-001-L07, RG-REQ-002-L02/L04/L11 and P-TESA-03.\n\nAll other paths are byte-identical to what review-1 already assessed.\n\n## Limitations\n- I did not run `cargo test --workspace` or the dogfood; those are the operator's gates after acceptance.\n- Everything I created under `/private/tmp` is removed. The prior document item's `TEST-EDGE-SCOPE-1A-PREP-*` files are not mine and were left in place.\n\nNo stop condition was hit and no decision is required."
+}

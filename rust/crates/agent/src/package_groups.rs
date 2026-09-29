@@ -10,8 +10,8 @@
 //!      (`Cargo.toml` / `package.json`) covers it — so a Rust workspace names
 //!      `agent`, `rgr`, `indexer`, … (whole crate = one group), and a TS
 //!      workspace names its packages, not raw `src/...` fragments; else
-//!   2. the **JVM `src/main`↔`src/test` logical package** (both halves merged,
-//!      carrying a test-file count); else
+//!   2. the **JVM `src/main`↔`src/test` logical package** (both halves merged);
+//!      else
 //!   3. the **leaf directory verbatim** (C/C++ and manifest-less trees).
 //!
 //! Two display transforms then run over the merged keys:
@@ -60,10 +60,15 @@ use std::collections::BTreeMap;
 /// `stats` already computes (`ModuleStatsResult`) and the
 /// `list_directory_groups` agent-port read returns (`AgentDirectoryGroup`), so
 /// both callers feed the roll-up an identical shape.
+///
+/// `test_file_count` (TEST-EDGE-SCOPE-1A, D-TESA-11) is how many of those owned
+/// files carry the stored `files.is_test = 1` — the STORED structural fact
+/// (conventions + markers, RG-REQ-001-L07), never a guess from the directory name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirGroup {
     pub path: String,
     pub file_count: u64,
+    pub test_file_count: u64,
 }
 
 /// The detected toolchain of a manifest root — the axis of variation that
@@ -111,9 +116,9 @@ pub struct PackageGroup {
     /// Total files this group owns (across `src/main` + `src/test`, or the whole
     /// crate/package).
     pub file_count: u64,
-    /// How many of those are test files (the `src/test/…`, a top-level
-    /// `test(s)/…` branch, or a crate/package `tests/…` branch). `0` is honest
-    /// "no separate test directory", never an inference about test adequacy.
+    /// How many of those are test files — the sum of the member directories'
+    /// stored `test_file_count` (`files.is_test`, TEST-EDGE-SCOPE-1A D-TESA-11).
+    /// Never an inference about test adequacy.
     pub test_file_count: u64,
 }
 
@@ -149,16 +154,14 @@ pub fn rollup_package_groups(
     // both at "." still satisfy it). Computed ONCE (O(roots)); `classify` reads it.
     let no_nested_manifest_roots = !manifest_roots.iter().any(|r| r.path != ".");
     // key -> (total_files, test_files, is_manifest_rooted). BTreeMap so iteration
-    // order is a deterministic function of the key set, not insertion order.
+    // order is a deterministic function of the key set, not insertion order. The
+    // test count sums each directory's STORED test-file count (D-TESA-11).
     let mut acc: BTreeMap<String, (u64, u64, bool)> = BTreeMap::new();
     for d in dirs {
-        let (is_test, key, is_manifest) =
-            classify(&d.path, manifest_roots, no_nested_manifest_roots);
+        let (key, is_manifest) = classify(&d.path, manifest_roots, no_nested_manifest_roots);
         let entry = acc.entry(key).or_insert((0, 0, false));
         entry.0 += d.file_count;
-        if is_test {
-            entry.1 += d.file_count;
-        }
+        entry.1 += d.test_file_count;
         entry.2 |= is_manifest;
     }
     if acc.is_empty() {
@@ -253,46 +256,37 @@ pub fn root_manifest_limitation(manifest_roots: &[ManifestRoot]) -> Option<Strin
     ))
 }
 
-/// Classify a leaf-directory path as (is_test, merge_key, is_manifest_rooted).
+/// Classify a leaf-directory path as (merge_key, is_manifest_rooted). Test-ness is
+/// NOT decided here: each directory carries its stored test-file count (D-TESA-11).
 ///
 /// Precedence (D4, §13):
 ///   1. **Manifest root** — if a crate/package root covers this directory, the
-///      whole crate/package is ONE group (merge key = the root path). Rust test
-///      files live under the crate's `tests/`; TS under `test(s)/`, `__tests__/`
-///      or `spec/` at the package root (co-located tests fall through as source —
-///      honest under-count, never a fabricated test number).
+///      whole crate/package is ONE group (merge key = the root path).
 ///   2. **JVM `src/main`↔`src/test`** — folds the two halves of one logical
 ///      package (both `src/main/.../owner` and `src/test/.../owner` → key
 ///      `java/.../owner`), the delivered spring-petclinic shape (UNCHANGED).
-///   3. **Top-level test roots** (`test/`, `tests/`, `__tests__/`, `spec/`) —
-///      flagged test but not folded (no `src/main` twin).
-///   4. Everything else keeps its path verbatim as the key.
+///   3. Everything else keeps its path verbatim as the key.
 fn classify(
     path: &str,
     manifest_roots: &[ManifestRoot],
     no_nested_manifest_roots: bool,
-) -> (bool, String, bool) {
+) -> (String, bool) {
     if let Some(root) = nearest_manifest_root(path, manifest_roots, no_nested_manifest_roots) {
-        let rel = relative_to(path, &root.path);
-        let is_test = manifest_test_dir(rel, root.kind);
-        return (is_test, root.path.clone(), true);
+        return (root.path.clone(), true);
     }
-    let (is_test, key) = classify_directory(path);
-    (is_test, key, false)
+    (classify_directory(path), false)
 }
 
-/// The delivered (pre-D4) JVM/directory classification — used when no manifest
-/// root covers the directory.
-fn classify_directory(path: &str) -> (bool, String) {
+/// The delivered (pre-D4) JVM/directory merge key — used when no manifest root
+/// covers the directory. `src/main/…` and `src/test/…` fold to one key.
+fn classify_directory(path: &str) -> String {
     if let Some(rest) = path.strip_prefix("src/test/") {
-        return (true, rest.to_string());
+        return rest.to_string();
     }
     if let Some(rest) = path.strip_prefix("src/main/") {
-        return (false, rest.to_string());
+        return rest.to_string();
     }
-    let first = path.split('/').next().unwrap_or("");
-    let is_test = matches!(first, "test" | "tests" | "__tests__" | "spec");
-    (is_test, path.to_string())
+    path.to_string()
 }
 
 /// The nearest (deepest) manifest root that covers `path` — the crate/package a
@@ -329,30 +323,6 @@ fn nearest_manifest_root<'a>(
             }
         })
         .max_by_key(|r| r.path.len())
-}
-
-/// `path` with the leading `root` (and its `/`) removed. `""` when `path == root`.
-fn relative_to<'a>(path: &'a str, root: &str) -> &'a str {
-    if path == root {
-        return "";
-    }
-    path.strip_prefix(root)
-        .and_then(|r| r.strip_prefix('/'))
-        .unwrap_or(path)
-}
-
-/// Whether a directory RELATIVE to its manifest root is a test directory, by the
-/// per-toolchain convention. Convention-based and honest: unrecognised layouts
-/// count as source (test_file_count stays a truthful `0`).
-fn manifest_test_dir(rel: &str, kind: ManifestKind) -> bool {
-    let first = rel.split('/').next().unwrap_or("");
-    match kind {
-        // Cargo integration tests live in `<crate>/tests/`. Unit tests are inline
-        // (`#[cfg(test)]`) → same source file → correctly counted as source.
-        ManifestKind::RustCrate => first == "tests",
-        // TS/JS test dirs at the package root.
-        ManifestKind::TsPackage => matches!(first, "test" | "tests" | "__tests__" | "spec"),
-    }
 }
 
 /// The last path segment of a key (a crate/package name, e.g. `agent`).
@@ -456,10 +426,17 @@ fn shortest_distinguishing_suffix(key: &str, others: &[String], self_pos: usize)
 mod tests {
     use super::*;
 
+    /// A directory with no stored test files.
     fn dg(path: &str, n: u64) -> DirGroup {
+        dgt(path, n, 0)
+    }
+
+    /// A directory whose stored `files.is_test = 1` count is `t` (D-TESA-11).
+    fn dgt(path: &str, n: u64, t: u64) -> DirGroup {
         DirGroup {
             path: path.to_string(),
             file_count: n,
+            test_file_count: t,
         }
     }
 
@@ -492,12 +469,13 @@ mod tests {
             dg(&format!("{base}/vet"), 6),
             dg(&format!("{base}/system"), 5),
             dg(&format!("{base}/model"), 4),
-            dg(tbase, 4),
-            dg(&format!("{tbase}/owner"), 5),
-            dg(&format!("{tbase}/system"), 3),
-            dg(&format!("{tbase}/service"), 2),
-            dg(&format!("{tbase}/vet"), 2),
-            dg(&format!("{tbase}/model"), 1),
+            // The src/test halves: every file stored test (the JVM test convention).
+            dgt(tbase, 4, 4),
+            dgt(&format!("{tbase}/owner"), 5, 5),
+            dgt(&format!("{tbase}/system"), 3, 3),
+            dgt(&format!("{tbase}/service"), 2, 2),
+            dgt(&format!("{tbase}/vet"), 2, 2),
+            dgt(&format!("{tbase}/model"), 1, 1),
         ];
 
         let groups = rollup_package_groups(&dirs, &[]);
@@ -573,11 +551,11 @@ mod tests {
         assert_eq!(groups.iter().map(|g| g.test_file_count).sum::<u64>(), 0);
     }
 
-    /// Top-level `tests/` is flagged test but not folded with a same-named
-    /// source dir (different physical layout, no `src/main` twin).
+    /// Top-level `tests/` is not folded with a same-named source dir (different
+    /// physical layout, no `src/main` twin); its test count is its stored one.
     #[test]
-    fn top_level_test_dir_counts_as_test() {
-        let dirs = vec![dg("src/foo", 10), dg("tests/foo", 4)];
+    fn top_level_test_dir_counts_its_stored_test_files() {
+        let dirs = vec![dg("src/foo", 10), dgt("tests/foo", 4, 4)];
         let groups = rollup_package_groups(&dirs, &[]);
         // No common prefix between `src/foo` and `tests/foo` → full keys as names.
         assert_eq!(groups.len(), 2);
@@ -616,7 +594,7 @@ mod tests {
             dg("rust/crates/agent", 1), // owns the crate Cargo.toml
             dg("rust/crates/agent/src", 20),
             dg("rust/crates/agent/src/aggregators", 8),
-            dg("rust/crates/agent/tests", 4),
+            dgt("rust/crates/agent/tests", 4, 4),
             dg("rust/crates/rgr", 1),
             dg("rust/crates/rgr/src", 30),
             dg("rust/crates/rgr/src/presentation", 12),
@@ -679,9 +657,9 @@ mod tests {
         let dirs = vec![
             dg("packages/api/src", 12),
             dg("packages/api/src/routes", 6),
-            dg("packages/api/__tests__", 3),
+            dgt("packages/api/__tests__", 3, 3),
             dg("packages/core/src", 20),
-            dg("packages/core/test", 5),
+            dgt("packages/core/test", 5, 5),
         ];
         let roots = vec![ts_root("packages/api"), ts_root("packages/core")];
         let groups = rollup_package_groups(&dirs, &roots);
@@ -790,7 +768,7 @@ mod tests {
             dg(".", 1), // the root Cargo.toml's own dir (e.g. build.rs)
             dg("src", 20),
             dg("src/handlers", 8),
-            dg("tests", 4), // Cargo integration tests
+            dgt("tests", 4, 4), // Cargo integration tests
         ];
         let roots = vec![crate_root(".")];
         let groups = rollup_package_groups(&dirs, &roots);
@@ -813,7 +791,7 @@ mod tests {
             dg(".", 2), // the root package.json's own dir
             dg("src", 15),
             dg("src/routes", 6),
-            dg("test", 3), // TS test dir at the package root
+            dgt("test", 3, 3), // TS test dir at the package root
         ];
         let roots = vec![ts_root(".")];
         let groups = rollup_package_groups(&dirs, &roots);
@@ -932,5 +910,51 @@ mod tests {
         let roots = vec![crate_root("."), crate_root("crates/inner")];
         let line = root_manifest_limitation(&roots).expect("marker present");
         assert!(line.contains("root Cargo.toml not folded"), "{line}");
+    }
+
+    // ── TEST-EDGE-SCOPE-1A (D-TESA-11): the test count is the stored fact ──
+
+    /// A `testsuite/` directory (poco's CppUnit suites) and a plain `src/` directory
+    /// holding gtest-promoted files: the group's test count is the sum of the STORED
+    /// counts — neither name says "test", yet both carry test files.
+    #[test]
+    fn package_group_test_count_is_the_stored_fact_not_the_directory_name() {
+        let dirs = vec![
+            dg("Foundation/src", 30),
+            dgt("Foundation/testsuite/src", 12, 12),
+            dgt("db", 40, 9), // leveldb: `db/*_test.cc` promoted by the gtest marker
+        ];
+        let groups = rollup_package_groups(&dirs, &[]);
+        let by_name: std::collections::HashMap<&str, &PackageGroup> =
+            groups.iter().map(|g| (g.name.as_str(), g)).collect();
+        assert_eq!(
+            by_name["Foundation/testsuite/src"].test_file_count, 12,
+            "{groups:?}"
+        );
+        assert_eq!(by_name["db"].test_file_count, 9, "{groups:?}");
+        assert_eq!(by_name["Foundation/src"].test_file_count, 0, "{groups:?}");
+        assert_eq!(groups.iter().map(|g| g.test_file_count).sum::<u64>(), 21);
+    }
+
+    /// A directory NAMED `tests` whose files the store says are not test (fixtures a
+    /// convention would not mark… or an older store) counts ZERO test files: the name
+    /// no longer decides. A manifest-rooted `tests/` likewise.
+    #[test]
+    fn a_directory_named_test_with_no_stored_test_files_counts_zero() {
+        let dirs = vec![dg("src/foo", 10), dg("tests/foo", 4), dg("spec", 2)];
+        let groups = rollup_package_groups(&dirs, &[]);
+        assert_eq!(
+            groups.iter().map(|g| g.test_file_count).sum::<u64>(),
+            0,
+            "{groups:?}"
+        );
+        let crate_dirs = vec![dg("c/src", 5), dg("c/tests", 3)];
+        let g = rollup_package_groups(&crate_dirs, &[crate_root("c")]);
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].file_count, 8);
+        assert_eq!(
+            g[0].test_file_count, 0,
+            "a crate `tests/` with no stored test files"
+        );
     }
 }

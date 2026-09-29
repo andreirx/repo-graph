@@ -350,6 +350,14 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for ServeSpy<'_, S> {
     fn get_module_summary(&self, s: &str) -> Result<Option<AgentModuleSummary>, AgentStorageError> {
         self.inner.get_module_summary(s)
     }
+    // TEST-EDGE-SCOPE-1A: a plain SQLite read (tracked-file test flags), DELEGATED verbatim.
+    fn query_tracked_file_test_flags(
+        &self,
+        s: &str,
+        path: Option<&str>,
+    ) -> Result<Vec<repo_graph_agent::TrackedFileTestFlag>, AgentStorageError> {
+        self.inner.query_tracked_file_test_flags(s, path)
+    }
     fn get_boundary_links_freshness(
         &self,
         s: &str,

@@ -80,7 +80,8 @@ pub(crate) fn summary_response_json(
     // `summary` itself stays the FULL reconciled object (byte-identical to the pre-slice
     // payload — the subtraction is a display concern), so a repo with neither test-only nor
     // unknown surfaces emits neither key and is unchanged.
-    let partition = build_composition_partition(repo_uid, snapshot_uid, storage, &unified)?;
+    let (partition, undetermined) =
+        build_composition_partition(repo_uid, snapshot_uid, storage, &unified)?;
 
     let mut summary = serde_json::to_value(base).map_err(|e| degraded("summary", e))?;
     if let serde_json::Value::Object(map) = &mut summary {
@@ -147,6 +148,10 @@ pub(crate) fn summary_response_json(
         // states the tool's coverage instead of blaming the codebase.
         "surface_coverage":
             crate::surface_coverage_read::surface_coverage_json(storage, snapshot_uid),
+        // TEST-EDGE-SCOPE-1A (D-TESA-13 S8): the undetermined files among the headline
+        // (non-test-only) reconciled rows, beside `unknown_composition`.
+        "test_status_undetermined":
+            crate::test_status_undetermined::to_json(&undetermined),
     });
     // FIXTURE-POLLUTION-1 §2.2/§2.4 (review-1 #2b, review-2 #1): each disclosure is emitted
     // ONLY when its portion is non-empty, so a repo with neither (leveldb, glamCRM's
@@ -202,7 +207,13 @@ fn build_composition_partition(
     snapshot_uid: &str,
     storage: &StorageConnection,
     unified: &[UnifiedHttpSurface],
-) -> Result<CompositionPartition, String> {
+) -> Result<
+    (
+        CompositionPartition,
+        repo_graph_agent::UndeterminedTestFiles,
+    ),
+    String,
+> {
     let files = storage
         .get_files_by_repo(repo_uid)
         .map_err(|e| degraded("tracked files", e))?;
@@ -213,12 +224,14 @@ fn build_composition_partition(
         .map_err(|e| degraded("boundary rows", e))?;
 
     let mut acc = CompositionAcc::default();
+    // TEST-EDGE-SCOPE-1A: the reconciled rows with their stored flags, for the headline's
+    // undetermined-files block (the SAME rows classified below).
+    let mut flagged_rows: Vec<(&str, Option<bool>)> = Vec::new();
     // Non-HTTP boundary rows (the HTTP boundary rows are replaced by the unified set).
     for it in all.iter().filter(|it| it.channel_kind.as_str() != "http") {
-        let comp = TestComposition::from_is_test_fact(
-            is_test_by_path.get(it.source_file.as_str()).copied(),
-            &it.source_file,
-        );
+        let fact = is_test_by_path.get(it.source_file.as_str()).copied();
+        flagged_rows.push((it.source_file.as_str(), fact));
+        let comp = TestComposition::from_is_test_fact(fact, &it.source_file);
         acc.note_file(&it.source_file, matches!(comp, TestComposition::TestOnly));
         match comp {
             TestComposition::TestOnly => {
@@ -247,6 +260,7 @@ fn build_composition_partition(
     // Unified HTTP rows bucket EXACTLY as the reconciliation added them: kind/family = http,
     // scope/basis = unknown, direction = the row's real direction.
     for r in unified {
+        flagged_rows.push((r.source_file.as_str(), r.is_test));
         let comp = TestComposition::from_is_test_fact(r.is_test, &r.source_file);
         acc.note_file(&r.source_file, matches!(comp, TestComposition::TestOnly));
         match comp {
@@ -268,7 +282,10 @@ fn build_composition_partition(
         }
     }
 
-    Ok(acc.finish())
+    // TEST-EDGE-SCOPE-1A: the undetermined files among the headline rows (every reconciled
+    // row not positively test-only), against `boundary_files`.
+    let undetermined = crate::test_status_undetermined::boundary_summary_block(flagged_rows);
+    Ok((acc.finish(), undetermined))
 }
 
 /// Accumulator for [`build_composition_partition`]: the test-only sub-breakdowns, the

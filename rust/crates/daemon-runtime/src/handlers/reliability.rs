@@ -229,6 +229,19 @@ pub fn handle_reliability(state: &DaemonState, request: &Request) -> DispatchRes
             "enrichment_summary".to_string(),
             serde_json::json!(enrichment_state_summary(enrichment_state)),
         );
+        // TEST-EDGE-SCOPE-1A (D-TESA-13 S4): the undetermined files among the non-test
+        // files whose calls these sections count (call_files); a failed read is
+        // `unavailable` with its reason, never a zero.
+        let call_files = storage
+            .query_call_source_file_test_flags(&snapshot_uid)
+            .map_err(|e| e.to_string());
+        let block = crate::test_status_undetermined::call_files_block(
+            call_files.as_deref().map_err(|e| e.clone()),
+        );
+        obj.insert(
+            "test_status_undetermined".to_string(),
+            crate::test_status_undetermined::to_json(&block),
+        );
     }
 
     DispatchResult::success(&request.id, response)

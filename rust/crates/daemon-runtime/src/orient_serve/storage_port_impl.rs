@@ -641,6 +641,17 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         self.inner.list_directory_groups(snapshot_uid)
     }
 
+    // TEST-EDGE-SCOPE-1A: the tracked-file test flags (`files` ⋈ `file_versions`) behind
+    // the UNDETERMINED test status — a plain SQLite read with no LiveGraph home, DELEGATED on
+    // every posture (the green-cert file summary still serves from the LiveGraph).
+    fn query_tracked_file_test_flags(
+        &self,
+        snapshot_uid: &str,
+        path: Option<&str>,
+    ) -> Result<Vec<repo_graph_agent::TrackedFileTestFlag>, AgentStorageError> {
+        self.inner.query_tracked_file_test_flags(snapshot_uid, path)
+    }
+
     // MODULE-MODEL-2 §13 D4: the per-toolchain manifest roots backing orient's
     // crate/package grouping. Like list_directory_groups above it is a (c)-class
     // SQLite read (module_candidates ⋈ evidence, no LiveGraph home) — DELEGATE to

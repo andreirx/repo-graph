@@ -189,6 +189,13 @@ pub fn render_symbol_not_found_semantic(data: Option<&Value>) -> Option<String> 
         if !unreadable.is_empty() {
             out.push_str(&render_unreadable_summary(&unreadable));
         }
+        // TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): after the candidates, the production
+        // candidates' files with undetermined test status (shared wording).
+        if let Some(line) =
+            super::test_status::undetermined_files_line(data.get("test_status_undetermined"))
+        {
+            out.push_str(&format!("{line}\n"));
+        }
     }
     Some(out)
 }
@@ -1021,6 +1028,32 @@ mod tests {
         assert!(
             out.contains("1 candidate unreadable"),
             "one counted line for the bad one: {out}"
+        );
+    }
+
+    /// TEST-EDGE-SCOPE-1A: the Group-B fallback states the production candidates' files
+    /// with undetermined test status, after the candidates.
+    #[test]
+    fn semantic_fallback_states_undetermined_files() {
+        let data = json!({
+            "semantic_candidates": [{
+                "stable_key": "r:util/testutil.cc#RandomString:SYMBOL:FUNCTION",
+                "path": "util/testutil.cc", "line": 14, "qualified_name": "RandomString",
+                "is_test": false, "score": 0.71, "source": "embedding", "model_id": "m",
+                "module": {"owning": "util"},
+                "next": {"cmd": "explain", "args": ["r:util/testutil.cc#RandomString:SYMBOL:FUNCTION"], "cwd": "/repo"}
+            }],
+            "hint": "no such symbol; these symbols are semantically near your query",
+            "test_status_undetermined": {"count": 1, "paths": ["util/testutil.cc"],
+                "universe": "candidate_files", "universe_count": 1, "unknown_count": 0}
+        });
+        let out = render_symbol_not_found_semantic(Some(&data)).expect("renders");
+        let line = "1 file whose test status can't be determined — open it and look inside \
+                    (of 1 candidate files)";
+        let pos = out.find(line).expect(&out);
+        assert!(
+            pos > out.find("util/testutil.cc:14").unwrap(),
+            "after the candidates:\n{out}"
         );
     }
 }

@@ -742,7 +742,14 @@ mod tests {
                 line: Some(10),
                 complexity: 40,
             }],
-            scope: crate::dto::signal::ComplexityScope::Production { excluded_count: 0 },
+            scope: crate::dto::signal::ComplexityScope::Production {
+                excluded_count: 0,
+                test_status_undetermined:
+                    crate::dto::test_status::UndeterminedTestFiles::over_partition(
+                        crate::dto::test_status::TestStatusUniverse::RankedFiles,
+                        [("src/a.ts", Some(false))],
+                    ),
+            },
         })
     }
 

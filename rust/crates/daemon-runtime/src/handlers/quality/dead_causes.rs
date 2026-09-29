@@ -102,6 +102,9 @@ pub fn handle_dead_causes(state: &DaemonState, request: &Request) -> DispatchRes
     }
     let total_inferences = inferences.len() as u64;
     let total_test_inferences: u64 = per_kind_test.values().sum();
+    // TEST-EDGE-SCOPE-1A (D-TESA-13 S10): the undetermined files among the production
+    // inferences — the SAME computation `inferences list` states.
+    let undetermined = crate::inferences_serve::production_inference_block(&inferences);
 
     // Snapshot language mix drives detector applicability + the honest zero-state line.
     // RENDERED, so a read failure is surfaced, never treated as "no languages".
@@ -200,6 +203,7 @@ pub fn handle_dead_causes(state: &DaemonState, request: &Request) -> DispatchRes
             "present": entrypoint_count > 0,
             "count": entrypoint_count,
         },
+        "test_status_undetermined": crate::test_status_undetermined::to_json(&undetermined),
     });
 
     DispatchResult::success(&request.id, response)

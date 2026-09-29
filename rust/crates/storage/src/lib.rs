@@ -200,6 +200,7 @@ pub mod queries; // Read-side graph queries (R10+)
 mod refresh_copy_forward_impl; // Refresh artifact copy-forward (refresh-integrity-parity slice)
 pub mod retention; // CACHE-SEMANTICS-1: Snapshot retention management
 mod seed_impl; // SeedCorpusRead impl for StorageConnection (EMBED-SEED-IMPL-1)
+mod test_status_reads; // TEST-EDGE-SCOPE-1A: tracked-file test flags + call-source files (plain reads; UNDETERMINED is computed when asked)
 mod trust_impl; // TrustStorageRead impl for StorageConnection (R4-E/F)
 pub mod types;
 

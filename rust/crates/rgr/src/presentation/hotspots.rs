@@ -63,6 +63,10 @@ pub struct HotspotsFiltering {
     pub excluded_count: usize,
     pub excluded_tests_count: usize,
     pub excluded_vendored_count: usize,
+    /// TEST-EDGE-SCOPE-1A: with `--exclude-tests`, the undetermined files among the kept
+    /// rows (`hotspot_files`). Absent on an older daemon → no line.
+    #[serde(default)]
+    pub test_status_undetermined: Option<serde_json::Value>,
 }
 
 /// Individual hotspot entry.
@@ -134,6 +138,12 @@ impl HotspotsResponse {
                     "  excluded {} test {}\n",
                     f.excluded_tests_count, word
                 ));
+                // TEST-EDGE-SCOPE-1A: the kept files with undetermined test status.
+                if let Some(line) =
+                    super::test_status::undetermined_files_line(f.test_status_undetermined.as_ref())
+                {
+                    out.push_str(&format!("  {line}\n"));
+                }
             }
             if f.exclude_vendored {
                 let word = if f.excluded_vendored_count == 1 {
@@ -349,6 +359,7 @@ mod tests {
             excluded_count: 5,
             excluded_tests_count: 5,
             excluded_vendored_count: 0,
+            test_status_undetermined: None,
         };
         let resp = make_response(
             vec![make_entry("src/main.rs", 100, 50, 5000)],
@@ -370,6 +381,7 @@ mod tests {
             excluded_count: 8,
             excluded_tests_count: 5,
             excluded_vendored_count: 3,
+            test_status_undetermined: None,
         };
         let resp = make_response(
             vec![make_entry("src/main.rs", 100, 50, 5000)],
@@ -391,6 +403,7 @@ mod tests {
             excluded_count: 2,
             excluded_tests_count: 1,
             excluded_vendored_count: 1,
+            test_status_undetermined: None,
         };
         let resp = make_response(vec![], "90.days.ago", Some(filtering));
         let out = resp.render_human(false);
@@ -535,6 +548,38 @@ mod tests {
         assert!(
             out.contains("could not be read"),
             "unavailable coverage must be stated on the hotspots surface: {out}"
+        );
+    }
+
+    #[test]
+    fn render_with_exclude_tests_states_undetermined_files() {
+        let filtering = HotspotsFiltering {
+            exclude_tests: true,
+            exclude_vendored: false,
+            excluded_count: 2,
+            excluded_tests_count: 2,
+            excluded_vendored_count: 0,
+            test_status_undetermined: Some(serde_json::json!({
+                "count": 1, "paths": ["util/testutil.cc"], "universe": "hotspot_files",
+                "universe_count": 7, "unknown_count": 0
+            })),
+        };
+        let resp = make_response(
+            vec![make_entry("util/testutil.cc", 100, 50, 5000)],
+            "90.days.ago",
+            Some(filtering),
+        );
+        let out = resp.render_human(false);
+        let lines: Vec<&str> = out.lines().collect();
+        let excl = lines
+            .iter()
+            .position(|l| l.contains("excluded 2 test files"))
+            .expect(&out);
+        assert_eq!(
+            lines[excl + 1].trim(),
+            "1 file whose test status can't be determined — open it and look inside \
+             (of 7 hotspot files)",
+            "{out}"
         );
     }
 }

@@ -437,6 +437,10 @@ impl ExplainResponse {
                     if let Some(file_count) = ev.get("file_count").and_then(|v| v.as_u64()) {
                         info.push_str(&format!("Files: {}\n", file_count));
                     }
+                    // TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): the file's UNDETERMINED test status.
+                    if let Some(line) = super::test_status::explain_test_status_line(ev) {
+                        info.push_str(&format!("{line}\n"));
+                    }
 
                     if !info.is_empty() {
                         return Some(info);
@@ -2486,6 +2490,72 @@ mod tests {
             out.contains(
                 "your code's calls 25% resolved (LOW); +10 inferred calls not counted as resolved"
             ),
+            "{out}"
+        );
+    }
+
+    // ── TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): explain <file>'s test-status line ──
+
+    fn file_identity(ev: serde_json::Value) -> ExplainResponse {
+        let mut r = minimal_response();
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_IDENTITY".to_string(),
+            summary: "Identity: file target.".to_string(),
+            evidence: Some(ev),
+        })];
+        r
+    }
+
+    #[test]
+    fn render_file_target_states_undetermined_test_status() {
+        let r = file_identity(serde_json::json!({
+            "target_kind": "file", "path": "util/testutil.cc", "language": "cpp",
+            "symbol_count": 3, "test_status": "undetermined", "test_status_word": "testutil"
+        }));
+        let out = r.render_human(false);
+        let lines: Vec<&str> = out.lines().map(str::trim).collect();
+        let sym = lines.iter().position(|l| *l == "Symbols: 3").expect(&out);
+        assert_eq!(
+            lines[sym + 1],
+            "test status: can't determine — open it and look inside",
+            "the line follows `Symbols: N`:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_file_target_without_test_status_is_unchanged() {
+        let ev = serde_json::json!({
+            "target_kind": "file", "path": "db/db_impl.cc", "language": "cpp", "symbol_count": 3
+        });
+        let out = file_identity(ev).render_human(false);
+        assert!(!out.contains("test status"), "{out}");
+        assert!(
+            out.contains("Language: cpp") && out.contains("Symbols: 3"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn render_tracked_only_file_target_states_undetermined_test_status() {
+        // A tracked file with no FILE node: no language, no symbol count.
+        let mut r = file_identity(serde_json::json!({
+            "target_kind": "file", "path": "integration-tests/pom.xml",
+            "test_status": "undetermined", "test_status_word": "tests"
+        }));
+        r.focus.input = Some("integration-tests/pom.xml".to_string());
+        r.focus.resolved_path = Some("integration-tests/pom.xml".to_string());
+        let out = r.render_human(false);
+        assert!(
+            out.contains("Target: integration-tests/pom.xml (file)"),
+            "{out}"
+        );
+        assert!(
+            out.lines()
+                .any(|l| l.trim() == "test status: can't determine — open it and look inside"),
+            "{out}"
+        );
+        assert!(
+            !out.contains("Language:") && !out.contains("Symbols:"),
             "{out}"
         );
     }

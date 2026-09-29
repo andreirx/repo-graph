@@ -144,6 +144,10 @@ pub struct BoundariesListResponse {
     /// empty default (handled honestly by the renderer).
     #[serde(default)]
     pub surface_coverage: SurfaceCoverage,
+    /// TEST-EDGE-SCOPE-1A: the undetermined files among the main-partition rows
+    /// (`boundary_files`). Absent on an older daemon → no line.
+    #[serde(default)]
+    pub test_status_undetermined: Option<serde_json::Value>,
 }
 
 impl BoundariesListResponse {
@@ -179,6 +183,13 @@ impl BoundariesListResponse {
                     "s"
                 }
             ));
+        }
+        // TEST-EDGE-SCOPE-1A: after the headline block — the undetermined files among the
+        // main-partition rows.
+        if let Some(line) = crate::presentation::test_status::undetermined_files_line(
+            self.test_status_undetermined.as_ref(),
+        ) {
+            out.push_str(&format!("{line}\n"));
         }
 
         // -- Active filters --

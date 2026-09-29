@@ -1944,6 +1944,34 @@ impl ServiceDispatcher {
             }
         };
 
+        // TEST-EDGE-SCOPE-1A (D-TESA-11): the STORED directory groups carry each directory's
+        // test-file count (`files.is_test`); the fold joins them to the stats rows by path.
+        // A read failure errors the request exactly like the sibling manifest-roots read.
+        // The tracked-file flags feed the `grouped_files` undetermined block; their read
+        // failing is stated `unavailable` on that block, never a zero.
+        let stored_dir_groups = match repo_graph_agent::AgentStorageRead::list_directory_groups(
+            &storage,
+            &snapshot.snapshot_uid,
+        ) {
+            Ok(groups) => groups,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+        let tracked_test_flags = repo_graph_agent::AgentStorageRead::query_tracked_file_test_flags(
+            &storage,
+            &snapshot.snapshot_uid,
+            None,
+        )
+        .map_err(|e| e.to_string());
+        let package_group_inputs = PackageGroupTestInputs {
+            stored_dir_groups: &stored_dir_groups,
+            tracked_test_flags: &tracked_test_flags,
+        };
+
         // RECON-M-R3a (g1u, §5.3.2): the ADDITIVE union-accounting call block from the shared
         // witness projection, computed ONCE and injected on EVERY engine path below (the four
         // bodies share `inject_stats_summary_fields`, so fastpath and SQLite carry the identical
@@ -2003,7 +2031,7 @@ impl ServiceDispatcher {
                     &epoch,
                 ) {
                     Ok(crate::livegraph_feed::StatsOutcome::Ready(mut v)) => {
-                        Self::inject_stats_summary_fields(
+                        match Self::inject_stats_summary_fields(
                             &mut v,
                             total_symbols_field,
                             import_graph_reliability_field.as_ref(),
@@ -2012,8 +2040,14 @@ impl ServiceDispatcher {
                             witnesses_field.as_ref(),
                             indexed_file_count,
                             repo_summary_unavailable,
-                        );
-                        DispatchResult::success(&request.id, v)
+                            &package_group_inputs,
+                        ) {
+                            Ok(()) => DispatchResult::success(&request.id, v),
+                            Err(e) => DispatchResult::error(
+                                &request.id,
+                                ErrorDetail::new(ErrorCode::InternalError, e),
+                            ),
+                        }
                     }
                     Ok(crate::livegraph_feed::StatsOutcome::Cancelled) => DispatchResult::error(
                         &request.id,
@@ -2035,7 +2069,7 @@ impl ServiceDispatcher {
                     &display_name,
                     &snapshot.snapshot_uid,
                 );
-                Self::inject_stats_summary_fields(
+                if let Err(e) = Self::inject_stats_summary_fields(
                     &mut v,
                     total_symbols_field,
                     import_graph_reliability_field.as_ref(),
@@ -2044,7 +2078,13 @@ impl ServiceDispatcher {
                     witnesses_field.as_ref(),
                     indexed_file_count,
                     repo_summary_unavailable,
-                );
+                    &package_group_inputs,
+                ) {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e),
+                    );
+                }
                 return DispatchResult::success(&request.id, v);
             }
             "compare" => {
@@ -2060,7 +2100,7 @@ impl ServiceDispatcher {
                     &repo_root,
                 ) {
                     Ok(crate::livegraph_feed::StatsOutcome::Ready(mut v)) => {
-                        Self::inject_stats_summary_fields(
+                        match Self::inject_stats_summary_fields(
                             &mut v,
                             total_symbols_field,
                             import_graph_reliability_field.as_ref(),
@@ -2069,8 +2109,14 @@ impl ServiceDispatcher {
                             witnesses_field.as_ref(),
                             indexed_file_count,
                             repo_summary_unavailable,
-                        );
-                        DispatchResult::success(&request.id, v)
+                            &package_group_inputs,
+                        ) {
+                            Ok(()) => DispatchResult::success(&request.id, v),
+                            Err(e) => DispatchResult::error(
+                                &request.id,
+                                ErrorDetail::new(ErrorCode::InternalError, e),
+                            ),
+                        }
                     }
                     Ok(crate::livegraph_feed::StatsOutcome::Cancelled) => DispatchResult::error(
                         &request.id,
@@ -2162,7 +2208,7 @@ impl ServiceDispatcher {
             "stats": stats,
             "count": stats.len(),
         });
-        Self::inject_stats_summary_fields(
+        if let Err(e) = Self::inject_stats_summary_fields(
             &mut body,
             total_symbols_field,
             import_graph_reliability_field.as_ref(),
@@ -2171,7 +2217,13 @@ impl ServiceDispatcher {
             witnesses_field.as_ref(),
             indexed_file_count,
             repo_summary_unavailable,
-        );
+            &package_group_inputs,
+        ) {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e),
+            );
+        }
         DispatchResult::success(&request.id, body)
     }
 
@@ -2206,9 +2258,10 @@ impl ServiceDispatcher {
         witnesses: Option<&serde_json::Value>,
         indexed_file_count: Option<u64>,
         repo_summary_unavailable: bool,
-    ) {
+        package_group_inputs: &PackageGroupTestInputs<'_>,
+    ) -> Result<(), String> {
         let Some(obj) = body.as_object_mut() else {
-            return;
+            return Ok(());
         };
         if let Some(total) = total_symbols {
             obj.insert("total_symbols".to_string(), serde_json::json!(total));
@@ -2246,7 +2299,7 @@ impl ServiceDispatcher {
         // `stats` array (present on every engine path) is the authoritative
         // population (§13 D2); mapping it to `DirGroup` here keeps the fold
         // daemon-side + shared with orient. `file_count` is clamped non-negative.
-        let dirs: Vec<repo_graph_agent::DirGroup> = obj
+        let stats_rows: Vec<(String, u64)> = obj
             .get("stats")
             .and_then(|s| s.as_array())
             .map(|rows| {
@@ -2258,11 +2311,19 @@ impl ServiceDispatcher {
                             .and_then(|v| v.as_i64())
                             .unwrap_or(0)
                             .max(0) as u64;
-                        Some(repo_graph_agent::DirGroup { path, file_count })
+                        Some((path, file_count))
                     })
                     .collect()
             })
             .unwrap_or_default();
+        // TEST-EDGE-SCOPE-1A (D-TESA-11): each directory's TEST count is its matching stored
+        // directory group's `test_file_count` (joined by path; any disagreement errors the
+        // request — never a zero, never a guessed count). Names and file counts still come
+        // from the stats rows.
+        let dirs = crate::test_status_undetermined::stats_dir_groups(
+            &stats_rows,
+            package_group_inputs.stored_dir_groups,
+        )?;
         let groups = repo_graph_agent::rollup_package_groups(&dirs, manifest_roots);
         let groups_json: Vec<serde_json::Value> = groups
             .iter()
@@ -2275,6 +2336,19 @@ impl ServiceDispatcher {
             })
             .collect();
         obj.insert("package_groups".to_string(), serde_json::json!(groups_json));
+        // TEST-EDGE-SCOPE-1A (D-TESA-13 S13): the grouped files whose test status can't be
+        // determined — the SAME `over_grouped_files` orient's module summary states.
+        let undetermined = crate::test_status_undetermined::grouped_block(
+            &groups,
+            package_group_inputs
+                .tracked_test_flags
+                .as_deref()
+                .map_err(|e| e.as_str()),
+        );
+        obj.insert(
+            "test_status_undetermined".to_string(),
+            crate::test_status_undetermined::to_json(&undetermined),
+        );
         // MODULE-MODEL-2 (ROOT-MANIFEST-POLYGLOT, ratified 2026-07-12): surface the
         // one-line limitation marker when a repo-root manifest was suppressed by the
         // conservative rule (nested roots coexist) — the SAME shared
@@ -2288,6 +2362,7 @@ impl ServiceDispatcher {
                 serde_json::json!(line),
             );
         }
+        Ok(())
     }
 
     /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
@@ -7522,14 +7597,23 @@ impl ServiceDispatcher {
         // renderer counts off these exact rows (headline == footer == rows). A
         // failed read is UNKNOWN, never an empty map (review-4 item 2). See
         // `unified_http_surfaces_json` (off this 8.9k-line file).
-        let (http_boundary_surfaces, http_boundary_surfaces_degraded) =
+        // TEST-EDGE-SCOPE-1A (D-TESA-13 S5): the undetermined files of the SAME rows'
+        // production partition; a failed HTTP read is `unavailable` with its reason.
+        let (http_boundary_surfaces, http_boundary_surfaces_degraded, http_undetermined) =
             match crate::http_boundary_read::unified_http_surfaces_json(
                 &storage,
                 &repo_uid,
                 &snapshot.snapshot_uid,
             ) {
-                Ok((list, _providers, _consumers)) => (list, None),
-                Err(reason) => (Vec::new(), Some(reason)),
+                Ok((list, _providers, _consumers, undetermined)) => (list, None, undetermined),
+                Err(reason) => (
+                    Vec::new(),
+                    Some(reason.clone()),
+                    repo_graph_agent::UndeterminedTestFiles::unavailable(
+                        repo_graph_agent::TestStatusUniverse::SurfaceFiles,
+                        reason,
+                    ),
+                ),
             };
 
         // ZEROSTATE-SCOPE-1 §2.1: the HTTP surface-detector coverage statement (additive).
@@ -7550,6 +7634,8 @@ impl ServiceDispatcher {
             "count": count,
             "http_boundary_surfaces": http_boundary_surfaces,
             "surface_coverage": surface_coverage,
+            "test_status_undetermined":
+                crate::test_status_undetermined::to_json(&http_undetermined),
         });
 
         // Add filter info
@@ -8983,6 +9069,18 @@ impl ServiceDispatcher {
         if let Some(block) = unref_reduction_block {
             rollups_output["unref_reduction"] = block;
         }
+        // TEST-EDGE-SCOPE-1A (D-TESA-13 S12): the undetermined files among THIS module's
+        // owned production files (owned_files).
+        rollups_output["test_status_undetermined"] = crate::test_status_undetermined::to_json(
+            &crate::test_status_undetermined::owned_files_block(
+                facts
+                    .context
+                    .owned_files
+                    .iter()
+                    .filter(|f| f.module_candidate_uid == resolved_module.module_candidate_uid)
+                    .map(|f| (f.file_path.as_str(), f.is_test)),
+            ),
+        );
 
         // Compute weighted neighbors
         let weighted =
@@ -9609,6 +9707,15 @@ impl ServiceDispatcher {
             // MODULES-METHOD-1 §2.2: orientation-doc recommendation (paths + rendered line).
             // Always emitted. The presenter renders the recommendation after the method line.
             "orientation_docs": orientation_docs_json,
+            // TEST-EDGE-SCOPE-1A (D-TESA-13 S12): the undetermined files among every listed
+            // module's owned production files (owned_files).
+            "test_status_undetermined": crate::test_status_undetermined::to_json(
+                &crate::test_status_undetermined::owned_files_block(
+                    owned_file_facts
+                        .iter()
+                        .map(|f| (f.file_path.as_str(), f.is_test)),
+                ),
+            ),
         });
         if let (serde_json::Value::Object(ref mut map), Some(reason)) =
             (&mut response, &http_boundary_link_degraded)
@@ -10273,4 +10380,13 @@ mod surfaces_show_payload_tests {
         assert!(parse_evidence_payload(Some("{not valid json")).is_err());
         assert!(parse_evidence_payload(Some("")).is_err());
     }
+}
+
+/// TEST-EDGE-SCOPE-1A (D-TESA-11): the two reads `stats` folds its package-group test counts
+/// and `grouped_files` block from — read once in `handle_stats`, shared by every engine path.
+pub(crate) struct PackageGroupTestInputs<'a> {
+    /// The stored directory groups with each directory's `files.is_test` count.
+    stored_dir_groups: &'a [repo_graph_agent::AgentDirectoryGroup],
+    /// The snapshot's tracked-file test flags, or the failed read's reason.
+    tracked_test_flags: &'a Result<Vec<repo_graph_agent::TrackedFileTestFlag>, String>,
 }

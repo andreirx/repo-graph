@@ -2193,6 +2193,15 @@ impl AgentStorageRead for StorageConnection {
         crate::agent_orient_reads::directory_groups(self.connection(), snapshot_uid)
     }
 
+    fn query_tracked_file_test_flags(
+        &self,
+        snapshot_uid: &str,
+        path: Option<&str>,
+    ) -> Result<Vec<repo_graph_agent::TrackedFileTestFlag>, AgentStorageError> {
+        StorageConnection::query_tracked_file_test_flags(self, snapshot_uid, path)
+            .map_err(map_err("query_tracked_file_test_flags"))
+    }
+
     fn list_manifest_roots(
         &self,
         snapshot_uid: &str,

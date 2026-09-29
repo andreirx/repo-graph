@@ -24,6 +24,7 @@ use crate::dto::limit::{DegradationInfo, Limit, LimitCode};
 use crate::dto::signal::{
     ModuleKindBreakdown, ModuleSizeEvidence, ModuleSummaryEvidence, PackageGroupEvidence, Signal,
 };
+use crate::dto::test_status::{TestStatusUniverse, UndeterminedTestFiles};
 use crate::errors::AgentStorageError;
 use crate::package_groups::{rollup_package_groups, root_manifest_limitation, DirGroup};
 use crate::storage_port::AgentStorageRead;
@@ -39,16 +40,31 @@ use crate::storage_port::AgentStorageRead;
 /// The marker is `Some` only when a repo-root manifest was suppressed by the
 /// conservative rule (nested roots coexist) — the SAME string the `stats` surface
 /// carries, from the SAME shared `root_manifest_limitation`, so the two agree.
+///
+/// TEST-EDGE-SCOPE-1A: each directory's test count is its STORED count (D-TESA-11),
+/// and the third value states the grouped files whose test status can't be
+/// determined (`grouped_files`, the shared [`UndeterminedTestFiles::over_grouped_files`]
+/// `stats` uses too); `None` only when there are no groups. A failed tracked-flags
+/// read is stated `unavailable` with its reason, never a zero.
+#[allow(clippy::type_complexity)]
 fn read_package_groups<S: AgentStorageRead + ?Sized>(
     storage: &S,
     snapshot_uid: &str,
-) -> Result<(Vec<PackageGroupEvidence>, Option<String>), AgentStorageError> {
+) -> Result<
+    (
+        Vec<PackageGroupEvidence>,
+        Option<String>,
+        Option<UndeterminedTestFiles>,
+    ),
+    AgentStorageError,
+> {
     let dirs: Vec<DirGroup> = storage
         .list_directory_groups(snapshot_uid)?
         .into_iter()
         .map(|g| DirGroup {
             path: g.path,
             file_count: g.file_count,
+            test_file_count: g.test_file_count,
         })
         .collect();
     // Per-toolchain grouping facts (MODULE-MODEL-2 §13 D4): the SAME
@@ -57,7 +73,7 @@ fn read_package_groups<S: AgentStorageRead + ?Sized>(
     // trees → the fold degrades to directory/JVM grouping.
     let manifest_roots = storage.list_manifest_roots(snapshot_uid)?;
     let limitation = root_manifest_limitation(&manifest_roots);
-    let groups = rollup_package_groups(&dirs, &manifest_roots)
+    let groups: Vec<PackageGroupEvidence> = rollup_package_groups(&dirs, &manifest_roots)
         .into_iter()
         .map(|g| PackageGroupEvidence {
             name: g.name,
@@ -65,7 +81,29 @@ fn read_package_groups<S: AgentStorageRead + ?Sized>(
             test_file_count: g.test_file_count,
         })
         .collect();
-    Ok((groups, limitation))
+    let undetermined = if groups.is_empty() {
+        None
+    } else {
+        let file_total: u64 = groups.iter().map(|g| g.file_count).sum();
+        let test_total: u64 = groups.iter().map(|g| g.test_file_count).sum();
+        Some(
+            match storage.query_tracked_file_test_flags(snapshot_uid, None) {
+                Ok(flags) => UndeterminedTestFiles::over_grouped_files(
+                    flags
+                        .iter()
+                        .filter(|f| f.has_file_node)
+                        .map(|f| (f.path.as_str(), f.is_test)),
+                    file_total,
+                    test_total,
+                ),
+                Err(e) => UndeterminedTestFiles::unavailable(
+                    TestStatusUniverse::GroupedFiles,
+                    format!("tracked-file test flags could not be read: {e}"),
+                ),
+            },
+        )
+    };
+    Ok((groups, limitation, undetermined))
 }
 
 /// Create the standard MODULE_DATA_UNAVAILABLE limit with degradation info.
@@ -95,7 +133,8 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
     // suppressed). Read independently of module_candidates so the named structure
     // survives on repos where get_module_summary returns None (Rust-indexer path).
     // Only one match arm runs, so moving it into each is fine.
-    let (package_groups, root_manifest_limitation) = read_package_groups(storage, snapshot_uid)?;
+    let (package_groups, root_manifest_limitation, package_groups_test_status_undetermined) =
+        read_package_groups(storage, snapshot_uid)?;
 
     // Check for module discovery data (the declared/inferred `module_candidates`
     // notion — a SEPARATE, labelled count, never collapsed into the topology).
@@ -137,6 +176,7 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
                 top_modules,
                 package_groups,
                 root_manifest_limitation,
+                package_groups_test_status_undetermined,
             };
             (evidence, Vec::new())
         }
@@ -154,6 +194,7 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
                 top_modules: Vec::new(),
                 package_groups,
                 root_manifest_limitation,
+                package_groups_test_status_undetermined,
             };
             let limits = vec![module_data_unavailable_limit()];
             (evidence, limits)
@@ -194,6 +235,7 @@ pub fn aggregate_file<S: AgentStorageRead + ?Sized>(
         // File/path scope is not repo-wide topology → no package groups and no
         // root-manifest suppression to report.
         root_manifest_limitation: None,
+        package_groups_test_status_undetermined: None,
     };
 
     Ok(AggregatorOutput {
@@ -230,6 +272,7 @@ pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
         // File/path scope is not repo-wide topology → no package groups and no
         // root-manifest suppression to report.
         root_manifest_limitation: None,
+        package_groups_test_status_undetermined: None,
     };
 
     Ok(AggregatorOutput {

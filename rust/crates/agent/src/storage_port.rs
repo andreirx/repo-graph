@@ -308,6 +308,26 @@ pub struct AgentDirectoryGroup {
     pub path: String,
     /// Number of files this directory directly owns in the snapshot.
     pub file_count: u64,
+    /// TEST-EDGE-SCOPE-1A (D-TESA-11): how many of those owned files carry the
+    /// stored `files.is_test = 1` — the package-group `(N test)` count reads this
+    /// stored fact, never a directory name.
+    pub test_file_count: u64,
+}
+
+/// TEST-EDGE-SCOPE-1A (D-TESA-DERIVED-1): one tracked file of a snapshot with its
+/// stored test flag (`files.is_test`, strict `== 1`) and whether the snapshot has a
+/// FILE node for it. The UNDETERMINED test status is computed from `path` and
+/// `is_test` by `repo_graph_classification::test_path::undetermined_test_word`;
+/// nothing about it is stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackedFileTestFlag {
+    /// Repo-relative path.
+    pub path: String,
+    /// The stored `files.is_test` (`== 1`).
+    pub is_test: bool,
+    /// Whether the snapshot holds a FILE node for this file (false for tracked-only
+    /// config / contract / unreadable files).
+    pub has_file_node: bool,
 }
 
 // ── Complexity measurement ──────────────────────────────────────
@@ -1245,6 +1265,17 @@ pub trait AgentStorageRead {
     ) -> Result<Vec<AgentDirectoryGroup>, AgentStorageError> {
         Ok(Vec::new())
     }
+
+    /// TEST-EDGE-SCOPE-1A: the snapshot's tracked files (`files` ⋈ `file_versions`)
+    /// with their stored test flag and FILE-node presence, sorted by path; with
+    /// `path = Some(p)`, only that file (zero or one row). A plain read of facts the
+    /// store already holds — the UNDETERMINED test status is computed from it when
+    /// asked (D-TESA-DERIVED-1). No default: every implementor forwards or fakes it.
+    fn query_tracked_file_test_flags(
+        &self,
+        snapshot_uid: &str,
+        path: Option<&str>,
+    ) -> Result<Vec<TrackedFileTestFlag>, AgentStorageError>;
 
     /// HEADLINE-TRUTH-1 (§2.1, review-4 #1): count the snapshot's ROOT-LEVEL SOURCE files —
     /// tracked files whose `files.path` contains no `/`, RESTRICTED to the source universe

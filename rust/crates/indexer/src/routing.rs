@@ -202,16 +202,12 @@ pub fn language_to_extensions(lang: &str) -> &'static [&'static str] {
 ///
 /// Mirror of `isTestFile` from `repo-indexer.ts:2904`.
 /// Uses path-pattern conventions common across TS, Python, Java,
-/// and Rust test ecosystems.
+/// and Rust test ecosystems. The conventions (RG-REQ-001-L07, with
+/// `testsuite/` added by TEST-EDGE-SCOPE-1A) have ONE definition, in
+/// `repo_graph_classification::test_path`, which the UNDETERMINED test
+/// status also reads.
 pub fn is_test_file(file_path: &str) -> bool {
-    file_path.contains("__tests__")
-        || file_path.contains(".test.")
-        || file_path.contains(".spec.")
-        || file_path.contains("/test/")
-        || file_path.contains("/tests/")
-        || file_path.starts_with("test/")
-        || file_path.starts_with("tests/")
-        || file_path.starts_with("__tests__/")
+    repo_graph_classification::test_path::matches_test_path_convention(file_path)
 }
 
 // ── Exclude / include filtering ──────────────────────────────────
@@ -609,6 +605,24 @@ mod tests {
     fn not_test_file_test_in_name_without_dot() {
         // "testing" in the path but no matching pattern.
         assert!(!is_test_file("src/testing-utils.ts"));
+    }
+
+    #[test]
+    fn test_file_nested_testsuite_dir() {
+        // TEST-EDGE-SCOPE-1A: poco's CppUnit suites live under `<lib>/testsuite/`.
+        assert!(is_test_file("Foundation/testsuite/src/ArrayTest.cpp"));
+    }
+
+    #[test]
+    fn test_file_top_level_testsuite_dir() {
+        assert!(is_test_file("testsuite/run.c"));
+    }
+
+    #[test]
+    fn not_test_file_testsuite_without_directory_boundary() {
+        assert!(!is_test_file("src/testsuite.c"));
+        assert!(!is_test_file("mytestsuite/x.c"));
+        assert!(!is_test_file("testsuites/x.c"));
     }
 
     // ── match_simple_glob ────────────────────────────────────

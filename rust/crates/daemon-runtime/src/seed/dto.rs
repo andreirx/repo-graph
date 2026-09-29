@@ -44,6 +44,12 @@ pub struct FindResponse {
     /// The reader-facing reason the seed tier is unavailable (§2.3), when it is.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seeds_unavailable_reason: Option<String>,
+    /// TEST-EDGE-SCOPE-1A (D-TESA-13 S11): the undetermined files among the production
+    /// candidates (`candidate_files`), whenever the seed tier produced a candidate
+    /// partition (fired or nothing scored). Absent when the tier was not consulted
+    /// (`--exact`) or unavailable — that tier states its own reason.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_status_undetermined: Option<repo_graph_agent::UndeterminedTestFiles>,
 }
 
 /// One fact class's group in the FACTS tier (§2.2). Always present per class so the
@@ -247,6 +253,11 @@ fn find_degrade_summary(reason: &DegradeReason) -> String {
 pub fn build_group_b_data(verb: &str, result: SemanticResult, repo_root: Option<&str>) -> Value {
     match result {
         SemanticResult::Fired { candidates, .. } => {
+            // TEST-EDGE-SCOPE-1A (D-TESA-13 S11): the undetermined files among the
+            // production candidates, stated beside the hint.
+            let undetermined = crate::test_status_undetermined::candidate_block(
+                candidates.iter().map(|c| (c.path.as_str(), c.is_test)),
+            );
             let cands: Vec<Value> = candidates
                 .into_iter()
                 .map(|c| {
@@ -281,6 +292,7 @@ pub fn build_group_b_data(verb: &str, result: SemanticResult, repo_root: Option<
                     "no such symbol; these symbols are semantically near your query — \
                      explain one (test-classified hits are labeled and ranked below production)"
                 ),
+                "test_status_undetermined": crate::test_status_undetermined::to_json(&undetermined),
             })
         }
         // Genuine known-zero: no candidates, only the honest hint (§8.3).
@@ -401,6 +413,12 @@ pub(crate) fn build_find_response(
     seed: Option<SemanticResult>,
     repo_root: Option<&str>,
 ) -> FindResponse {
+    // TEST-EDGE-SCOPE-1A: a candidate partition exists only when the tier was consulted
+    // and answered (fired or nothing scored).
+    let tier_answered = matches!(
+        seed,
+        Some(SemanticResult::Fired { .. } | SemanticResult::NothingScored { .. })
+    );
     let (summary, candidates, seeds_available, seeds_unavailable_reason) = match seed {
         // `--exact`: the endpoint is never consulted (§2.4).
         None => (
@@ -462,7 +480,13 @@ pub(crate) fn build_find_response(
         ),
     };
 
+    let test_status_undetermined = tier_answered.then(|| {
+        crate::test_status_undetermined::candidate_block(
+            candidates.iter().map(|c| (c.path.as_str(), c.is_test)),
+        )
+    });
     FindResponse {
+        test_status_undetermined,
         schema: "rgr.agent.v1".to_string(),
         command: "find".to_string(),
         repo: repo.to_string(),

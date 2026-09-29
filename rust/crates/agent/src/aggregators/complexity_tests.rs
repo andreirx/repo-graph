@@ -364,6 +364,23 @@ impl AgentStorageRead for FakeStorage {
             earliest_impacted_at: None,
         })
     }
+
+    fn query_tracked_file_test_flags(
+        &self,
+        _snapshot_uid: &str,
+        _path: Option<&str>,
+    ) -> Result<Vec<crate::TrackedFileTestFlag>, AgentStorageError> {
+        // The complexity aggregator reads no tracked-file flags (its rows carry them).
+        Ok(Vec::new())
+    }
+}
+
+/// The production-scope undetermined block over `ranked` (path, is_test) rows.
+fn ranked_block(ranked: &[(&str, bool)]) -> crate::dto::test_status::UndeterminedTestFiles {
+    crate::dto::test_status::UndeterminedTestFiles::over_partition(
+        crate::dto::test_status::TestStatusUniverse::RankedFiles,
+        ranked.iter().map(|(p, t)| (*p, Some(*t))),
+    )
 }
 
 #[test]
@@ -522,7 +539,17 @@ fn generated_vendored_and_test_rows_are_excluded_and_counted() {
         ev.high_complexity_count, 3,
         "count is the production subset"
     );
-    assert_eq!(ev.scope, ComplexityScope::Production { excluded_count: 3 });
+    assert_eq!(
+        ev.scope,
+        ComplexityScope::Production {
+            excluded_count: 3,
+            test_status_undetermined: ranked_block(&[
+                ("src/a.rs", false),
+                ("src/b.rs", false),
+                ("src/c.rs", false),
+            ]),
+        }
+    );
     let syms: Vec<&str> = ev.top_complex.iter().map(|c| c.symbol.as_str()).collect();
     assert_eq!(syms, vec!["sym_p1", "sym_p2", "sym_p3"]);
     // The vendored row (cx 70) was the highest; excluded, it does not lead the ranking.
@@ -576,7 +603,13 @@ fn all_rows_excluded_still_emits_the_signal_with_the_excluded_count() {
     let ev = complexity_evidence(&out);
     assert_eq!(ev.high_complexity_count, 0);
     assert!(ev.top_complex.is_empty());
-    assert_eq!(ev.scope, ComplexityScope::Production { excluded_count: 6 });
+    assert_eq!(
+        ev.scope,
+        ComplexityScope::Production {
+            excluded_count: 6,
+            test_status_undetermined: ranked_block(&[]),
+        }
+    );
 }
 
 #[test]
@@ -612,7 +645,15 @@ fn a_row_without_a_file_stays_ranked() {
     let out = aggregate(&storage, "snap1", Budget::Full).unwrap();
     let ev = complexity_evidence(&out);
     assert_eq!(ev.high_complexity_count, 1);
-    assert_eq!(ev.scope, ComplexityScope::Production { excluded_count: 1 });
+    // TEST-EDGE-SCOPE-1A: the path-less row is outside the file universe (never
+    // evaluated, never counted unknown) — universe 0, count 0.
+    assert_eq!(
+        ev.scope,
+        ComplexityScope::Production {
+            excluded_count: 1,
+            test_status_undetermined: ranked_block(&[]),
+        }
+    );
     assert_eq!(ev.top_complex.len(), 1);
     assert_eq!(ev.top_complex[0].symbol, "sym_nf");
     assert!(ev.top_complex[0].file.is_none());
@@ -627,4 +668,114 @@ fn no_rows_above_threshold_emits_no_signal() {
     let out = aggregate(&storage, "snap1", Budget::Full).unwrap();
     assert!(out.signals.is_empty());
     assert!(out.limits.is_empty());
+}
+
+// ── TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): undetermined files among the ranked rows ──
+
+#[test]
+fn production_scope_counts_undetermined_files_among_all_ranked_rows() {
+    // Two symbols in one undetermined file, one in another; a determined file; a test
+    // file (excluded, never counted); a `testsuite/` path whose OLD flag is 0 (a
+    // convention — ranked, but never undetermined). Budget::Small cuts the top-N to 5,
+    // the block still counts every ranked row (before any display cap).
+    let storage = FakeStorage::with_measurements(vec![
+        prod("u1", "CppUnit/src/TestRunner.cpp", 24),
+        prod("u2", "CppUnit/src/TestRunner.cpp", 23),
+        prod("u3", "Data/DataTest/src/SQLExecutor.cpp", 24),
+        prod("d1", "Foundation/src/Array.cpp", 90),
+        prod("d2", "Foundation/src/B.cpp", 80),
+        prod("d3", "Foundation/src/C.cpp", 70),
+        prod("d4", "Foundation/src/D.cpp", 60),
+        prod("s1", "Foundation/testsuite/src/TestApp.cpp", 42),
+        meas("t1", Some("util/testutil.h"), 99, true, false),
+    ]);
+    let out = aggregate(&storage, "snap1", Budget::Small).unwrap();
+    let ev = complexity_evidence(&out);
+    let json = serde_json::to_value(&ev.scope).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "kind": "production",
+            "excluded_count": 1,
+            "test_status_undetermined": {
+                "count": 2,
+                "paths": ["CppUnit/src/TestRunner.cpp", "Data/DataTest/src/SQLExecutor.cpp"],
+                "universe": "ranked_files",
+                "universe_count": 7,
+                "unknown_count": 0
+            }
+        })
+    );
+    assert!(
+        ev.top_complex.len() <= 5,
+        "the display cap does not cap the block"
+    );
+}
+
+#[test]
+fn production_scope_count_equals_the_shared_function_over_its_ranked_files() {
+    let rows = vec![
+        prod("a", "src/test_helpers.c", 30),
+        prod("b", "src/tester/x.c", 31),
+        prod("c", "src/contest.c", 32),
+        prod("d", "src/Tests/y.c", 33),
+        meas("e", Some("tests/z.c"), 34, true, false),
+        meas("g", Some("gen/TestGen.c"), 35, false, true),
+        meas("n", None, 36, false, false),
+    ];
+    let storage = FakeStorage::with_measurements(rows.clone());
+    let out = aggregate(&storage, "snap1", Budget::Full).unwrap();
+    let ev = complexity_evidence(&out);
+    // Independently: the ranked files are the production rows with a path.
+    let ranked: std::collections::BTreeSet<&str> = ev
+        .top_complex
+        .iter()
+        .filter_map(|c| c.file.as_deref())
+        .collect();
+    let expected: Vec<String> = ranked
+        .iter()
+        .filter(|p| {
+            repo_graph_classification::test_path::undetermined_test_word(p, false).is_some()
+        })
+        .map(|p| p.to_string())
+        .collect();
+    match &ev.scope {
+        ComplexityScope::Production {
+            test_status_undetermined:
+                crate::dto::test_status::UndeterminedTestFiles::Counted {
+                    count,
+                    paths,
+                    universe_count,
+                    unknown_count,
+                    ..
+                },
+            ..
+        } => {
+            assert_eq!(paths, &expected);
+            assert_eq!(*count, expected.len() as u64);
+            assert_eq!(*universe_count, ranked.len() as u64);
+            assert_eq!(*unknown_count, 0);
+            assert_eq!(
+                paths,
+                &vec![
+                    "src/Tests/y.c".to_string(),
+                    "src/test_helpers.c".to_string(),
+                    "src/tester/x.c".to_string()
+                ]
+            );
+        }
+        other => panic!("expected a counted production scope, got {other:?}"),
+    }
+}
+
+#[test]
+fn include_all_scope_carries_no_undetermined_count() {
+    let storage = FakeStorage::with_measurements(vec![prod("u1", "util/testutil.cc", 40)]);
+    let out = aggregate_with_threshold(&storage, "snap1", 20, Budget::Full, true).unwrap();
+    let ev = complexity_evidence(&out);
+    assert_eq!(ev.scope, ComplexityScope::All);
+    assert_eq!(
+        serde_json::to_value(&ev.scope).unwrap(),
+        serde_json::json!({"kind": "all"})
+    );
 }

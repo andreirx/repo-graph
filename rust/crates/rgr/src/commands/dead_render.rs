@@ -44,6 +44,10 @@ pub struct DeadCausesFacts {
     pub framework: FrameworkFacts,
     pub coverage: PresenceFacts,
     pub entrypoints: PresenceFacts,
+    /// TEST-EDGE-SCOPE-1A: the files with production inferences whose test status can't be
+    /// determined (`inference_files`). Additive — absent on an older daemon → no line.
+    #[serde(default)]
+    pub test_status_undetermined: Option<serde_json::Value>,
 }
 
 impl DeadCausesFacts {
@@ -224,6 +228,13 @@ pub fn render_derived(facts: &DeadCausesFacts) -> String {
     let mut s = String::new();
     s.push_str("Root causes (derived from this repo's current snapshot):\n");
     s.push_str(&format!("  - {}\n", framework_line(&facts.framework)));
+    // TEST-EDGE-SCOPE-1A: after the framework line — the inference files whose test status
+    // can't be determined (shared wording).
+    if let Some(line) = crate::presentation::test_status::undetermined_files_line(
+        facts.test_status_undetermined.as_ref(),
+    ) {
+        s.push_str(&format!("  - {line}\n"));
+    }
     // Mixed-language gap: a separate cause line when a family produced inferences yet
     // other materially-present languages have no detector at all (server sets this only
     // in the total>0 case; the zero-inference case carries it inside the framework line).
@@ -615,6 +626,34 @@ mod tests {
         assert!(
             out.contains("not wired into deadness scoring"),
             "original message preserved: {out}"
+        );
+    }
+
+    /// TEST-EDGE-SCOPE-1A: the undetermined inference files follow the framework line.
+    #[test]
+    fn dead_causes_render_states_undetermined_files() {
+        let facts = facts_from(serde_json::json!({
+            "framework": {
+                "detectors": [{"label": "Spring", "applicable": true, "count": 14}],
+                "total_inferences": 14, "empty": null, "uncovered_note": null,
+            },
+            "coverage": {"present": false, "count": 0},
+            "entrypoints": {"present": false, "count": 0},
+            "test_status_undetermined": {"count": 2,
+                "paths": ["src/main/java/TestSupport.java", "src/main/java/TesterBean.java"],
+                "universe": "inference_files", "universe_count": 9, "unknown_count": 0},
+        }));
+        let out = render_derived(&facts);
+        let lines: Vec<&str> = out.lines().collect();
+        let fw = lines
+            .iter()
+            .position(|l| l.contains("Spring: 14"))
+            .expect(&out);
+        assert_eq!(
+            lines[fw + 1],
+            "  - 2 files whose test status can't be determined — open them and look inside \
+             (of 9 files with inferences)",
+            "{out}"
         );
     }
 }

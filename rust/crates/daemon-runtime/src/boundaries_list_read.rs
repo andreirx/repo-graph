@@ -86,6 +86,9 @@ pub(crate) fn boundaries_list_response_json(
     };
 
     let count = results.len();
+    // TEST-EDGE-SCOPE-1A (D-TESA-13 S7): the undetermined files among the main-partition
+    // rows (every row not positively test-only; unknown composition stays, tallied).
+    let undetermined = crate::test_status_undetermined::boundary_list_block(&results);
     let mut response = serde_json::json!({
         "command": "boundaries list",
         "repo": repo_uid,
@@ -97,6 +100,7 @@ pub(crate) fn boundaries_list_response_json(
         // boundaries stops blaming the codebase.
         "surface_coverage":
             crate::surface_coverage_read::surface_coverage_json(storage, snapshot_uid),
+        "test_status_undetermined": crate::test_status_undetermined::to_json(&undetermined),
     });
     if let Some(note) = filtered_out_note {
         if let serde_json::Value::Object(ref mut map) = response {

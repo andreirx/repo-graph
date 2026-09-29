@@ -614,6 +614,13 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for PartialSpy<'_, S> {
     ) -> Result<Vec<repo_graph_agent::AgentDirectoryGroup>, AgentStorageError> {
         self.0.list_directory_groups(s)
     }
+    fn query_tracked_file_test_flags(
+        &self,
+        s: &str,
+        path: Option<&str>,
+    ) -> Result<Vec<repo_graph_agent::TrackedFileTestFlag>, AgentStorageError> {
+        self.0.query_tracked_file_test_flags(s, path)
+    }
     fn list_manifest_roots(
         &self,
         s: &str,
@@ -1209,6 +1216,13 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for M2Spy<'_, S> {
         s: &str,
     ) -> Result<Vec<repo_graph_agent::AgentDirectoryGroup>, AgentStorageError> {
         self.0.list_directory_groups(s)
+    }
+    fn query_tracked_file_test_flags(
+        &self,
+        s: &str,
+        path: Option<&str>,
+    ) -> Result<Vec<repo_graph_agent::TrackedFileTestFlag>, AgentStorageError> {
+        self.0.query_tracked_file_test_flags(s, path)
     }
     fn list_manifest_roots(
         &self,

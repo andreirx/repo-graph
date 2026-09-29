@@ -55,6 +55,36 @@ fn http_headline_discloses_test_fixture_and_unknown_partition() {
 }
 
 #[test]
+fn http_headline_states_undetermined_files_in_the_disclosure() {
+    // TEST-EDGE-SCOPE-1A: the block orient attaches beside the partition counts.
+    let r = response(json!({
+        "http_surfaces": {
+            "total": 3, "providers": 2, "consumers": 1,
+            "test_fixture_excluded": 1, "test_status_unknown": 1,
+            "test_status_undetermined": {"count": 1, "paths": ["api/test_routes.py"],
+                "universe": "surface_files", "universe_count": 3, "unknown_count": 1}
+        }
+    }));
+    let line = r.http_surfaces_line(OrientDepth::Small).unwrap();
+    assert_eq!(
+        line,
+        "3 HTTP surfaces (2 providers / 1 consumer) (+1 test-fixture excluded; test-status \
+         unknown for 1; 1 file whose test status can't be determined — open it and look inside \
+         (of 3 files with HTTP surfaces; 1 with unknown test status)) — rmap surfaces"
+    );
+    // Count 0 → the line is exactly as before.
+    let r0 = response(json!({
+        "http_surfaces": {"total": 5, "providers": 3, "consumers": 2,
+            "test_status_undetermined": {"count": 0, "paths": [],
+                "universe": "surface_files", "universe_count": 2, "unknown_count": 0}}
+    }));
+    assert_eq!(
+        r0.http_surfaces_line(OrientDepth::Small).unwrap(),
+        "5 HTTP surfaces (3 providers / 2 consumers) — rmap surfaces"
+    );
+}
+
+#[test]
 fn http_headline_no_clause_when_no_fixtures_or_unknown() {
     // Zero excluded/unknown ⇒ no clause ⇒ byte-identical to the pre-slice headline.
     let r = response(json!({

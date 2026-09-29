@@ -199,6 +199,9 @@ struct BoundariesSummaryResponseDto {
     /// instead of blaming the codebase.
     #[serde(default)]
     surface_coverage: super::surfaces::SurfaceCoverage,
+    /// TEST-EDGE-SCOPE-1A — the undetermined files among the headline rows (`boundary_files`).
+    #[serde(default)]
+    test_status_undetermined: Option<serde_json::Value>,
 }
 
 /// Response structure for boundaries summary command (normalized).
@@ -224,6 +227,9 @@ pub struct BoundariesSummaryResponse {
     pub(crate) unknown: partition::Additive<partition::UnknownComposition>,
     /// ZEROSTATE-SCOPE-1 §2.2 — the per-repo coverage roster, rendered in the zero-state.
     pub(crate) surface_coverage: super::surfaces::SurfaceCoverage,
+    /// TEST-EDGE-SCOPE-1A — the undetermined files among the headline (non-test-only) rows,
+    /// rendered after the unknown-composition disclosure. Absent (older daemon) → no line.
+    pub(crate) test_status_undetermined: Option<serde_json::Value>,
 }
 
 impl BoundariesSummaryResponse {
@@ -243,6 +249,7 @@ impl BoundariesSummaryResponse {
             test_only: partition::Additive::parse(dto.test_only_summary, "test-only"),
             unknown: partition::Additive::parse(dto.unknown_composition, "unknown-composition"),
             surface_coverage: dto.surface_coverage,
+            test_status_undetermined: dto.test_status_undetermined,
         })
     }
 }
@@ -346,6 +353,13 @@ impl BoundariesSummaryResponse {
                 reason
             )),
             partition::Additive::Absent => {}
+        }
+
+        // -- TEST-EDGE-SCOPE-1A: the headline files with undetermined test status --
+        if let Some(line) =
+            super::test_status::undetermined_files_line(self.test_status_undetermined.as_ref())
+        {
+            out.push_str(&format!("\n{line}\n"));
         }
 
         // -- Trailing test-only disclosure (§2.2, review-1 #2b) --

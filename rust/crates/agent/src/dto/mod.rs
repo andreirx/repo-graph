@@ -20,6 +20,8 @@ pub mod parse_status;
 mod semantic_candidate;
 pub mod signal;
 pub mod source;
+/// TEST-EDGE-SCOPE-1A: the UNDETERMINED test-status DTOs (computed when asked).
+pub mod test_status;
 /// TOOLCHAIN-STALENESS-1: the snapshot toolchain-stamp comparison and its status DTO.
 pub mod toolchain_staleness;
 
@@ -50,3 +52,6 @@ pub use signal::{
     TrustStaleSnapshotEvidence,
 };
 pub use source::SourceRef;
+pub use test_status::{
+    ExplainUndeterminedTestStatus, TestStatusState, TestStatusUniverse, UndeterminedTestFiles,
+};

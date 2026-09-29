@@ -283,6 +283,7 @@ pub mod module_rollup;
 pub mod risk_scorer;
 pub(crate) mod signals;
 pub mod spring_liveness;
+pub mod test_path;
 pub mod types;
 pub(crate) mod unresolved_classifier;
 pub mod vendored_path;

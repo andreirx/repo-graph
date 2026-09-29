@@ -69,6 +69,7 @@ fn sample_list_response() -> BoundariesListResponse {
         filter_file_prefix: None,
         filter_symbol: None,
         surface_coverage: sample_coverage(),
+        test_status_undetermined: None,
     }
 }
 
@@ -87,6 +88,7 @@ fn sample_empty_response() -> BoundariesListResponse {
         filter_file_prefix: None,
         filter_symbol: None,
         surface_coverage: sample_coverage(),
+        test_status_undetermined: None,
     }
 }
 
@@ -517,5 +519,28 @@ fn grouped_line_set_is_capped_with_remainder() {
     assert!(
         !out.contains("@ 0") && !out.contains(",0"),
         "no fabricated 0 line:\n{out}"
+    );
+}
+
+// ── TEST-EDGE-SCOPE-1A (RG-REQ-001-L07) ──
+
+#[test]
+fn boundaries_list_states_undetermined_files_after_the_headline() {
+    let mut resp = sample_list_response();
+    let before = resp.render_human();
+    resp.test_status_undetermined = Some(serde_json::json!({
+        "count": 2, "paths": ["src/test_db.c", "src/tester_db.c"],
+        "universe": "boundary_files", "universe_count": 5, "unknown_count": 1
+    }));
+    let output = resp.render_human();
+    let line = "2 files whose test status can't be determined — open them and look inside \
+                (of 5 files with boundary surfaces; 1 with unknown test status)";
+    let head_end = output.find(" boundar").expect("headline present");
+    let pos = output.find(line).expect(&output);
+    assert!(pos > head_end, "{output}");
+    assert_eq!(output.matches(line).count(), 1, "{output}");
+    assert!(
+        !before.contains("test status"),
+        "absent block → unchanged:\n{before}"
     );
 }

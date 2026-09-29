@@ -93,6 +93,7 @@ pub mod livegraph_refresh;
 pub mod livegraph_warm_cache;
 // FIXTURE-POLLUTION-1: tri-state test-composition classification result + additive-JSON shape (crate-private)
 mod test_composition;
+mod test_status_undetermined; // TEST-EDGE-SCOPE-1A: the per-surface UNDETERMINED test-status blocks (computed when asked, nothing stored)
 
 // MODULE-OWNERSHIP-DUPLICATE-1: maps a duplicate-ownership load failure to a labeled
 // degradation for the module command surface (keeps it out of the oversized dispatch.rs).

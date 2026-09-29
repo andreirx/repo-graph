@@ -61,6 +61,10 @@ pub struct ReliabilityResponse {
     pub enrichment_state: Option<String>,
     #[serde(default)]
     pub enrichment_summary: Option<String>,
+    /// TEST-EDGE-SCOPE-1A: the undetermined files among the non-test files whose calls
+    /// these sections count (`call_files`). Absent on an older daemon → no line.
+    #[serde(default)]
+    pub test_status_undetermined: Option<serde_json::Value>,
 }
 
 impl ReliabilityResponse {
@@ -97,6 +101,13 @@ impl ReliabilityResponse {
         }
         if axis.module {
             out.push_str(&render_section("By module", &self.by_module));
+        }
+        // TEST-EDGE-SCOPE-1A: once, after the last rendered section.
+        if let Some(line) =
+            super::test_status::undetermined_files_line(self.test_status_undetermined.as_ref())
+        {
+            out.push_str(&line);
+            out.push_str("\n\n");
         }
 
         // Point at the full posture without re-deriving it here.
@@ -340,6 +351,7 @@ mod tests {
             )],
             enrichment_state: Some("ran".into()),
             enrichment_summary: Some("Enrichment phase executed.".into()),
+            test_status_undetermined: None,
         }
     }
 
@@ -446,5 +458,24 @@ mod tests {
         );
         // A scope without inferred calls is unchanged.
         assert!(out.contains("jsx: 24% resolved (LOW) — "), "{out}");
+    }
+
+    #[test]
+    fn reliability_states_undetermined_files_once_after_the_sections() {
+        let mut r = resp();
+        r.test_status_undetermined = Some(serde_json::json!({
+            "count": 2, "paths": ["db/c_test.c", "util/testutil.cc"],
+            "universe": "call_files", "universe_count": 66, "unknown_count": 0
+        }));
+        let line = "2 files whose test status can't be determined — open them and look inside \
+                    (of 66 files with measured calls)";
+        let out = r.render_human(AxisFilter::from_flags(false, false));
+        assert_eq!(out.matches(line).count(), 1, "{out}");
+        assert!(
+            out.find(line).unwrap() > out.find("By module").unwrap(),
+            "after the last section:\n{out}"
+        );
+        let lang_only = r.render_human(AxisFilter::from_flags(true, false));
+        assert_eq!(lang_only.matches(line).count(), 1, "{lang_only}");
     }
 }

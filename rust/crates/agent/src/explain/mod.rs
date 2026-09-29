@@ -194,7 +194,16 @@ pub fn run_explain_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
             //    as high confidence.
             match storage.resolve_symbol(snapshot_uid, target)? {
                 AgentSymbolResolution::NotFound => {
-                    Ok(build_no_match(&repo.name, &snapshot, target, budget))
+                    // TEST-EDGE-SCOPE-1A (D-TESA-07): a tracked file with no FILE node
+                    // (config / contract / unreadable) whose test status can't be
+                    // determined is explained as a file carrying that status; any other
+                    // miss keeps today's no-match.
+                    match explain_tracked_only_undetermined_file(
+                        storage, &repo.name, &snapshot, target,
+                    )? {
+                        Some(result) => Ok(result),
+                        None => Ok(build_no_match(&repo.name, &snapshot, target, budget)),
+                    }
                 }
                 AgentSymbolResolution::Resolved(candidate) => {
                     let context =
@@ -493,6 +502,7 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
         module_path: context.module_path.clone(),
         file_count: None,
         symbol_count: None,
+        undetermined_test_status: None,
     }));
 
     // PYTHON-RECEIVER-BINDING-1 (RG-REQ-002-L11, RG-REQ-005-L09): what the certain rows leave out
@@ -855,6 +865,26 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
 
     // ── EXPLAIN_IDENTITY ────────────────────────────────────
     let file_summary = storage.compute_file_summary(snapshot_uid, file_path)?;
+    // TEST-EDGE-SCOPE-1A (RG-REQ-001-L07, D-TESA-13 S1): the focused file's stored test
+    // flag through the shared UNDETERMINED function. A FILE-bearing focus is a tracked
+    // file of its snapshot, so no tracked row is an inconsistency — an error, never
+    // read as "determined".
+    let undetermined_test_status = match storage
+        .query_tracked_file_test_flags(snapshot_uid, Some(file_path))?
+        .as_slice()
+    {
+        [row] => crate::dto::test_status::ExplainUndeterminedTestStatus::of(&row.path, row.is_test),
+        rows => {
+            return Err(ExplainError::Storage(AgentStorageError::new(
+                "explain_file",
+                format!(
+                    "{file_path} has a FILE node but {} tracked rows on snapshot {snapshot_uid}; \
+                     its test status is unknown",
+                    rows.len()
+                ),
+            )))
+        }
+    };
     signals.push(Signal::explain_identity(ExplainIdentityEvidence {
         target_kind: "file".to_string(),
         path: Some(file_path.to_string()),
@@ -867,6 +897,7 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
         module_path: None,
         file_count: None,
         symbol_count: Some(file_summary.symbol_count),
+        undetermined_test_status,
     }));
 
     // ── EXPLAIN_IMPORTS ─────────────────────────────────────
@@ -964,6 +995,68 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
     })
 }
 
+/// TEST-EDGE-SCOPE-1A (D-TESA-07): `explain <path>` of a tracked file with NO FILE node
+/// (a config, contract or unreadable file — nothing was extracted from it) whose test
+/// status can't be determined: a file identity (`target_kind` `file`, `path`, the test
+/// status; no language or symbol count — none is stored) instead of no-match. `None` for
+/// any other target, which keeps today's no-match unchanged.
+fn explain_tracked_only_undetermined_file<S: AgentStorageRead + ?Sized>(
+    storage: &S,
+    repo_name: &str,
+    snapshot: &AgentSnapshot,
+    target: &str,
+) -> Result<Option<OrientResult>, ExplainError> {
+    let snapshot_uid = &snapshot.snapshot_uid;
+    let rows = storage.query_tracked_file_test_flags(snapshot_uid, Some(target))?;
+    let status = match rows.as_slice() {
+        [row] if !row.has_file_node => {
+            crate::dto::test_status::ExplainUndeterminedTestStatus::of(&row.path, row.is_test)
+        }
+        _ => None,
+    };
+    let Some(status) = status else {
+        return Ok(None);
+    };
+    let mut signals = vec![Signal::explain_identity(ExplainIdentityEvidence {
+        target_kind: "file".to_string(),
+        path: Some(target.to_string()),
+        stable_key: None,
+        name: None,
+        subtype: None,
+        line_start: None,
+        language: None,
+        is_test: None,
+        module_path: None,
+        file_count: None,
+        symbol_count: None,
+        undetermined_test_status: Some(status),
+    })];
+    let trust = storage.get_trust_summary(&snapshot.repo_uid, snapshot_uid)?;
+    signals.push(build_trust_signal(&trust));
+    ranking::sort_and_rank(&mut signals);
+    let stale = !storage.get_stale_files(snapshot_uid)?.is_empty();
+    Ok(Some(OrientResult {
+        schema: ORIENT_SCHEMA,
+        command: EXPLAIN_COMMAND,
+        repo: repo_name.to_string(),
+        display_name: None, // Populated by daemon handler
+        snapshot: snapshot_uid.clone(),
+        focus: Focus::file(target, None, target),
+        confidence: derive_repo_confidence(&trust, stale),
+        documentation: None,
+        signals,
+        signals_truncated: None,
+        signals_omitted_count: None,
+        limits: Vec::new(),
+        limits_truncated: None,
+        limits_omitted_count: None,
+        next: Vec::new(),
+        next_truncated: None,
+        next_omitted_count: None,
+        truncated: false,
+    }))
+}
+
 // ── Path explain pipeline ───────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -996,6 +1089,7 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
         module_path: Some(path_prefix.to_string()),
         file_count: Some(path_summary.file_count),
         symbol_count: Some(path_summary.symbol_count),
+        undetermined_test_status: None,
     }));
 
     // ── EXPLAIN_FILES ───────────────────────────────────────

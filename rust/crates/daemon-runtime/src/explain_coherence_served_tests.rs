@@ -226,6 +226,7 @@ fn explain_identity_serves_live_anchor_from_livegraph() {
             module_path: Some("alpha".to_string()),
             file_count: None,
             symbol_count: None,
+            undetermined_test_status: None,
         })],
     );
     let env = build_explain_envelope(&state, REPO, result, false, false);
@@ -447,6 +448,7 @@ fn explain_identity_file_focus_counts_label_follows_actual_serve() {
             module_path: None,
             file_count: None,
             symbol_count: Some(1),
+            undetermined_test_status: None,
         })
     };
 

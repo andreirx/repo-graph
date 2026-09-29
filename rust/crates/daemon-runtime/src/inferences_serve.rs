@@ -157,6 +157,20 @@ pub fn no_detector_note(uncovered: &BTreeSet<String>) -> Option<String> {
     ))
 }
 
+/// TEST-EDGE-SCOPE-1A (D-TESA-13 S9/S10): the undetermined files among inference rows'
+/// production partition (`is_test != Some(true)`; the path from the target stable key, a
+/// key with no path staying outside the file universe). Shared by `inferences list` and
+/// the `dead` causes arm so the two state the same count.
+pub(crate) fn production_inference_block(
+    rows: &[InferenceListRow],
+) -> repo_graph_agent::UndeterminedTestFiles {
+    let paths: Vec<(Option<String>, Option<bool>)> = rows
+        .iter()
+        .map(|i| (file_from_stable_key(&i.target_stable_key), i.is_test))
+        .collect();
+    crate::test_status_undetermined::inference_block(paths.iter().map(|(p, f)| (p.as_deref(), *f)))
+}
+
 /// Parse the source FILE path from a `target_stable_key`. Handles both inference
 /// key shapes: `{repo}:{path}#{sym}:SYMBOL:{kind}` (path is before `#`) and
 /// `{repo}:{path}:FILE` (path is before the trailing `:FILE`). `repo_uid` carries no
@@ -343,6 +357,9 @@ pub fn build_response(
         None => inferences,
     };
     let count = matching.len() as u64;
+    // TEST-EDGE-SCOPE-1A (D-TESA-13 S9): the undetermined files among the MATCHING
+    // production inferences, before the `limit` cap (the universe is never capped).
+    let undetermined = production_inference_block(&matching);
 
     let all_records: Vec<serde_json::Value> = matching.into_iter().map(record_json).collect();
     let results: Vec<serde_json::Value> = match limit {
@@ -378,6 +395,7 @@ pub fn build_response(
         "truncated": truncated,
         "limit": limit,
         "empty": empty,
+        "test_status_undetermined": crate::test_status_undetermined::to_json(&undetermined),
         "results": results,
     });
     if let Some(k) = kind_filter {
@@ -748,5 +766,64 @@ mod tests {
         );
         assert_eq!(resp["count"], 0);
         assert_eq!(resp["empty"]["reason"], "no_records_for_kind_filter");
+    }
+
+    // ── TEST-EDGE-SCOPE-1A (D-TESA-13 S9/S10) ────────────────────────────────
+
+    fn test_row(uid: &str, path: &str, is_test: Option<bool>) -> InferenceListRow {
+        let mut r = row(
+            uid,
+            &format!("repo_01abc:{path}#X:SYMBOL:CLASS"),
+            "spring_container_managed",
+            r#"{"annotation":"@Service","reason":"stereotype"}"#,
+        );
+        r.is_test = is_test;
+        r
+    }
+
+    #[test]
+    fn inferences_block_counts_production_inferences_before_the_limit() {
+        let rows = vec![
+            test_row("i1", "src/main/java/TestSupport.java", Some(false)),
+            test_row("i2", "src/main/java/App.java", Some(false)),
+            test_row("i3", "src/test/java/AppTest.java", Some(true)),
+            test_row("i4", "src/main/java/TesterBean.java", None),
+        ];
+        let langs: BTreeSet<String> = ["java".to_string()].into_iter().collect();
+        // `--limit 1` caps the records carried, never the universe.
+        let resp = build_response("r", "s", rows, &langs, None, Some(1));
+        assert_eq!(resp["returned"], 1);
+        assert_eq!(
+            resp["test_status_undetermined"],
+            serde_json::json!({
+                "count": 1,
+                "paths": ["src/main/java/TestSupport.java"],
+                "universe": "inference_files",
+                "universe_count": 3,
+                "unknown_count": 1
+            })
+        );
+    }
+
+    #[test]
+    fn dead_causes_block_counts_production_inferences() {
+        // The `dead` causes arm calls the SAME function over its (unfiltered) inferences.
+        let rows = vec![
+            test_row("i1", "src/main/java/TestSupport.java", Some(false)),
+            test_row("i3", "src/test/java/AppTest.java", Some(true)),
+            row("i5", "malformed", "spring_container_managed", "{}"),
+        ];
+        let b = production_inference_block(&rows);
+        assert_eq!(
+            crate::test_status_undetermined::to_json(&b),
+            serde_json::json!({
+                "count": 1,
+                "paths": ["src/main/java/TestSupport.java"],
+                "universe": "inference_files",
+                "universe_count": 1,
+                "unknown_count": 0
+            }),
+            "a test inference is excluded; a key with no path is outside the file universe"
+        );
     }
 }

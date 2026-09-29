@@ -288,7 +288,13 @@ fn high_complexity_signal() -> Signal {
         high_complexity_count: 0,
         threshold: repo_graph_agent::aggregators::complexity::DEFAULT_COMPLEXITY_THRESHOLD,
         top_complex: Vec::new(),
-        scope: ComplexityScope::Production { excluded_count: 0 },
+        scope: ComplexityScope::Production {
+            excluded_count: 0,
+            test_status_undetermined: repo_graph_agent::UndeterminedTestFiles::over_partition(
+                repo_graph_agent::TestStatusUniverse::RankedFiles,
+                std::iter::empty(),
+            ),
+        },
     })
 }
 
@@ -935,6 +941,7 @@ fn build_orient_envelope_module_summary_leaf_follows_actual_serve() {
             top_modules: Vec::new(),
             package_groups: Vec::new(),
             root_manifest_limitation: None,
+            package_groups_test_status_undetermined: None,
         })
     };
 

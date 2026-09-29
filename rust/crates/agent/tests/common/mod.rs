@@ -27,7 +27,7 @@ use repo_graph_agent::{
     AgentModuleSize, AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis,
     AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
     AgentStorageError, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
-    AgentSymbolResolution, AgentTrustSummary, EnrichmentState,
+    AgentSymbolResolution, AgentTrustSummary, EnrichmentState, TrackedFileTestFlag,
 };
 use repo_graph_gate::{
     GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -161,6 +161,17 @@ pub struct FakeAgentStorage {
     pub module_sizes: HashMap<String, Vec<AgentModuleSize>>,
     pub complexity_measurements: HashMap<String, Vec<AgentComplexityMeasurement>>,
 
+    /// TEST-EDGE-SCOPE-1A: the snapshot's tracked files with their stored test flag, keyed by
+    /// snapshot_uid. When a snapshot is seeded here the rows are authoritative. When it is NOT,
+    /// the fake mirrors the real store's invariant (every FILE node is a tracked file): each
+    /// `path_resolutions` entry with `has_exact_file` and each FILE `stable_key_candidates`
+    /// file is tracked with `is_test = false` and a FILE node — so existing file-explain fixtures
+    /// keep working unchanged.
+    pub tracked_file_flags: HashMap<String, Vec<TrackedFileTestFlag>>,
+    /// TEST-EDGE-SCOPE-1A: the directory topology (`list_directory_groups`) per snapshot,
+    /// with each directory's stored test-file count. Unseeded ⇒ empty (the trait default).
+    pub directory_groups: HashMap<String, Vec<repo_graph_agent::AgentDirectoryGroup>>,
+
     /// If set to the name of a port operation, the fake returns
     /// `AgentStorageError` from that operation. Used to verify
     /// error propagation. Shared between both traits — operation
@@ -229,6 +240,58 @@ impl FakeAgentStorage {
 }
 
 impl AgentStorageRead for FakeAgentStorage {
+    fn query_tracked_file_test_flags(
+        &self,
+        snapshot_uid: &str,
+        path: Option<&str>,
+    ) -> Result<Vec<TrackedFileTestFlag>, AgentStorageError> {
+        self.fail_if_forced("query_tracked_file_test_flags")?;
+        let mut rows: Vec<TrackedFileTestFlag> = match self.tracked_file_flags.get(snapshot_uid) {
+            Some(seeded) => seeded.clone(),
+            None => {
+                let mut paths: std::collections::BTreeSet<String> = self
+                    .path_resolutions
+                    .iter()
+                    .filter(|((s, _), r)| s == snapshot_uid && r.has_exact_file)
+                    .map(|((_, p), _)| p.clone())
+                    .collect();
+                paths.extend(
+                    self.stable_key_candidates
+                        .iter()
+                        .filter(|((s, _), c)| {
+                            s == snapshot_uid && c.kind == repo_graph_agent::AgentFocusKind::File
+                        })
+                        .filter_map(|(_, c)| c.file.clone()),
+                );
+                paths
+                    .into_iter()
+                    .map(|p| TrackedFileTestFlag {
+                        path: p,
+                        is_test: false,
+                        has_file_node: true,
+                    })
+                    .collect()
+            }
+        };
+        if let Some(p) = path {
+            rows.retain(|r| r.path == p);
+        }
+        rows.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(rows)
+    }
+
+    fn list_directory_groups(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<repo_graph_agent::AgentDirectoryGroup>, AgentStorageError> {
+        self.fail_if_forced("list_directory_groups")?;
+        Ok(self
+            .directory_groups
+            .get(snapshot_uid)
+            .cloned()
+            .unwrap_or_default())
+    }
+
     fn get_repo(&self, repo_uid: &str) -> Result<Option<AgentRepo>, AgentStorageError> {
         self.fail_if_forced("get_repo")?;
         Ok(self.repos.get(repo_uid).cloned())

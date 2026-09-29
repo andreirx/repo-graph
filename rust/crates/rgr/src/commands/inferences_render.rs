@@ -65,6 +65,13 @@ pub fn render(result: &Value, limit_active: bool) -> String {
     } else {
         out.push_str(&render_summary(records, count));
     }
+    // TEST-EDGE-SCOPE-1A (RG-REQ-001-L07): the files with production inferences whose test
+    // status can't be determined (shared wording; absent on an older daemon → nothing).
+    if let Some(line) = crate::presentation::test_status::undetermined_files_line(
+        result.get("test_status_undetermined"),
+    ) {
+        out.push_str(&format!("\n{line}\n"));
+    }
     out
 }
 
@@ -511,5 +518,39 @@ mod tests {
             !out.contains("[test]"),
             "non-test inference must NOT carry the [test] label:\n{out}"
         );
+    }
+
+    /// TEST-EDGE-SCOPE-1A: after the kind table, the undetermined files among the
+    /// production inferences (counted before `--limit`).
+    #[test]
+    fn inferences_render_states_undetermined_files() {
+        let rec = record(
+            "spring_container_managed",
+            "src/main/java/TestSupport.java",
+            "TestSupport",
+            json!({"annotation":"@Service","reason":"stereotype","line_start":10}),
+        );
+        let result = json!({
+            "count": 1, "returned": 1, "truncated": false, "limit": null,
+            "detectors": json!([
+                {"detector":"spring","label":"Spring","subjects":"container-managed beans",
+                 "kinds":["spring_container_managed"],"applicable":true,"count":1}
+            ]),
+            "empty": Value::Null, "results": [rec],
+            "test_status_undetermined": {"count": 1, "paths": ["src/main/java/TestSupport.java"],
+                "universe": "inference_files", "universe_count": 3, "unknown_count": 1}
+        });
+        let line = "1 file whose test status can't be determined — open it and look inside \
+                    (of 3 files with inferences; 1 with unknown test status)";
+        for limit_active in [false, true] {
+            let out = render(&result, limit_active);
+            assert_eq!(out.matches(line).count(), 1, "{out}");
+        }
+        let mut older = result.clone();
+        older
+            .as_object_mut()
+            .unwrap()
+            .remove("test_status_undetermined");
+        assert!(!render(&older, false).contains("test status"));
     }
 }
