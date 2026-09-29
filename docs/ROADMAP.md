@@ -1338,7 +1338,13 @@ NEXT: DOCS-UNREADABLE-DECODE-1 (RC-1), then the queue above in order; CPP-INCLUD
   Follow-ups:
   - DGC-ATTRIBUTION-PRECISE-1: exact cross-script attribution, only if such layouts appear in the corpus;
   - DEPS-GRADLE-CATALOG-1B: catalog aliases.
-NEXT (remaining queue): TEST-EDGE-SCOPE-1A (re-cut under the amended L07) → 1B (the release gate) → CPP-INCLUDE-BASENAME-1 (rebase → implementation); TS-WORKSPACE-RESOLUTION-1 (re-cut, D-TS-WORKSPACE-1); release.
+- **TEST-EDGE-SCOPE-1A — SHIPPED** `df98b655` (2026-09-29).
+  - poco: the 788 `**/testsuite/**` files are test code now (`is_test` 0 → 1, FILE node SOURCE → TEST_FILE), e.g. `Foundation/testsuite/src/ArrayTest.cpp:19` `ArrayTest::ArrayTest(const std::string& name): CppUnit::TestCase(name)`. `stats` test files 8 → 796.
+  - A test-worded path matching no convention or marker is UNDETERMINED: poco `CppUnit/include/CppUnit/Test.h:27` `class CppUnit_API Test`, leveldb `util/testutil.cc:14`. `explain` says `test status: can't determine — open it and look inside`.
+  - Each partitioned surface states its count with its universe: poco complexity "undetermined 2 of 97 ranked files", 25 undetermined in total. leveldb is otherwise identical: `util/testutil.h` keeps `is_test` 1 by its gtest marker.
+  - The status is computed when asked, from path and known-false `is_test` (D-TESA-DERIVED-1, human 2026-09-29, chosen over storing it per snapshot), so counts cannot disagree with their partition.
+  - Tally: 1 baseline (PREP-2, 6 document cycles: FILE-less files, the stats name-based count, count universes, then the store-vs-compute pivot, absent-is-not-zero, unknown-flag denominators, closed by the per-surface table D-TESA-13); implementation accepted at cycle 3; gates green first run.
+NEXT (remaining queue): TEST-EDGE-SCOPE-1B (the release gate) → CPP-INCLUDE-BASENAME-1 (rebase → implementation); TS-WORKSPACE-RESOLUTION-1 (re-cut, D-TS-WORKSPACE-1); release.
 
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a
