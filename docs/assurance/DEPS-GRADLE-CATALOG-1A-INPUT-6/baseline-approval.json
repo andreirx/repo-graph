@@ -1,0 +1,76 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DEPS-GRADLE-CATALOG-1A-BASELINE-APPROVAL-6",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DEPS-GRADLE-CATALOG-1A-INPUT-6.json",
+    "sha256": "sha256:2df94c1b8ce6fcbbb8839ca25374cc375b55613a4703be7532f1232871babe2b"
+  },
+  "review": {
+    "path": "docs/assurance/DEPS-GRADLE-CATALOG-1A-INPUT-6/requirements-review.json",
+    "sha256": "sha256:6d35acb8a336908bd8092a8054de323ea64434fb842625220d354cd9b918c8a7"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-GRADLE-DECLARED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+        "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-DGC-CONDITIONAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-CONDITIONAL-1.md",
+        "sha256": "sha256:240e67c53adcd3f4daf09233d8bdbd003d5acaa61a300230977af94da4bfa3f0"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-DGC-ATTRIBUTION-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-ATTRIBUTION-1.md",
+        "sha256": "sha256:c0dd3ff3220f38fc273398376dac6c52bcdb1b2645559ec7a2edda295d5c2d77"
+      }
+    },
+    {
+      "id": "D-DGC-BOUNDARY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-BOUNDARY-1.md",
+        "sha256": "sha256:531a2dcad843c3096b75b4d7b847892296b7154fac4895630687705690877afd"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-29T10:44:27.063Z",
+  "rationale": "Document item DEPS-GRADLE-CATALOG-1A-PREP-8 accepted at cycle 2 (codex gpt-6-sol): OC-7 gives DGC-A06's three failed-record boundary fixtures a runtime-builtin fact (System.out.println, the classifier's runtime-global rule) so the sparse-row rule emits their rows; failed-manifest assertions unchanged (implementation review-0 D-DGC-A06-FACTLESS-FIXTURES = A; PREP-8 review-0 D-DGC-A06-FACT-KIND = A \u2014 the packet's 'third-party import' wording was the manager's error)."
+}
