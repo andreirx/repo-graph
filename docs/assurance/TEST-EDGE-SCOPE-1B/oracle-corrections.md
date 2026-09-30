@@ -134,3 +134,113 @@ Trigger: the implementation review-0 of the admission-1 candidate (`.agent-manag
 ## Operator confirmation (2026-09-30, in-place-manager) — A-1 and OC-1, with their revisions
 
 A-1 (including TESB-PARTITION-FALLBACK-REASON, the reviewer's recommended option) and OC-1 are approved; any "Approver: PENDING" line above is resolved by this entry. They were accepted by PREP-3 review-2 (codex gpt-6-sol) and are carried as INPUT-2. The admission-1 TESB-C03 failure stays on record. The human may override the fallback-reason ruling.
+
+---
+
+# INPUT-3 entries (2026-09-30)
+
+Baseline these entries enter: `docs/requirements/baselines/TEST-EDGE-SCOPE-1B-INPUT-3.json`. Admitted baseline before them: `TEST-EDGE-SCOPE-1B-INPUT-2.json` (committed at c81cdea4). Trigger: the implementation review-0 of the admission-2 candidate (`.agent-manager/slices/TEST-EDGE-SCOPE-1B/review-0.json`, verdict `decision-required`; candidate saved at `.agent-manager/slices/TEST-EDGE-SCOPE-1B/candidate-admission-2.patch`, 94 paths). The operator's four rulings are given by the PREP-4 packet (in-place-manager; the human may override). Author: document item TEST-EDGE-SCOPE-1B-PREP-4 (builder role, claude-opus-5-5). Independent review of these entries: pending (the PREP-4 reviewer). Every entry above is unchanged.
+
+## A-3 — 2026-09-30 — allocation amendment: a failed partition-evidence read names its own reason
+
+- **Authority.** Review-0 DECISION_REQUIRED `TESB-PARTITION-READ-FAILURE`, recommended option A, "add a precise fallback reason". The operator ruled: A. The packet's instructions: a distinct additive value in `FallbackReason` and its coherence mirror, beside D-TESB-16's partition-view reason; the SQLite fallback stays; the read error's reason is carried, not discarded; every exhaustive match and literal construction of both enums allocated; tests force a storage-open failure and a graph-read failure and assert the served backend, the exact reason and the human and JSON provenance.
+- **Finding (review-0, blocking 1).** "`default_view_partition_fallback` turns a failed storage open or `directory_module_graph` read into `FallbackReason::LiveGraphError`. The enum's documented contract in `livegraph_feed.rs` says that reason means *the LiveGraph engine errored*. … `.ok()` discards the actual read failure." Verified on the admission-2 candidate at `orient_lg_decisions.rs:398-417`.
+- **Class and rule.** Class: a fallback reason that names a mechanism other than the one that failed, with the failure's text discarded. Rule: D-TESB-16's INPUT-3 addendum.
+  - The read becomes `read_default_view_excludes_nothing -> Result<bool, String>`, whose `Err` names the failed read and keeps the underlying error.
+  - `Err` maps to `Fallback { PartitionEvidenceUnreadable }` plus one daemon-log warning.
+  - The final name is `PartitionEvidenceUnreadable`, with no `LiveGraph` prefix, because the unreadable thing is the SQLite store's partition evidence.
+  - The error text is not added to the wire: a free-text `Provenance` key is a boundary shape the ruling did not authorize (§8 FALLBACK-READ-FAILURE-1).
+- **Sites.** The table in D-TESB-16's INPUT-3 addendum lists three exhaustive matches, one `_` match, the defect, two HEAD instances of the class on other surfaces (surfaced in §8, not fixed), and two propagations that are not instances. The grep behind it covered every `FallbackReason::` and `CoherenceFallbackReason::` use in the admission-2 candidate (a scratch worktree), and every `LiveGraphBoundedServeDeclined =>` arm, which appears only in exhaustive matches.
+- **Allocation change.** No new path. Checks:
+  - TESB-C06 gains `read_default_view_excludes_nothing_carries_the_read_error`, `orient_cycles_outcome_names_partition_evidence_unreadable_when_the_store_cannot_be_opened`, `orient_cycles_outcome_names_partition_evidence_unreadable_when_the_directory_graph_read_fails`, `build_orient_envelope_cycles_leaf_serializes_partition_evidence_unreadable_never_livegraph_error` and `build_explain_envelope_cycles_leaf_serializes_partition_evidence_unreadable_never_livegraph_error`. Floor 871 → 877: the admission-2 builder's recorded `--list` of 872, plus 5.
+  - TESB-C07 gains `orient_full_serving_line_names_the_partition_evidence_unreadable_fallback`.
+  - TESB-C09 gains `partition_evidence_unreadable_reason_as_str_and_serde_name_match_and_differ_from_livegraph_error`. Floor 25 → 26.
+  - The acceptance boundary, P-TESB-02, §2.3 R17b/R17c, §3 and §4 name the rule.
+
+## A-4 — 2026-09-30 — allocation amendment: `partition_evidence_status` is derived from positive validation
+
+- **Authority.** Review-0 blocking finding 2. The operator ruled: "Invert it. The status is `stated` ONLY when every required carrier and item was positively validated. It is `unavailable` only for a genuinely older payload (the documented absent-key shape). Anything else is `unreadable`, with a reason and a JSON pointer." The packet also asked for one named test per sibling guard, plus any others found, and for D-TESB-17's table to show the derivation rule.
+- **Finding.** "`rgr/src/presentation/import_partition.rs:629–955` defaults to `state: "stated"` when traversal records neither `stated_any` nor `unavailable_any`." Verified on the admission-2 candidate. The four sibling guards the review lists were confirmed. The sweep found four more:
+  - a non-object `value` read as the older shape;
+  - a skipped daemon-stated `unavailable` module-edges block;
+  - carrier containers never looked for;
+  - a mixed document marked `unreadable` with no entry.
+- **Class and rule.** Class: a status that defaults to its positive value when the traversal records nothing. This is its third appearance, after admission-1 review F-2 and PREP-3 review F-2. Rule: D-TESB-17's INPUT-3 status derivation.
+  - Every carrier records exactly one outcome, and containers are validated first.
+  - The derivation has eight rows, including the fail-closed row for a carrier without an outcome.
+  - A per-surface table gives each surface's containers, carriers and older-daemon shape.
+  - A non-object answer is a named error: the function returns `Result`, and a discarded result fails clippy and the wiring guard.
+- **Allocation change.** No new path. TESB-C07 gains ten tests (the list is in D-TESB-17 INPUT-3 and in C07's command). Floor 1420 → 1431: the admission-2 builder's recorded `--list` of 1420, plus A-3's one test, plus these ten.
+
+## OC-2 — 2026-09-30 — oracle correction: TESB-C11's usage probe
+
+- **Authority.** Review-0 finding 4: "`/tmp/tesb-c11-a-usage.txt.err` says `--engine livegraph requires --kind file-import or module-import`. It does **not** demonstrate refusal of `--include-tests` with an explicit LiveGraph engine … This is an evidence correction, not permission to rewrite the historical C11 record." The operator ruled: add `--kind module-import`, assert the nonzero exit and the partition-specific diagnostic, verified in the source, and keep the historical result on record.
+- **Historical result, kept.** The INPUT-2 TESB-C11 command held `q $C "$CAND" "$LD" $T-a-usage.txt cycles --include-tests --engine livegraph` and asserted only `rc(T + "a-usage.txt") == 1`. On the admission-2 candidate the builder recorded TESB-C11 EXECUTED exit 0 (`.agent-manager/slices/TEST-EDGE-SCOPE-1B/build-progress.md`). Its own note reads: "the usage probe `cycles --include-tests --engine livegraph` exits 1 on the pre-existing `--engine livegraph requires --kind` rule, which fires first." The capture `/tmp/tesb-c11-a-usage.txt.err` (71 bytes, still present 2026-09-30) holds that message. **That C11 pass stands as recorded. Its usage clause passed for the wrong reason and is not evidence of the partition refusal.**
+- **Diagnostic, verified in the source.** Admission-2 `rgr/src/commands/graph.rs:265-277`, `refuse_partition_flags_with_explicit_engine`: `error: --include-tests / --include-inferred are not supported with --engine {engine} (it serves the unpartitioned import graph); omit --engine to use them`. It is reached only after the engine/kind validation (`parse_cycles_args`, :1149-1186). `run_cycles` prints it to stderr with `EXIT_USAGE_ERROR` (1).
+- **Corrected clause (text only).** The invocation gains `--kind module-import`. The oracle gains four assertions: the partition-specific line is on stderr; no line mentions `requires --kind`; stdout is empty; the exit code is 1, as before.
+- **Probe (EXECUTED 2026-09-30).** Both invocations ran with the admission-2 release build (`rust/target/release/rmap`, `rmap 0.19.0`; its binaries contain the admission-2 strings, so the identity is INFERRED), fully isolated (`RMAP_STATE_ROOT`/`RMAP_SOCKET_PATH` = `/private/tmp/TEST-EDGE-SCOPE-1B-PREP-4-c11`, stdio, auto passes off), from the leveldb checkout. The corrected assertion lines, extracted from the new command text, were run on each output.
+
+  | Invocation | exit | stderr | corrected oracle |
+  |---|---|---|---|
+  | `cycles --include-tests --engine livegraph` (INPUT-2) | 1 | `error: --engine livegraph requires --kind file-import or module-import` | exit 1 (AssertionError on the partition line) |
+  | `cycles --include-tests --engine livegraph --kind module-import` (INPUT-3) | 1 | `error: --include-tests / --include-inferred are not supported with --engine livegraph (it serves the unpartitioned import graph); omit --engine to use them` | exit 0 |
+
+  The parse fails before any daemon or state access, and the state root held only the probe's captures.
+- **Rerun.** The corrected C11 must be rerun on the next candidate. This entry does not change the admission-2 record.
+
+## A-5 — 2026-09-30 — allocation amendment: the `path` field witness, TESB-C16; one contradiction surfaced
+
+- **Authority.** Review-0 finding 3: "The slice's definition of done requires a real `rmap path` fixture whose sole route uses an inferred import … The builder explicitly reports only a unit test for this case. RG-REQ-002-L11 remains **UNVERIFIED at that acceptance boundary**." The operator ruled: make the check explicit and named — an isolated `rmap path` over a real fixture whose sole route uses an inferred import, with no route by default and the route under `--include-inferred`, quoting the fixture's actual import source line, with full isolation and builder-owned roots only.
+- **Contradiction, verified.** No `rmap path` route can contain an IMPORTS hop, at HEAD or in the admission-2 candidate:
+  - `path` resolves both endpoints through `StorageConnection::resolve_symbol`, whose exact-stable-key tier and name tiers select `kind = 'SYMBOL'` only (storage `queries.rs:3301-3308`).
+  - Its walk follows edges whose source is on the frontier (`queries.rs:1949-1951`).
+  - Every stored IMPORTS edge is FILE→FILE or MODULE→MODULE. EXECUTED 2026-09-30 by sqlite `?immutable=1` on the manager's before-roots: leveldb `FILE→FILE static 498`, `MODULE→MODULE static 21`; kafka `FILE→FILE inferred 3 / static 42479`, `MODULE→MODULE static 5602`; FRAKTAG and grpc-java FILE→FILE and MODULE→MODULE static only.
+  - A FILE stable key given to `path` is refused (probe below).
+
+  The operator's literal witness therefore cannot be produced, which contradicts a ruling and §6's text. It is surfaced as DECISION_REQUIRED `TESB-PATH-WITNESS` (§9 of the slice document), recommended option A.
+- **As authored (option A, pending the operator's confirmation).** TESB-C16 is an isolated `rmap path` over a builder-made Python fixture whose only route is the INFERRED call `app.py:2` `    return worker.process_batch()`: an untyped receiver and a unique method name, stored `inferred` by PYTHON-RECEIVER-BINDING-1. It asserts:
+  - the store row;
+  - the default no-route line with its runnable command;
+  - the `--include-inferred` route, in human and JSON form;
+  - the printed command, run as printed, answering byte-identically;
+  - the stated limit: FILE keys exit 2 with `symbol not found`.
+
+  The inferred-import hop stays proven at the daemon function (TESB-C06 `path_include_inferred_walks_inferred_hops_and_counts_them`). §6 says "an inferred edge" and cites this entry. TESB-C14 also checks `/private/tmp/TEST-EDGE-SCOPE-1B-path`. §5 runs C16 after C15.
+- **Probes (EXECUTED 2026-09-30, admission-2 release build, PREP-4-owned roots, each removed).**
+
+  | Probe | Expected | Actual |
+  |---|---|---|
+  | TESB-C16 as written, with only its root and capture names renamed to `TEST-EDGE-SCOPE-1B-PREP-4-path` / `/tmp/tesb4-c16` | exit 0 | exit 0, `TESB-C16 ok`; the EXIT trap removed the root |
+  | the same, `rmap` wrapped to strip `--include-inferred` | exit ≠ 0 | exit 1: `AssertionError: ('missing line', '1 hop', …)` |
+  | the same, `rmap` wrapped to add `--include-inferred` to every `path` | exit ≠ 0 | exit 1: the default shows the route, so no command is printed and `test "$CMD" = …` fails |
+  | `rmap path app.py lib/worker.py` / FILE stable keys on the fixture | refused | exit 2, `error: InvalidRequest: symbol not found: …` |
+
+## Guard probes for INPUT-3 (EXECUTED 2026-09-30)
+
+- `bash -n` on the sixteen check commands, each written to a file: exit 0 for all sixteen.
+- The named-test loops of TESB-C06, C07 and C09 were run on copies of the admission-2 builder's cargo logs (`/tmp/tesb-c06.txt`, `/tmp/tesb-c07.txt`, `/tmp/tesb-c09b.txt`, read-only):
+  - each exits 1 on its first INPUT-3 name (`MISSING read_default_view_excludes_nothing_carries_the_read_error`, `MISSING orient_full_serving_line_names_the_partition_evidence_unreadable_fallback`, `MISSING partition_evidence_unreadable_reason_as_str_and_serde_name_match_and_differ_from_livegraph_error`);
+  - the same loops without the 17 INPUT-3 names exit 0;
+  - the floors (877, 1431, 26) exceed the admission-2 builder's recorded `--list` counts (872, 1420, 25). That comparison is INFERRED from the recorded counts; no cargo was run.
+- The TESB-C14 leftover loop, renamed to the PREP-4 prefix: exit 0 with no root present; exit 1 `LEFT path` with a `…-path` directory present (removed after).
+- Every probe ran in a scratch worktree `/private/tmp/TEST-EDGE-SCOPE-1B-PREP-4-probe` (detached at c81cdea4 with the admission-2 patch applied, 94 paths), in PREP-4-named roots, or in `/tmp/tesb4-*` captures. All were removed at the end of the item.
+
+## A-5 addendum — 2026-09-30 (INPUT-3 cycle 2) — ruling TESB-PATH-WITNESS → A
+
+- **Authority.** PREP-4 review-0 (`.agent-manager/slices/TEST-EDGE-SCOPE-1B-PREP-4/review-0.json`, decision-required) raised DECISION_REQUIRED `TESB-PATH-WITNESS` with the recommendation A. The operator (in-place-manager) took A in the cycle-2 packet; the human may override. The packet: "`rmap path` resolves SYMBOL endpoints only (`storage/src/queries.rs:3280–3308`). The definition of done's 'sole route uses an inferred import' therefore cannot be shown at the CLI on the current product; that wording was the manager's error."
+- **Ruling as recorded.**
+  - §6 and TESB-C16: the CLI witness is an isolated `rmap path` whose sole route uses an inferred CALL (`app.py:2` `    return worker.process_batch()`). By default it gives no route; with `--include-inferred`, the route.
+  - The inferred-IMPORT walk stays proven by TESB-C06's unit test `path_include_inferred_walks_inferred_hops_and_counts_them`, now named in §6.
+  - FILE endpoints for `path` are out of scope, recorded as the follow-up §8 PATH-FILE-ENDPOINTS.
+- **Superseded.** Only the "pending the operator's confirmation" status of A-5 above; its text is kept as written. TESB-C16's command is unchanged, and its cycle-1 probes stand.
+- **Also in cycle 2 (review-0's fixable finding).** A blank line at the end of the slice document made `git diff --check` exit 2; it is removed. This is a document hygiene fix, not an oracle change.
+
+## Operator confirmation (2026-09-30, in-place-manager) — the INPUT-3 corrections
+
+The INPUT-3 corrections authored by PREP-4 are approved; any "Approver: PENDING" line on them is resolved by this entry. They are:
+- TESB-PARTITION-READ-FAILURE → A (a precise fallback reason);
+- the positive-validation derivation of partition-evidence status;
+- TESB-C11's oracle correction (the admission-2 result retained);
+- TESB-PATH-WITNESS → A (a CLI inferred-call witness; the inferred-import walk proven by the C06 unit test; `path` file endpoints recorded as a follow-up).
+
+Accepted by PREP-4 review-1 (codex gpt-6-sol). Carried as INPUT-3. The human may override either operator ruling.
