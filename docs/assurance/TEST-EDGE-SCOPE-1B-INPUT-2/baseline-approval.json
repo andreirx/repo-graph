@@ -1,0 +1,90 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "TEST-EDGE-SCOPE-1B-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/TEST-EDGE-SCOPE-1B-INPUT-2.json",
+    "sha256": "sha256:ce941a28ff8decb0509943c8577eeb9c822d092ecdf1fe733aab3f6b354df1b8"
+  },
+  "review": {
+    "path": "docs/assurance/TEST-EDGE-SCOPE-1B-INPUT-2/requirements-review.json",
+    "sha256": "sha256:164275c732e1dccfd09110b43df7a4c519545b2c232f5f5ea3fc0fda753520bd"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-TEST-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+        "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d"
+      }
+    },
+    {
+      "id": "D-PSI-RELEASE-GATE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSI-RELEASE-GATE-1.md",
+        "sha256": "sha256:75eeec71f03eb211011817f69aa5734fdc90d6b2f4aaf44c0bfbe94babf7bb49"
+      }
+    },
+    {
+      "id": "D-TESB-READERS-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TESB-READERS-1.md",
+        "sha256": "sha256:b7c5079782261a3abfd2f4a7fecbb89104ca53ff35a06464aeab33f6259abdf7"
+      }
+    },
+    {
+      "id": "D-TEST-UNDETERMINED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-UNDETERMINED-1.md",
+        "sha256": "sha256:61ffac89c67841ee628c73ed7f66bce1e910ed99925a6b4ae012c2dbce0622f0"
+      }
+    },
+    {
+      "id": "D-TESA-DERIVED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TESA-DERIVED-1.md",
+        "sha256": "sha256:ac035faa4bd90a0e915de26f89cb7481ea3a270a702c6be7709d96b815b0af26"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-PSI-R1-VOCAB",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSI-R1-VOCAB.md",
+        "sha256": "sha256:9fefd3779c40ddf74db9f3298ca5d8f055b5089ee1b1f619b0a5d15d15023eb1"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    }
+  ],
+  "decidedAt": "2026-09-30T01:21:20.631Z",
+  "rationale": "Document item TEST-EDGE-SCOPE-1B-PREP-3 accepted at cycle 3 (codex gpt-6-sol): A-1 allocates the cycle-provenance label sites so provenance follows the partitioned answer served, with a distinct partition-view fallback reason (TESB-PARTITION-FALLBACK-REASON, operator: the reviewer's recommendation); OC-1 corrects TESB-C03's source guard to the two real call sites (the admission-1 failure retained); D-TESB-17 closes the absent/malformed-evidence class with named reader and boundary tests (implementation review-0)."
+}
