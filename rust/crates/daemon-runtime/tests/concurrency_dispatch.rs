@@ -505,6 +505,13 @@ fn imports_edge(repo_uid: &str, snapshot_uid: &str, i: usize, dst: usize) -> Gra
 /// daemon's per-operation reader (S-A) sees the committed rows. `n` ≫ the Tarjan
 /// checkpoint interval (256) so `find_cycles`' SCC pass runs long enough for an
 /// in-loop checkpoint to fire.
+///
+/// TEST-EDGE-SCOPE-1B (INPUT-4 A-6): the ring is ALSO stored in the file-level shape an
+/// index stores and the partitioned `cycles`/`orient`/`explain` reads derive their
+/// directory graph from (file→file IMPORTS × OWNS): per ring module one `files` row
+/// under `cmod{i}/`, one FILE node, an `OWNS` edge MODULE → FILE and a production
+/// file→file `static` IMPORTS edge to the next module's file. The persisted
+/// MODULE→MODULE ring above stays: the cycles certificate build reads it.
 fn inject_module_ring(db_path: &str, repo_uid: &str, snapshot_uid: &str, n: usize) {
     let mut conn = StorageConnection::open(db_path).expect("open daemon db for fixture injection");
     let nodes: Vec<GraphNode> = (0..n)
@@ -515,6 +522,81 @@ fn inject_module_ring(db_path: &str, repo_uid: &str, snapshot_uid: &str, n: usiz
         .map(|i| imports_edge(repo_uid, snapshot_uid, i, (i + 1) % n))
         .collect();
     conn.insert_edges(&edges).expect("insert module ring edges");
+    inject_module_ring_file_level(&mut conn, repo_uid, snapshot_uid, n);
+}
+
+/// The file-level shape of the module ring (A-6): `files` rows (production), FILE nodes,
+/// `OWNS` edges MODULE `cm{i}` → FILE `crn{i}` and file→file `static` IMPORTS
+/// `crn{i}` → `crn{(i+1)%n}`. Every uid is distinct from the MODULE ring's (`cm*`, `ce*`)
+/// and from `inject_stats_fixture`'s (`fu*`, `sm*`, `sfn*`, `ss*`, `sowns*`, `simp*`).
+fn inject_module_ring_file_level(
+    conn: &mut StorageConnection,
+    repo_uid: &str,
+    snapshot_uid: &str,
+    n: usize,
+) {
+    let files: Vec<TrackedFile> = (0..n)
+        .map(|i| TrackedFile {
+            file_uid: format!("crf{i}"),
+            repo_uid: repo_uid.to_string(),
+            path: format!("cmod{i}/ring.ts"),
+            language: Some("typescript".to_string()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        })
+        .collect();
+    conn.upsert_files(&files).expect("insert module ring files");
+    let file_nodes: Vec<GraphNode> = (0..n)
+        .map(|i| GraphNode {
+            node_uid: format!("crn{i}"),
+            snapshot_uid: snapshot_uid.to_string(),
+            repo_uid: repo_uid.to_string(),
+            stable_key: format!("{repo_uid}:cmod{i}/ring.ts:FILE"),
+            kind: "FILE".to_string(),
+            subtype: None,
+            name: format!("cmod{i}/ring.ts"),
+            qualified_name: None,
+            file_uid: Some(format!("crf{i}")),
+            parent_node_uid: None,
+            location: None,
+            signature: None,
+            visibility: None,
+            doc_comment: None,
+            metadata_json: None,
+        })
+        .collect();
+    conn.insert_nodes(&file_nodes)
+        .expect("insert module ring FILE nodes");
+    let mut edges: Vec<GraphEdge> = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        edges.push(GraphEdge {
+            edge_uid: format!("cro{i}"),
+            snapshot_uid: snapshot_uid.to_string(),
+            repo_uid: repo_uid.to_string(),
+            source_node_uid: format!("cm{i}"),
+            target_node_uid: format!("crn{i}"),
+            edge_type: "OWNS".to_string(),
+            resolution: "static".to_string(),
+            extractor: "test".to_string(),
+            location: None,
+            metadata_json: None,
+        });
+        edges.push(GraphEdge {
+            edge_uid: format!("cri{i}"),
+            snapshot_uid: snapshot_uid.to_string(),
+            repo_uid: repo_uid.to_string(),
+            source_node_uid: format!("crn{i}"),
+            target_node_uid: format!("crn{}", (i + 1) % n),
+            edge_type: "IMPORTS".to_string(),
+            resolution: "static".to_string(),
+            extractor: "test".to_string(),
+            location: None,
+            metadata_json: None,
+        });
+    }
+    conn.insert_edges(&edges)
+        .expect("insert module ring OWNS and file IMPORTS edges");
 }
 
 /// Inject one SYMBOL node so `path`'s `resolve_symbol` (which requires `kind='SYMBOL'`)

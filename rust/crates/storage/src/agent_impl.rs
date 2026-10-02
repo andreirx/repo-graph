@@ -74,6 +74,7 @@ fn map_axis(axis: &TrustAxisScore) -> AgentReliabilityAxis {
 
 use crate::connection::StorageConnection;
 use crate::types::RepoRef;
+use repo_graph_classification::import_partition::ImportClass;
 
 // ── Small error mapping helper ───────────────────────────────────
 
@@ -302,15 +303,17 @@ impl AgentStorageRead for StorageConnection {
     }
 
     fn find_module_cycles(&self, snapshot_uid: &str) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        // Storage's `find_cycles` takes a level param; we always
-        // use the module level at the agent boundary.
-        let cycles = self
-            .find_cycles(snapshot_uid, "module")
-            .map_err(map_err("find_module_cycles"))?;
-        // ORIENT-CYCLES-DISAGREE-1: this is the SQLite SERVING computation for `orient`'s
-        // cycles — label each with the shared test-only classification here so the headline
-        // matches `cycles` (which labels at ITS serving computation via the same classifier).
-        crate::agent_cycle_labeling::label_module_cycles(self, snapshot_uid, cycles)
+        // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): the module cycles of the DEFAULT view (certain
+        // production imports) over the query-time directory graph, labeled at the serving
+        // computation (ORIENT-CYCLES-DISAGREE-1). What the view leaves out is
+        // `import_cycle_partition`.
+        crate::agent_cycle_labeling::cycles_in_default_view(
+            self,
+            snapshot_uid,
+            crate::agent_cycle_labeling::CycleScope::Repo,
+            &mut || std::ops::ControlFlow::Continue(()),
+            "find_module_cycles",
+        )
     }
 
     fn find_module_cycles_cancellable(
@@ -318,18 +321,15 @@ impl AgentStorageRead for StorageConnection {
         snapshot_uid: &str,
         cancel: AgentCancelCheck<'_>,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        // DAEMON-CANCEL-3: identical to `find_module_cycles` but routed through the
-        // CANCELLABLE Tarjan entry (`find_cycles_cancellable`, CANCEL-1). `cancel` is
-        // consulted inside the SCC traversal and the per-cycle name fan-out, so a
-        // disconnected peer's in-flight orient abandons the O(V+E) traversal at the
-        // next checkpoint instead of running it to completion with no consumer.
-        // Read-only ⇒ nothing to roll back; `StorageError::Cancelled` maps through
-        // the standard adapter boundary like any other storage failure.
-        let cycles = self
-            .find_cycles_cancellable(snapshot_uid, "module", cancel)
-            .map_err(map_err("find_module_cycles"))?;
-        // ORIENT-CYCLES-DISAGREE-1: label at the serving computation (see `find_module_cycles`).
-        crate::agent_cycle_labeling::label_module_cycles(self, snapshot_uid, cycles)
+        // DAEMON-CANCEL-3: identical to `find_module_cycles`, with `cancel` consulted inside the
+        // SCC traversal and before labeling. Read-only ⇒ nothing to roll back.
+        crate::agent_cycle_labeling::cycles_in_default_view(
+            self,
+            snapshot_uid,
+            crate::agent_cycle_labeling::CycleScope::Repo,
+            cancel,
+            "find_module_cycles",
+        )
     }
 
     fn find_dead_nodes(
@@ -377,11 +377,34 @@ impl AgentStorageRead for StorageConnection {
         source_prefix: &str,
         target_prefix: &str,
     ) -> Result<Vec<AgentImportEdge>, AgentStorageError> {
+        // TEST-EDGE-SCOPE-1B (D-TESB-11): boundaries judge CERTAIN imports of every test status;
+        // the inferred ones are `find_inferred_imports_between_paths`. Every row's class was checked
+        // by the read (an out-of-vocabulary resolution is its error).
         let rows = self
             .find_imports_between_paths(snapshot_uid, source_prefix, target_prefix)
             .map_err(map_err("find_imports_between_paths"))?;
         Ok(rows
             .into_iter()
+            .filter(|e| e.import_class == ImportClass::Certain)
+            .map(|e| AgentImportEdge {
+                source_file: e.source_file,
+                target_file: e.target_file,
+            })
+            .collect())
+    }
+
+    fn find_inferred_imports_between_paths(
+        &self,
+        snapshot_uid: &str,
+        source_prefix: &str,
+        target_prefix: &str,
+    ) -> Result<Vec<AgentImportEdge>, AgentStorageError> {
+        let rows = self
+            .find_imports_between_paths(snapshot_uid, source_prefix, target_prefix)
+            .map_err(map_err("find_inferred_imports_between_paths"))?;
+        Ok(rows
+            .into_iter()
+            .filter(|e| e.import_class == ImportClass::Inferred)
             .map(|e| AgentImportEdge {
                 source_file: e.source_file,
                 target_file: e.target_file,
@@ -1006,51 +1029,16 @@ impl AgentStorageRead for StorageConnection {
         snapshot_uid: &str,
         path_prefix: &str,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        // Run the full cycle query, then filter to cycles where
-        // at least one module's qualified_name (full path) matches
-        // the prefix.
-        //
-        // `CycleNode.name` is the short display name (e.g.
-        // `seams`). The prefix check must use the full
-        // `qualified_name` (e.g. `src/core/seams`) because focus
-        // strings are repo-relative paths. The Rust-44 spike
-        // found that comparing short names against full paths
-        // almost never matched — e.g. the module at
-        // `src/core/seams` has short name `seams`, which does
-        // not start with `src/core/seams/`.
-        //
-        // The returned `AgentCycle.modules` also carries
-        // qualified_names so path-scoped cycle evidence shows
-        // full paths. The repo-level aggregator continues using
-        // short names through its own `find_module_cycles` path.
-        //
-        // EXPLAIN-CYCLES-HONEST-1 (§2.1): filter the raw cycles here, then route the FILTERED set
-        // through `label_focus_cycles` — the SAME labeling `find_module_cycles` uses — so each
-        // returned cycle carries the REAL directed `walk` (and the type-only verdict) the shared
-        // `cycle_walk` kernel found over its true import edges. `explain`'s Import-cycles block then
-        // draws a verified ring (or the honest unordered form), never a ring fabricated from the
-        // sorted member set (RC-4). The qualified-name membership test is unchanged.
-        let all_cycles = self
-            .find_cycles(snapshot_uid, "module")
-            .map_err(map_err("find_cycles_involving_path"))?;
-        let qualified = self
-            .module_qualified_names(snapshot_uid)
-            .map_err(map_err("find_cycles_involving_path"))?;
-
-        let filtered: Vec<crate::queries::CycleResult> = all_cycles
-            .into_iter()
-            .filter(|c| {
-                c.nodes.iter().any(|n| {
-                    let qn = qualified
-                        .get(&n.node_id)
-                        .cloned()
-                        .unwrap_or_else(|| n.name.clone());
-                    qn == path_prefix || qn.starts_with(&format!("{}/", path_prefix))
-                })
-            })
-            .collect();
-
-        crate::agent_cycle_labeling::label_focus_cycles(self, snapshot_uid, filtered)
+        // The DEFAULT-view cycles with a member whose QUALIFIED module path is the prefix or under
+        // it (focus strings are repo-relative paths; short names almost never match — Rust-44),
+        // labeled with qualified member names and the REAL walk (EXPLAIN-CYCLES-HONEST-1).
+        crate::agent_cycle_labeling::cycles_in_default_view(
+            self,
+            snapshot_uid,
+            crate::agent_cycle_labeling::CycleScope::Path(path_prefix),
+            &mut || std::ops::ControlFlow::Continue(()),
+            "find_cycles_involving_path",
+        )
     }
 
     fn find_cycles_involving_path_cancellable(
@@ -1059,54 +1047,15 @@ impl AgentStorageRead for StorageConnection {
         path_prefix: &str,
         cancel: AgentCancelCheck<'_>,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        // DAEMON-CANCEL-3: same shape as `find_cycles_involving_path`, but the heavy Tarjan runs
-        // through the cancellable entry (reborrow `&mut *cancel` so the checkpoint stays usable for
-        // the filter below) and the per-cycle filter is checkpointed per cycle. Read-only ⇒ a
-        // cancelled query drops its partial result with nothing to undo.
-        //
-        // EXPLAIN-CYCLES-HONEST-1 (§2.1): filter here, then route the FILTERED cycles through
-        // `label_focus_cycles` (the SAME labeling `find_module_cycles` uses) so each carries the
-        // REAL directed `walk` + type-only verdict — `explain` draws a verified ring, never a
-        // fabricated one (RC-4). The qualified-name membership test is unchanged.
-        let all_cycles = self
-            .find_cycles_cancellable(snapshot_uid, "module", &mut *cancel)
-            .map_err(map_err("find_cycles_involving_path"))?;
-        let qualified = self
-            .module_qualified_names(snapshot_uid)
-            .map_err(map_err("find_cycles_involving_path"))?;
-
-        let mut filtered: Vec<crate::queries::CycleResult> = Vec::new();
-        for c in all_cycles {
-            if cancel().is_break() {
-                return Err(AgentStorageError::new(
-                    "find_cycles_involving_path",
-                    "cancelled (client disconnected during cycle filtering)",
-                ));
-            }
-            let involves_prefix = c.nodes.iter().any(|n| {
-                let qn = qualified
-                    .get(&n.node_id)
-                    .cloned()
-                    .unwrap_or_else(|| n.name.clone());
-                qn == path_prefix || qn.starts_with(&format!("{}/", path_prefix))
-            });
-            if involves_prefix {
-                filtered.push(c);
-            }
-        }
-
-        // DAEMON-CANCEL-3 (EXPLAIN-CYCLES-HONEST-1 A-2): the labeling below loads the tracked-file set,
-        // classifies edges and walks each SCC un-checkpointed — the same shape the repo-level
-        // `find_module_cycles_cancellable` already ships (COHERENCE-3). Honour one last cooperative
-        // checkpoint here — the read's final checkpoint — so a client that disconnected during filtering
-        // abandons the read before that work. Per-cycle checkpoints inside labeling are CANCEL-LABELING-1.
-        if cancel().is_break() {
-            return Err(AgentStorageError::new(
-                "find_cycles_involving_path",
-                "cancelled (client disconnected before cycle labeling)",
-            ));
-        }
-        crate::agent_cycle_labeling::label_focus_cycles(self, snapshot_uid, filtered)
+        // DAEMON-CANCEL-3: the cancellable sibling (checkpoints in the SCC traversal and before
+        // labeling).
+        crate::agent_cycle_labeling::cycles_in_default_view(
+            self,
+            snapshot_uid,
+            crate::agent_cycle_labeling::CycleScope::Path(path_prefix),
+            cancel,
+            "find_cycles_involving_path",
+        )
     }
 
     // ── Symbol-focus methods (Rust-45) ──────────────────────────
@@ -1448,33 +1397,14 @@ impl AgentStorageRead for StorageConnection {
         snapshot_uid: &str,
         module_qualified_name: &str,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        // Same as find_cycles_involving_path but with exact match instead of prefix match.
-        //
-        // EXPLAIN-CYCLES-HONEST-1 (§2.1): filter the raw cycles here, then route the FILTERED set
-        // through `label_focus_cycles` (the SAME labeling `find_module_cycles` uses) so each cycle
-        // carries the REAL directed `walk` + type-only verdict — `explain` draws a verified ring,
-        // never a fabricated one (RC-4). The exact-match membership test is unchanged.
-        let all_cycles = self
-            .find_cycles(snapshot_uid, "module")
-            .map_err(map_err("find_cycles_involving_module"))?;
-        let qualified = self
-            .module_qualified_names(snapshot_uid)
-            .map_err(map_err("find_cycles_involving_module"))?;
-
-        let filtered: Vec<crate::queries::CycleResult> = all_cycles
-            .into_iter()
-            .filter(|c| {
-                c.nodes.iter().any(|n| {
-                    let qn = qualified
-                        .get(&n.node_id)
-                        .cloned()
-                        .unwrap_or_else(|| n.name.clone());
-                    qn == module_qualified_name
-                })
-            })
-            .collect();
-
-        crate::agent_cycle_labeling::label_focus_cycles(self, snapshot_uid, filtered)
+        // Same as `find_cycles_involving_path` with an exact qualified-name match.
+        crate::agent_cycle_labeling::cycles_in_default_view(
+            self,
+            snapshot_uid,
+            crate::agent_cycle_labeling::CycleScope::Module(module_qualified_name),
+            &mut || std::ops::ControlFlow::Continue(()),
+            "find_cycles_involving_module",
+        )
     }
 
     fn find_cycles_involving_module_cancellable(
@@ -1483,51 +1413,24 @@ impl AgentStorageRead for StorageConnection {
         module_qualified_name: &str,
         cancel: AgentCancelCheck<'_>,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        // DAEMON-CANCEL-3: the exact-match sibling of `find_cycles_involving_path_cancellable`
-        // (cancellable Tarjan + per-cycle checkpointed filter). Read-only ⇒ a cancelled query drops
-        // its partial result.
-        //
-        // EXPLAIN-CYCLES-HONEST-1 (§2.1): filter here, then route the FILTERED cycles through
-        // `label_focus_cycles` so each carries the REAL directed `walk` + type-only verdict — the
-        // verified ring `explain` draws (RC-4). The exact-match membership test is unchanged.
-        let all_cycles = self
-            .find_cycles_cancellable(snapshot_uid, "module", &mut *cancel)
-            .map_err(map_err("find_cycles_involving_module"))?;
-        let qualified = self
-            .module_qualified_names(snapshot_uid)
-            .map_err(map_err("find_cycles_involving_module"))?;
+        // DAEMON-CANCEL-3: the exact-match cancellable sibling.
+        crate::agent_cycle_labeling::cycles_in_default_view(
+            self,
+            snapshot_uid,
+            crate::agent_cycle_labeling::CycleScope::Module(module_qualified_name),
+            cancel,
+            "find_cycles_involving_module",
+        )
+    }
 
-        let mut filtered: Vec<crate::queries::CycleResult> = Vec::new();
-        for c in all_cycles {
-            if cancel().is_break() {
-                return Err(AgentStorageError::new(
-                    "find_cycles_involving_module",
-                    "cancelled (client disconnected during cycle filtering)",
-                ));
-            }
-            if c.nodes.iter().any(|n| {
-                let qn = qualified
-                    .get(&n.node_id)
-                    .cloned()
-                    .unwrap_or_else(|| n.name.clone());
-                qn == module_qualified_name
-            }) {
-                filtered.push(c);
-            }
-        }
-
-        // DAEMON-CANCEL-3 (EXPLAIN-CYCLES-HONEST-1 A-2): the labeling below loads the tracked-file set,
-        // classifies edges and walks each SCC un-checkpointed — the same shape the repo-level
-        // `find_module_cycles_cancellable` already ships (COHERENCE-3). Honour one last cooperative
-        // checkpoint here — the read's final checkpoint — so a client that disconnected during filtering
-        // abandons the read before that work. Per-cycle checkpoints inside labeling are CANCEL-LABELING-1.
-        if cancel().is_break() {
-            return Err(AgentStorageError::new(
-                "find_cycles_involving_module",
-                "cancelled (client disconnected before cycle labeling)",
-            ));
-        }
-        crate::agent_cycle_labeling::label_focus_cycles(self, snapshot_uid, filtered)
+    fn import_cycle_partition(
+        &self,
+        snapshot_uid: &str,
+        view: repo_graph_classification::import_partition::ImportView,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<repo_graph_agent::AgentImportCyclePartition, AgentStorageError> {
+        // TEST-EDGE-SCOPE-1B: body in `agent_cycle_labeling` (this file is over the guardrail).
+        crate::agent_cycle_labeling::import_cycle_partition(self, snapshot_uid, view, cancel)
     }
 
     // ── Explain-focus methods ──────────────────────────────────────
@@ -1613,30 +1516,30 @@ impl AgentStorageRead for StorageConnection {
         snapshot_uid: &str,
         file_path: &str,
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
-        let conn = self.connection();
-        let mut stmt = conn
-            .prepare(
-                "SELECT DISTINCT tgt_f.path AS target_file \
-				 FROM edges e \
-				 JOIN nodes src_n ON e.source_node_uid = src_n.node_uid \
-				 JOIN files src_f ON src_n.file_uid = src_f.file_uid \
-				 JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid \
-				 JOIN files tgt_f ON tgt_n.file_uid = tgt_f.file_uid \
-				 WHERE e.snapshot_uid = ? AND e.type = 'IMPORTS' AND src_f.path = ? \
-				 ORDER BY tgt_f.path ASC",
-            )
-            .map_err(map_err("find_file_imports"))?;
+        // TEST-EDGE-SCOPE-1B (RG-REQ-002-L11): certain imports only; the inferred remainder is
+        // `find_inferred_file_imports`. The file is the subject, so its imports stay whatever its
+        // test status (D-TESB-READERS-1 §1).
+        crate::import_partition_reads::file_import_targets(
+            self,
+            snapshot_uid,
+            file_path,
+            repo_graph_classification::import_partition::ImportClass::Certain,
+        )
+        .map_err(map_err("find_file_imports"))
+    }
 
-        let rows = stmt
-            .query_map(rusqlite::params![snapshot_uid, file_path], |row| {
-                Ok(AgentImportEntry {
-                    target_file: row.get(0)?,
-                })
-            })
-            .map_err(map_err("find_file_imports"))?;
-
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(map_err("find_file_imports"))
+    fn find_inferred_file_imports(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
+        crate::import_partition_reads::file_import_targets(
+            self,
+            snapshot_uid,
+            file_path,
+            repo_graph_classification::import_partition::ImportClass::Inferred,
+        )
+        .map_err(map_err("find_inferred_file_imports"))
     }
 
     // ── EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): type-focus member + referenced-by reads ──
@@ -1840,7 +1743,9 @@ impl AgentStorageRead for StorageConnection {
             // The certainty discriminator is validated here, at the read boundary: only the
             // canonical `static | dynamic | inferred` vocabulary is readable. An unknown value is
             // a named error — never read as a certain edge (RG-REQ-002-L04/L11).
-            if !matches!(resolution.as_str(), "static" | "dynamic" | "inferred") {
+            // TEST-EDGE-SCOPE-1B (D-TESB-14): the vocabulary is the classification crate's one
+            // definition; this read keeps its named error.
+            if ImportClass::from_resolution(&resolution).is_err() {
                 let why =
                     format!("resolution {resolution:?} is not one of static | dynamic | inferred");
                 return Err(AgentStorageError::new(

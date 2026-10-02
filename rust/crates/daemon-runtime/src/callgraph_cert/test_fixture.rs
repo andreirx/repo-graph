@@ -379,7 +379,7 @@ fn imports_edge(snapshot_uid: &str, uid: &str, source_uid: &str, target_uid: &st
         source_node_uid: source_uid.into(),
         target_node_uid: target_uid.into(),
         edge_type: "IMPORTS".into(),
-        resolution: "resolved".into(),
+        resolution: "static".into(),
         extractor: "test".into(),
         location: None,
         metadata_json: None,

@@ -45,5 +45,7 @@ pub use deps::{
     DriftEntry, DriftKind, ManifestContext, ManifestErrorKind, ManifestProvenance,
     ModuleDependencySummary, PackageUsage, ProvenanceRead, ReconcileInput, UndeterminedBlocks,
 };
-pub use facts::{load_module_graph_facts, ModuleGraphFacts, ModuleQueryError};
+pub use facts::{
+    load_module_graph_facts, ModuleGraphFacts, ModuleQueryError, ModuleRelationPartitions,
+};
 pub use violations::{evaluate_violations_from_facts, DiscoveredModuleViolationsResult};

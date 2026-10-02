@@ -441,21 +441,7 @@ fn is_type_only_subtype(subtype: Option<&str>) -> bool {
 /// (never swallow a fallible read whose result is classified). Every non-`Runtime` case is carried
 /// through as its own state, NEVER demoted to runtime (STANDING HONESTY RULE 2).
 fn import_edge_type_only(edge: &ExtractedEdge) -> Option<TypeOnlyDisposition> {
-    // No carrier at all ⇒ the fact is ABSENT (not present, not corrupt).
-    let raw = edge.metadata_json.as_deref()?;
-    // A carrier that does not parse is CORRUPT, distinct from absent — NOT silently swallowed.
-    let value: serde_json::Value = match serde_json::from_str(raw) {
-        Ok(v) => v,
-        Err(_) => return Some(TypeOnlyDisposition::Unreadable),
-    };
-    match value.get("isTypeOnly") {
-        // Valid JSON without the key ⇒ the fact was never stamped ⇒ ABSENT (indexed before tracking).
-        None => None,
-        Some(serde_json::Value::Bool(true)) => Some(TypeOnlyDisposition::TypeOnly),
-        Some(serde_json::Value::Bool(false)) => Some(TypeOnlyDisposition::Runtime),
-        // Key present but not a boolean ⇒ a CORRUPT value, distinct from absent.
-        Some(_) => Some(TypeOnlyDisposition::Unreadable),
-    }
+    crate::type_only::type_only_disposition_of(edge.metadata_json.as_deref())
 }
 
 // ── Resolution entry point ───────────────────────────────────────

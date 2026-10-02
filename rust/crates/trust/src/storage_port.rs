@@ -60,6 +60,61 @@ pub struct TrustModuleStats {
     /// omits the field deserializing (the `top_external_types` precedent).
     #[serde(default)]
     pub alias_unresolved_imports: u64,
+    /// TEST-EDGE-SCOPE-1B (RG-REQ-004-L12, D-TESB-10): the module relations (in or out) this
+    /// module has ONLY through imports the default view excludes, per flag set. `fan_in`/`fan_out`
+    /// read the default view (certain production imports); a module whose only neighbours are
+    /// test importers is then named as such, not read as a resolution failure. Additive and
+    /// serialized on EVERY row, zeros included; decoded as `Option` with no serde default, so an
+    /// absent key (a daemon that predates the partition) is `None` — unknown, never a measured
+    /// zero (D-TESB-17 row U5). The storage producer always sets `Some`, so every measured value,
+    /// zero included, is on the wire; an unknown `None` is omitted (it reads as "unavailable"
+    /// downstream, exactly as a pre-partition payload does) — never written as a zero.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excluded_connectivity: Option<ExcludedConnectivity>,
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-10): module relations that exist only through excluded imports,
+/// grouped by the smallest flag set that shows them (`tests` = `--include-tests`, `inferred` =
+/// `--include-inferred`, `tests_and_inferred` = both).
+///
+/// Decoding is strict and names the field: a wrong-typed value, a non-numeric or negative count,
+/// or a missing sub-key fails with an error that starts `excluded_connectivity:` — never a
+/// defaulted zero (D-TESB-17 row W5).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ExcludedConnectivity {
+    pub tests: u64,
+    pub inferred: u64,
+    pub tests_and_inferred: u64,
+}
+
+impl<'de> Deserialize<'de> for ExcludedConnectivity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Strict {
+            tests: u64,
+            inferred: u64,
+            tests_and_inferred: u64,
+        }
+        let s = Strict::deserialize(deserializer).map_err(|e| {
+            <D::Error as serde::de::Error>::custom(format!("excluded_connectivity: {e}"))
+        })?;
+        Ok(ExcludedConnectivity {
+            tests: s.tests,
+            inferred: s.inferred,
+            tests_and_inferred: s.tests_and_inferred,
+        })
+    }
+}
+
+impl ExcludedConnectivity {
+    /// No relation is excluded.
+    pub fn is_zero(&self) -> bool {
+        self.tests == 0 && self.inferred == 0 && self.tests_and_inferred == 0
+    }
 }
 
 /// A path-prefix module cycle (ancestor → descendant).
@@ -430,6 +485,7 @@ mod tests {
             fan_out: 3,
             file_count: 12,
             alias_unresolved_imports: 0,
+            excluded_connectivity: Some(Default::default()),
         };
         let s = serde_json::to_string(&ms).unwrap();
         assert!(s.contains("\"stableKey\":"));

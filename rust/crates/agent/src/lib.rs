@@ -170,10 +170,12 @@ pub use package_groups::{
 pub use storage_port::{
     AgentBasisCount, AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCallRemainders,
     AgentCalleeRow, AgentCallerRow, AgentCancelCheck, AgentComplexityMeasurement, AgentCycle,
-    AgentDeadNode, AgentDirectoryGroup, AgentDocEntry, AgentFileEntry, AgentFileImporter,
-    AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentInferredCallRow,
-    AgentMemberEntry, AgentModuleSize, AgentModuleSummary, AgentPathResolution,
-    AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
-    AgentStaleFile, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry, AgentSymbolResolution,
-    AgentTrustSummary, AgentUnresolvedCallSite, EnrichmentState, TrackedFileTestFlag,
+    AgentCyclePartitions, AgentDeadNode, AgentDirectoryGroup, AgentDocEntry, AgentExcludedCycle,
+    AgentFileEntry, AgentFileImporter, AgentFocusCandidate, AgentFocusKind,
+    AgentImportCyclePartition, AgentImportEdge, AgentImportEntry, AgentImporterFile,
+    AgentInferredCallRow, AgentMemberEntry, AgentModuleSize, AgentModuleSummary,
+    AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
+    AgentSnapshot, AgentStaleFile, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
+    AgentSymbolResolution, AgentTrustSummary, AgentUnresolvedCallSite, EnrichmentState,
+    TrackedFileTestFlag,
 };

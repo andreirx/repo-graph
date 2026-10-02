@@ -28,6 +28,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use repo_graph_classification::import_partition::ImportClass;
 use repo_graph_classification::types::UnresolvedEdgeCategory;
 use repo_graph_repo_index::compose::{index_path, ComposeOptions};
 use repo_graph_storage::StorageConnection;
@@ -83,9 +84,13 @@ fn indexed_cpp_include_resolves_through_nested_include_root() {
     let storage = StorageConnection::open(&db_path).unwrap();
 
     // ── (1) exactly one resolved IMPORTS edge Net/src/a.cpp → the header ──
-    let imports = storage
-        .get_resolved_imports_for_snapshot(snap)
-        .expect("resolved imports query");
+    // TEST-EDGE-SCOPE-1B: the partitioned file-level read, certain rows.
+    let imports: Vec<_> = storage
+        .file_imports_with_partition(snap)
+        .expect("resolved imports query")
+        .into_iter()
+        .filter(|i| i.partition.class == ImportClass::Certain)
+        .collect();
     let from_a: Vec<&str> = imports
         .iter()
         .filter(|i| i.source_file_uid == "poco-fix:Net/src/a.cpp")
@@ -142,9 +147,13 @@ fn indexed_cpp_include_ambiguous_across_two_include_roots_is_counted_not_bound()
     let storage = StorageConnection::open(&db_path).unwrap();
 
     // ── (1) NO resolved IMPORTS edge from Net/src/b.cpp — never a silent pick ──
-    let imports = storage
-        .get_resolved_imports_for_snapshot(snap)
-        .expect("resolved imports query");
+    // TEST-EDGE-SCOPE-1B: the partitioned file-level read, certain rows.
+    let imports: Vec<_> = storage
+        .file_imports_with_partition(snap)
+        .expect("resolved imports query")
+        .into_iter()
+        .filter(|i| i.partition.class == ImportClass::Certain)
+        .collect();
     let from_b: Vec<&str> = imports
         .iter()
         .filter(|i| i.source_file_uid == "poco-ambig:Net/src/b.cpp")

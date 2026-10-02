@@ -14,7 +14,21 @@ fn minimal_response() -> CyclesResponse {
         test_composition_note: None,
         module_count: None,
         module_edge_count: None,
+        // A current daemon's complete partition payload, nothing excluded (D-TESB-17 fixture
+        // rule: only the named partial/absent tests omit keys).
+        import_view: Some(serde_json::json!({"include_tests": false, "include_inferred": false})),
+        import_remainder: Some(zero_remainder()),
+        excluded_cycles: Some(serde_json::json!([])),
+        importer_test_status_undetermined: Some(importer_block(0, 0)),
     }
+}
+
+fn zero_remainder() -> serde_json::Value {
+    serde_json::json!({
+        "tests": {"imports": 0, "edges": 0},
+        "inferred": {"imports": 0, "edges": 0},
+        "tests_and_inferred": {"imports": 0, "edges": 0},
+    })
 }
 
 /// A MODULE cycle node; `qualified_name` defaults to `None` (exercises the `name` fallback).
@@ -775,4 +789,266 @@ fn unknown_footer_renders_the_carried_reason_not_a_hardcoded_string() {
         !out.contains("indexed before type-only tracking"),
         "no cycle carried that reason, so it must NOT appear (no reason invention):\n{out}"
     );
+}
+
+// ── TEST-EDGE-SCOPE-1B: the import partition (RG-REQ-004-L12, D-TESB-07) ──────────────
+
+/// A cycles payload as the partitioned daemon sends it: `view` flags, the three remainder groups
+/// (imports, edges), the excluded cycles and the importer block (`None` = key absent).
+fn partitioned(
+    base: serde_json::Value,
+    view: (bool, bool),
+    remainder: Option<[(u64, u64); 3]>,
+    excluded: Option<serde_json::Value>,
+    importers: Option<serde_json::Value>,
+) -> CyclesResponse {
+    // A current daemon sends every key (D-TESB-17); a `None` argument is its zero value.
+    let mut v = base;
+    v["import_view"] = serde_json::json!({"include_tests": view.0, "include_inferred": view.1});
+    let r = remainder.unwrap_or([(0, 0); 3]);
+    v["import_remainder"] = serde_json::json!({
+        "tests": {"imports": r[0].0, "edges": r[0].1},
+        "inferred": {"imports": r[1].0, "edges": r[1].1},
+        "tests_and_inferred": {"imports": r[2].0, "edges": r[2].1},
+    });
+    v["excluded_cycles"] = excluded.unwrap_or_else(|| serde_json::json!([]));
+    v["importer_test_status_undetermined"] = importers.unwrap_or_else(|| importer_block(0, 0));
+    serde_json::from_value(v).expect("partitioned cycles payload parses")
+}
+
+fn zero_base(groups: u64, edges: u64) -> serde_json::Value {
+    serde_json::json!({
+        "repo_uid": "repo_leveldb", "display_name": "leveldb", "snapshot_uid": "snap_leveldb",
+        "cycles": [], "count": 0, "module_count": groups, "module_edge_count": edges
+    })
+}
+
+/// One shown production 2-cycle `a <-> b` with its real edges.
+fn shown_base() -> serde_json::Value {
+    serde_json::json!({
+        "repo_uid": "repo_x", "display_name": "x", "snapshot_uid": "snap_x", "count": 1,
+        "cycles": [{
+            "nodes": [
+                {"node_id": "m_a", "name": "a", "qualified_name": "a"},
+                {"node_id": "m_b", "name": "b", "qualified_name": "b"}
+            ],
+            "edges": [
+                {"from_node_id": "m_a", "to_node_id": "m_b"},
+                {"from_node_id": "m_b", "to_node_id": "m_a"}
+            ],
+            "test_composition": "production"
+        }]
+    })
+}
+
+fn excluded_cycle(members: &[&str], flags: &[&str], contains: &[&[&str]]) -> serde_json::Value {
+    serde_json::json!({
+        "members": members,
+        "flags": flags,
+        "contains_shown": contains,
+        "partitions": {"production_certain": 1, "test_certain": 1, "production_inferred": 0,
+                       "test_inferred": 0, "unknown_test_status": 0}
+    })
+}
+
+fn importer_block(count: u64, universe_count: u64) -> serde_json::Value {
+    let paths: Vec<String> = (0..count).map(|i| format!("util/f{i}.cc")).collect();
+    serde_json::json!({"count": count, "paths": paths, "universe": "cross_directory_importers",
+                       "universe_count": universe_count, "unknown_count": 0})
+}
+
+#[test]
+fn cycles_zero_state_counts_the_view_edges_and_names_the_excluded_cycle() {
+    // §2.4 leveldb, verbatim: no cycle remains among production imports; the one closed only by
+    // imports from test files is named with the flag that shows it, then the remainder and the
+    // importer count.
+    let r = partitioned(
+        zero_base(10, 15),
+        (false, false),
+        Some([(105, 6), (0, 0), (0, 0)]),
+        Some(serde_json::json!([excluded_cycle(
+            &["db", "helpers/memenv", "table", "util"],
+            &["include_tests"],
+            &[]
+        )])),
+        Some(importer_block(1, 67)),
+    );
+    let out = r.render_human();
+    let expected = [
+        "No module-level cycles found over 10 directory groups / 15 resolved import edges.",
+        "+1 cycle only through excluded imports, not shown:",
+        "  4 modules: db, helpers/memenv, table, util — --include-tests",
+        "+105 imports from test files, not shown (6 directory-group edges only through them) — --include-tests",
+        "1 file whose test status can't be determined — open it and look inside (of 67 files importing across directories)",
+    ]
+    .join("\n");
+    assert!(out.ends_with(&expected), "{out}");
+}
+
+#[test]
+fn cycles_names_excluded_cycles_with_their_flags_capped_with_the_elision_line() {
+    // D-TESB-07 budget: at most 5 rows, at most 8 members per row, then the elision line naming
+    // the command that lists all of them.
+    let big: Vec<String> = (0..10).map(|i| format!("m{i:02}")).collect();
+    let big: Vec<&str> = big.iter().map(String::as_str).collect();
+    let mut cycles = vec![excluded_cycle(&big, &["include_tests"], &[])];
+    for i in 0..6 {
+        let a = format!("p{i}");
+        let b = format!("q{i}");
+        cycles.push(excluded_cycle(&[&a, &b], &["include_inferred"], &[]));
+    }
+    let r = partitioned(
+        zero_base(30, 40),
+        (false, false),
+        Some([(3, 1), (7, 6), (0, 0)]),
+        Some(serde_json::Value::Array(cycles)),
+        None,
+    );
+    let out = r.render_human();
+    assert!(
+        out.contains("+7 cycles only through excluded imports, not shown:\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains(
+            "  10 modules: m00, m01, m02, m03, m04, m05, m06, m07, + 2 more — --include-tests\n"
+        ),
+        "{out}"
+    );
+    assert!(
+        out.contains("  2 modules: p0, q0 — --include-inferred\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("  2 modules: p3, q3 — --include-inferred\n"),
+        "{out}"
+    );
+    assert!(!out.contains("p4, q4"), "only five rows are listed:\n{out}");
+    assert!(
+        out.contains(
+            "  … and 2 more cycles — rmap cycles --include-tests --include-inferred --json\n"
+        ),
+        "{out}"
+    );
+    assert!(
+        out.contains("+7 inferred imports, not shown (6 directory-group edges only through them) — --include-inferred"),
+        "{out}"
+    );
+}
+
+#[test]
+fn cycles_render_with_zero_partitions_equals_the_render_without_them() {
+    // Additive-key neutrality (P-TESB-04): zero-valued remainder, no excluded cycle and a zero
+    // importer count add no text, in the zero state and beside a shown cycle. "Without" is the
+    // same payload with no partition key at all (a daemon that predates the partition), whose
+    // text is the same plus exactly the one partition-unavailable line (D-TESB-17: absence is
+    // stated, never read as zero).
+    use crate::presentation::import_partition::PARTITION_UNAVAILABLE;
+    for base in [zero_base(4, 2), shown_base()] {
+        let without: CyclesResponse = serde_json::from_value(base.clone()).unwrap();
+        let without = without.render_human();
+        let with = partitioned(
+            base,
+            (false, false),
+            Some([(0, 0), (0, 0), (0, 0)]),
+            Some(serde_json::json!([])),
+            Some(importer_block(0, 12)),
+        )
+        .render_human();
+        assert!(!with.contains(PARTITION_UNAVAILABLE), "{with}");
+        assert_eq!(
+            without.matches(PARTITION_UNAVAILABLE).count(),
+            1,
+            "{without}"
+        );
+        let stripped: String = without
+            .lines()
+            .filter(|l| *l != PARTITION_UNAVAILABLE)
+            .map(|l| format!("{l}\n"))
+            .collect();
+        let stripped = stripped.replace("\n\n\n", "\n\n");
+        assert_eq!(with.trim_end(), stripped.trim_end());
+    }
+}
+
+#[test]
+fn cycles_names_a_larger_excluded_cycle_with_the_shown_cycles_it_contains() {
+    // D-TESB-07: an excluded cycle that grows a shown one is named with the shown cycles it
+    // contains — the reader sees the larger SCC is not a separate problem.
+    let r = partitioned(
+        shown_base(),
+        (false, false),
+        Some([(2, 1), (0, 0), (0, 0)]),
+        Some(serde_json::json!([excluded_cycle(
+            &["a", "b", "c"],
+            &["include_tests"],
+            &[&["a", "b"]]
+        )])),
+        None,
+    );
+    let out = r.render_human();
+    assert!(out.contains("1 module-level cycle found"), "{out}");
+    assert!(
+        out.contains("\n\n+1 cycle only through excluded imports, not shown:\n  3 modules: a, b, c — --include-tests (contains 1 shown cycle)\n"),
+        "{out}"
+    );
+}
+
+#[test]
+fn cycles_excluded_row_names_the_full_flag_set_of_the_wider_view() {
+    // Under `--include-tests` a cycle that also needs inferred imports is shown only by the view
+    // with both flags — its row names both, the command that shows it.
+    let r = partitioned(
+        zero_base(5, 6),
+        (true, false),
+        Some([(0, 0), (1, 1), (0, 0)]),
+        Some(serde_json::json!([excluded_cycle(
+            &["a", "b"],
+            &["include_tests", "include_inferred"],
+            &[]
+        )])),
+        None,
+    );
+    let out = r.render_human();
+    assert!(
+        out.contains("  2 modules: a, b — --include-tests --include-inferred\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("+1 inferred import, not shown (1 directory-group edge only through them) — --include-inferred"),
+        "{out}"
+    );
+}
+
+// ── TEST-EDGE-SCOPE-1B: D-TESB-17 (rows U9, W2) on `cycles` ──
+
+#[test]
+fn cycles_partitioned_payload_without_excluded_cycles_states_them_unreadable() {
+    use crate::presentation::import_partition::PARTITION_UNREADABLE;
+    let mut r = partitioned(zero_base(10, 15), (false, false), None, None, None);
+    r.excluded_cycles = None;
+    let out = r.render_human();
+    assert_eq!(out.matches(PARTITION_UNREADABLE).count(), 1, "{out}");
+    assert!(!out.contains("only through excluded imports"), "{out}");
+}
+
+#[test]
+fn cycles_wrong_typed_excluded_cycles_renders_unreadable() {
+    use crate::presentation::import_partition::PARTITION_UNREADABLE;
+    for bad in [
+        serde_json::json!({"members": ["db", "table"]}),
+        serde_json::json!([{"members": ["db", 7], "flags": ["include_tests"], "contains_shown": []}]),
+        serde_json::json!([{"members": ["db", "table"], "flags": "include_tests", "contains_shown": []}]),
+    ] {
+        let r = partitioned(
+            zero_base(10, 15),
+            (false, false),
+            None,
+            Some(bad.clone()),
+            None,
+        );
+        let out = r.render_human();
+        assert!(out.contains(PARTITION_UNREADABLE), "{bad}: {out}");
+        assert!(!out.contains("only through excluded imports"), "{out}");
+    }
 }

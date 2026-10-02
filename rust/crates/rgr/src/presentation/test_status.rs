@@ -35,6 +35,9 @@ fn universe_noun(universe: &str) -> Option<&'static str> {
         "candidate_files" => "candidate files",
         "owned_files" => "owned files",
         "grouped_files" => "grouped files",
+        // TEST-EDGE-SCOPE-1B (D-TESB-09): the importer universes of the partitioned module surfaces.
+        "cross_module_importers" => "files importing across modules",
+        "cross_directory_importers" => "files importing across directories",
         _ => return None,
     })
 }
@@ -104,6 +107,12 @@ fn parse_block(block: &Value) -> Result<Block<'_>, ()> {
         unknown_count,
         noun,
     })
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-17 row W3): whether a block is exactly one contracted, consistent
+/// shape — the check a partitioned surface's decode rule runs on its importer block.
+pub(crate) fn block_is_readable(block: &Value) -> bool {
+    parse_block(block).is_ok()
 }
 
 /// The count line for a surface's `test_status_undetermined` block.
@@ -187,6 +196,21 @@ mod tests {
         assert_eq!(
             undetermined_files_line(Some(&blk(0, "owned_files", 120, 0))),
             None
+        );
+    }
+
+    #[test]
+    fn undetermined_line_names_the_importer_universes() {
+        // TEST-EDGE-SCOPE-1B (D-TESB-09, §2.4): the partitioned module surfaces count their
+        // production importers — `modules list`/`deps`/orient across modules, `cycles`/explain
+        // across directories.
+        assert_eq!(
+            undetermined_files_line(Some(&blk(1, "cross_module_importers", 64, 0))).unwrap(),
+            "1 file whose test status can't be determined — open it and look inside (of 64 files importing across modules)"
+        );
+        assert_eq!(
+            undetermined_files_line(Some(&blk(5, "cross_directory_importers", 696, 0))).unwrap(),
+            "5 files whose test status can't be determined — open them and look inside (of 696 files importing across directories)"
         );
     }
 

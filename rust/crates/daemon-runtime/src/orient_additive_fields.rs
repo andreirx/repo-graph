@@ -151,7 +151,12 @@ fn inject_modules_method(
     // §2.1: method line from module_graph_facts (the SAME load `top_module_edges` above
     // may already have done — but orient calls are rare and the read is cheap; sharing
     // the load result would couple the two injectors, which is worse than a second read).
-    match repo_graph_module_queries::load_module_graph_facts(storage, snapshot_uid) {
+    // TEST-EDGE-SCOPE-1B: the method line reads module identity only; the view is immaterial.
+    match repo_graph_module_queries::load_module_graph_facts(
+        storage,
+        snapshot_uid,
+        repo_graph_classification::import_partition::ImportView::DEFAULT,
+    ) {
         Ok(facts) => {
             // review-2 #4: orient carries the SAME diagnostics as `modules list` — both
             // the Maven presence AND the Gradle projectDir count — so orient's method
@@ -348,8 +353,53 @@ fn inject_top_module_edges(
     repo_uid: &str,
     snapshot_uid: &str,
 ) {
-    let block = match repo_graph_module_queries::load_module_graph_facts(storage, snapshot_uid) {
-        Ok(facts) => top_module_edges_block(Ok(&facts.edges)),
+    // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): orient's module-edges line answers the DEFAULT view
+    // (certain production imports) — the SAME facts `modules list` renders without a flag — and
+    // carries the view, its remainder, each top edge's partition counts and the importer block.
+    let block = match repo_graph_module_queries::load_module_graph_facts(
+        storage,
+        snapshot_uid,
+        repo_graph_classification::import_partition::ImportView::DEFAULT,
+    ) {
+        Ok(facts) => {
+            let mut block = top_module_edges_block(Ok(&facts.edges));
+            if block.is_none() && !facts.remainder.is_empty() {
+                // No production edge, but excluded imports exist: state the remainder.
+                block = Some(serde_json::json!({ "edges": [] }));
+            }
+            if let Some(Value::Object(map)) = block.as_mut() {
+                if let Some(Value::Array(edges)) = map.get_mut("edges") {
+                    for e in edges.iter_mut() {
+                        let hit = facts.edges.iter().find(|d| {
+                            e["source"] == d.source_canonical_path.as_str()
+                                && e["target"] == d.target_canonical_path.as_str()
+                        });
+                        match (hit, e.as_object_mut()) {
+                            (Some(d), Some(obj)) => obj.extend(
+                                crate::import_partition_view::edge_partition_fields(&facts, d),
+                            ),
+                            // D-TESB-17 row U6: an edge the facts do not hold: null + reason.
+                            (None, Some(obj)) => {
+                                obj.insert("partitions".into(), Value::Null);
+                                obj.insert(
+                                    "partitions_unavailable".into(),
+                                    serde_json::json!(
+                                        "partition counts unknown: the edge is not an edge of \
+                                         the partitioned facts"
+                                    ),
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                let all: Vec<_> = facts.edges.iter().collect();
+                map.extend(crate::import_partition_view::module_edge_partition_fields(
+                    &facts, &all,
+                ));
+            }
+            block
+        }
         Err(e) => top_module_edges_block(Err(e.to_string())),
     };
     if let Some(block) = block {

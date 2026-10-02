@@ -58,6 +58,47 @@ fn sig(
     summary: &str,
     evidence: serde_json::Value,
 ) -> CoherenceEnvelope<Signal> {
+    sig_raw(
+        code,
+        severity,
+        summary,
+        with_partition_payload(code, evidence),
+    )
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-17 fixture rule): a current daemon's cycle evidence always carries
+/// its complete partition payload; a fixture that omits a key gets that key's zero value, so the
+/// pre-partition fixtures model a current daemon with nothing excluded. Tests of an absent,
+/// partial or malformed payload build their signal with [`sig_raw`].
+fn with_partition_payload(code: &str, mut evidence: serde_json::Value) -> serde_json::Value {
+    if code == "IMPORT_CYCLES" {
+        if let Some(obj) = evidence.as_object_mut() {
+            obj.entry("import_view")
+                .or_insert(serde_json::json!({"include_tests": false, "include_inferred": false}));
+            obj.entry("import_remainder").or_insert(serde_json::json!({
+                "tests": {"imports": 0, "edges": 0},
+                "inferred": {"imports": 0, "edges": 0},
+                "tests_and_inferred": {"imports": 0, "edges": 0}
+            }));
+            obj.entry("excluded_cycles")
+                .or_insert(serde_json::json!([]));
+            obj.entry("importer_test_status_undetermined").or_insert(
+                serde_json::json!({"count": 0, "paths": [],
+                                  "universe": "cross_directory_importers",
+                                  "universe_count": 0, "unknown_count": 0}),
+            );
+        }
+    }
+    evidence
+}
+
+/// A signal exactly as given (no partition payload filled in).
+fn sig_raw(
+    code: &str,
+    severity: &str,
+    summary: &str,
+    evidence: serde_json::Value,
+) -> CoherenceEnvelope<Signal> {
     leaf(Signal {
         code: code.to_string(),
         severity: severity.to_string(),
@@ -1042,6 +1083,188 @@ fn honesty_named_facts_are_extracted_no_dead_claim() {
     );
 }
 
+// ── TEST-EDGE-SCOPE-1B: cycles only through excluded imports ──────────────
+
+#[test]
+fn orient_cycle_line_states_excluded_cycles_with_the_cycles_command() {
+    // RG-REQ-004-L12 (§2.4 leveldb): no cycle remains among production imports, one exists only
+    // through imports from test files — orient states it with the `cycles` command that shows it
+    // instead of dropping the line.
+    let mut r = minimal_response();
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "low",
+        "0 import cycles.",
+        serde_json::json!({
+            "cycle_count": 0,
+            "cycles": [],
+            "production_count": 0,
+            "test_only_count": 0,
+            "unknown_count": 0,
+            "excluded_cycles": [{
+                "members": ["db", "helpers/memenv", "table", "util"],
+                "flags": ["include_tests"],
+                "contains_shown": [],
+                "partitions": {}
+            }]
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("0 import cycles (+1 only through imports from test files — rmap cycles --include-tests)"),
+        "the excluded cycle is stated with its command:\n{out}"
+    );
+    // A cycle needing both flags names the excluded imports and both flags.
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "medium",
+        "1 import cycle detected.",
+        serde_json::json!({
+            "cycle_count": 1,
+            "cycles": [{ "length": 2, "modules": ["a", "b"], "walk": ["a", "b"] }],
+            "excluded_cycles": [{
+                "members": ["a", "b", "c"],
+                "flags": ["include_tests", "include_inferred"],
+                "contains_shown": [["a", "b"]],
+                "partitions": {}
+            }]
+        }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("1 import cycle (a -> b -> a) (+1 only through excluded imports — rmap cycles --include-tests --include-inferred)"),
+        "{out}"
+    );
+    // Without excluded cycles and without cycles, no line (the pre-partition behaviour).
+    r.signals = vec![sig(
+        "IMPORT_CYCLES",
+        "low",
+        "0 import cycles.",
+        serde_json::json!({ "cycle_count": 0, "cycles": [], "excluded_cycles": [] }),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(!out.contains("import cycle"), "{out}");
+}
+
+#[test]
+fn cross_surface_excluded_cycles_agree_between_cycles_orient_and_explain() {
+    // RG-REQ-004-L12: ONE excluded-cycle set (the daemon's `excluded_cycles`, the same value on
+    // each payload) is stated by `cycles`, `orient` and explain with the same count and the same
+    // flag set — `cycles` lists the members with the flags, orient and explain name the command.
+    for (flags, cmd) in [
+        (vec!["include_tests"], "rmap cycles --include-tests"),
+        (vec!["include_inferred"], "rmap cycles --include-inferred"),
+        (
+            vec!["include_tests", "include_inferred"],
+            "rmap cycles --include-tests --include-inferred",
+        ),
+    ] {
+        let excluded = serde_json::json!([
+            {"members": ["a", "b"], "length": 2, "flags": flags, "contains_shown": [],
+             "partitions": {"production_certain": 1, "test_certain": 1, "production_inferred": 1,
+                            "test_inferred": 0, "unknown_test_status": 0}},
+            {"members": ["c", "d", "e"], "length": 3, "flags": flags, "contains_shown": [],
+             "partitions": {"production_certain": 2, "test_certain": 1, "production_inferred": 1,
+                            "test_inferred": 0, "unknown_test_status": 0}}
+        ]);
+        let view = serde_json::json!({"include_tests": false, "include_inferred": false});
+        // A current daemon's complete payload on each surface (D-TESB-17 fixture rule).
+        let remainder = serde_json::json!({
+            "tests": {"imports": 0, "edges": 0},
+            "inferred": {"imports": 0, "edges": 0},
+            "tests_and_inferred": {"imports": 0, "edges": 0}
+        });
+        let importers = serde_json::json!({"count": 0, "paths": [],
+            "universe": "cross_directory_importers", "universe_count": 0, "unknown_count": 0});
+        let flag_text = cmd.trim_start_matches("rmap cycles ");
+
+        let cycles: crate::presentation::cycles::CyclesResponse =
+            serde_json::from_value(serde_json::json!({
+                "repo_uid": "r", "snapshot_uid": "s", "cycles": [], "count": 0,
+                "module_count": 5, "module_edge_count": 4,
+                "import_view": view, "excluded_cycles": excluded,
+                "import_remainder": remainder, "importer_test_status_undetermined": importers
+            }))
+            .unwrap();
+        let cycles_out = cycles.render_human();
+        assert!(
+            cycles_out.contains("+2 cycles only through excluded imports, not shown:"),
+            "{cycles_out}"
+        );
+        assert!(
+            cycles_out.contains(&format!("  2 modules: a, b — {flag_text}\n")),
+            "{cycles_out}"
+        );
+        assert!(
+            cycles_out.contains(&format!("  3 modules: c, d, e — {flag_text}")),
+            "{cycles_out}"
+        );
+
+        let mut orient = minimal_response();
+        orient.signals = vec![sig(
+            "IMPORT_CYCLES",
+            "low",
+            "0 import cycles.",
+            serde_json::json!({
+                "cycle_count": 0, "cycles": [], "production_count": 0, "test_only_count": 0,
+                "unknown_count": 0, "import_view": view, "excluded_cycles": excluded
+            }),
+        )];
+        let orient_out = orient.render_human(OrientDepth::Small);
+        let clause_prefix = "+2 only through ";
+        assert!(orient_out.contains(clause_prefix), "{orient_out}");
+        assert!(
+            orient_out.contains(&format!(" — {cmd})")),
+            "orient names the same command:\n{orient_out}"
+        );
+
+        let explain = crate::presentation::explain::ExplainResponse {
+            repo: "r".to_string(),
+            display_name: None,
+            snapshot: "s".to_string(),
+            focus: crate::presentation::explain::ExplainFocus {
+                input: Some("a".to_string()),
+                resolved: true,
+                resolved_kind: Some("module".to_string()),
+                resolved_path: Some("a".to_string()),
+                reason: None,
+                candidates: vec![],
+            },
+            confidence: "high".to_string(),
+            signals: vec![CoherenceEnvelope::sqlite_leaf(
+                crate::presentation::explain::ExplainSignal {
+                    code: "EXPLAIN_CYCLES".to_string(),
+                    summary: "0 import cycles.".to_string(),
+                    evidence: Some(serde_json::json!({
+                        "count": 0, "items": [], "import_view": view, "excluded_cycles": excluded,
+                        "import_remainder": remainder,
+                        "importer_test_status_undetermined": importers
+                    })),
+                },
+                false,
+            )],
+            truncated: false,
+            limits: vec![],
+            layer2_resolution: None,
+            index_drift: None,
+            next: vec![],
+            next_omitted_count: None,
+        };
+        let explain_out = explain.render_human(false);
+        // orient's clause and explain's bullet are the same sentence.
+        let orient_clause = orient_out
+            .split(clause_prefix)
+            .nth(1)
+            .and_then(|rest| rest.split(')').next())
+            .map(|rest| format!("{clause_prefix}{rest}"))
+            .expect("orient clause");
+        assert!(
+            explain_out.contains(&format!("  - {orient_clause}")),
+            "explain states orient's clause `{orient_clause}`:\n{explain_out}"
+        );
+    }
+}
+
 // ── Cycle anchor: the REAL walk (COHERENCE-3 §2.1) ──────────────
 
 #[test]
@@ -1404,7 +1627,15 @@ fn wrapper_full_renders_dense_body_serving_block_and_degradation() {
                             "severity": "medium",
                             "category": "structure",
                             "summary": "1 import cycle detected.",
-                            "evidence": { "cycle_count": 1, "cycles": [{ "length": 2, "modules": ["http", "core"] }] }
+                            "evidence": { "cycle_count": 1, "cycles": [{ "length": 2, "modules": ["http", "core"] }],
+                                          "import_view": {"include_tests": false, "include_inferred": false},
+                                          "import_remainder": {"tests": {"imports": 0, "edges": 0},
+                                                               "inferred": {"imports": 0, "edges": 0},
+                                                               "tests_and_inferred": {"imports": 0, "edges": 0}},
+                                          "excluded_cycles": [],
+                                          "importer_test_status_undetermined": {"count": 0, "paths": [],
+                                              "universe": "cross_directory_importers", "universe_count": 0,
+                                              "unknown_count": 0} }
                         },
                         "provenance": { "source": ["livegraph"] },
                         "trust": { "class": "Exact", "completeness": "Complete" },
@@ -2063,6 +2294,18 @@ fn seam_cycles_response(
         test_composition_note: None,
         module_count: None,
         module_edge_count: None,
+        // A current daemon's complete partition payload, nothing excluded (D-TESB-17).
+        import_view: Some(serde_json::json!({"include_tests": false, "include_inferred": false})),
+        import_remainder: Some(serde_json::json!({
+            "tests": {"imports": 0, "edges": 0},
+            "inferred": {"imports": 0, "edges": 0},
+            "tests_and_inferred": {"imports": 0, "edges": 0}
+        })),
+        excluded_cycles: Some(serde_json::json!([])),
+        importer_test_status_undetermined: Some(serde_json::json!({
+            "count": 0, "paths": [], "universe": "cross_directory_importers",
+            "universe_count": 0, "unknown_count": 0
+        })),
     }
 }
 
@@ -2221,6 +2464,18 @@ fn seam_walk_cycles_response(
         test_composition_note: None,
         module_count: None,
         module_edge_count: None,
+        // A current daemon's complete partition payload, nothing excluded (D-TESB-17).
+        import_view: Some(serde_json::json!({"include_tests": false, "include_inferred": false})),
+        import_remainder: Some(serde_json::json!({
+            "tests": {"imports": 0, "edges": 0},
+            "inferred": {"imports": 0, "edges": 0},
+            "tests_and_inferred": {"imports": 0, "edges": 0}
+        })),
+        excluded_cycles: Some(serde_json::json!([])),
+        importer_test_status_undetermined: Some(serde_json::json!({
+            "count": 0, "paths": [], "universe": "cross_directory_importers",
+            "universe_count": 0, "unknown_count": 0
+        })),
     }
 }
 
@@ -2376,6 +2631,18 @@ fn assert_type_only_surfaces_render_identically(v: crate::presentation::cycles::
         test_composition_note: None,
         module_count: None,
         module_edge_count: None,
+        // A current daemon's complete partition payload, nothing excluded (D-TESB-17).
+        import_view: Some(serde_json::json!({"include_tests": false, "include_inferred": false})),
+        import_remainder: Some(serde_json::json!({
+            "tests": {"imports": 0, "edges": 0},
+            "inferred": {"imports": 0, "edges": 0},
+            "tests_and_inferred": {"imports": 0, "edges": 0}
+        })),
+        excluded_cycles: Some(serde_json::json!([])),
+        importer_test_status_undetermined: Some(serde_json::json!({
+            "count": 0, "paths": [], "universe": "cross_directory_importers",
+            "universe_count": 0, "unknown_count": 0
+        })),
         cycles: vec![Cycle {
             nodes: vec![
                 CycleNode {
@@ -2834,4 +3101,111 @@ fn small_reliability_states_the_inferred_calls_not_counted() {
         ),
         "{small}"
     );
+}
+
+// ── TEST-EDGE-SCOPE-1B: D-TESB-17 (rows U9, W2) and D-TESB-16 on orient ──
+
+fn complete_cycle_evidence() -> serde_json::Value {
+    serde_json::json!({
+        "cycle_count": 0, "cycles": [], "production_count": 0, "test_only_count": 0,
+        "unknown_count": 0,
+        "import_view": {"include_tests": false, "include_inferred": false},
+        "import_remainder": {"tests": {"imports": 105, "edges": 6},
+                             "inferred": {"imports": 0, "edges": 0},
+                             "tests_and_inferred": {"imports": 0, "edges": 0}},
+        "excluded_cycles": [{"members": ["db", "table"], "length": 2, "flags": ["include_tests"],
+                             "contains_shown": []}],
+        "importer_test_status_undetermined": {"count": 0, "paths": [],
+            "universe": "cross_directory_importers", "universe_count": 67, "unknown_count": 0}
+    })
+}
+
+#[test]
+fn orient_cycle_line_partitioned_payload_without_excluded_cycles_states_them_unreadable() {
+    use crate::presentation::import_partition::PARTITION_UNREADABLE_CLAUSE;
+    let mut ev = complete_cycle_evidence();
+    ev.as_object_mut().unwrap().remove("excluded_cycles");
+    let mut r = minimal_response();
+    r.signals = vec![sig_raw("IMPORT_CYCLES", "low", "0 import cycles.", ev)];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(out.contains(PARTITION_UNREADABLE_CLAUSE), "{out}");
+    assert!(
+        !out.contains("only through"),
+        "never 'no excluded cycle': {out}"
+    );
+    // The complete payload names the excluded cycle.
+    r.signals = vec![sig_raw(
+        "IMPORT_CYCLES",
+        "low",
+        "0 import cycles.",
+        complete_cycle_evidence(),
+    )];
+    let out = r.render_human(OrientDepth::Small);
+    assert!(
+        out.contains("0 import cycles (+1 only through imports from test files — rmap cycles --include-tests)"),
+        "{out}"
+    );
+}
+
+#[test]
+fn orient_cycle_line_wrong_typed_excluded_cycles_states_them_unreadable() {
+    use crate::presentation::import_partition::PARTITION_UNREADABLE_CLAUSE;
+    for bad in [
+        serde_json::json!({"members": ["db"]}),
+        serde_json::json!([{"members": ["db", "table"], "flags": ["include_tests"], "contains_shown": 3}]),
+    ] {
+        let mut ev = complete_cycle_evidence();
+        ev["excluded_cycles"] = bad.clone();
+        let mut r = minimal_response();
+        r.signals = vec![sig_raw("IMPORT_CYCLES", "low", "0 import cycles.", ev)];
+        let out = r.render_human(OrientDepth::Small);
+        assert!(out.contains(PARTITION_UNREADABLE_CLAUSE), "{bad}: {out}");
+        assert!(!out.contains("only through"), "{out}");
+    }
+}
+
+/// D-TESB-16: orient `--full`'s serving line names the partition-view fallback through `as_str`
+/// (no renderer change — the line is generic).
+#[test]
+fn orient_full_serving_line_names_the_partitioned_view_fallback() {
+    let json = r#"{
+            "value": {
+                "schema": "rgr.agent.v1", "command": "orient", "repo": "fx", "snapshot": "s",
+                "focus": { "resolved": true, "resolved_kind": "repo" },
+                "confidence": "high", "signals": [], "limits": [], "next": [], "truncated": false
+            },
+            "provenance": { "source": ["sqlite"], "fallback_reason": "LiveGraphPartitionedViewUnsupported" },
+            "trust": { "class": "Exact", "completeness": "Complete" },
+            "freshness": "Fresh"
+        }"#;
+    let env: CoherenceEnvelope<OrientResponse> = serde_json::from_str(json).unwrap();
+    let out = render_orient_envelope(&env, OrientDepth::Full);
+    assert!(
+        out.contains("fallback: LiveGraphPartitionedViewUnsupported"),
+        "{out}"
+    );
+    assert!(!out.contains("LiveGraphCycleDivergence"), "{out}");
+}
+
+/// TEST-EDGE-SCOPE-1B INPUT-3 (D-TESB-16 addendum): orient `--full`'s serving line renders the
+/// unreadable-partition-evidence reason through the generic `as_str`, never as a LiveGraph error.
+#[test]
+fn orient_full_serving_line_names_the_partition_evidence_unreadable_fallback() {
+    let json = r#"{
+            "value": {
+                "schema": "rgr.agent.v1", "command": "orient", "repo": "fx", "snapshot": "s",
+                "focus": { "resolved": true, "resolved_kind": "repo" },
+                "confidence": "high", "signals": [], "limits": [], "next": [], "truncated": false
+            },
+            "provenance": { "source": ["sqlite"], "fallback_reason": "PartitionEvidenceUnreadable" },
+            "trust": { "class": "Exact", "completeness": "Complete" },
+            "freshness": "Fresh"
+        }"#;
+    let env: CoherenceEnvelope<OrientResponse> = serde_json::from_str(json).unwrap();
+    let out = render_orient_envelope(&env, OrientDepth::Full);
+    assert!(
+        out.contains("fallback: PartitionEvidenceUnreadable"),
+        "{out}"
+    );
+    assert!(!out.contains("LiveGraphError"), "{out}");
 }

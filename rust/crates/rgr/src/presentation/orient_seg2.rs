@@ -103,6 +103,16 @@ pub struct TopModuleEdges {
     pub edges: Option<Vec<TopModuleEdgeRow>>,
     #[serde(default)]
     pub unavailable: Option<String>,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-08): the view the edges answer (DEFAULT). Absent = a daemon
+    /// that predates the partition.
+    #[serde(default)]
+    pub import_view: Option<serde_json::Value>,
+    /// TEST-EDGE-SCOPE-1B: the imports the default view excludes.
+    #[serde(default)]
+    pub import_remainder: Option<serde_json::Value>,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-09): the undetermined files among the production importers.
+    #[serde(default)]
+    pub importer_test_status_undetermined: Option<serde_json::Value>,
 }
 
 /// One row of [`TopModuleEdges`]. Fields are lenient `Option`s: a row missing any of
@@ -300,11 +310,51 @@ impl OrientResponse {
                 }
             }
         }
-        // Empty success shape is not injected by the producer; guard keeps that honest.
-        if parts.is_empty() {
+        // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12, D-TESB-07): the edges answer the DEFAULT view; the
+        // imports it excludes join the line in one parenthesis, in command form.
+        use super::import_partition::{
+            remainder_command_clause, surface_partition, Partition, Requires,
+            PARTITION_UNAVAILABLE_CLAUSE, PARTITION_UNREADABLE,
+        };
+        // One decode rule (D-TESB-17 row U9).
+        let partition = surface_partition(
+            block.import_view.as_ref(),
+            block.import_remainder.as_ref(),
+            None,
+            block.importer_test_status_undetermined.as_ref(),
+            Requires::MODULE_EDGES,
+        );
+        let stated = matches!(partition, Partition::Stated(_));
+        let clause = match partition {
+            Partition::Unavailable => Some(PARTITION_UNAVAILABLE_CLAUSE.to_string()),
+            Partition::Unreadable => Some(PARTITION_UNREADABLE.to_string()),
+            Partition::Stated(r) => remainder_command_clause(&r, "modules list"),
+        };
+        // An empty edge list is sent only when excluded imports exist (the remainder is stated).
+        if parts.is_empty() && clause.is_none() {
             return None;
         }
-        Some(format!("Module edges: {}", parts.join(", ")))
+        let mut line = if parts.is_empty() {
+            "Module edges: none among production imports".to_string()
+        } else {
+            format!("Module edges: {}", parts.join(", "))
+        };
+        if let Some(c) = clause {
+            line.push_str(&format!(" ({c})"));
+        }
+        // D-TESB-09: the undetermined files among the production files importing across modules.
+        if let Some(u) = stated
+            .then(|| {
+                super::test_status::undetermined_files_line(
+                    block.importer_test_status_undetermined.as_ref(),
+                )
+            })
+            .flatten()
+        {
+            line.push('\n');
+            line.push_str(&u);
+        }
+        Some(line)
     }
 
     /// ORIENT-SEGMENT-2 §2.1: the PROMOTED directory-group fan-in view, rendered only
@@ -352,6 +402,9 @@ impl OrientResponse {
             return String::new();
         }
         let mut out = head;
+        // TEST-EDGE-SCOPE-1B (D-TESB-12): these directory fans are the `stats` read, which keeps
+        // imports from test files — the same basis clause `stats` states.
+        out.push_str(&bullet(super::stats::STATS_FAN_BASIS));
         for g in groups {
             out.push_str(&bullet(&format!(
                 "{} — fan-in {}, fan-out {} ({} file{})",

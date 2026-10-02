@@ -978,3 +978,49 @@ fn explain_zero_certain_callers_state_the_unresolved_calls_naming_the_symbol() {
     let j = signal_json(&r, SignalCode::ExplainCallers);
     assert!(j.get("unresolved_naming").is_none() && j.get("inferred_items").is_none());
 }
+
+/// TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): explain's Import-cycles block renders when an excluded
+/// cycle involves the focus module even though the default view has none, and names only the
+/// excluded cycles involving it.
+#[test]
+fn explain_import_cycles_block_names_excluded_cycles_involving_the_focus() {
+    let mut fake = FakeAgentStorage::new();
+    seed_symbol_repo(&mut fake);
+    let cyc = |members: &[&str]| repo_graph_agent::AgentExcludedCycle {
+        members: members.iter().map(|s| s.to_string()).collect(),
+        flags: vec!["include_tests".to_string()],
+        contains_shown: Vec::new(),
+        partitions: Default::default(),
+    };
+    fake.import_cycle_partitions.insert(
+        "snap1".into(),
+        repo_graph_agent::AgentImportCyclePartition {
+            view: repo_graph_classification::import_partition::ImportView::DEFAULT,
+            remainder: Default::default(),
+            excluded_cycles: vec![cyc(&["src/core", "src/db"]), cyc(&["lib/a", "lib/b"])],
+            cycle_partitions: Vec::new(),
+            importers: vec![repo_graph_agent::AgentImporterFile {
+                path: "src/core/c_test.c".into(),
+                is_test: Some(false),
+            }],
+        },
+    );
+    let result = run_explain(&fake, "r1", "MyService", Budget::Medium, TEST_NOW).unwrap();
+    let sig = result
+        .signals
+        .iter()
+        .find(|s| s.code() == SignalCode::ExplainCycles)
+        .expect("EXPLAIN_CYCLES renders for an excluded cycle involving the focus");
+    let ev = serde_json::to_value(sig).unwrap()["evidence"].clone();
+    assert_eq!(ev["count"], 0);
+    assert_eq!(ev["excluded_cycles"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        ev["excluded_cycles"][0]["members"],
+        serde_json::json!(["src/core", "src/db"])
+    );
+    assert_eq!(ev["importer_test_status_undetermined"]["count"], 1);
+    assert_eq!(
+        ev["importer_test_status_undetermined"]["universe"],
+        "cross_directory_importers"
+    );
+}

@@ -49,10 +49,19 @@ pub trait GateStorageRead {
         repo_uid: &str,
     ) -> Result<Vec<GateBoundaryDeclaration>, GateStorageError>;
 
-    /// Return IMPORTS edges between two file-path prefixes.
-    /// Mirrors the storage query used by the existing
-    /// `arch_violations` method.
+    /// Return the CERTAIN (`static`/`dynamic`) IMPORTS edges between two file-path prefixes,
+    /// of every test status — the imports `arch_violations` judges (TEST-EDGE-SCOPE-1B, D-TESB-11).
     fn find_boundary_imports(
+        &self,
+        snapshot_uid: &str,
+        source_prefix: &str,
+        target_prefix: &str,
+    ) -> Result<Vec<GateImportEdge>, GateStorageError>;
+
+    /// TEST-EDGE-SCOPE-1B (D-TESB-11, RG-REQ-002-L11): the INFERRED IMPORTS edges between two
+    /// file-path prefixes — counted and cited, never judged. REQUIRED (no default body): a
+    /// defaulted empty answer would be a measured absence nobody measured.
+    fn find_inferred_boundary_imports(
         &self,
         snapshot_uid: &str,
         source_prefix: &str,

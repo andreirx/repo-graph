@@ -171,6 +171,15 @@ pub struct FakeAgentStorage {
     /// TEST-EDGE-SCOPE-1A: the directory topology (`list_directory_groups`) per snapshot,
     /// with each directory's stored test-file count. Unseeded ⇒ empty (the trait default).
     pub directory_groups: HashMap<String, Vec<repo_graph_agent::AgentDirectoryGroup>>,
+    /// TEST-EDGE-SCOPE-1B: the import partition of the cycle graph per snapshot (DEFAULT view).
+    /// Unseeded ⇒ a view that excludes nothing (no excluded cycle, empty remainder).
+    pub import_cycle_partitions: HashMap<String, repo_graph_agent::AgentImportCyclePartition>,
+    /// TEST-EDGE-SCOPE-1B: inferred boundary-crossing imports, keyed like `imports_between_paths`.
+    pub inferred_imports_between_paths: HashMap<(String, String, String), Vec<AgentImportEdge>>,
+    /// TEST-EDGE-SCOPE-1B: a file's inferred imports, keyed like `file_imports`.
+    pub inferred_file_imports: HashMap<(String, String), Vec<AgentImportEntry>>,
+    /// TEST-EDGE-SCOPE-1B: the gate's inferred boundary imports, keyed like `gate_boundary_imports`.
+    pub gate_inferred_boundary_imports: HashMap<(String, String, String), Vec<GateImportEdge>>,
 
     /// If set to the name of a port operation, the fake returns
     /// `AgentStorageError` from that operation. Used to verify
@@ -640,6 +649,57 @@ impl AgentStorageRead for FakeAgentStorage {
             .unwrap_or_default())
     }
 
+    fn import_cycle_partition(
+        &self,
+        snapshot_uid: &str,
+        view: repo_graph_classification::import_partition::ImportView,
+        _cancel: repo_graph_agent::AgentCancelCheck<'_>,
+    ) -> Result<repo_graph_agent::AgentImportCyclePartition, AgentStorageError> {
+        self.fail_if_forced("import_cycle_partition")?;
+        Ok(self
+            .import_cycle_partitions
+            .get(snapshot_uid)
+            .cloned()
+            .unwrap_or(repo_graph_agent::AgentImportCyclePartition {
+                view,
+                remainder: Default::default(),
+                excluded_cycles: Vec::new(),
+                cycle_partitions: Vec::new(),
+                importers: Vec::new(),
+            }))
+    }
+
+    fn find_inferred_imports_between_paths(
+        &self,
+        snapshot_uid: &str,
+        source_prefix: &str,
+        target_prefix: &str,
+    ) -> Result<Vec<AgentImportEdge>, AgentStorageError> {
+        self.fail_if_forced("find_inferred_imports_between_paths")?;
+        Ok(self
+            .inferred_imports_between_paths
+            .get(&(
+                snapshot_uid.to_string(),
+                source_prefix.to_string(),
+                target_prefix.to_string(),
+            ))
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    fn find_inferred_file_imports(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
+        self.fail_if_forced("find_inferred_file_imports")?;
+        Ok(self
+            .inferred_file_imports
+            .get(&(snapshot_uid.to_string(), file_path.to_string()))
+            .cloned()
+            .unwrap_or_default())
+    }
+
     // ── Explain-focus methods ──────────────────────────────────
 
     fn list_symbols_in_file(
@@ -845,6 +905,24 @@ impl GateStorageRead for FakeAgentStorage {
         Ok(self
             .gate_boundary_declarations
             .get(repo_uid)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    fn find_inferred_boundary_imports(
+        &self,
+        snapshot_uid: &str,
+        source_prefix: &str,
+        target_prefix: &str,
+    ) -> Result<Vec<GateImportEdge>, GateStorageError> {
+        self.fail_if_forced_gate("find_inferred_boundary_imports")?;
+        Ok(self
+            .gate_inferred_boundary_imports
+            .get(&(
+                snapshot_uid.to_string(),
+                source_prefix.to_string(),
+                target_prefix.to_string(),
+            ))
             .cloned()
             .unwrap_or_default())
     }

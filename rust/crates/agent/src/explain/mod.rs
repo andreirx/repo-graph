@@ -634,12 +634,16 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
             // the remainder, anything else is a broken read — never counted as certain.
             let mut certain_files: std::collections::BTreeSet<&str> = Default::default();
             for i in &importers {
-                match i.resolution.as_str() {
-                    "static" | "dynamic" => {
+                // TEST-EDGE-SCOPE-1B (D-TESB-14): the classification crate's one vocabulary.
+                match repo_graph_classification::import_partition::ImportClass::from_resolution(
+                    &i.resolution,
+                ) {
+                    Ok(repo_graph_classification::import_partition::ImportClass::Certain) => {
                         certain_files.insert(i.file.as_str());
                     }
-                    "inferred" => {}
-                    other => {
+                    Ok(repo_graph_classification::import_partition::ImportClass::Inferred) => {}
+                    Err(_) => {
+                        let other = &i.resolution;
                         return Err(AgentStorageError::new(
                             "find_file_importers",
                             format!(
@@ -708,82 +712,38 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
     // ── Inherited module-context signals ────────────────────
     let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
     if let Some(ref module_path) = context.module_path {
-        // EXPLAIN_CYCLES (DAEMON-CANCEL-3: cancellable Tarjan + filter)
-        let mut cycles =
-            storage.find_cycles_involving_module_cancellable(snapshot_uid, module_path, cancel)?;
-        if !cycles.is_empty() {
-            // TRUNCATION-AUDIT-1: rank the FULL cycle set (length DESC, then ring members)
-            // BEFORE the cut so the surviving top-N are the biggest cycles, deterministically.
-            ordering::canonicalize_cycles(&mut cycles);
-            let count = cycles.len() as u64;
-            let mut items: Vec<CycleEvidence> = cycles
-                .into_iter()
-                .map(|c| CycleEvidence {
-                    length: c.length,
-                    modules: c.modules,
-                    type_only: c.type_only,
-                    // EXPLAIN-CYCLES-HONEST-1 (§2.1): the focus-scoped SQLite read carries the REAL
-                    // directed walk (via `label_focus_cycles`); the renderer draws the verified ring
-                    // from it. `None` only when no walk closes (truncated/no edges). A-1 (D-ECH-002):
-                    // the M-2 LiveGraph route DELEGATES the focus cycle read to SQLite, so the walk is
-                    // carried on every route (never a route-dependent unordered value).
-                    walk: c.walk,
-                })
-                .collect();
-            let (trunc, omitted) = truncate_items(&mut items, cap);
-            signals.push(
-                Signal::explain_cycles(ExplainCyclesEvidence {
-                    count,
-                    items,
-                    items_truncated: trunc,
-                    items_omitted_count: omitted,
-                })
-                .with_module_context(),
-            );
+        // EXPLAIN_CYCLES (DAEMON-CANCEL-3: cancellable Tarjan + filter). TEST-EDGE-SCOPE-1B: the
+        // cycles of the DEFAULT view involving the focus module, and the excluded cycles involving
+        // it — the block renders when either exists.
+        let cycles = storage.find_cycles_involving_module_cancellable(
+            snapshot_uid,
+            module_path,
+            &mut *cancel,
+        )?;
+        let partition = storage.import_cycle_partition(
+            snapshot_uid,
+            repo_graph_classification::import_partition::ImportView::DEFAULT,
+            &mut *cancel,
+        )?;
+        let excluded: Vec<&crate::storage_port::AgentExcludedCycle> = partition
+            .excluded_cycles
+            .iter()
+            .filter(|e| e.members.iter().any(|m| m == module_path))
+            .collect();
+        if let Some(signal) = explain_cycles_signal(cycles, &partition, &excluded, cap) {
+            signals.push(signal.with_module_context());
         }
 
-        // EXPLAIN_BOUNDARY
+        // EXPLAIN_BOUNDARY — TEST-EDGE-SCOPE-1B (D-TESB-11): certain imports judged, inferred
+        // ones counted with their files.
         let declarations = storage.get_active_boundary_declarations(repo_uid)?;
-        let matching: Vec<_> = declarations
+        let matching: Vec<(String, String)> = declarations
             .into_iter()
             .filter(|d| d.source_module == *module_path)
+            .map(|d| (d.source_module, d.forbidden_target))
             .collect();
-        if !matching.is_empty() {
-            let mut per_rule: Vec<BoundaryViolationEvidence> = Vec::new();
-            let mut total = 0u64;
-            for decl in matching {
-                let edges = storage.find_imports_between_paths(
-                    snapshot_uid,
-                    &decl.source_module,
-                    &decl.forbidden_target,
-                )?;
-                if edges.is_empty() {
-                    continue;
-                }
-                let edge_count = edges.len() as u64;
-                total += edge_count;
-                per_rule.push(BoundaryViolationEvidence {
-                    source_module: decl.source_module,
-                    target_module: decl.forbidden_target,
-                    edge_count,
-                });
-            }
-            if total > 0 {
-                // TRUNCATION-AUDIT-1: rank by edge_count DESC (then source/target) BEFORE the
-                // cut, matching the orient boundary aggregators' order. Previously truncated in
-                // declaration-iteration (arbitrary) order.
-                ordering::sort_boundary_violations(&mut per_rule);
-                let (trunc, omitted) = truncate_items(&mut per_rule, cap);
-                signals.push(
-                    Signal::explain_boundary(ExplainBoundaryEvidence {
-                        violation_count: total,
-                        items: per_rule,
-                        items_truncated: trunc,
-                        items_omitted_count: omitted,
-                    })
-                    .with_module_context(),
-                );
-            }
+        if let Some(signal) = explain_boundary_signal(storage, snapshot_uid, matching, cap)? {
+            signals.push(signal.with_module_context());
         }
 
         // EXPLAIN_GATE
@@ -901,8 +861,12 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
     }));
 
     // ── EXPLAIN_IMPORTS ─────────────────────────────────────
+    // TEST-EDGE-SCOPE-1B (RG-REQ-002-L11): certain imports listed; the inferred ones are counted
+    // (`import_remainder.inferred.imports`) with `rmap imports <file> --include-inferred` to show
+    // them. The file is the subject, so its imports stay whatever its test status.
     let mut imports = storage.find_file_imports(snapshot_uid, file_path)?;
-    if !imports.is_empty() {
+    let inferred_imports = storage.find_inferred_file_imports(snapshot_uid, file_path)?;
+    if !imports.is_empty() || !inferred_imports.is_empty() {
         // TRUNCATION-AUDIT-1: order by target_file ASC BEFORE the cut (deterministic,
         // source-independent). Previously truncated in storage order.
         ordering::sort_explain_imports(&mut imports);
@@ -914,12 +878,24 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
             })
             .collect();
         let (trunc, omitted) = truncate_items(&mut items, cap);
-        signals.push(Signal::explain_imports(ExplainImportsEvidence {
-            count,
-            items,
-            items_truncated: trunc,
-            items_omitted_count: omitted,
-        }));
+        let additions = crate::dto::signal::EvidenceAdditions {
+            import_remainder: (!inferred_imports.is_empty()).then(|| {
+                let mut remainder =
+                    repo_graph_classification::import_partition::ImportRemainder::default();
+                remainder.inferred.imports = inferred_imports.len() as u64;
+                remainder
+            }),
+            ..Default::default()
+        };
+        signals.push(
+            Signal::explain_imports(ExplainImportsEvidence {
+                count,
+                items,
+                items_truncated: trunc,
+                items_omitted_count: omitted,
+            })
+            .with_evidence_additions(additions),
+        );
     }
 
     // ── EXPLAIN_SYMBOLS ─────────────────────────────────────
@@ -1118,68 +1094,33 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
 
     // ── EXPLAIN_CYCLES ──────────────────────────────────────
     let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
-    // DAEMON-CANCEL-3: cancellable Tarjan + filter.
-    let mut cycles =
-        storage.find_cycles_involving_path_cancellable(snapshot_uid, path_prefix, cancel)?;
-    if !cycles.is_empty() {
-        // TRUNCATION-AUDIT-1: length DESC, then ring members — biggest cycles survive the cut.
-        ordering::canonicalize_cycles(&mut cycles);
-        let count = cycles.len() as u64;
-        let mut items: Vec<CycleEvidence> = cycles
-            .into_iter()
-            .map(|c| CycleEvidence {
-                length: c.length,
-                modules: c.modules,
-                type_only: c.type_only,
-                // EXPLAIN-CYCLES-HONEST-1 (§2.1): the path-scoped SQLite read carries the REAL directed
-                // walk (via `label_focus_cycles`); the renderer draws the verified ring from it. `None`
-                // only when no walk closes (truncated/no edges). A-1 (D-ECH-002): the M-2 LiveGraph
-                // route DELEGATES the focus cycle read to SQLite, so the walk is carried on every route.
-                walk: c.walk,
-            })
-            .collect();
-        let (trunc, omitted) = truncate_items(&mut items, cap);
-        signals.push(Signal::explain_cycles(ExplainCyclesEvidence {
-            count,
-            items,
-            items_truncated: trunc,
-            items_omitted_count: omitted,
-        }));
+    // DAEMON-CANCEL-3: cancellable Tarjan + filter. TEST-EDGE-SCOPE-1B: the DEFAULT view's
+    // cycles involving the path and the excluded cycles involving it.
+    let cycles =
+        storage.find_cycles_involving_path_cancellable(snapshot_uid, path_prefix, &mut *cancel)?;
+    let partition = storage.import_cycle_partition(
+        snapshot_uid,
+        repo_graph_classification::import_partition::ImportView::DEFAULT,
+        &mut *cancel,
+    )?;
+    let excluded: Vec<&crate::storage_port::AgentExcludedCycle> = partition
+        .excluded_cycles
+        .iter()
+        .filter(|e| crate::aggregators::cycles::involves_path(e, path_prefix))
+        .collect();
+    if let Some(signal) = explain_cycles_signal(cycles, &partition, &excluded, cap) {
+        signals.push(signal);
     }
 
     // ── EXPLAIN_BOUNDARY ────────────────────────────────────
+    // TEST-EDGE-SCOPE-1B (D-TESB-11): certain imports judged, inferred ones counted.
     let declarations = storage.find_boundary_declarations_in_path(repo_uid, path_prefix)?;
-    if !declarations.is_empty() {
-        let mut per_rule: Vec<BoundaryViolationEvidence> = Vec::new();
-        let mut total = 0u64;
-        for decl in declarations {
-            let edges = storage.find_imports_between_paths(
-                snapshot_uid,
-                &decl.source_module,
-                &decl.forbidden_target,
-            )?;
-            if edges.is_empty() {
-                continue;
-            }
-            let edge_count = edges.len() as u64;
-            total += edge_count;
-            per_rule.push(BoundaryViolationEvidence {
-                source_module: decl.source_module,
-                target_module: decl.forbidden_target,
-                edge_count,
-            });
-        }
-        if total > 0 {
-            // TRUNCATION-AUDIT-1: edge_count DESC (then source/target) BEFORE the cut.
-            ordering::sort_boundary_violations(&mut per_rule);
-            let (trunc, omitted) = truncate_items(&mut per_rule, cap);
-            signals.push(Signal::explain_boundary(ExplainBoundaryEvidence {
-                violation_count: total,
-                items: per_rule,
-                items_truncated: trunc,
-                items_omitted_count: omitted,
-            }));
-        }
+    let rules: Vec<(String, String)> = declarations
+        .into_iter()
+        .map(|d| (d.source_module, d.forbidden_target))
+        .collect();
+    if let Some(signal) = explain_boundary_signal(storage, snapshot_uid, rules, cap)? {
+        signals.push(signal);
     }
 
     // ── EXPLAIN_GATE ────────────────────────────────────────
@@ -1448,4 +1389,108 @@ fn build_gate_signal<S: GateStorageRead + ?Sized>(
     }
 
     Ok(())
+}
+
+/// TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): the `EXPLAIN_CYCLES` signal over the focus's cycles of the
+/// DEFAULT view, with the excluded cycles involving the focus, the remainder and the importer
+/// UNDETERMINED block. `None` when there is neither a cycle nor an excluded cycle.
+fn explain_cycles_signal(
+    mut cycles: Vec<crate::storage_port::AgentCycle>,
+    partition: &crate::storage_port::AgentImportCyclePartition,
+    excluded: &[&crate::storage_port::AgentExcludedCycle],
+    cap: usize,
+) -> Option<Signal> {
+    if cycles.is_empty() && excluded.is_empty() {
+        return None;
+    }
+    // TRUNCATION-AUDIT-1: rank the FULL cycle set (length DESC, then ring members) BEFORE the
+    // cut so the surviving top-N are the biggest cycles, deterministically.
+    ordering::canonicalize_cycles(&mut cycles);
+    let count = cycles.len() as u64;
+    let mut items: Vec<CycleEvidence> = cycles
+        .into_iter()
+        .map(|c| CycleEvidence {
+            length: c.length,
+            modules: c.modules,
+            type_only: c.type_only,
+            // EXPLAIN-CYCLES-HONEST-1 (§2.1): the focus-scoped SQLite read carries the REAL directed
+            // walk (via `label_focus_cycles`); the renderer draws the verified ring from it.
+            walk: c.walk,
+        })
+        .collect();
+    let (trunc, omitted) = truncate_items(&mut items, cap);
+    let additions = crate::aggregators::cycles::cycle_partition_additions(
+        partition,
+        excluded,
+        items.iter().map(|c| c.modules.as_slice()),
+    );
+    Some(
+        Signal::explain_cycles(ExplainCyclesEvidence {
+            count,
+            items,
+            items_truncated: trunc,
+            items_omitted_count: omitted,
+        })
+        .with_evidence_additions(additions),
+    )
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-11): the `EXPLAIN_BOUNDARY` signal over `(source, forbidden)`
+/// rules — CERTAIN imports judged (edge counts, as before); the INFERRED imports across each rule
+/// counted with their sorted source files (`inferred_imports_not_judged`), never judged. `None`
+/// when nothing crosses any rule.
+fn explain_boundary_signal<S: AgentStorageRead + ?Sized>(
+    storage: &S,
+    snapshot_uid: &str,
+    rules: Vec<(String, String)>,
+    cap: usize,
+) -> Result<Option<Signal>, AgentStorageError> {
+    let mut per_rule: Vec<BoundaryViolationEvidence> = Vec::new();
+    let mut total = 0u64;
+    let mut not_judged: Vec<crate::dto::signal::InferredImportsNotJudgedRule> = Vec::new();
+    for (source, forbidden) in rules {
+        let edges = storage.find_imports_between_paths(snapshot_uid, &source, &forbidden)?;
+        let inferred =
+            storage.find_inferred_imports_between_paths(snapshot_uid, &source, &forbidden)?;
+        if !inferred.is_empty() {
+            let files: std::collections::BTreeSet<&str> =
+                inferred.iter().map(|e| e.source_file.as_str()).collect();
+            not_judged.push(crate::dto::signal::InferredImportsNotJudgedRule {
+                source_module: source.clone(),
+                target_module: forbidden.clone(),
+                count: inferred.len() as u64,
+                files: files.into_iter().map(str::to_string).collect(),
+            });
+        }
+        if edges.is_empty() {
+            continue;
+        }
+        let edge_count = edges.len() as u64;
+        total += edge_count;
+        per_rule.push(BoundaryViolationEvidence {
+            source_module: source,
+            target_module: forbidden,
+            edge_count,
+        });
+    }
+    if total == 0 && not_judged.is_empty() {
+        return Ok(None);
+    }
+    // TRUNCATION-AUDIT-1: rank by edge_count DESC (then source/target) BEFORE the cut.
+    ordering::sort_boundary_violations(&mut per_rule);
+    let (trunc, omitted) = truncate_items(&mut per_rule, cap);
+    let additions = crate::dto::signal::EvidenceAdditions {
+        inferred_imports_not_judged: (!not_judged.is_empty())
+            .then_some(crate::dto::signal::InferredImportsNotJudgedEvidence::PerRule(not_judged)),
+        ..Default::default()
+    };
+    Ok(Some(
+        Signal::explain_boundary(ExplainBoundaryEvidence {
+            violation_count: total,
+            items: per_rule,
+            items_truncated: trunc,
+            items_omitted_count: omitted,
+        })
+        .with_evidence_additions(additions),
+    ))
 }

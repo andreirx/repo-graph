@@ -177,6 +177,7 @@ pub mod crud;
 mod db_root_path; // ENRICH-ROOT-1: resolve stored root_path against the DB parent (crate-private helper)
 mod deps_language_read; // DEPS-LIST-REWRITE-1 §2.2: query_file_count_by_language (crate-private)
 pub(crate) mod diagnostic;
+pub mod directory_module_edges; // TEST-EDGE-SCOPE-1B: the query-time directory-module graph of an import view
 mod enrichment_impl; // EnrichmentStoragePort impl for StorageConnection (EN-3)
 pub mod error;
 pub mod find_facts_reads; // FIND-FACTS-1: lexical (LIKE) fact-table reads for the `find` FACTS tier
@@ -189,6 +190,7 @@ mod generated_code_mapping_read_impl; // GeneratedCodeMappingReadPort impl (CS-2
 pub mod grpc_impl_hint_impl; // gRPC implementation hint queries (GR-1A)
 mod grpc_impl_hint_port_impl; // GrpcImplHintReadPort/StorePort impl (GR-1A)
 mod http_surface_read; // HTTP-BOUNDARY-1: query_http_surfaces helper (crate-private)
+pub mod import_partition_reads; // TEST-EDGE-SCOPE-1B: the one partitioned import read + the IMPORTS vocabulary check
 mod indexer_impl; // SnapshotLifecyclePort + FileCatalogPort impl (R5-C)
 pub mod metrics; // PERF-OBS-1: Storage metrics for performance observability
 pub mod migrations;

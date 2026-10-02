@@ -73,9 +73,48 @@ pub struct ModulesDepsResponse {
     pub count: u64,
     #[serde(default)]
     pub diagnostics: Option<ImportDiagnostics>,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-08): the import view. Absent = a daemon that predates the
+    /// partition (stated, never a zero remainder).
+    #[serde(default)]
+    pub import_view: Option<serde_json::Value>,
+    /// TEST-EDGE-SCOPE-1B: the imports the view excludes over the relations this answer covers.
+    #[serde(default)]
+    pub import_remainder: Option<serde_json::Value>,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-09): the undetermined files among the answer's importers.
+    #[serde(default)]
+    pub importer_test_status_undetermined: Option<serde_json::Value>,
 }
 
 impl ModulesDepsResponse {
+    /// TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): the remainder lines and the importer UNDETERMINED
+    /// line (shared wording modules).
+    fn partition_lines(&self) -> String {
+        use super::import_partition::{
+            partition_lines_from, surface_partition, EdgeNoun, Partition, Requires,
+        };
+        let mut out = String::new();
+        // One decode rule (D-TESB-17 row U9).
+        let partition = surface_partition(
+            self.import_view.as_ref(),
+            self.import_remainder.as_ref(),
+            None,
+            self.importer_test_status_undetermined.as_ref(),
+            Requires::MODULE_EDGES,
+        );
+        let stated = matches!(partition, Partition::Stated(_));
+        for line in partition_lines_from(partition, EdgeNoun::CrossModule) {
+            out.push_str(&format!("{line}\n"));
+        }
+        if stated {
+            if let Some(line) = super::test_status::undetermined_files_line(
+                self.importer_test_status_undetermined.as_ref(),
+            ) {
+                out.push_str(&format!("{line}\n"));
+            }
+        }
+        out
+    }
+
     /// Render as human-readable text.
     pub fn render_human(&self) -> String {
         let mut out = String::new();
@@ -115,6 +154,7 @@ impl ModulesDepsResponse {
         // -- Dependency edges --
         if self.results.is_empty() {
             out.push_str("\nNo cross-module dependencies exist.\n");
+            out.push_str(&self.partition_lines());
             out.push_str("\nhint: if this is unexpected, module boundaries may need refinement.\n");
             out.push_str("      Run 'rmap modules list' to see module coverage.\n");
             return out;
@@ -138,6 +178,7 @@ impl ModulesDepsResponse {
                 edge.source_module, edge.target_module, edge.import_count, edge.source_file_count
             ));
         }
+        out.push_str(&self.partition_lines());
 
         out
     }
@@ -175,6 +216,19 @@ mod tests {
                 cross_module_edges: 15,
                 from_unowned_edges: 5,
             }),
+            import_view: Some(
+                serde_json::json!({"include_tests": false, "include_inferred": false}),
+            ),
+            // A current daemon's complete payload, nothing excluded (D-TESB-17 fixture rule).
+            import_remainder: Some(serde_json::json!({
+                "tests": {"imports": 0, "edges": 0},
+                "inferred": {"imports": 0, "edges": 0},
+                "tests_and_inferred": {"imports": 0, "edges": 0}
+            })),
+            importer_test_status_undetermined: Some(serde_json::json!({
+                "count": 0, "paths": [], "universe": "cross_module_importers",
+                "universe_count": 0, "unknown_count": 0
+            })),
         }
     }
 
@@ -193,6 +247,19 @@ mod tests {
                 cross_module_edges: 0,
                 from_unowned_edges: 143,
             }),
+            import_view: Some(
+                serde_json::json!({"include_tests": false, "include_inferred": false}),
+            ),
+            // A current daemon's complete payload, nothing excluded (D-TESB-17 fixture rule).
+            import_remainder: Some(serde_json::json!({
+                "tests": {"imports": 0, "edges": 0},
+                "inferred": {"imports": 0, "edges": 0},
+                "tests_and_inferred": {"imports": 0, "edges": 0}
+            })),
+            importer_test_status_undetermined: Some(serde_json::json!({
+                "count": 0, "paths": [], "universe": "cross_module_importers",
+                "universe_count": 0, "unknown_count": 0
+            })),
         }
     }
 
@@ -254,5 +321,33 @@ mod tests {
             api_pos < cli_pos,
             "Edges should be sorted by (source, target)"
         );
+    }
+
+    /// TEST-EDGE-SCOPE-1B (D-TESB-07): the remainder and importer lines follow the edges.
+    #[test]
+    fn modules_deps_renders_the_remainder() {
+        let mut r = sample_deps_response();
+        r.import_remainder = Some(serde_json::json!({
+            "tests": {"imports": 415, "edges": 1},
+            "inferred": {"imports": 0, "edges": 0},
+            "tests_and_inferred": {"imports": 0, "edges": 0},
+        }));
+        r.importer_test_status_undetermined = Some(serde_json::json!({
+            "count": 1, "paths": ["util/testutil.cc"], "universe": "cross_module_importers",
+            "universe_count": 3, "unknown_count": 0,
+        }));
+        let out = r.render_human();
+        assert!(out.contains(
+            "+415 imports from test files, not shown (1 cross-module dependency only through them) — --include-tests\n"
+        ), "{out}");
+        assert!(out.contains(
+            "1 file whose test status can't be determined — open it and look inside (of 3 files importing across modules)"
+        ), "{out}");
+        // A payload from a daemon that predates the partition says so.
+        let mut old = sample_deps_response();
+        old.import_view = None;
+        assert!(old
+            .render_human()
+            .contains("import partition unavailable from this daemon"));
     }
 }

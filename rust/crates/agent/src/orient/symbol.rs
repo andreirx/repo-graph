@@ -44,7 +44,6 @@ use crate::dto::signal::{
     CalleesSummaryEvidence, CallersSummaryEvidence, ModuleCountEvidence, Signal,
 };
 use crate::errors::OrientError;
-use crate::ordering;
 use crate::ranking;
 use crate::storage_port::{AgentCancelCheck, AgentSnapshot, AgentStorageRead, AgentSymbolContext};
 
@@ -254,7 +253,6 @@ fn group_by_module<'a>(
 
 // ── Boundary aggregator for exact module match ──────────────────
 
-use crate::dto::signal::{BoundaryViolationEvidence, BoundaryViolationsEvidence};
 use crate::errors::AgentStorageError;
 
 fn aggregate_boundary_for_module<S: AgentStorageRead + ?Sized>(
@@ -275,51 +273,12 @@ fn aggregate_boundary_for_module<S: AgentStorageRead + ?Sized>(
     if matching.is_empty() {
         return Ok(AggregatorOutput::empty());
     }
-
-    let mut per_rule: Vec<BoundaryViolationEvidence> = Vec::new();
-    let mut total_edges: u64 = 0;
-
-    for decl in matching {
-        let edges = storage.find_imports_between_paths(
-            snapshot_uid,
-            &decl.source_module,
-            &decl.forbidden_target,
-        )?;
-        if edges.is_empty() {
-            continue;
-        }
-        let edge_count = edges.len() as u64;
-        total_edges += edge_count;
-        per_rule.push(BoundaryViolationEvidence {
-            source_module: decl.source_module,
-            target_module: decl.forbidden_target,
-            edge_count,
-        });
-    }
-
-    if total_edges == 0 {
-        return Ok(AggregatorOutput::empty());
-    }
-
-    // TRUNCATION-AUDIT-1: shared meaningful order (edge_count DESC, then source/target) — the
-    // comparator this site previously inlined, now centralised in `ordering`.
-    ordering::sort_boundary_violations(&mut per_rule);
-    per_rule.truncate(3);
-
-    let evidence = BoundaryViolationsEvidence {
-        violation_count: total_edges,
-        top_violations: per_rule,
-    };
-
-    Ok(AggregatorOutput {
-        signals: vec![Signal::boundary_violations(evidence)],
-        limits: Vec::new(),
-    })
+    // TEST-EDGE-SCOPE-1B (D-TESB-11): certain imports judged, inferred ones counted — the SAME
+    // judgement the repo-level boundary aggregator makes.
+    crate::aggregators::boundary::violations_output(storage, snapshot_uid, matching)
 }
 
 // ── Cycle aggregator for exact module match ─────────────────────
-
-use crate::dto::signal::{CycleEvidence, ImportCyclesEvidence};
 
 fn aggregate_cycles_for_module<S: AgentStorageRead + ?Sized>(
     storage: &S,
@@ -328,51 +287,27 @@ fn aggregate_cycles_for_module<S: AgentStorageRead + ?Sized>(
     cancel: AgentCancelCheck<'_>,
 ) -> Result<AggregatorOutput, AgentStorageError> {
     // DAEMON-CANCEL-3: symbol-focus cycles run through the cancellable Tarjan + filter.
-    let mut cycles = storage.find_cycles_involving_module_cancellable(
+    // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): the DEFAULT view's cycles involving the module, and the
+    // excluded cycles involving it. Module-focus cycles are not test-composition-labeled, so no
+    // split is claimed (raw total only) — the shared builder yields `None` splits for them.
+    let cycles = storage.find_cycles_involving_module_cancellable(
         snapshot_uid,
         module_qualified_name,
+        &mut *cancel,
+    )?;
+    let partition = storage.import_cycle_partition(
+        snapshot_uid,
+        repo_graph_classification::import_partition::ImportView::DEFAULT,
         cancel,
     )?;
-
-    if cycles.is_empty() {
-        return Ok(AggregatorOutput::empty());
-    }
-
-    // TRUNCATION-AUDIT-1: rank (length DESC, then ring members) BEFORE the top-3 cut so the
-    // surviving cycles are the biggest, deterministically — not a storage-order prefix.
-    ordering::canonicalize_cycles(&mut cycles);
-    let cycle_count = cycles.len() as u64;
-    let top: Vec<CycleEvidence> = cycles
-        .into_iter()
-        .take(3)
-        .map(|c| CycleEvidence {
-            length: c.length,
-            modules: c.modules,
-            // TYPE-ONLY-IMPORTS-1: `None` on this symbol/focus-scoped path (the storage adapter
-            // does not label it) — carried through so a future labeling flows without a new field.
-            type_only: c.type_only,
-            // COHERENCE-3: carried through (`None` on this symbol/focus-scoped serve).
-            walk: c.walk,
-        })
+    let excluded: Vec<&crate::storage_port::AgentExcludedCycle> = partition
+        .excluded_cycles
+        .iter()
+        .filter(|e| e.members.iter().any(|m| m == module_qualified_name))
         .collect();
-
-    let evidence = ImportCyclesEvidence {
-        cycle_count,
-        // ORIENT-CYCLES-DISAGREE-1: module-focus cycles (`find_cycles_involving_module`) are a
-        // focus surface, not the repo headline this slice unifies; the adapter does not
-        // test-composition-label them, so no split is claimed here (raw total only).
-        production_count: None,
-        test_only_count: None,
-        unknown_count: None,
-        // Module-focus cycles are not test-composition-labeled → no production example.
-        production_type_only: None,
-        cycles: top,
-    };
-
-    Ok(AggregatorOutput {
-        signals: vec![Signal::import_cycles(evidence)],
-        limits: Vec::new(),
-    })
+    Ok(crate::aggregators::cycles::build_import_cycles_output(
+        cycles, &partition, &excluded,
+    ))
 }
 
 // ── Gate aggregator for exact module match ──────────────────────

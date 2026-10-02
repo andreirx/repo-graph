@@ -58,6 +58,13 @@ pub struct ImportsResponse {
     pub file: String,
     /// List of imports.
     pub imports: Vec<ImportEntry>,
+    /// TEST-EDGE-SCOPE-1B (RG-REQ-002-L11): the view the listing answers (`None` = a daemon that
+    /// predates the partition — the unavailable line, never a zero remainder).
+    #[serde(default)]
+    pub import_view: Option<serde_json::Value>,
+    /// The imports the view left out (the inferred ones unless `--include-inferred`).
+    #[serde(default)]
+    pub import_remainder: Option<serde_json::Value>,
 }
 
 // ── Human Rendering ──────────────────────────────────────────────────────────
@@ -79,6 +86,7 @@ impl ImportsResponse {
         }
 
         if self.imports.is_empty() {
+            self.push_partition_lines(&mut out);
             return out;
         }
 
@@ -98,7 +106,23 @@ impl ImportsResponse {
             out.push_str(&format!("  {}  depth={}  {}\n", name, depth, resolution));
         }
 
+        self.push_partition_lines(&mut out);
         out
+    }
+
+    /// TEST-EDGE-SCOPE-1B: the inferred imports not listed, with the flag that lists them (worded
+    /// by `import_partition`). Nothing when nothing is left out.
+    fn push_partition_lines(&self, out: &mut String) {
+        use crate::presentation::import_partition as ip;
+        let partition =
+            match ip::partition_from(self.import_view.as_ref(), self.import_remainder.as_ref()) {
+                ip::Partition::Stated(r) => ip::Partition::Stated(ip::per_file_remainder(&r)),
+                other => other,
+            };
+        for line in ip::partition_lines_from(partition, ip::EdgeNoun::None) {
+            out.push_str(&line);
+            out.push('\n');
+        }
     }
 }
 
@@ -583,14 +607,91 @@ mod tests {
                     depth: 1,
                 },
             ],
+            import_view: Some(default_view()),
+            import_remainder: Some(zero_remainder()),
         }
+    }
+
+    /// The view a partitioned daemon states for a default request.
+    fn default_view() -> serde_json::Value {
+        serde_json::json!({"include_tests": false, "include_inferred": false})
+    }
+
+    /// A current daemon's zero remainder (D-TESB-17 fixture rule).
+    fn zero_remainder() -> serde_json::Value {
+        serde_json::json!({
+            "tests": {"imports": 0, "edges": 0},
+            "inferred": {"imports": 0, "edges": 0},
+            "tests_and_inferred": {"imports": 0, "edges": 0}
+        })
     }
 
     fn sample_empty_imports() -> ImportsResponse {
         ImportsResponse {
             file: "src/standalone.cpp".to_string(),
             imports: vec![],
+            import_view: Some(default_view()),
+            import_remainder: Some(zero_remainder()),
         }
+    }
+
+    #[test]
+    fn imports_renders_certain_rows_and_the_inferred_remainder() {
+        // RG-REQ-002-L11 (§2.4 kafka): the default lists the certain rows and states the inferred
+        // ones with the flag that lists them; with the flag the rows carry `inferred`.
+        let resp: ImportsResponse = serde_json::from_value(serde_json::json!({
+            "file": "tests/kafkatest/services/streams.py",
+            "imports": [{"symbol": "tests/kafkatest/services/monitor/jmx.py", "resolution": "static", "depth": 1}],
+            "count": 1,
+            "import_view": {"include_tests": false, "include_inferred": false},
+            "import_remainder": {
+                "tests": {"imports": 0, "edges": 0},
+                "inferred": {"imports": 2, "edges": 0},
+                "tests_and_inferred": {"imports": 0, "edges": 0}
+            }
+        }))
+        .unwrap();
+        let out = resp.render_human();
+        assert!(out.contains("1 import\n"), "{out}");
+        assert!(
+            out.contains("  tests/kafkatest/services/monitor/jmx.py  depth=1  static"),
+            "{out}"
+        );
+        assert!(
+            out.contains("+2 inferred imports, not shown — --include-inferred"),
+            "{out}"
+        );
+        assert!(!out.contains("streams_property.py"), "{out}");
+
+        let with: ImportsResponse = serde_json::from_value(serde_json::json!({
+            "file": "tests/kafkatest/services/streams.py",
+            "imports": [
+                {"symbol": "tests/kafkatest/services/streams_property.py", "resolution": "inferred", "depth": 1},
+                {"symbol": "tests/kafkatest/services/verifiable_consumer.py", "resolution": "inferred", "depth": 1}
+            ],
+            "import_view": {"include_tests": false, "include_inferred": true},
+            "import_remainder": {
+                "tests": {"imports": 0, "edges": 0},
+                "inferred": {"imports": 0, "edges": 0},
+                "tests_and_inferred": {"imports": 0, "edges": 0}
+            }
+        }))
+        .unwrap();
+        let out = with.render_human();
+        assert!(
+            out.contains("streams_property.py  depth=1  inferred"),
+            "{out}"
+        );
+        assert!(!out.contains("not shown"), "{out}");
+
+        // An older daemon (no view): the unavailable line, never a zero remainder.
+        let old: ImportsResponse = serde_json::from_value(serde_json::json!({
+            "file": "a.py", "imports": []
+        }))
+        .unwrap();
+        assert!(old
+            .render_human()
+            .contains(crate::presentation::import_partition::PARTITION_UNAVAILABLE));
     }
 
     #[test]
@@ -837,5 +938,38 @@ mod tests {
         assert!(out.contains("VERDICT: RED"));
         assert!(out.contains("REGRESSION DETAIL"));
         assert!(out.contains("a.ts -> missing [\"b.ts\"]"));
+    }
+
+    // ── TEST-EDGE-SCOPE-1B: D-TESB-17 (rows U9, W1) on `imports` ──
+
+    #[test]
+    fn imports_partial_partition_payload_renders_unreadable_never_nothing_excluded() {
+        let mut resp = sample_imports();
+        resp.import_remainder = None;
+        let out = resp.render_human();
+        assert!(
+            out.contains(crate::presentation::import_partition::PARTITION_UNREADABLE),
+            "{out}"
+        );
+        assert!(!out.contains("not shown"), "{out}");
+    }
+
+    #[test]
+    fn imports_wrong_typed_remainder_renders_unreadable_never_zero() {
+        for bad in [
+            serde_json::json!([]),
+            serde_json::json!({"tests": {"imports": 0, "edges": 0},
+                               "inferred": {"imports": "2", "edges": 0},
+                               "tests_and_inferred": {"imports": 0, "edges": 0}}),
+        ] {
+            let mut resp = sample_imports();
+            resp.import_remainder = Some(bad.clone());
+            let out = resp.render_human();
+            assert!(
+                out.contains(crate::presentation::import_partition::PARTITION_UNREADABLE),
+                "{bad}: {out}"
+            );
+            assert!(!out.contains("not shown"), "{out}");
+        }
     }
 }

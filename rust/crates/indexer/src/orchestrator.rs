@@ -45,6 +45,7 @@ use crate::storage_port::{
     PersistedUnresolvedEdge, ResolvedCallFilePair, SymbolCallDegree, TrackedFile,
     TypeOnlyDisposition, UpdateSnapshotStatusInput,
 };
+use crate::type_only::aggregate_module_edge_type_only;
 use crate::types::{
     ContractIndexResult, ContractParseFailure, EdgeType, ExtractedNode, IndexOptions, IndexResult,
     NodeKind, NodeSubtype, ParseStatus, Resolution, SnapshotKind, SnapshotStatus,
@@ -1354,37 +1355,6 @@ fn inject_import_type_only(metadata_json: &Option<String>, is_type_only: bool) -
         serde_json::Value::Bool(is_type_only),
     );
     Some(serde_json::Value::Object(obj).to_string())
-}
-
-/// TYPE-ONLY-IMPORTS-1: the conjunctive aggregate for a MODULE→MODULE IMPORTS edge over its contributing
-/// file-level import dispositions. A module edge is type-only iff EVERY contributing import is type-only.
-/// The precedence encodes "runtime dominates; a corrupt fact is louder than an absent one":
-///   - any `Some(Runtime)` present ⇒ `Some(Runtime)` — a confirmed runtime coupling (dominates all),
-///   - else any `Some(Unreadable)` present ⇒ `Some(Unreadable)` — a corrupt contributor blocks a
-///     type-only verdict AND is a distinct truth from an absent one (surfaces its own Unknown reason),
-///   - else any `None` present ⇒ `None` — an absent contributor (can't confirm ALL type-only ⇒ unknown,
-///     left NULL in the store: "indexed before type-only tracking"),
-///   - else (all `Some(TypeOnly)`) ⇒ `Some(TypeOnly)`.
-///
-/// The per-file-specific parse error cannot survive the aggregate + the NULL/int column; `Unreadable`
-/// carries the CATEGORY (corrupt) forward, which the serve renders as its own Unknown reason.
-fn aggregate_module_edge_type_only(
-    contributors: &[Option<TypeOnlyDisposition>],
-) -> Option<TypeOnlyDisposition> {
-    use TypeOnlyDisposition::*;
-    if contributors.is_empty() {
-        // No contributor ⇒ cannot confirm "all type-only" ⇒ unknown (left NULL). Not reachable from
-        // `create_module_edges` (a pair exists only because ≥1 file import fed it), but correct here.
-        None
-    } else if contributors.contains(&Some(Runtime)) {
-        Some(Runtime)
-    } else if contributors.contains(&Some(Unreadable)) {
-        Some(Unreadable)
-    } else if contributors.contains(&None) {
-        None
-    } else {
-        Some(TypeOnly)
-    }
 }
 
 /// Derive the MODULE-level edges. Returns the edges AND — for TYPE-ONLY-IMPORTS-1 — the

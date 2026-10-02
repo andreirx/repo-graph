@@ -129,6 +129,15 @@ pub fn run_gate(args: &[String]) -> ExitCode {
             };
 
             if json_mode {
+                // D-TESB-17: the JSON consumer boundary marks unreadable partition evidence.
+                let mut result = result;
+                if let Err(e) = crate::presentation::import_partition::mark_partition_evidence(
+                    &mut result,
+                    crate::presentation::import_partition::JsonSurface::Gate,
+                ) {
+                    eprintln!("error: {e}");
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
+                }
                 // Machine mode: raw JSON output
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {

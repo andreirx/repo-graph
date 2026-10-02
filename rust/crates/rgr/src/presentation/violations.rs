@@ -90,6 +90,10 @@ pub struct ViolationsResponse {
     /// the armed-and-clean render explicit ("N boundary declarations checked").
     #[serde(default)]
     pub declarations_checked: Option<u64>,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-11): the inferred imports the rules would have judged —
+    /// `declared` (per boundary, with files) and `discovered` (with relations). Absent = none.
+    #[serde(default)]
+    pub inferred_imports_not_judged: Option<serde_json::Value>,
 }
 
 // ── Human Rendering ──────────────────────────────────────────────────────────
@@ -149,6 +153,12 @@ impl ViolationsResponse {
                 "stale declarations"
             )
         ));
+
+        // TEST-EDGE-SCOPE-1B (D-TESB-11): beside the verdict, the inferred imports no rule
+        // judged, each with a runnable next action.
+        for line in self.not_judged_lines() {
+            out.push_str(&format!("{line}\n"));
+        }
 
         // Empty case (armed and clean — declarations exist, nothing violated).
         // GOV-ARMED-1: name the declarations checked so this reads as a real
@@ -237,6 +247,58 @@ impl ViolationsResponse {
     }
 }
 
+impl ViolationsResponse {
+    /// The not-judged lines: one per declared boundary (sorted), then the discovered one.
+    fn not_judged_lines(&self) -> Vec<String> {
+        use crate::presentation::import_partition as ip;
+        // D-TESB-17 row U10: a current daemon sends both halves on every answer, zeros included;
+        // absent = a daemon that predates the partition, stated — never read as zero.
+        let Some(nj) = &self.inferred_imports_not_judged else {
+            return vec![ip::PARTITION_UNAVAILABLE.to_string()];
+        };
+        if !nj.is_object() {
+            return vec![ip::NOT_JUDGED_UNREADABLE.to_string()];
+        }
+        let mut out = Vec::new();
+        if let Some(declared) = nj.get("declared") {
+            match declared.as_array() {
+                Some(rows) => {
+                    let mut rows: Vec<&serde_json::Value> = rows.iter().collect();
+                    rows.sort_by_key(|r| {
+                        (
+                            r.get("boundary_module")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(""),
+                            r.get("forbidden_module")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(""),
+                        )
+                    });
+                    for r in rows {
+                        let boundary = format!(
+                            "{} -> {}",
+                            r.get("boundary_module")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("?"),
+                            r.get("forbidden_module")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("?")
+                        );
+                        out.extend(ip::not_judged_line(r, &boundary));
+                    }
+                }
+                None => out.push(ip::NOT_JUDGED_UNREADABLE.to_string()),
+            }
+        }
+        match (nj.get("declared"), nj.get("discovered")) {
+            (Some(_), Some(discovered)) => out.extend(ip::not_judged_line(discovered, "")),
+            // A current daemon sends both halves; a half missing is unreadable, never zero.
+            _ => out.push(ip::NOT_JUDGED_UNREADABLE.to_string()),
+        }
+        out
+    }
+}
+
 /// Format a count with singular/plural grammar.
 fn format_count(count: usize, singular: &str, plural: &str) -> String {
     if count == 1 {
@@ -279,6 +341,10 @@ mod tests {
             // per test for the unarmed / unknown cases.
             armed: Some(true),
             declarations_checked: Some(3),
+            // A current daemon sends both halves, zeros included (D-TESB-17 fixture rule).
+            inferred_imports_not_judged: Some(serde_json::json!({
+                "declared": [], "discovered": {"count": 0, "relations": []}
+            })),
         }
     }
 
@@ -327,6 +393,42 @@ mod tests {
 
     // GOV-ARMED-1: armed and clean — declarations exist, nothing violated. The
     // render names the declarations checked; it is NOT the unarmed one-liner.
+    #[test]
+    fn violations_state_inferred_imports_not_judged() {
+        // D-TESB-11: an armed, clean answer still states the inferred imports each rule would have
+        // judged — declared per boundary with its first file, discovered with its first module.
+        let mut resp = make_response(vec![], vec![], vec![]);
+        resp.inferred_imports_not_judged = Some(serde_json::json!({
+            "declared": [
+                {"boundary_module": "src/core", "forbidden_module": "src/adapters", "count": 2,
+                 "files": ["src/core/a.py"]}
+            ],
+            "discovered": {"count": 1, "relations": [
+                {"source": "db", "target": "util", "import_count": 1}
+            ]}
+        }));
+        let out = resp.render_human();
+        assert!(
+            out.contains("+2 inferred imports across src/core -> src/adapters not judged (1 file; first: src/core/a.py) — investigate with rmap imports src/core/a.py --include-inferred\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("+1 inferred import not judged — investigate with rmap modules deps db --include-inferred\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("3 boundary declarations checked — no violations."),
+            "{out}"
+        );
+        // A measured zero: the render is as before (absence is its own test, D-TESB-17).
+        resp.inferred_imports_not_judged = Some(serde_json::json!({
+            "declared": [], "discovered": {"count": 0, "relations": []}
+        }));
+        let out = resp.render_human();
+        assert!(!out.contains("not judged"), "{out}");
+        assert!(!out.contains("partition unavailable"), "{out}");
+    }
+
     #[test]
     fn render_armed_clean_violations() {
         let resp = make_response(vec![], vec![], vec![]);
@@ -531,5 +633,38 @@ mod tests {
         // Should not have ":None" or ":" with no number
         assert!(out.contains("source: a.ts\n"));
         assert!(!out.contains("a.ts:"));
+    }
+
+    // ── TEST-EDGE-SCOPE-1B: D-TESB-17 (rows U10, W4) on `violations` ──
+
+    #[test]
+    fn violations_without_not_judged_evidence_states_the_partition_unavailable() {
+        let mut resp = make_response(vec![], vec![], vec![]);
+        resp.inferred_imports_not_judged = None;
+        let out = resp.render_human();
+        assert!(
+            out.contains(crate::presentation::import_partition::PARTITION_UNAVAILABLE),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn violations_non_numeric_not_judged_renders_unreadable() {
+        for bad in [
+            serde_json::json!({"declared": [], "discovered": {"count": "1", "relations": []}}),
+            serde_json::json!({"declared": {"x": 1}, "discovered": {"count": 0, "relations": []}}),
+            serde_json::json!({"declared": [{"boundary_module": "a", "forbidden_module": "b",
+                                             "count": -2, "files": ["a/x.py"]}],
+                               "discovered": {"count": 0, "relations": []}}),
+            serde_json::json!("0"),
+        ] {
+            let mut resp = make_response(vec![], vec![], vec![]);
+            resp.inferred_imports_not_judged = Some(bad.clone());
+            let out = resp.render_human();
+            assert!(
+                out.contains(crate::presentation::import_partition::NOT_JUDGED_UNREADABLE),
+                "{bad}: {out}"
+            );
+        }
     }
 }

@@ -336,6 +336,13 @@ pub struct ModuleTrustRow {
     #[serde(default)]
     pub alias_unresolved_imports: u64,
     pub trust_notes: Vec<String>,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-10): the relations this module has only through imports the
+    /// default view excludes, per flag set. Additive; serialized on every row, zeros included;
+    /// decoded as `Option` with no serde default — absent (an older daemon) is `None`, unknown,
+    /// never zero; malformed fails to decode naming the field (D-TESB-17 rows U5, W5). An unknown
+    /// `None` (an input that predates the partition) is omitted on the wire, never written as zero.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excluded_connectivity: Option<crate::storage_port::ExcludedConnectivity>,
 }
 
 // ── Trust report (full output) ───────────────────────────────────

@@ -147,11 +147,14 @@ impl PathResponse {
             out.push_str("No path found.\n");
             // PYTHON-RECEIVER-BINDING-1: an absent certain route is never presented as proof of
             // absence when inferred call/import edges connect the endpoints.
+            // TEST-EDGE-SCOPE-1B (D-TESB-15): the next action is the runnable command with the
+            // user's two queries (worded by `import_partition`).
             if let Some((n, depth)) = self.inferred_route {
-                let edges = if n == 1 { "edge" } else { "edges" };
                 out.push_str(&format!(
-                    "no route through certain edges within depth {depth}; a route exists using {n} \
-                     inferred call/import {edges} — investigate\n"
+                    "no route through certain edges within depth {depth}; {}\n",
+                    crate::presentation::import_partition::path_no_route_line(
+                        n, from_query, to_query
+                    )
                 ));
             }
             return out;
@@ -181,6 +184,17 @@ impl PathResponse {
                     };
                     out.push_str(&format!("    {}\n", edge));
                 }
+            }
+        }
+
+        // TEST-EDGE-SCOPE-1B (D-TESB-15): a route found with `--include-inferred` states how many
+        // of its hops are inferred call/import edges.
+        if let Some((n, _)) = self.inferred_route {
+            if n > 0 {
+                out.push_str(&format!(
+                    "{}\n",
+                    crate::presentation::import_partition::path_inferred_hops_line(n, hops as u64)
+                ));
             }
         }
 
@@ -317,37 +331,94 @@ mod tests {
         assert!(!output.contains("hops")); // singular
     }
 
-    #[test]
-    fn render_path_not_found_states_the_inferred_edges_on_route_within_the_depth() {
-        let parse = |extra: serde_json::Value| -> Result<PathResponse, serde_json::Error> {
-            let mut v = serde_json::json!({
-                "repo_uid": "r", "snapshot_uid": "s", "found": false,
-                "path": {"found": false, "path_length": 0, "path": []}
-            });
-            for (k, x) in extra.as_object().unwrap() {
-                v[k] = x.clone();
-            }
-            serde_json::from_value(v)
+    fn parse_path(
+        extra: serde_json::Value,
+        found: bool,
+    ) -> Result<PathResponse, serde_json::Error> {
+        let path = if found {
+            serde_json::json!({"found": true, "path_length": 2, "path": [
+                {"node_id": "n1", "symbol": "A.f", "file": "a.py", "line": 1, "edge_type": ""},
+                {"node_id": "n2", "symbol": "M.h", "file": "m.py", "line": 5, "edge_type": "CALLS"},
+                {"node_id": "n3", "symbol": "B.g", "file": "b.py", "line": 9, "edge_type": "IMPORTS"}
+            ]})
+        } else {
+            serde_json::json!({"found": false, "path_length": 0, "path": []})
         };
-        let one =
-            parse(serde_json::json!({"inferred_edges_on_route": 1, "search_depth": 8})).unwrap();
+        let mut v = serde_json::json!({
+            "repo_uid": "r", "snapshot_uid": "s", "found": found, "path": path
+        });
+        for (k, x) in extra.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        serde_json::from_value(v)
+    }
+
+    #[test]
+    fn render_path_not_found_names_the_runnable_include_inferred_command() {
+        // D-TESB-15 (the new identity of `render_path_not_found_states_the_inferred_edges_on_route_
+        // within_the_depth`): the next action is `rmap path <from> <to> --include-inferred` with
+        // the user's two queries, quoted for the shell when needed.
+        let one = parse_path(
+            serde_json::json!({"inferred_edges_on_route": 1, "search_depth": 8}),
+            false,
+        )
+        .unwrap();
         let out = one.render_human_with_query("A.f", "B.g");
         assert!(out.contains("No path found."), "{out}");
         assert!(
-            out.contains("no route through certain edges within depth 8; a route exists using 1 inferred call/import edge — investigate"),
+            out.contains("no route through certain edges within depth 8; a route exists using 1 inferred call/import edge — investigate with rmap path A.f B.g --include-inferred\n"),
             "{out}"
         );
-        let three =
-            parse(serde_json::json!({"inferred_edges_on_route": 3, "search_depth": 8})).unwrap();
+        let three = parse_path(
+            serde_json::json!({"inferred_edges_on_route": 3, "search_depth": 8}),
+            false,
+        )
+        .unwrap();
         assert!(three
-            .render_human_with_query("A.f", "B.g")
-            .contains("a route exists using 3 inferred call/import edges — investigate"));
+            .render_human_with_query("pkg mod::f", "B.g")
+            .contains("a route exists using 3 inferred call/import edges — investigate with rmap path 'pkg mod::f' B.g --include-inferred"));
         // Absent → the plain not-found render (byte-identical).
-        let plain = parse(serde_json::json!({})).unwrap();
+        let plain = parse_path(serde_json::json!({}), false).unwrap();
         assert!(!plain
             .render_human_with_query("A.f", "B.g")
             .contains("inferred"));
         // A count without its depth is a decode error, never a guessed bound.
-        assert!(parse(serde_json::json!({"inferred_edges_on_route": 1})).is_err());
+        assert!(parse_path(serde_json::json!({"inferred_edges_on_route": 1}), false).is_err());
+    }
+
+    #[test]
+    fn render_path_found_with_inferred_hops_states_their_count() {
+        // D-TESB-15: `path --include-inferred` answers the admitting walk's route and states how
+        // many of its hops are inferred.
+        let resp = parse_path(
+            serde_json::json!({"include_inferred": true, "inferred_edges_on_route": 1, "search_depth": 8}),
+            true,
+        )
+        .unwrap();
+        let out = resp.render_human_with_query("A.f", "B.g");
+        assert!(out.contains("2 hops"), "{out}");
+        assert!(
+            out.ends_with("1 of 2 hops is an inferred call/import edge — investigate\n"),
+            "{out}"
+        );
+        let two = parse_path(
+            serde_json::json!({"include_inferred": true, "inferred_edges_on_route": 2, "search_depth": 8}),
+            true,
+        )
+        .unwrap();
+        assert!(two
+            .render_human_with_query("A.f", "B.g")
+            .contains("2 of 2 hops are inferred call/import edges — investigate"));
+        // No inferred hop: nothing added.
+        let zero = parse_path(
+            serde_json::json!({"include_inferred": true, "inferred_edges_on_route": 0, "search_depth": 8}),
+            true,
+        )
+        .unwrap();
+        let plain = parse_path(serde_json::json!({}), true).unwrap();
+        assert_eq!(
+            zero.render_human_with_query("A.f", "B.g"),
+            plain.render_human_with_query("A.f", "B.g")
+        );
     }
 }

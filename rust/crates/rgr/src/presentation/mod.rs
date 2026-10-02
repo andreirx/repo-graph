@@ -50,6 +50,8 @@ pub mod explain;
 pub mod explain_sections;
 pub mod graph_edges;
 pub mod imports;
+// TEST-EDGE-SCOPE-1B (D-TESB-07): the one home of the import-partition wording.
+pub(crate) mod import_partition;
 pub mod map;
 // MODULES-IDENTITY-2 §2.1: crate-local — all items are `pub(crate)`; its only users
 // (`orient_seg2`, `modules_list`) are in this crate, so the module is not part of the

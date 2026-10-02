@@ -86,7 +86,26 @@ fn sample_list_response() -> ModulesListResponse {
         modules_method: None,
         orientation_docs: None,
         test_status_undetermined: None,
+        // A current (partitioned) daemon's payload: the view stated, nothing excluded.
+        import_view: Some(serde_json::json!({"include_tests": false, "include_inferred": false})),
+        import_remainder: Some(zero_remainder()),
+        importer_test_status_undetermined: Some(zero_importer_block()),
     }
+}
+
+/// A current daemon's zero remainder (D-TESB-17 fixture rule).
+fn zero_remainder() -> serde_json::Value {
+    serde_json::json!({
+        "tests": {"imports": 0, "edges": 0},
+        "inferred": {"imports": 0, "edges": 0},
+        "tests_and_inferred": {"imports": 0, "edges": 0}
+    })
+}
+
+/// A current daemon's zero importer block over the cross-module importers.
+fn zero_importer_block() -> serde_json::Value {
+    serde_json::json!({"count": 0, "paths": [], "universe": "cross_module_importers",
+                       "universe_count": 0, "unknown_count": 0})
 }
 
 fn sample_empty_list_response() -> ModulesListResponse {
@@ -107,6 +126,10 @@ fn sample_empty_list_response() -> ModulesListResponse {
         modules_method: None,
         orientation_docs: None,
         test_status_undetermined: None,
+        // A current (partitioned) daemon's payload: the view stated, nothing excluded.
+        import_view: Some(serde_json::json!({"include_tests": false, "include_inferred": false})),
+        import_remainder: Some(zero_remainder()),
+        importer_test_status_undetermined: Some(zero_importer_block()),
     }
 }
 
@@ -140,6 +163,10 @@ fn two_crate_fixture_response() -> ModulesListResponse {
         modules_method: None,
         orientation_docs: None,
         test_status_undetermined: None,
+        // A current (partitioned) daemon's payload: the view stated, nothing excluded.
+        import_view: Some(serde_json::json!({"include_tests": false, "include_inferred": false})),
+        import_remainder: Some(zero_remainder()),
+        importer_test_status_undetermined: Some(zero_importer_block()),
     }
 }
 
@@ -1030,6 +1057,10 @@ fn identity_response(results: Vec<ModuleListEntry>) -> ModulesListResponse {
         modules_method: None,
         orientation_docs: None,
         test_status_undetermined: None,
+        // A current (partitioned) daemon's payload: the view stated, nothing excluded.
+        import_view: Some(serde_json::json!({"include_tests": false, "include_inferred": false})),
+        import_remainder: Some(zero_remainder()),
+        importer_test_status_undetermined: Some(zero_importer_block()),
     }
 }
 
@@ -1448,4 +1479,182 @@ fn modules_list_states_undetermined_owned_files() {
         !before.contains("test status"),
         "absent → unchanged:\n{before}"
     );
+}
+
+// ── TEST-EDGE-SCOPE-1B: the import partition (RG-REQ-004-L12, D-TESB-07/08) ──
+
+/// The sample catalog with `n` edges `m{i} → core` (as the daemon sends them) and the given
+/// partition keys (`edges`, `import_remainder`, `importer_test_status_undetermined`).
+fn partitioned_list(n: usize, extra: serde_json::Value) -> ModulesListResponse {
+    let edges: Vec<serde_json::Value> = (0..n)
+        .map(|i| serde_json::json!({"source": format!("m{i:02}"), "target": "core", "import_count": 100 - i}))
+        .collect();
+    let edges = extra
+        .get("edges")
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(edges));
+    let mut r = sample_list_response();
+    r.edges = Some(serde_json::from_value(edges).expect("edges parse"));
+    r.unresolved_import_count = Some(280);
+    // A current daemon sends every key; a key `extra` omits is its zero value (D-TESB-17).
+    r.import_remainder = Some(
+        extra
+            .get("import_remainder")
+            .cloned()
+            .unwrap_or_else(zero_remainder),
+    );
+    r.importer_test_status_undetermined = Some(
+        extra
+            .get("importer_test_status_undetermined")
+            .cloned()
+            .unwrap_or_else(zero_importer_block),
+    );
+    r
+}
+
+#[test]
+fn modules_list_renders_the_remainder_after_the_edge_list() {
+    // §2.4 leveldb: the remainder (flag form, cross-module noun) and the importer count follow
+    // the edge list — after its budget line, before anything else.
+    let resp = partitioned_list(
+        14,
+        serde_json::json!({
+            "import_remainder": {
+                "tests": {"imports": 89, "edges": 3},
+                "inferred": {"imports": 0, "edges": 0},
+                "tests_and_inferred": {"imports": 2, "edges": 1}
+            },
+            "importer_test_status_undetermined": {
+                "count": 1, "paths": ["util/testutil.cc"], "universe": "cross_module_importers",
+                "universe_count": 64, "unknown_count": 0
+            }
+        }),
+    );
+    let out = resp.render_human();
+    let last_row = out
+        .rfind(" \u{2192} core (")
+        .unwrap_or_else(|| panic!("an edge row:\n{out}"));
+    let tests_line = out
+        .find("+89 imports from test files, not shown (3 cross-module dependencies only through them) — --include-tests\n")
+        .unwrap_or_else(|| panic!("tests remainder line:\n{out}"));
+    let both_line = out
+        .find("+2 inferred imports from test files, not shown (1 cross-module dependency only through them) — --include-tests --include-inferred\n")
+        .unwrap_or_else(|| panic!("tests-and-inferred line:\n{out}"));
+    let importer_line = out
+        .find("1 file whose test status can't be determined — open it and look inside (of 64 files importing across modules)\n")
+        .unwrap_or_else(|| panic!("importer line:\n{out}"));
+    assert!(
+        last_row < tests_line && tests_line < both_line && both_line < importer_line,
+        "{out}"
+    );
+    // After the edge list's own budget line, when it has one.
+    if let Some(more) = out.find("more — --full") {
+        assert!(more < tests_line, "{out}");
+    }
+    // No line for the zero `inferred` group.
+    assert!(!out.contains("+0 "), "{out}");
+}
+
+#[test]
+fn modules_list_render_with_zero_partitions_equals_the_render_without_them() {
+    // Additive-key neutrality (P-TESB-04): zero per-edge partitions, a zero remainder and a zero
+    // importer count add no text. "Without" is the same payload with no partition key at all (a
+    // daemon that predates the partition): the same text plus exactly the one
+    // partition-unavailable line (D-TESB-17: absence is stated, never read as zero).
+    use crate::presentation::import_partition::PARTITION_UNAVAILABLE;
+    let mut older = partitioned_list(3, serde_json::json!({}));
+    older.import_view = None;
+    older.import_remainder = None;
+    older.importer_test_status_undetermined = None;
+    let older = older.render_human();
+    assert_eq!(older.matches(PARTITION_UNAVAILABLE).count(), 1, "{older}");
+    let without = older.replace(&format!("{PARTITION_UNAVAILABLE}\n"), "");
+    let zero_edges: Vec<serde_json::Value> = (0..3)
+        .map(|i| {
+            serde_json::json!({
+                "source": format!("m{i:02}"), "target": "core", "import_count": 100 - i,
+                "partitions": {"production_certain": 100 - i, "test_certain": 0,
+                               "production_inferred": 0, "test_inferred": 0,
+                               "unknown_test_status": 0}
+            })
+        })
+        .collect();
+    let with = partitioned_list(
+        3,
+        serde_json::json!({
+            "edges": zero_edges,
+            "import_remainder": {
+                "tests": {"imports": 0, "edges": 0},
+                "inferred": {"imports": 0, "edges": 0},
+                "tests_and_inferred": {"imports": 0, "edges": 0}
+            },
+            "importer_test_status_undetermined": {
+                "count": 0, "paths": [], "universe": "cross_module_importers",
+                "universe_count": 64, "unknown_count": 0
+            }
+        }),
+    )
+    .render_human();
+    assert_eq!(with, without);
+}
+
+// ── TEST-EDGE-SCOPE-1B: D-TESB-17 (rows U9, W1, W3) on `modules list` ──
+
+#[test]
+fn modules_list_partial_partition_payload_renders_unreadable_never_nothing_excluded() {
+    use crate::presentation::import_partition::PARTITION_UNREADABLE;
+    for missing in ["import_remainder", "importer_test_status_undetermined"] {
+        let mut r = partitioned_list(3, serde_json::json!({}));
+        match missing {
+            "import_remainder" => r.import_remainder = None,
+            _ => r.importer_test_status_undetermined = None,
+        }
+        let out = r.render_human();
+        assert_eq!(
+            out.matches(PARTITION_UNREADABLE).count(),
+            1,
+            "{missing}: {out}"
+        );
+        assert!(!out.contains("not shown"), "{missing}: {out}");
+    }
+}
+
+#[test]
+fn modules_list_non_numeric_remainder_renders_unreadable_never_zero() {
+    use crate::presentation::import_partition::PARTITION_UNREADABLE;
+    for bad in [
+        serde_json::json!("0"),
+        serde_json::json!({"tests": {"imports": "89", "edges": 3},
+                           "inferred": {"imports": 0, "edges": 0},
+                           "tests_and_inferred": {"imports": 0, "edges": 0}}),
+        serde_json::json!({"tests": {"imports": -1, "edges": 3},
+                           "inferred": {"imports": 0, "edges": 0},
+                           "tests_and_inferred": {"imports": 0, "edges": 0}}),
+    ] {
+        let r = partitioned_list(3, serde_json::json!({ "import_remainder": bad }));
+        let out = r.render_human();
+        assert!(out.contains(PARTITION_UNREADABLE), "{out}");
+        assert!(!out.contains("+0 ") && !out.contains("not shown"), "{out}");
+    }
+}
+
+#[test]
+fn modules_list_non_numeric_importer_block_renders_unreadable() {
+    use crate::presentation::import_partition::PARTITION_UNREADABLE;
+    for bad in [
+        serde_json::json!({"count": "1", "paths": ["db/c_test.c"], "universe": "cross_module_importers",
+                           "universe_count": 64, "unknown_count": 0}),
+        serde_json::json!(1),
+    ] {
+        let r = partitioned_list(
+            3,
+            serde_json::json!({ "importer_test_status_undetermined": bad }),
+        );
+        let out = r.render_human();
+        assert!(out.contains(PARTITION_UNREADABLE), "{out}");
+        assert!(
+            !out.contains("can't be determined"),
+            "never a count from a malformed block: {out}"
+        );
+    }
 }

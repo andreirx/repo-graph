@@ -319,6 +319,40 @@ impl AgentStorageRead for FakeStorage {
         Ok(Vec::new())
     }
 
+    // TEST-EDGE-SCOPE-1B: this double drives the complexity aggregator only; the import-partition
+    // reads are never reached from it (an unused fixture, not a defaulted serving read).
+    fn import_cycle_partition(
+        &self,
+        _snapshot_uid: &str,
+        view: repo_graph_classification::import_partition::ImportView,
+        _cancel: crate::AgentCancelCheck<'_>,
+    ) -> Result<crate::AgentImportCyclePartition, AgentStorageError> {
+        Ok(crate::AgentImportCyclePartition {
+            view,
+            remainder: Default::default(),
+            excluded_cycles: Vec::new(),
+            cycle_partitions: Vec::new(),
+            importers: Vec::new(),
+        })
+    }
+
+    fn find_inferred_imports_between_paths(
+        &self,
+        _snapshot_uid: &str,
+        _source_prefix: &str,
+        _target_prefix: &str,
+    ) -> Result<Vec<crate::AgentImportEdge>, AgentStorageError> {
+        Ok(Vec::new())
+    }
+
+    fn find_inferred_file_imports(
+        &self,
+        _snapshot_uid: &str,
+        _file_path: &str,
+    ) -> Result<Vec<crate::AgentImportEntry>, AgentStorageError> {
+        Ok(Vec::new())
+    }
+
     // EXPLAIN-TYPE-SECTIONS-1: the complexity fake carries no type members / importers — this
     // double drives the complexity aggregator only, never a type-focus explain. Empty is honest
     // here (an unused fixture), NOT a defaulted read on a serving path.

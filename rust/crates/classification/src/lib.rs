@@ -277,6 +277,7 @@ pub mod dep_reduce;
 pub(crate) mod framework_boundary;
 pub(crate) mod framework_entrypoints;
 pub mod hotspot_scorer;
+pub mod import_partition;
 pub mod measurement_coverage;
 pub mod module_edges;
 pub mod module_rollup;

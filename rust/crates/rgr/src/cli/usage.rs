@@ -84,9 +84,11 @@ pub fn print_usage() {
     eprintln!("  rmap callers <symbol> [--edge-types <types>] [--include-inferred]");
     eprintln!("  rmap callees <symbol> [--edge-types <types>] [--include-inferred]");
     eprintln!("    --include-inferred  also list the calls bound by an inferred (name-only) binding, marked");
-    eprintln!("  rmap path <from> <to>");
-    eprintln!("  rmap imports <file_path>");
-    eprintln!("  rmap cycles");
+    eprintln!("  rmap path <from> <to> [--include-inferred]");
+    eprintln!("  rmap imports <file_path> [--include-inferred]");
+    eprintln!("  rmap cycles [--include-tests] [--include-inferred]");
+    eprintln!("    --include-tests     also count imports from test files (default: production files only)");
+    eprintln!("    --include-inferred  also count inferred imports / walk inferred edges (default: certain only)");
     eprintln!("  rmap stats");
     eprintln!();
     eprintln!("Quality and risk (resolve repo from cwd):");
@@ -107,9 +109,9 @@ pub fn print_usage() {
     eprintln!("  rmap docs extract");
     eprintln!();
     eprintln!("Modules (resolve repo from cwd):");
-    eprintln!("  rmap modules list");
+    eprintln!("  rmap modules list [--include-tests] [--include-inferred]");
     eprintln!("  rmap modules files <module>");
-    eprintln!("  rmap modules deps [module] [--outbound|--inbound]");
+    eprintln!("  rmap modules deps [module] [--outbound|--inbound] [--include-tests] [--include-inferred]");
     eprintln!("  rmap modules violations");
     eprintln!();
     eprintln!("Surfaces and boundaries (resolve repo from cwd):");

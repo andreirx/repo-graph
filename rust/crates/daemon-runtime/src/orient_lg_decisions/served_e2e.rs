@@ -1000,3 +1000,564 @@ fn build_orient_envelope_module_summary_leaf_follows_actual_serve() {
     );
     assert!(leaf.provenance.fallback_reason.is_none());
 }
+
+// ── TEST-EDGE-SCOPE-1B (D-TESB-16): cycle provenance follows the partitioned view actually served ──
+
+/// Add to the fixture's SQLite store two directory modules `a` and `b` whose DEFAULT import view
+/// excludes one import: a test file's import `b/y.test.ts → a/x.ts`. `changes_sccs`:
+/// - `true`  — the production graph is `a → b` only, so the test import CLOSES the only cycle (the
+///   exclusion changes the SCCs: none in the default view, {a, b} with tests);
+/// - `false` — the production graph already has `a ↔ b`, so the test import is parallel to the
+///   production `b/y.ts → a/x.ts` and leaves the SCCs unchanged ({a, b} in both views).
+///
+/// Either way the default view excludes exactly one directory import; the LiveGraph posture and its
+/// fingerprint (and so the seeded GREEN certificate) are untouched.
+fn add_directory_imports_with_one_excluded(f: &Fixture, changes_sccs: bool) {
+    let db_path = f._dir.path().join("repo.db");
+    let mut conn = StorageConnection::open(&db_path).expect("reopen storage");
+    let snap = f.snapshot_uid.clone();
+    let files = [("a/x.ts", false), ("b/y.ts", false), ("b/y.test.ts", true)];
+    conn.upsert_files(
+        &files
+            .iter()
+            .map(|(p, t)| TrackedFile {
+                file_uid: format!("{REPO}:{p}"),
+                repo_uid: REPO.to_string(),
+                path: p.to_string(),
+                language: Some("typescript".to_string()),
+                is_test: *t,
+                is_generated: false,
+                is_excluded: false,
+            })
+            .collect::<Vec<_>>(),
+    )
+    .expect("upsert files");
+    let node = |uid: String, kind: &str, qn: &str, file: Option<String>| GraphNode {
+        node_uid: uid,
+        snapshot_uid: snap.clone(),
+        repo_uid: REPO.to_string(),
+        stable_key: format!("{REPO}:{qn}:{kind}"),
+        kind: kind.to_string(),
+        subtype: None,
+        name: qn.rsplit('/').next().unwrap().to_string(),
+        qualified_name: Some(qn.to_string()),
+        file_uid: file,
+        parent_node_uid: None,
+        location: None,
+        signature: None,
+        visibility: None,
+        doc_comment: None,
+        metadata_json: None,
+    };
+    let mut nodes = vec![
+        node("tesb:m:a".into(), "MODULE", "a", None),
+        node("tesb:m:b".into(), "MODULE", "b", None),
+    ];
+    for (p, _) in &files {
+        nodes.push(node(
+            format!("tesb:f:{p}"),
+            "FILE",
+            p,
+            Some(format!("{REPO}:{p}")),
+        ));
+    }
+    conn.insert_nodes(&nodes).expect("insert nodes");
+    let edge = |uid: &str, s: String, t: String, ty: &str| GraphEdge {
+        edge_uid: uid.to_string(),
+        snapshot_uid: snap.clone(),
+        repo_uid: REPO.to_string(),
+        source_node_uid: s,
+        target_node_uid: t,
+        edge_type: ty.to_string(),
+        resolution: "static".to_string(),
+        extractor: "test".to_string(),
+        location: None,
+        metadata_json: None,
+    };
+    let mut edges = vec![
+        edge(
+            "tesb:own:a",
+            "tesb:m:a".into(),
+            "tesb:f:a/x.ts".into(),
+            "OWNS",
+        ),
+        edge(
+            "tesb:own:b1",
+            "tesb:m:b".into(),
+            "tesb:f:b/y.ts".into(),
+            "OWNS",
+        ),
+        edge(
+            "tesb:own:b2",
+            "tesb:m:b".into(),
+            "tesb:f:b/y.test.ts".into(),
+            "OWNS",
+        ),
+        edge(
+            "tesb:imp:ab",
+            "tesb:f:a/x.ts".into(),
+            "tesb:f:b/y.ts".into(),
+            "IMPORTS",
+        ),
+        edge(
+            "tesb:imp:test",
+            "tesb:f:b/y.test.ts".into(),
+            "tesb:f:a/x.ts".into(),
+            "IMPORTS",
+        ),
+    ];
+    if !changes_sccs {
+        edges.push(edge(
+            "tesb:imp:ba",
+            "tesb:f:b/y.ts".into(),
+            "tesb:f:a/x.ts".into(),
+            "IMPORTS",
+        ));
+    }
+    conn.insert_edges(&edges).expect("insert edges");
+    // The premise, read the way the decision reads it: the default view excludes one import, and the
+    // SCCs change (or not) as the case says.
+    let graph = conn.directory_module_graph(&snap).expect("directory graph");
+    let view = repo_graph_classification::import_partition::ImportView::DEFAULT;
+    assert_eq!(graph.excluded_import_count(view), 1);
+    let never = &mut || std::ops::ControlFlow::Continue(());
+    let default_sccs = graph.find_cycles(view, never).expect("cycles").len();
+    let with_tests = graph
+        .find_cycles(
+            repo_graph_classification::import_partition::ImportView::CERTAIN_WITH_TESTS,
+            never,
+        )
+        .expect("cycles")
+        .len();
+    assert_eq!(with_tests, 1);
+    assert_eq!(default_sccs, if changes_sccs { 0 } else { 1 });
+}
+
+/// Seed ONLY the cycles certificate at the LIVE fingerprint with the given verdict.
+fn seed_cycles_cert(state: &RepoState, snapshot_uid: &str, verdict: &str) {
+    let fp = {
+        let guard = state.livegraph.read();
+        let lg = guard.as_ref().expect("livegraph set");
+        import_cert_fingerprint(&lg.live_partitions(), snapshot_uid)
+    };
+    *state.cycles_cert.write() = Some(CycleNoLossCert {
+        verdict: verdict.to_string(),
+        values_verdict: verdict.to_string(),
+        fingerprint: fp,
+    });
+}
+
+fn assert_partitioned_view_fallback(outcome: OrientLgOutcome) {
+    match outcome {
+        OrientLgOutcome::Fallback { reason } => assert_eq!(
+            reason,
+            crate::livegraph_feed::FallbackReason::LiveGraphPartitionedViewUnsupported,
+            "a view that excludes an import names the partitioned view, never a divergence"
+        ),
+        OrientLgOutcome::Livegraph { .. } => {
+            panic!("a SQLite production-view answer must not be labelled LiveGraph-corroborated")
+        }
+    }
+}
+
+#[test]
+fn orient_cycles_outcome_names_the_partitioned_view_when_an_excluded_import_changes_the_sccs_despite_a_green_cert(
+) {
+    let f = setup();
+    add_directory_imports_with_one_excluded(&f, true);
+    seed_certs_green(&f.state, &f.snapshot_uid);
+    assert_partitioned_view_fallback(orient_cycles_outcome(&f.state, &f.snapshot_uid));
+}
+
+#[test]
+fn orient_cycles_outcome_names_the_partitioned_view_when_an_excluded_import_leaves_the_sccs_unchanged_despite_a_green_cert(
+) {
+    let f = setup();
+    add_directory_imports_with_one_excluded(&f, false);
+    seed_certs_green(&f.state, &f.snapshot_uid);
+    assert_partitioned_view_fallback(orient_cycles_outcome(&f.state, &f.snapshot_uid));
+}
+
+#[test]
+fn orient_cycles_outcome_with_a_non_green_cert_and_nothing_excluded_stays_cycle_divergence() {
+    let f = setup();
+    seed_cycles_cert(&f.state, &f.snapshot_uid, "RED");
+    match orient_cycles_outcome(&f.state, &f.snapshot_uid) {
+        OrientLgOutcome::Fallback { reason } => assert_eq!(
+            reason,
+            crate::livegraph_feed::FallbackReason::LiveGraphCycleDivergence,
+            "a certificate that is not GREEN keeps its divergence meaning"
+        ),
+        OrientLgOutcome::Livegraph { .. } => panic!("a RED certificate never labels livegraph"),
+    }
+}
+
+fn import_cycles_signal() -> Signal {
+    Signal::import_cycles(ImportCyclesEvidence {
+        cycle_count: 0,
+        production_count: None,
+        test_only_count: None,
+        unknown_count: None,
+        production_type_only: None,
+        cycles: Vec::new(),
+    })
+}
+
+#[test]
+fn build_orient_envelope_cycles_leaf_serializes_the_partitioned_view_reason_never_a_divergence() {
+    for changes_sccs in [true, false] {
+        let f = setup();
+        add_directory_imports_with_one_excluded(&f, changes_sccs);
+        seed_certs_green(&f.state, &f.snapshot_uid);
+        let result = orient_result(
+            REPO,
+            &f.snapshot_uid,
+            Focus::repo(),
+            vec![import_cycles_signal()],
+        );
+        let env = crate::orient_coherence::build_orient_envelope(
+            &f.state, REPO, result, true, false, false,
+        );
+        let leaf = env
+            .value
+            .signals
+            .iter()
+            .find(|l| l.value.code() == SignalCode::ImportCycles)
+            .expect("cycles leaf present");
+        assert_eq!(leaf.provenance.source, BTreeSet::from([Source::Sqlite]));
+        let json = serde_json::to_value(&leaf.provenance).unwrap();
+        assert_eq!(
+            json["fallback_reason"], "LiveGraphPartitionedViewUnsupported",
+            "changes_sccs={changes_sccs}: {json}"
+        );
+        // The one leaf is SQLite, so the root claims no LiveGraph source.
+        assert!(!env.provenance.source.contains(&Source::Livegraph));
+    }
+}
+
+fn explain_module_result(snapshot_uid: &str) -> OrientResult {
+    orient_result(
+        REPO,
+        snapshot_uid,
+        Focus::path_area("a", None, "a"),
+        vec![Signal::explain_cycles(
+            repo_graph_agent::ExplainCyclesEvidence {
+                count: 0,
+                items: Vec::new(),
+                items_truncated: None,
+                items_omitted_count: None,
+            },
+        )],
+    )
+}
+
+#[test]
+fn explain_cycles_leaf_label_is_render_unsupported_with_a_green_cert_when_nothing_is_excluded() {
+    let f = setup();
+    seed_certs_green(&f.state, &f.snapshot_uid);
+    let label = crate::explain_lg_serve::cycles_leaf_label(&f.state, &f.snapshot_uid);
+    assert!(
+        matches!(
+            label,
+            repo_graph_agent::OrientLeafLabel::SqliteFallback {
+                reason: repo_graph_coherence::CoherenceFallbackReason::LiveGraphRenderUnsupported
+            }
+        ),
+        "{label:?}"
+    );
+}
+
+fn assert_explain_label_is_partitioned_view(f: &Fixture) {
+    let label = crate::explain_lg_serve::cycles_leaf_label(&f.state, &f.snapshot_uid);
+    assert!(
+        matches!(
+            label,
+            repo_graph_agent::OrientLeafLabel::SqliteFallback {
+                reason:
+                    repo_graph_coherence::CoherenceFallbackReason::LiveGraphPartitionedViewUnsupported
+            }
+        ),
+        "the LiveGraph could not have served the partitioned view: {label:?}"
+    );
+}
+
+#[test]
+fn explain_cycles_leaf_label_names_the_partitioned_view_when_an_excluded_import_changes_the_sccs() {
+    let f = setup();
+    add_directory_imports_with_one_excluded(&f, true);
+    seed_certs_green(&f.state, &f.snapshot_uid);
+    assert_explain_label_is_partitioned_view(&f);
+}
+
+#[test]
+fn explain_cycles_leaf_label_names_the_partitioned_view_when_an_excluded_import_leaves_the_sccs_unchanged(
+) {
+    let f = setup();
+    add_directory_imports_with_one_excluded(&f, false);
+    seed_certs_green(&f.state, &f.snapshot_uid);
+    assert_explain_label_is_partitioned_view(&f);
+}
+
+#[test]
+fn build_explain_envelope_cycles_leaf_serializes_the_partitioned_view_reason_never_a_divergence() {
+    for changes_sccs in [true, false] {
+        let f = setup();
+        add_directory_imports_with_one_excluded(&f, changes_sccs);
+        seed_certs_green(&f.state, &f.snapshot_uid);
+        let env = crate::explain_coherence::build_explain_envelope(
+            &f.state,
+            REPO,
+            explain_module_result(&f.snapshot_uid),
+            false,
+            false,
+        );
+        let leaf = env
+            .value
+            .signals
+            .iter()
+            .find(|l| l.value.code() == SignalCode::ExplainCycles)
+            .expect("explain cycles leaf present");
+        assert_eq!(leaf.provenance.source, BTreeSet::from([Source::Sqlite]));
+        let json = serde_json::to_value(&leaf.provenance).unwrap();
+        assert_eq!(
+            json["fallback_reason"], "LiveGraphPartitionedViewUnsupported",
+            "changes_sccs={changes_sccs}: {json}"
+        );
+    }
+}
+
+// ── TEST-EDGE-SCOPE-1B INPUT-3 (D-TESB-16 addendum): a failed read of the partition evidence ──
+
+/// The two ways the partition evidence behind the cycle leaves' provenance can fail to read.
+#[derive(Clone, Copy, Debug)]
+enum PartitionReadFailure {
+    /// The store cannot be opened: a `<store>.rebuilding` sentinel beside the fixture's `repo.db`
+    /// (RG-REQ-011-L04's named refusal, checked before any open).
+    StorageOpen,
+    /// The store opens but the directory-module graph read fails: an IMPORTS edge whose resolution
+    /// is outside the vocabulary (`resolved`, D-TESB-14's named error).
+    DirectoryGraphRead,
+}
+
+const PARTITION_READ_FAILURES: [PartitionReadFailure; 2] = [
+    PartitionReadFailure::StorageOpen,
+    PartitionReadFailure::DirectoryGraphRead,
+];
+
+/// Force `failure` on the fixture's store. For `StorageOpen` this must run AFTER every other read the
+/// test needs (the sentinel refuses every open).
+fn force_partition_read_failure(f: &Fixture, failure: PartitionReadFailure) {
+    let db_path = f._dir.path().join("repo.db");
+    match failure {
+        PartitionReadFailure::StorageOpen => {
+            std::fs::write(
+                crate::rebuild::rebuild_sentinel_path(&db_path),
+                "test sentinel",
+            )
+            .expect("write rebuild sentinel");
+        }
+        PartitionReadFailure::DirectoryGraphRead => {
+            let mut conn = StorageConnection::open(&db_path).expect("reopen storage");
+            let snap = f.snapshot_uid.clone();
+            let paths = ["p/one.ts", "q/two.ts"];
+            conn.upsert_files(
+                &paths
+                    .iter()
+                    .map(|p| TrackedFile {
+                        file_uid: format!("{REPO}:{p}"),
+                        repo_uid: REPO.to_string(),
+                        path: p.to_string(),
+                        language: Some("typescript".to_string()),
+                        is_test: false,
+                        is_generated: false,
+                        is_excluded: false,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .expect("upsert files");
+            conn.insert_nodes(
+                &paths
+                    .iter()
+                    .map(|p| GraphNode {
+                        node_uid: format!("tesb:rf:{p}"),
+                        snapshot_uid: snap.clone(),
+                        repo_uid: REPO.to_string(),
+                        stable_key: format!("{REPO}:{p}:FILE"),
+                        kind: "FILE".to_string(),
+                        subtype: None,
+                        name: p.to_string(),
+                        qualified_name: Some(p.to_string()),
+                        file_uid: Some(format!("{REPO}:{p}")),
+                        parent_node_uid: None,
+                        location: None,
+                        signature: None,
+                        visibility: None,
+                        doc_comment: None,
+                        metadata_json: None,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .expect("insert nodes");
+            conn.insert_edges(&[GraphEdge {
+                edge_uid: "tesb:rf:imp".to_string(),
+                snapshot_uid: snap.clone(),
+                repo_uid: REPO.to_string(),
+                source_node_uid: "tesb:rf:p/one.ts".to_string(),
+                target_node_uid: "tesb:rf:q/two.ts".to_string(),
+                edge_type: "IMPORTS".to_string(),
+                resolution: "resolved".to_string(),
+                extractor: "test".to_string(),
+                location: None,
+                metadata_json: None,
+            }])
+            .expect("insert out-of-vocabulary import");
+        }
+    }
+}
+
+#[test]
+fn read_default_view_excludes_nothing_carries_the_read_error() {
+    for failure in PARTITION_READ_FAILURES {
+        let f = setup();
+        seed_certs_green(&f.state, &f.snapshot_uid);
+        force_partition_read_failure(&f, failure);
+        let err = super::read_default_view_excludes_nothing(&f.state, &f.snapshot_uid)
+            .expect_err("a failed read is never 'excludes nothing' nor 'excludes one'");
+        match failure {
+            PartitionReadFailure::StorageOpen => {
+                assert!(err.starts_with("storage open: "), "{failure:?}: {err}");
+                assert!(
+                    err.contains(crate::rebuild::REBUILD_INTERRUPTED_REASON),
+                    "{failure:?}: the sentinel refusal text is carried whole: {err}"
+                );
+            }
+            PartitionReadFailure::DirectoryGraphRead => {
+                assert!(
+                    err.starts_with("directory module graph read: "),
+                    "{failure:?}: {err}"
+                );
+                assert!(
+                    err.contains("resolved"),
+                    "{failure:?}: the out-of-vocabulary value is carried: {err}"
+                );
+            }
+        }
+    }
+    // Premise: with nothing forced the read succeeds and the fixture excludes nothing.
+    let f = setup();
+    assert_eq!(
+        super::read_default_view_excludes_nothing(&f.state, &f.snapshot_uid),
+        Ok(true)
+    );
+}
+
+fn assert_partition_evidence_unreadable(outcome: OrientLgOutcome, failure: PartitionReadFailure) {
+    match outcome {
+        OrientLgOutcome::Fallback { reason } => assert_eq!(
+            reason,
+            crate::livegraph_feed::FallbackReason::PartitionEvidenceUnreadable,
+            "{failure:?}: a failed partition-evidence read names that read, never a LiveGraph error"
+        ),
+        OrientLgOutcome::Livegraph { .. } => {
+            panic!(
+                "{failure:?}: an unread partition view must not be labelled LiveGraph-corroborated"
+            )
+        }
+    }
+}
+
+#[test]
+fn orient_cycles_outcome_names_partition_evidence_unreadable_when_the_store_cannot_be_opened() {
+    let f = setup();
+    seed_certs_green(&f.state, &f.snapshot_uid);
+    force_partition_read_failure(&f, PartitionReadFailure::StorageOpen);
+    assert_partition_evidence_unreadable(
+        orient_cycles_outcome(&f.state, &f.snapshot_uid),
+        PartitionReadFailure::StorageOpen,
+    );
+}
+
+#[test]
+fn orient_cycles_outcome_names_partition_evidence_unreadable_when_the_directory_graph_read_fails() {
+    let f = setup();
+    seed_certs_green(&f.state, &f.snapshot_uid);
+    force_partition_read_failure(&f, PartitionReadFailure::DirectoryGraphRead);
+    assert_partition_evidence_unreadable(
+        orient_cycles_outcome(&f.state, &f.snapshot_uid),
+        PartitionReadFailure::DirectoryGraphRead,
+    );
+}
+
+#[test]
+fn build_orient_envelope_cycles_leaf_serializes_partition_evidence_unreadable_never_livegraph_error(
+) {
+    for failure in PARTITION_READ_FAILURES {
+        let f = setup();
+        seed_certs_green(&f.state, &f.snapshot_uid);
+        let result = orient_result(
+            REPO,
+            &f.snapshot_uid,
+            Focus::repo(),
+            vec![import_cycles_signal()],
+        );
+        force_partition_read_failure(&f, failure);
+        let env = crate::orient_coherence::build_orient_envelope(
+            &f.state, REPO, result, true, false, false,
+        );
+        let leaf = env
+            .value
+            .signals
+            .iter()
+            .find(|l| l.value.code() == SignalCode::ImportCycles)
+            .expect("cycles leaf present");
+        assert_eq!(
+            leaf.provenance.source,
+            BTreeSet::from([Source::Sqlite]),
+            "{failure:?}: the served backend"
+        );
+        let json = serde_json::to_value(&leaf.provenance).unwrap();
+        assert_eq!(
+            json["fallback_reason"], "PartitionEvidenceUnreadable",
+            "{failure:?}: {json}"
+        );
+        assert_ne!(json["fallback_reason"], "LiveGraphError", "{failure:?}");
+        assert!(
+            !env.provenance.source.contains(&Source::Livegraph),
+            "{failure:?}: the root claims no LiveGraph source"
+        );
+    }
+}
+
+#[test]
+fn build_explain_envelope_cycles_leaf_serializes_partition_evidence_unreadable_never_livegraph_error(
+) {
+    for failure in PARTITION_READ_FAILURES {
+        let f = setup();
+        seed_certs_green(&f.state, &f.snapshot_uid);
+        let result = explain_module_result(&f.snapshot_uid);
+        force_partition_read_failure(&f, failure);
+        let env =
+            crate::explain_coherence::build_explain_envelope(&f.state, REPO, result, false, false);
+        let leaf = env
+            .value
+            .signals
+            .iter()
+            .find(|l| l.value.code() == SignalCode::ExplainCycles)
+            .expect("explain cycles leaf present");
+        assert_eq!(
+            leaf.provenance.source,
+            BTreeSet::from([Source::Sqlite]),
+            "{failure:?}: the served backend"
+        );
+        let json = serde_json::to_value(&leaf.provenance).unwrap();
+        assert_eq!(
+            json["fallback_reason"], "PartitionEvidenceUnreadable",
+            "{failure:?}: {json}"
+        );
+        assert_ne!(json["fallback_reason"], "LiveGraphError", "{failure:?}");
+        assert!(
+            !env.provenance.source.contains(&Source::Livegraph),
+            "{failure:?}: the root claims no LiveGraph source"
+        );
+    }
+}

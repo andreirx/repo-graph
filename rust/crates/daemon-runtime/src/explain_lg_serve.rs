@@ -145,7 +145,15 @@ pub(crate) fn serve_imports(
 ///   - when the module-cycle field-exact cert is GREEN (`orient_cycles_outcome` Livegraph): a labelled SQLite
 ///     fallback with `LiveGraphRenderUnsupported` — the LiveGraph could have served the member set but not the
 ///     walk the response shape now carries, so the proven SQLite value (with the walk) is served;
-///   - when the cert is not green (`Fallback`): the shipped cert-ladder reason via `map_outcome`.
+///   - when the cert is not green (`Fallback`): the shipped cert-ladder reason via `map_outcome`;
+///   - TEST-EDGE-SCOPE-1B (D-TESB-16): when the DEFAULT import view the focus cycles answer excludes an
+///     import, `orient_cycles_outcome` is already `Fallback { LiveGraphPartitionedViewUnsupported }` (decided
+///     before any certificate), so this label carries that reason through `map_outcome` — the LiveGraph
+///     could NOT have served that view's member set, and `LiveGraphRenderUnsupported` is claimed only when
+///     nothing is excluded. One decision, in `orient_cycles_outcome`; this function adds no second check.
+///   - INPUT-3 (D-TESB-16 addendum): when that partition evidence could not be read,
+///     `orient_cycles_outcome` is `Fallback { PartitionEvidenceUnreadable }` (the read error is in the
+///     daemon log) and this label carries it through `map_outcome` — never `LiveGraphError`.
 ///
 /// Either way the caller adds NO replacement — the value stays the port-delegated SQLite item.
 pub(crate) fn cycles_leaf_label(repo_state: &RepoState, snapshot_uid: &str) -> OrientLeafLabel {

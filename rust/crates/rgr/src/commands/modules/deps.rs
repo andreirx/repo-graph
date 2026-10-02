@@ -27,18 +27,18 @@ use crate::daemon_client::DaemonClient;
 
 // ── modules deps command ─────────────────────────────────────────
 //
-// `rmap modules deps [module] [--outbound|--inbound] [--json]`
+// `rmap modules deps [module] [--outbound|--inbound] [--include-tests] [--include-inferred] [--json]`
 //
 // Human mode (default): plain text with dependency summary.
 // Machine mode (--json): full envelope.
 
 pub(super) fn run_modules_deps(args: &[String]) -> ExitCode {
     // Parse args: [module] [--outbound|--inbound] [--json]
-    let (module_filter, direction, json_mode) = match parse_deps_args(args) {
+    let (module_filter, direction, json_mode, flags) = match parse_deps_args(args) {
         Ok(v) => v,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            eprintln!("usage: rmap modules deps [module] [--outbound|--inbound] [--json]");
+            eprintln!("usage: rmap modules deps [module] [--outbound|--inbound] [--include-tests] [--include-inferred] [--json]");
             eprintln!();
             eprintln!("Run from within a repo directory.");
             return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
@@ -87,10 +87,20 @@ pub(super) fn run_modules_deps(args: &[String]) -> ExitCode {
     if let Some(ref module) = module_filter {
         params["module"] = serde_json::json!(module);
     }
+    flags.add_to_params(&mut params);
 
     match client.request("modules_deps", Some(params)) {
         Ok(result) => {
             if json_mode {
+                // D-TESB-17: the JSON consumer boundary marks unreadable partition evidence.
+                let mut result = result;
+                if let Err(e) = crate::presentation::import_partition::mark_partition_evidence(
+                    &mut result,
+                    crate::presentation::import_partition::JsonSurface::ModulesDeps,
+                ) {
+                    eprintln!("error: {e}");
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
+                }
                 // Machine mode: print full envelope
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
@@ -130,10 +140,23 @@ pub(super) fn run_modules_deps(args: &[String]) -> ExitCode {
     }
 }
 
-/// Parse [module] [--outbound|--inbound] [--json] args.
+/// Parse [module] [--outbound|--inbound] [--include-tests] [--include-inferred] [--json] args.
 ///
-/// Returns (module_filter, direction_string, json_mode).
-fn parse_deps_args(args: &[String]) -> Result<(Option<String>, &'static str, bool), String> {
+/// Returns (module_filter, direction_string, json_mode, partition flags). TEST-EDGE-SCOPE-1B
+/// (RG-REQ-004-L12): the flags widen the import view (default: certain production imports).
+pub(crate) fn parse_deps_args(
+    args: &[String],
+) -> Result<
+    (
+        Option<String>,
+        &'static str,
+        bool,
+        crate::commands::graph::PartitionFlags,
+    ),
+    String,
+> {
+    let (args, flags) = crate::commands::graph::extract_partition_flags(args.to_vec(), true);
+    let args = &args;
     let mut module_filter = None;
     let mut direction: &'static str = "all";
     let mut direction_set = false;
@@ -170,5 +193,5 @@ fn parse_deps_args(args: &[String]) -> Result<(Option<String>, &'static str, boo
         }
     }
 
-    Ok((module_filter, direction, json_mode))
+    Ok((module_filter, direction, json_mode, flags))
 }

@@ -14,6 +14,7 @@
 
 use std::path::PathBuf;
 
+use repo_graph_classification::import_partition::{ImportClass, ImportView};
 use repo_graph_repo_index::compose::{index_into_storage, refresh_into_storage, ComposeOptions};
 use repo_graph_storage::StorageConnection;
 
@@ -798,9 +799,14 @@ fn cross_crate_use_resolves_to_defining_file() {
 
     // ── (1) File-level resolution: both `use b::…` edges hit b's files ──
     // `use b::util::helper` → b/src/util.rs ; `use b::Thing` → b/src/lib.rs.
-    let imports = storage
-        .get_resolved_imports_for_snapshot(&result.snapshot_uid)
-        .unwrap();
+    // TEST-EDGE-SCOPE-1B: the partitioned file-level read, certain rows (the resolutions this
+    // resolution fixture produces).
+    let imports: Vec<_> = storage
+        .file_imports_with_partition(&result.snapshot_uid)
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.partition.class == ImportClass::Certain)
+        .collect();
     let a_lib = "rust-workspace:a/src/lib.rs";
     let targets: Vec<&str> = imports
         .iter()
@@ -836,8 +842,12 @@ fn cross_crate_use_resolves_to_defining_file() {
     );
 
     // ── (3) One derived MODULE→MODULE edge a → b ──
-    let facts =
-        repo_graph_module_queries::load_module_graph_facts(&storage, &result.snapshot_uid).unwrap();
+    let facts = repo_graph_module_queries::load_module_graph_facts(
+        &storage,
+        &result.snapshot_uid,
+        ImportView::CERTAIN_WITH_TESTS,
+    )
+    .unwrap();
     let ab_edges: Vec<(&str, &str)> = facts
         .edges
         .iter()
@@ -857,8 +867,8 @@ fn cross_crate_use_resolves_to_defining_file() {
 
     // ── (4) Cycles response shape: the §4 zero-state clause the fixture drives ──
     // IMPORT-RESOLUTION-RUST-1 §4 (operator ruling cycle-4, `cycles-module-count-semantics` = C):
-    // the daemon's SQLite cycles handler builds `module_count` / `module_edge_count` from EXACTLY
-    // these two storage reads (dispatch.rs:2558-2559). Asserting them here proves the fixture
+    // the daemon's SQLite cycles handler builds `module_count` / `module_edge_count` from the MODULE
+    // nodes and the directory graph's edges (daemon-runtime import_partition_view.rs). Asserting them here proves the fixture
     // yields (4, 1) through the real production reads, so the rendered zero-state is
     // "over 4 directory groups / 1 resolved import edge" (the cycles-presenter unit test
     // `zero_state_renders_two_crate_fixture_clause_verbatim` pins the rendering of those numbers).
@@ -872,9 +882,13 @@ fn cross_crate_use_resolves_to_defining_file() {
         module_count, 4,
         "cycles module_count = per-directory MODULE nodes (a, a/src, b, b/src)"
     );
+    // TEST-EDGE-SCOPE-1B: the SQLite cycles handler now runs its SCC over the query-time
+    // directory graph in the requested view (`rmap cycles` = DEFAULT); this fixture has no test
+    // file and no inferred import, so every view has the one edge.
     let module_edge_count = storage
-        .module_import_edges(&result.snapshot_uid)
+        .directory_module_graph(&result.snapshot_uid)
         .unwrap()
+        .view_edges(ImportView::DEFAULT)
         .len();
     assert_eq!(
         module_edge_count, 1,
@@ -920,13 +934,18 @@ fn cross_package_java_import_resolves_by_suffix() {
     // ── (1) BOTH non-wildcard imports resolve to the relocated Util.java ──
     // `import org.x.core.Util` and `import org.x.core.Util.Inner` (nested class → suffix-shortens
     // to Util.java) BOTH resolve to libs/core/src/main/java/org/x/core/Util.java. The two are
-    // distinct IMPORTS edges (distinct FQN target_key), and `get_resolved_imports_for_snapshot`
-    // is non-DISTINCT (storage/src/crud/module_edges_support.rs), so both surface as rows — we
+    // distinct IMPORTS edges (distinct FQN target_key), and `file_imports_with_partition`
+    // is non-DISTINCT (storage/src/import_partition_reads.rs), so both surface as rows — we
     // assert EXACTLY two Main.java → Util.java resolutions (not merely that Util.java is present:
     // a `contains` check would pass even if only `Util` resolved while `Util.Inner` did not).
-    let imports = storage
-        .get_resolved_imports_for_snapshot(&result.snapshot_uid)
-        .unwrap();
+    // TEST-EDGE-SCOPE-1B: the partitioned file-level read, certain rows (the resolutions this
+    // resolution fixture produces).
+    let imports: Vec<_> = storage
+        .file_imports_with_partition(&result.snapshot_uid)
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.partition.class == ImportClass::Certain)
+        .collect();
     let main_file = "java-multi:app/src/main/java/org/x/app/Main.java";
     let util_file = "java-multi:libs/core/src/main/java/org/x/core/Util.java";
     let targets: Vec<&str> = imports
@@ -951,8 +970,12 @@ fn cross_package_java_import_resolves_by_suffix() {
     );
 
     // ── (3) One derived MODULE→MODULE edge app → core (canonical libs/core) ──
-    let facts =
-        repo_graph_module_queries::load_module_graph_facts(&storage, &result.snapshot_uid).unwrap();
+    let facts = repo_graph_module_queries::load_module_graph_facts(
+        &storage,
+        &result.snapshot_uid,
+        ImportView::CERTAIN_WITH_TESTS,
+    )
+    .unwrap();
     let edges: Vec<(&str, &str)> = facts
         .edges
         .iter()

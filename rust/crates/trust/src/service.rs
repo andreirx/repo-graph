@@ -575,6 +575,7 @@ pub fn compute_trust_report_cancellable(
                 suspicious_zero_connectivity: suspicious,
                 alias_unresolved_imports: m.alias_unresolved_imports,
                 trust_notes,
+                excluded_connectivity: m.excluded_connectivity,
             }
         })
         .collect();
@@ -1625,6 +1626,7 @@ mod tests {
                 fan_out: 0,
                 file_count: 3,
                 alias_unresolved_imports: 0,
+                excluded_connectivity: Some(Default::default()),
             },
             TrustModuleStats {
                 stable_key: "r1:src/connected:MODULE".into(),
@@ -1633,6 +1635,7 @@ mod tests {
                 fan_out: 1,
                 file_count: 5,
                 alias_unresolved_imports: 0,
+                excluded_connectivity: Some(Default::default()),
             },
         ];
 
@@ -1659,6 +1662,7 @@ mod tests {
             fan_out: 0,
             file_count: 4,
             alias_unresolved_imports: 55,
+            excluded_connectivity: Some(Default::default()),
         }];
 
         let report = compute_trust_report(&input);
@@ -1681,12 +1685,123 @@ mod tests {
             fan_out: 0,
             file_count: 4,
             alias_unresolved_imports: 0,
+            excluded_connectivity: Some(Default::default()),
         }];
 
         let report = compute_trust_report(&input);
         assert!(report.modules[0].suspicious_zero_connectivity);
         assert_eq!(report.modules[0].alias_unresolved_imports, 0);
         assert_eq!(report.modules[0].trust_notes, vec!["isolated"]);
+    }
+
+    /// TEST-EDGE-SCOPE-1B (D-TESB-10): a module whose only neighbours are test importers keeps
+    /// its default-view zero connectivity AND carries the relations the default view excludes, so
+    /// the renderer can name them instead of reading the module as a resolution failure. The
+    /// zero-connectivity rule itself reads the default fans, unchanged.
+    #[test]
+    fn module_row_carries_the_connectivity_the_default_view_excludes() {
+        let mut input = minimal_input();
+        let excluded = crate::storage_port::ExcludedConnectivity {
+            tests: 3,
+            inferred: 1,
+            tests_and_inferred: 0,
+        };
+        input.module_stats = vec![TrustModuleStats {
+            stable_key: "r1:system-tests:MODULE".into(),
+            path: "system-tests".into(),
+            fan_in: 0,
+            fan_out: 0,
+            file_count: 7,
+            alias_unresolved_imports: 0,
+            excluded_connectivity: Some(excluded),
+        }];
+        let report = compute_trust_report(&input);
+        assert!(report.modules[0].suspicious_zero_connectivity);
+        assert_eq!(report.modules[0].excluded_connectivity, Some(excluded));
+        let json = serde_json::to_value(&report.modules[0]).unwrap();
+        assert_eq!(json["excluded_connectivity"]["tests"], 3);
+    }
+
+    /// D-TESB-17 row U5: the connectivity the default view excludes is serialized on EVERY row,
+    /// zeros included, so its absence can only mean a daemon that predates the partition — and
+    /// an absent key decodes as `None` (unknown), never as a measured zero.
+    #[test]
+    fn module_row_excluded_connectivity_is_always_serialized_and_absent_decodes_as_unknown() {
+        let mut input = minimal_input();
+        input.module_stats = vec![TrustModuleStats {
+            stable_key: "r1:core:MODULE".into(),
+            path: "core".into(),
+            fan_in: 2,
+            fan_out: 1,
+            file_count: 4,
+            alias_unresolved_imports: 0,
+            excluded_connectivity: Some(Default::default()),
+        }];
+        let report = compute_trust_report(&input);
+        let row = serde_json::to_value(&report.modules[0]).unwrap();
+        assert_eq!(
+            row["excluded_connectivity"],
+            serde_json::json!({"tests": 0, "inferred": 0, "tests_and_inferred": 0}),
+            "zeros are serialized, never omitted"
+        );
+        let stats = serde_json::to_value(&input.module_stats[0]).unwrap();
+        assert_eq!(
+            stats["excludedConnectivity"],
+            serde_json::json!({"tests": 0, "inferred": 0, "tests_and_inferred": 0})
+        );
+        // An older payload without the key decodes as unknown, on both wire types.
+        let mut older = row.clone();
+        older
+            .as_object_mut()
+            .unwrap()
+            .remove("excluded_connectivity");
+        let decoded: crate::types::ModuleTrustRow = serde_json::from_value(older).unwrap();
+        assert_eq!(decoded.excluded_connectivity, None);
+        let mut older_stats = stats.clone();
+        older_stats
+            .as_object_mut()
+            .unwrap()
+            .remove("excludedConnectivity");
+        let decoded: TrustModuleStats = serde_json::from_value(older_stats).unwrap();
+        assert_eq!(decoded.excluded_connectivity, None);
+        // A present zero decodes as a measured zero.
+        let decoded: crate::types::ModuleTrustRow = serde_json::from_value(row).unwrap();
+        assert_eq!(decoded.excluded_connectivity, Some(Default::default()));
+    }
+
+    /// D-TESB-17 row W5: a present but malformed value fails to decode with an error naming the
+    /// field — never a defaulted zero.
+    #[test]
+    fn module_row_excluded_connectivity_wrong_typed_fails_to_decode_naming_the_field() {
+        let mut input = minimal_input();
+        input.module_stats = vec![TrustModuleStats {
+            stable_key: "r1:core:MODULE".into(),
+            path: "core".into(),
+            fan_in: 0,
+            fan_out: 0,
+            file_count: 1,
+            alias_unresolved_imports: 0,
+            excluded_connectivity: Some(Default::default()),
+        }];
+        let report = compute_trust_report(&input);
+        let row = serde_json::to_value(&report.modules[0]).unwrap();
+        for bad in [
+            serde_json::json!(5),
+            serde_json::json!("0"),
+            serde_json::json!({"tests": "x", "inferred": 0, "tests_and_inferred": 0}),
+            serde_json::json!({"tests": -1, "inferred": 0, "tests_and_inferred": 0}),
+            serde_json::json!({"tests": 1.5, "inferred": 0, "tests_and_inferred": 0}),
+            serde_json::json!({"tests": 0, "inferred": 0}),
+        ] {
+            let mut r = row.clone();
+            r["excluded_connectivity"] = bad.clone();
+            let err = serde_json::from_value::<crate::types::ModuleTrustRow>(r)
+                .expect_err("a malformed value never decodes");
+            assert!(
+                err.to_string().contains("excluded_connectivity"),
+                "{bad}: {err}"
+            );
+        }
     }
 
     #[test]
@@ -1699,6 +1814,7 @@ mod tests {
             fan_out: 0,
             file_count: 10,
             alias_unresolved_imports: 0,
+            excluded_connectivity: Some(Default::default()),
         }];
 
         let report = compute_trust_report(&input);
@@ -1717,6 +1833,7 @@ mod tests {
                 fan_out: 0,
                 file_count: 1,
                 alias_unresolved_imports: 0,
+                excluded_connectivity: Some(Default::default()),
             },
             TrustModuleStats {
                 stable_key: "r1:src/a:MODULE".into(),
@@ -1725,6 +1842,7 @@ mod tests {
                 fan_out: 0,
                 file_count: 1,
                 alias_unresolved_imports: 0,
+                excluded_connectivity: Some(Default::default()),
             },
             TrustModuleStats {
                 stable_key: "r1:src/m:MODULE".into(),
@@ -1733,6 +1851,7 @@ mod tests {
                 fan_out: 0,
                 file_count: 1,
                 alias_unresolved_imports: 0,
+                excluded_connectivity: Some(Default::default()),
             },
         ];
 

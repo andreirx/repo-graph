@@ -43,6 +43,11 @@ use serde::Deserialize;
 
 use crate::presentation::heading;
 
+/// TEST-EDGE-SCOPE-1B (D-TESB-12): the basis clause of the directory fans (they count certain
+/// imports from test files too).
+pub(crate) const STATS_FAN_BASIS: &str =
+    "fan-in/fan-out count certain imports from test files too — rmap cycles shows production imports only";
+
 /// MODULE-MODEL-2 §13 D7: the top-N cap for EACH per-group table on the human
 /// `stats` surface — the folded "Package groups" table AND the single "Directory
 /// groups" table (QUANT-MECH-1 §2.3 collapsed the four former per-metric views into
@@ -387,6 +392,11 @@ impl StatsResponse {
         // primary, and a TOTAL order (module paths are unique) so `.take(cap)` is
         // deterministic regardless of input row order. Bounded to STATS_SECTION_CAP +
         // a TRUE omission line (the count is the COMPLETE directory-group total).
+        // TEST-EDGE-SCOPE-1B (D-TESB-12, RG-REQ-002-L02): these directory fans read the persisted
+        // graph, which keeps imports from test files — state that basis inline, since `cycles`,
+        // `modules` and `orient` answer production imports.
+        out.push_str(STATS_FAN_BASIS);
+        out.push('\n');
         out.push_str(&heading("Directory groups (by size)"));
         let mut dirs = self.stats.clone();
         dirs.sort_by(|a, b| {
@@ -1358,5 +1368,19 @@ mod tests {
             );
         }
         assert!(!before.contains("test status"), "{before}");
+    }
+
+    /// TEST-EDGE-SCOPE-1B (D-TESB-12): `stats`' directory fans keep test imports and say so.
+    #[test]
+    fn stats_module_rows_state_that_their_fans_count_test_imports() {
+        let out = sample_stats().render_human();
+        assert!(
+            out.lines().any(|l| l == STATS_FAN_BASIS),
+            "the basis line is stated:\n{out}"
+        );
+        assert_eq!(
+            STATS_FAN_BASIS,
+            "fan-in/fan-out count certain imports from test files too — rmap cycles shows production imports only"
+        );
     }
 }

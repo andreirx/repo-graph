@@ -60,12 +60,24 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
     // violating edges when legacy authoring produced redundant
     // rows.
     let unique = dedupe_declarations(declarations);
+    violations_output(storage, snapshot_uid, unique)
+}
 
+/// TEST-EDGE-SCOPE-1B (D-TESB-11, RG-REQ-002-L11): judge each rule on its CERTAIN imports (of
+/// every test status) and count the INFERRED imports across it — with their sorted source files,
+/// so the rendered next action cites a real file — never judged. Empty when nothing crosses.
+pub(crate) fn violations_output<S: AgentStorageRead + ?Sized>(
+    storage: &S,
+    snapshot_uid: &str,
+    unique: Vec<AgentBoundaryDeclaration>,
+) -> Result<AggregatorOutput, AgentStorageError> {
     // For each unique rule, collect the violating edges and
     // aggregate into one per-rule entry. Total violation_count
     // is the sum of all edges across all unique rules.
     let mut per_rule: Vec<BoundaryViolationEvidence> = Vec::new();
     let mut total_edges: u64 = 0;
+    let mut not_judged: u64 = 0;
+    let mut not_judged_files: std::collections::BTreeSet<String> = Default::default();
 
     for decl in unique {
         let edges = storage.find_imports_between_paths(
@@ -73,6 +85,13 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
             &decl.source_module,
             &decl.forbidden_target,
         )?;
+        let inferred = storage.find_inferred_imports_between_paths(
+            snapshot_uid,
+            &decl.source_module,
+            &decl.forbidden_target,
+        )?;
+        not_judged += inferred.len() as u64;
+        not_judged_files.extend(inferred.into_iter().map(|e| e.source_file));
         if edges.is_empty() {
             continue;
         }
@@ -85,7 +104,7 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
         });
     }
 
-    if total_edges == 0 {
+    if total_edges == 0 && not_judged == 0 {
         return Ok(AggregatorOutput::empty());
     }
 
@@ -98,9 +117,18 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
         violation_count: total_edges,
         top_violations: per_rule,
     };
+    let additions = crate::dto::signal::EvidenceAdditions {
+        inferred_imports_not_judged: (not_judged > 0).then(|| {
+            crate::dto::signal::InferredImportsNotJudgedEvidence::Total {
+                count: not_judged,
+                files: not_judged_files.into_iter().collect(),
+            }
+        }),
+        ..Default::default()
+    };
 
     Ok(AggregatorOutput {
-        signals: vec![Signal::boundary_violations(evidence)],
+        signals: vec![Signal::boundary_violations(evidence).with_evidence_additions(additions)],
         limits: Vec::new(),
     })
 }
@@ -124,44 +152,7 @@ pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
     }
 
     let unique = dedupe_declarations(declarations);
-
-    let mut per_rule: Vec<BoundaryViolationEvidence> = Vec::new();
-    let mut total_edges: u64 = 0;
-
-    for decl in unique {
-        let edges = storage.find_imports_between_paths(
-            snapshot_uid,
-            &decl.source_module,
-            &decl.forbidden_target,
-        )?;
-        if edges.is_empty() {
-            continue;
-        }
-        let edge_count = edges.len() as u64;
-        total_edges += edge_count;
-        per_rule.push(BoundaryViolationEvidence {
-            source_module: decl.source_module,
-            target_module: decl.forbidden_target,
-            edge_count,
-        });
-    }
-
-    if total_edges == 0 {
-        return Ok(AggregatorOutput::empty());
-    }
-
-    ordering::sort_boundary_violations(&mut per_rule);
-    per_rule.truncate(VIOLATIONS_TOP_N);
-
-    let evidence = BoundaryViolationsEvidence {
-        violation_count: total_edges,
-        top_violations: per_rule,
-    };
-
-    Ok(AggregatorOutput {
-        signals: vec![Signal::boundary_violations(evidence)],
-        limits: Vec::new(),
-    })
+    violations_output(storage, snapshot_uid, unique)
 }
 
 /// Deduplicate a list of active boundary declarations by

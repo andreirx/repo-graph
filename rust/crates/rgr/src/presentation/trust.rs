@@ -660,20 +660,54 @@ fn render_suspicious_modules(v: &CoherentTrustReport) -> String {
     // failed through a project alias names that evidence and its count; a module that is
     // merely isolated is listed plain (no cause is asserted the store does not hold).
     for m in suspicious.iter().take(10) {
-        if m.alias_unresolved_imports >= 1 {
-            out.push_str(&bullet(&format!(
+        let mut row = if m.alias_unresolved_imports >= 1 {
+            format!(
                 "{} — {}",
                 m.qualified_name,
                 alias_import_phrase(m.alias_unresolved_imports)
-            )));
+            )
         } else {
-            out.push_str(&bullet(&m.qualified_name));
+            m.qualified_name.clone()
+        };
+        // TEST-EDGE-SCOPE-1B (D-TESB-10): connectivity reads the DEFAULT view; a module whose
+        // only relations run through excluded imports says so, with the command that shows them.
+        if let Some(clause) = excluded_connectivity_clause(m) {
+            row.push_str(&clause);
         }
+        out.push_str(&bullet(&row));
     }
     if suspicious.len() > 10 {
         out.push_str(&bullet(&format!("... ({} more)", suspicious.len() - 10)));
     }
     out
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-10): ` — connected only through imports from test files (rmap modules
+/// deps <module> --include-tests)` when the module's only relations run through imports the
+/// default view excludes (inferred / both flags likewise). `None` when nothing is excluded.
+fn excluded_connectivity_clause(m: &repo_graph_trust::types::ModuleTrustRow) -> Option<String> {
+    // D-TESB-17 row U5: absent (a daemon that predates the partition) is stated, never read as
+    // "nothing excluded"; a malformed value already failed the report's decode, naming the field.
+    let Some(e) = &m.excluded_connectivity else {
+        return Some(format!(
+            " — {}",
+            super::import_partition::PARTITION_UNAVAILABLE_CLAUSE
+        ));
+    };
+    let (subject, flags) = match (e.tests > 0, e.inferred > 0, e.tests_and_inferred > 0) {
+        (false, false, false) => return None,
+        (true, false, false) => ("imports from test files", "--include-tests"),
+        (false, true, false) => ("inferred imports", "--include-inferred"),
+        (false, false, true) => (
+            "inferred imports from test files",
+            "--include-tests --include-inferred",
+        ),
+        _ => ("excluded imports", "--include-tests --include-inferred"),
+    };
+    Some(format!(
+        " — connected only through {subject} (rmap modules deps {} {flags})",
+        super::import_partition::shell_quote(&m.qualified_name)
+    ))
 }
 
 /// Reader-frame phrase for a module's failed alias imports (ALIAS-SUSPICION-1,

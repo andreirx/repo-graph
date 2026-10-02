@@ -36,10 +36,12 @@ use repo_graph_classification::boundary_evaluator::evaluate_module_boundaries;
 use repo_graph_classification::boundary_parser::{
     parse_discovered_module_boundaries, RawBoundaryDeclaration,
 };
+use repo_graph_classification::import_partition::{ImportClass, ImportView};
 use repo_graph_classification::module_edges::{
-    derive_module_dependency_edges, FileOwnershipFact, ModuleEdgeDerivationInput, ModuleRef,
-    ResolvedImportFact,
+    derive_module_dependency_edges_in_view, FileOwnershipFact, ModuleDependencyEdge,
+    ModuleEdgeDerivationInput, ModuleRef, ResolvedImportFact,
 };
+use repo_graph_gate::types::GateNotJudgedRelation;
 
 use crate::connection::StorageConnection;
 
@@ -108,11 +110,33 @@ impl GateStorageRead for StorageConnection {
         source_prefix: &str,
         target_prefix: &str,
     ) -> Result<Vec<GateImportEdge>, GateStorageError> {
+        // TEST-EDGE-SCOPE-1B (D-TESB-11): the judged population is CERTAIN imports of every test
+        // status; each row's class was checked by the read (an unreadable resolution errors).
         let rows = self
             .find_imports_between_paths(snapshot_uid, source_prefix, target_prefix)
             .map_err(map_err("find_boundary_imports"))?;
         Ok(rows
             .into_iter()
+            .filter(|e| e.import_class == ImportClass::Certain)
+            .map(|e| GateImportEdge {
+                source_file: e.source_file,
+                target_file: e.target_file,
+            })
+            .collect())
+    }
+
+    fn find_inferred_boundary_imports(
+        &self,
+        snapshot_uid: &str,
+        source_prefix: &str,
+        target_prefix: &str,
+    ) -> Result<Vec<GateImportEdge>, GateStorageError> {
+        let rows = self
+            .find_imports_between_paths(snapshot_uid, source_prefix, target_prefix)
+            .map_err(map_err("find_inferred_boundary_imports"))?;
+        Ok(rows
+            .into_iter()
+            .filter(|e| e.import_class == ImportClass::Inferred)
             .map(|e| GateImportEdge {
                 source_file: e.source_file,
                 target_file: e.target_file,
@@ -215,9 +239,11 @@ impl GateStorageRead for StorageConnection {
             .build_module_index_by_canonical_path(snapshot_uid)
             .map_err(map_err("evaluate_module_violations"))?;
 
-        // RS-MG-2: Load imports + ownership and derive edges
+        // RS-MG-2: Load imports + ownership and derive edges. TEST-EDGE-SCOPE-1B (D-TESB-11):
+        // governance judges CERTAIN imports of every test status; the inferred ones are evaluated
+        // by the same rule only to be counted, never judged.
         let imports = self
-            .get_resolved_imports_for_snapshot(snapshot_uid)
+            .file_imports_with_partition(snapshot_uid)
             .map_err(map_err("evaluate_module_violations"))?;
 
         let ownership = self
@@ -230,6 +256,7 @@ impl GateStorageRead for StorageConnection {
                 .map(|i| ResolvedImportFact {
                     source_file_uid: i.source_file_uid,
                     target_file_uid: i.target_file_uid,
+                    partition: i.partition,
                 })
                 .collect(),
             ownership: ownership
@@ -248,8 +275,35 @@ impl GateStorageRead for StorageConnection {
                 .collect(),
         };
 
-        let edges = derive_module_dependency_edges(derivation_input)
+        // The judged edges: certain imports of every test status (CERTAIN_WITH_TESTS).
+        let judged = derive_module_dependency_edges_in_view(
+            derivation_input.clone(),
+            ImportView::CERTAIN_WITH_TESTS,
+        )
+        .map_err(|e| GateStorageError::new("evaluate_module_violations", e.to_string()))?
+        .edges;
+        // The inferred edges: each relation's inferred cells only, for the not-judged count.
+        let all = derive_module_dependency_edges_in_view(derivation_input, ImportView::ALL)
             .map_err(|e| GateStorageError::new("evaluate_module_violations", e.to_string()))?;
+        let mut inferred = Vec::new();
+        for edge in &all.edges {
+            let parts = all.partitions_of(edge).ok_or_else(|| {
+                GateStorageError::new(
+                    "evaluate_module_violations",
+                    format!(
+                        "no partition counts for the module edge {} -> {}",
+                        edge.source_canonical_path, edge.target_canonical_path
+                    ),
+                )
+            })?;
+            let inferred_count = parts.production_inferred + parts.test_inferred;
+            if inferred_count > 0 {
+                inferred.push(ModuleDependencyEdge {
+                    import_count: inferred_count,
+                    ..edge.clone()
+                });
+            }
+        }
 
         // RS-MG-3: Load and parse boundary declarations
         let raw_boundaries = self
@@ -268,12 +322,26 @@ impl GateStorageRead for StorageConnection {
             .map_err(|e| GateStorageError::new("evaluate_module_violations", e.to_string()))?;
 
         // RS-MG-4: Evaluate violations (repo-wide, no filtering)
-        let evaluation =
-            evaluate_module_boundaries(&parsed_boundaries, &edges.edges, &module_index);
+        let evaluation = evaluate_module_boundaries(&parsed_boundaries, &judged, &module_index);
+        let not_judged = evaluate_module_boundaries(&parsed_boundaries, &inferred, &module_index);
+        let mut inferred_not_judged: Vec<GateNotJudgedRelation> = not_judged
+            .violations
+            .iter()
+            .map(|v| GateNotJudgedRelation {
+                source_module: v.source_canonical_path.clone(),
+                target_module: v.target_canonical_path.clone(),
+                import_count: v.import_count as usize,
+            })
+            .collect();
+        inferred_not_judged.sort_by(|a, b| {
+            (a.source_module.as_str(), a.target_module.as_str())
+                .cmp(&(b.source_module.as_str(), b.target_module.as_str()))
+        });
 
         Ok(GateModuleViolationEvidence {
             violations_count: evaluation.violations.len(),
             stale_declarations_count: evaluation.stale_declarations.len(),
+            inferred_not_judged,
         })
     }
 

@@ -611,3 +611,280 @@ fn trust_no_enrichment_suppressed_when_state_not_applicable() {
         "must suppress when eligible is zero"
     );
 }
+
+// ── TEST-EDGE-SCOPE-1B: the import partition on IMPORT_CYCLES ────────────────
+
+fn excluded(
+    members: &[&str],
+    flags: &[&str],
+    contains: &[&[&str]],
+) -> repo_graph_agent::AgentExcludedCycle {
+    repo_graph_agent::AgentExcludedCycle {
+        members: members.iter().map(|s| s.to_string()).collect(),
+        flags: flags.iter().map(|s| s.to_string()).collect(),
+        contains_shown: contains
+            .iter()
+            .map(|c| c.iter().map(|s| s.to_string()).collect())
+            .collect(),
+        partitions: Default::default(),
+    }
+}
+
+fn partition_with(
+    excluded_cycles: Vec<repo_graph_agent::AgentExcludedCycle>,
+    importers: Vec<(&str, Option<bool>)>,
+) -> repo_graph_agent::AgentImportCyclePartition {
+    let mut remainder = repo_graph_classification::import_partition::ImportRemainder::default();
+    remainder.tests.imports = 105;
+    remainder.tests.edges = 6;
+    repo_graph_agent::AgentImportCyclePartition {
+        view: repo_graph_classification::import_partition::ImportView::DEFAULT,
+        remainder,
+        excluded_cycles,
+        cycle_partitions: Vec::new(),
+        importers: importers
+            .into_iter()
+            .map(|(p, t)| repo_graph_agent::AgentImporterFile {
+                path: p.to_string(),
+                is_test: t,
+            })
+            .collect(),
+    }
+}
+
+fn import_cycles_json(result: &repo_graph_agent::OrientResult) -> serde_json::Value {
+    let sig = find_signal(result, SignalCode::ImportCycles).expect("IMPORT_CYCLES emitted");
+    serde_json::to_value(sig).unwrap()["evidence"].clone()
+}
+
+/// RG-REQ-004-L12: a cycle that exists only through a test file's imports is not a default cycle
+/// — orient still emits IMPORT_CYCLES (count 0) and names it, with the flag that shows it.
+#[test]
+fn orient_import_cycles_evidence_names_a_cycle_only_through_test_imports() {
+    let mut fake = seeded();
+    fake.import_cycle_partitions.insert(
+        "snap-1".into(),
+        partition_with(
+            vec![excluded(
+                &["db", "helpers/memenv", "table", "util"],
+                &["include_tests"],
+                &[],
+            )],
+            vec![],
+        ),
+    );
+    let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
+    let ev = import_cycles_json(&result);
+    assert_eq!(ev["cycle_count"], 0);
+    assert_eq!(ev["cycles"], serde_json::json!([]));
+    assert_eq!(
+        ev["excluded_cycles"][0]["members"],
+        serde_json::json!(["db", "helpers/memenv", "table", "util"])
+    );
+    assert_eq!(
+        ev["excluded_cycles"][0]["flags"],
+        serde_json::json!(["include_tests"])
+    );
+    assert_eq!(ev["excluded_cycles"][0]["length"], 4);
+    assert_eq!(ev["import_remainder"]["tests"]["imports"], 105);
+    assert_eq!(
+        ev["import_view"],
+        serde_json::json!({"include_tests": false, "include_inferred": false})
+    );
+}
+
+/// review-0's counterexample surfaced on orient: an excluded cycle that grows a shown one is
+/// named with the shown cycles it contains.
+#[test]
+fn orient_import_cycles_evidence_names_a_larger_cycle_grown_through_test_imports() {
+    let mut fake = seeded();
+    fake.cycles.insert(
+        "snap-1".into(),
+        vec![AgentCycle {
+            length: 2,
+            modules: vec!["a".into(), "b".into()],
+            test_composition: None,
+            type_only: None,
+            walk: None,
+        }],
+    );
+    fake.import_cycle_partitions.insert(
+        "snap-1".into(),
+        partition_with(
+            vec![excluded(
+                &["a", "b", "c"],
+                &["include_tests"],
+                &[&["a", "b"]],
+            )],
+            vec![],
+        ),
+    );
+    let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
+    let ev = import_cycles_json(&result);
+    assert_eq!(ev["cycle_count"], 1);
+    assert_eq!(
+        ev["excluded_cycles"][0]["contains_shown"],
+        serde_json::json!([["a", "b"]])
+    );
+}
+
+/// D-TESB-09: the IMPORT_CYCLES evidence carries the importer UNDETERMINED block over the
+/// cross-directory production importers, computed by 1A's one function.
+#[test]
+fn orient_import_cycles_evidence_carries_the_cross_directory_importer_block() {
+    let mut fake = seeded();
+    fake.import_cycle_partitions.insert(
+        "snap-1".into(),
+        partition_with(
+            vec![excluded(&["db", "table"], &["include_tests"], &[])],
+            vec![
+                ("db/c_test.c", Some(false)),
+                ("db/db_impl.cc", Some(false)),
+                ("gen/x.c", None),
+            ],
+        ),
+    );
+    let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
+    let ev = import_cycles_json(&result);
+    assert_eq!(
+        ev["importer_test_status_undetermined"],
+        serde_json::json!({
+            "count": 1,
+            "paths": ["db/c_test.c"],
+            "universe": "cross_directory_importers",
+            "universe_count": 3,
+            "unknown_count": 1,
+        })
+    );
+}
+
+/// D-TESB-11: boundaries judge certain imports; the inferred ones are counted, never judged.
+#[test]
+fn boundary_violations_judge_certain_imports_and_count_inferred_ones() {
+    let mut fake = seeded();
+    fake.boundary_declarations.insert(
+        "r1".into(),
+        vec![AgentBoundaryDeclaration {
+            source_module: "src/core".into(),
+            forbidden_target: "src/adapters".into(),
+            reason: None,
+        }],
+    );
+    let key = (
+        "snap-1".to_string(),
+        "src/core".to_string(),
+        "src/adapters".to_string(),
+    );
+    fake.imports_between_paths.insert(
+        key.clone(),
+        vec![AgentImportEdge {
+            source_file: "src/core/a.ts".into(),
+            target_file: "src/adapters/b.ts".into(),
+        }],
+    );
+    fake.inferred_imports_between_paths.insert(
+        key,
+        vec![AgentImportEdge {
+            source_file: "src/core/z.py".into(),
+            target_file: "src/adapters/b.py".into(),
+        }],
+    );
+    let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
+    let sig = find_signal(&result, SignalCode::BoundaryViolations).expect("emitted");
+    let ev = serde_json::to_value(sig).unwrap()["evidence"].clone();
+    assert_eq!(
+        ev["violation_count"], 1,
+        "only the certain import is judged"
+    );
+    assert_eq!(ev["inferred_imports_not_judged"]["count"], 1);
+}
+
+/// review-0 F-4: the not-judged evidence carries the sorted source files, so the next action
+/// cites the first one.
+#[test]
+fn boundary_not_judged_evidence_cites_the_first_source_file() {
+    let mut fake = seeded();
+    fake.boundary_declarations.insert(
+        "r1".into(),
+        vec![AgentBoundaryDeclaration {
+            source_module: "src/core".into(),
+            forbidden_target: "src/adapters".into(),
+            reason: None,
+        }],
+    );
+    fake.inferred_imports_between_paths.insert(
+        ("snap-1".into(), "src/core".into(), "src/adapters".into()),
+        vec![
+            AgentImportEdge {
+                source_file: "src/core/z.py".into(),
+                target_file: "src/adapters/b.py".into(),
+            },
+            AgentImportEdge {
+                source_file: "src/core/a.py".into(),
+                target_file: "src/adapters/b.py".into(),
+            },
+        ],
+    );
+    let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
+    let sig =
+        find_signal(&result, SignalCode::BoundaryViolations).expect("stated even with 0 judged");
+    let ev = serde_json::to_value(sig).unwrap()["evidence"].clone();
+    assert_eq!(ev["violation_count"], 0);
+    assert_eq!(
+        ev["inferred_imports_not_judged"]["files"],
+        serde_json::json!(["src/core/a.py", "src/core/z.py"])
+    );
+}
+
+/// RG-REQ-004-L12: orient's symbol focus answers the module's cycles in the DEFAULT view and names
+/// the excluded cycles involving the module.
+#[test]
+fn orient_symbol_module_cycles_answer_the_default_view() {
+    let mut fake = seeded();
+    let sk = "r1:src/core/service.ts:SYMBOL:doWork";
+    fake.symbol_name_results.insert(
+        ("snap-1".into(), "doWork".into()),
+        vec![repo_graph_agent::AgentFocusCandidate {
+            stable_key: sk.into(),
+            kind: repo_graph_agent::AgentFocusKind::Symbol,
+            file: Some("src/core/service.ts".into()),
+            line: None,
+        }],
+    );
+    fake.symbol_contexts.insert(
+        ("snap-1".into(), sk.into()),
+        repo_graph_agent::AgentSymbolContext {
+            file_path: Some("src/core/service.ts".into()),
+            module_path: Some("src/core".into()),
+            module_stable_key: Some("r1:src/core:MODULE".into()),
+            name: "doWork".into(),
+            qualified_name: Some("doWork".into()),
+            subtype: Some("function".into()),
+            line_start: Some(10),
+        },
+    );
+    fake.import_cycle_partitions.insert(
+        "snap-1".into(),
+        partition_with(
+            vec![
+                excluded(&["src/core", "src/test_support"], &["include_tests"], &[]),
+                excluded(&["lib/x", "lib/y"], &["include_tests"], &[]),
+            ],
+            vec![],
+        ),
+    );
+    let result = orient(&fake, "r1", Some("doWork"), Budget::Large, common::TEST_NOW).unwrap();
+    let ev = import_cycles_json(&result);
+    assert_eq!(ev["cycle_count"], 0);
+    let members: Vec<&serde_json::Value> = ev["excluded_cycles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| &e["members"])
+        .collect();
+    assert_eq!(
+        members,
+        vec![&serde_json::json!(["src/core", "src/test_support"])],
+        "only the excluded cycle involving the focus module"
+    );
+}

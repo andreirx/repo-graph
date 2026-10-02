@@ -224,6 +224,15 @@ pub fn run_orient(args: &[String]) -> ExitCode {
     match client.request("orient", Some(params)) {
         Ok(result) => {
             if json_mode {
+                // D-TESB-17: the JSON consumer boundary marks unreadable partition evidence.
+                let mut result = result;
+                if let Err(e) = crate::presentation::import_partition::mark_partition_evidence(
+                    &mut result,
+                    crate::presentation::import_partition::JsonSurface::Orient,
+                ) {
+                    eprintln!("error: {e}");
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
+                }
                 // Machine mode: print full envelope
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
@@ -562,6 +571,15 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
     match client.request("explain", Some(params)) {
         Ok(result) => {
             if json_mode {
+                // D-TESB-17: the JSON consumer boundary marks unreadable partition evidence.
+                let mut result = result;
+                if let Err(e) = crate::presentation::import_partition::mark_partition_evidence(
+                    &mut result,
+                    crate::presentation::import_partition::JsonSurface::Explain,
+                ) {
+                    eprintln!("error: {e}");
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
+                }
                 // Machine mode: print full envelope
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {

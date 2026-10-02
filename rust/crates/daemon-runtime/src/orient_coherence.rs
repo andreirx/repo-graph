@@ -274,6 +274,12 @@ fn map_fallback(reason: FallbackReason) -> CoherenceFallbackReason {
         FallbackReason::LiveGraphBoundedServeDeclined => {
             CoherenceFallbackReason::LiveGraphBoundedServeDeclined
         }
+        FallbackReason::LiveGraphPartitionedViewUnsupported => {
+            CoherenceFallbackReason::LiveGraphPartitionedViewUnsupported
+        }
+        FallbackReason::PartitionEvidenceUnreadable => {
+            CoherenceFallbackReason::PartitionEvidenceUnreadable
+        }
     }
 }
 

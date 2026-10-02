@@ -794,9 +794,140 @@ mod tests {
         r.signals = vec![leaf(ExplainSignal {
             code: "EXPLAIN_CYCLES".to_string(),
             summary: format!("{count} import cycle(s)."),
-            evidence: Some(serde_json::json!({ "count": count, "items": items })),
+            // A current daemon's complete partition payload, nothing excluded (D-TESB-17 fixture
+            // rule).
+            evidence: Some(serde_json::json!({
+                "count": count, "items": items,
+                "import_view": {"include_tests": false, "include_inferred": false},
+                "import_remainder": {"tests": {"imports": 0, "edges": 0},
+                                     "inferred": {"imports": 0, "edges": 0},
+                                     "tests_and_inferred": {"imports": 0, "edges": 0}},
+                "excluded_cycles": [],
+                "importer_test_status_undetermined": {"count": 0, "paths": [],
+                    "universe": "cross_directory_importers", "universe_count": 0,
+                    "unknown_count": 0}
+            })),
         })];
         r
+    }
+
+    // ── TEST-EDGE-SCOPE-1B: the import partition on explain ──
+
+    /// The `excluded_cycles` + importer keys the agent merges into `EXPLAIN_CYCLES` evidence.
+    fn partitioned_cycles_evidence(count: u64, items: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "count": count,
+            "items": items,
+            "import_view": {"include_tests": false, "include_inferred": false},
+            "import_remainder": {
+                "tests": {"imports": 105, "edges": 6},
+                "inferred": {"imports": 0, "edges": 0},
+                "tests_and_inferred": {"imports": 0, "edges": 0}
+            },
+            "excluded_cycles": [{
+                "members": ["db", "helpers/memenv", "table", "util"],
+                "length": 4,
+                "flags": ["include_tests"],
+                "contains_shown": [],
+                "partitions": {"production_certain": 2, "test_certain": 3, "production_inferred": 0,
+                               "test_inferred": 0, "unknown_test_status": 0}
+            }],
+            "importer_test_status_undetermined": {
+                "count": 1, "paths": ["util/testutil.cc"], "universe": "cross_directory_importers",
+                "universe_count": 67, "unknown_count": 0
+            }
+        })
+    }
+
+    #[test]
+    fn explain_import_cycles_block_renders_excluded_cycles_when_none_remain() {
+        // §2.4 leveldb `explain leveldb::DBImpl::Recover`, verbatim: no cycle remains, one exists
+        // only through imports from test files — the block states it and the importer count.
+        let mut r = minimal_response();
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_CYCLES".to_string(),
+            summary: "0 import cycles.".to_string(),
+            evidence: Some(partitioned_cycles_evidence(0, serde_json::json!([]))),
+        })];
+        let out = r.render_human(false);
+        let expected = [
+            "Import cycles (0)",
+            "  - +1 only through imports from test files — rmap cycles --include-tests",
+            "  - 1 file whose test status can't be determined — open it and look inside (of 67 files importing across directories)",
+        ]
+        .join("\n");
+        assert!(out.contains(&expected), "{out}");
+
+        // Beside a remaining cycle the same statements follow its rows.
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_CYCLES".to_string(),
+            summary: "1 import cycle.".to_string(),
+            evidence: Some(partitioned_cycles_evidence(
+                1,
+                serde_json::json!([{ "length": 2, "modules": ["db", "table"], "walk": ["db", "table"] }]),
+            )),
+        })];
+        let out = r.render_human(false);
+        assert!(
+            out.contains("Import cycles (1)\n  - Cycle 1 (2 modules): db -> table -> db\n  - +1 only through imports from test files — rmap cycles --include-tests\n"),
+            "{out}"
+        );
+
+        // No cycle and nothing excluded: no block, as before.
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_CYCLES".to_string(),
+            summary: "0 import cycles.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 0, "items": [], "excluded_cycles": [],
+                "import_view": {"include_tests": false, "include_inferred": false},
+                "import_remainder": {"tests": {"imports": 0, "edges": 0},
+                                     "inferred": {"imports": 0, "edges": 0},
+                                     "tests_and_inferred": {"imports": 0, "edges": 0}},
+                "importer_test_status_undetermined": {"count": 0, "paths": [],
+                    "universe": "cross_directory_importers", "universe_count": 0,
+                    "unknown_count": 0}
+            })),
+        })];
+        assert!(!r.render_human(false).contains("Import cycles"));
+    }
+
+    #[test]
+    fn explain_imports_section_states_the_inferred_remainder() {
+        // RG-REQ-002-L11: the file's certain imports are listed; the inferred ones are counted
+        // with the command that lists them for this file.
+        let mut r = minimal_response();
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_IMPORTS".to_string(),
+            summary: "1 import.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 1,
+                "items": [{"target_file": "src/core/session.ts"}],
+                "import_remainder": {
+                    "tests": {"imports": 0, "edges": 0},
+                    "inferred": {"imports": 2, "edges": 0},
+                    "tests_and_inferred": {"imports": 0, "edges": 0}
+                }
+            })),
+        })];
+        let out = r.render_human(false);
+        assert!(
+            out.contains("Imports (1)\n  - src/core/session.ts\n  - +2 inferred imports, not shown — rmap imports src/core/auth.ts --include-inferred"),
+            "{out}"
+        );
+        // No inferred import: the section is as before.
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_IMPORTS".to_string(),
+            summary: "1 import.".to_string(),
+            evidence: Some(serde_json::json!({
+                "count": 1, "items": [{"target_file": "src/core/session.ts"}]
+            })),
+        })];
+        let out = r.render_human(false);
+        assert!(
+            out.contains("Imports (1)\n  - src/core/session.ts"),
+            "{out}"
+        );
+        assert!(!out.contains("not shown"), "{out}");
     }
 
     #[test]
@@ -2558,5 +2689,52 @@ mod tests {
             !out.contains("Language:") && !out.contains("Symbols:"),
             "{out}"
         );
+    }
+
+    // ── TEST-EDGE-SCOPE-1B: D-TESB-17 (rows U9, W2) on explain's Import-cycles block ──
+
+    #[test]
+    fn explain_import_cycles_partitioned_payload_without_excluded_cycles_states_them_unreadable() {
+        let mut ev = partitioned_cycles_evidence(0, serde_json::json!([]));
+        ev.as_object_mut().unwrap().remove("excluded_cycles");
+        let mut r = minimal_response();
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_CYCLES".to_string(),
+            summary: "0 import cycles.".to_string(),
+            evidence: Some(ev),
+        })];
+        let out = r.render_human(false);
+        assert!(
+            out.contains(&format!(
+                "  - {}",
+                crate::presentation::import_partition::PARTITION_UNREADABLE
+            )),
+            "{out}"
+        );
+        assert!(!out.contains("only through"), "{out}");
+        assert!(!out.contains("can't be determined"), "{out}");
+    }
+
+    #[test]
+    fn explain_import_cycles_wrong_typed_excluded_cycles_states_them_unreadable() {
+        for bad in [
+            serde_json::json!("none"),
+            serde_json::json!([{"members": [1], "flags": ["include_tests"], "contains_shown": []}]),
+        ] {
+            let mut ev = partitioned_cycles_evidence(0, serde_json::json!([]));
+            ev["excluded_cycles"] = bad.clone();
+            let mut r = minimal_response();
+            r.signals = vec![leaf(ExplainSignal {
+                code: "EXPLAIN_CYCLES".to_string(),
+                summary: "0 import cycles.".to_string(),
+                evidence: Some(ev),
+            })];
+            let out = r.render_human(false);
+            assert!(
+                out.contains(crate::presentation::import_partition::PARTITION_UNREADABLE),
+                "{bad}: {out}"
+            );
+            assert!(!out.contains("only through"), "{out}");
+        }
     }
 }

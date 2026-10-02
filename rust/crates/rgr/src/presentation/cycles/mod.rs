@@ -98,6 +98,19 @@ pub struct CyclesResponse {
     /// is a DIFFERENT statement from "acyclic".
     #[serde(default)]
     pub module_edge_count: Option<u64>,
+    /// TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): the view this answer computed (`None` = a daemon that
+    /// predates the partition — the unavailable line, never a zero remainder).
+    #[serde(default)]
+    pub import_view: Option<serde_json::Value>,
+    /// The imports the view excluded, by the flag set that shows them.
+    #[serde(default)]
+    pub import_remainder: Option<serde_json::Value>,
+    /// The cycles only through excluded imports, with the flags that show each.
+    #[serde(default)]
+    pub excluded_cycles: Option<serde_json::Value>,
+    /// RG-REQ-001-L07: production importers whose test status can't be determined.
+    #[serde(default)]
+    pub importer_test_status_undetermined: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -203,6 +216,16 @@ impl CycleNode {
 impl CyclesResponse {
     /// Render the cycles response as human-readable plain text.
     pub fn render_human(&self) -> String {
+        self.render_module_cycles(PartitionStatement::FromPayload)
+    }
+
+    /// TEST-EDGE-SCOPE-1B (D-TESB-06): the `--engine compare` answer — the generic MODULE render
+    /// over the unpartitioned persisted graph, stating that instead of a partition it lacks.
+    pub fn render_human_explicit_engine(&self) -> String {
+        self.render_module_cycles(PartitionStatement::ExplicitEngine)
+    }
+
+    fn render_module_cycles(&self, statement: PartitionStatement) -> String {
         let mut out = String::new();
 
         // ── Header ─────────────────────────────────────────────────
@@ -270,6 +293,7 @@ impl CyclesResponse {
                     out.push_str("No module-level cycles found.\n");
                 }
             }
+            self.push_partition_statement(&mut out, statement, false);
             self.push_test_composition_note(&mut out);
             return out.trim_end().to_string();
         }
@@ -341,10 +365,72 @@ impl CyclesResponse {
             }
         }
 
+        self.push_partition_statement(&mut out, statement, true);
         self.push_type_only_unknown_note(&mut out);
         self.push_ts_caveat(&mut out);
         self.push_test_composition_note(&mut out);
         out.trim_end().to_string()
+    }
+
+    /// The partition statement of a MODULE-cycle render: the payload's partition, or the explicit
+    /// engine's unpartitioned line.
+    fn push_partition_statement(
+        &self,
+        out: &mut String,
+        statement: PartitionStatement,
+        separate: bool,
+    ) {
+        match statement {
+            PartitionStatement::FromPayload => self.push_import_partition(out, separate),
+            PartitionStatement::ExplicitEngine => push_explicit_engine_line(out),
+        }
+    }
+
+    /// TEST-EDGE-SCOPE-1B (RG-REQ-004-L12, RG-REQ-001-L07): the cycles only through excluded
+    /// imports, the excluded imports by the flags that show them, and the production importers
+    /// whose test status can't be determined — all worded by `import_partition`/`test_status`.
+    /// Nothing is added when nothing is excluded, so such an answer renders as before. The zero
+    /// state continues its line directly; after a cycle listing the block is set off by a blank
+    /// line (`separate`).
+    fn push_import_partition(&self, out: &mut String, separate: bool) {
+        use crate::presentation::import_partition as ip;
+        let mut lines: Vec<String> = Vec::new();
+        // One decode rule (D-TESB-17 row U9): a partial or malformed payload is ONE unreadable
+        // line, never "no excluded cycle" or "nothing excluded".
+        let partition = ip::surface_partition(
+            self.import_view.as_ref(),
+            self.import_remainder.as_ref(),
+            self.excluded_cycles.as_ref(),
+            self.importer_test_status_undetermined.as_ref(),
+            ip::Requires::CYCLES,
+        );
+        if let ip::Partition::Stated(_) = partition {
+            if let Some(Ok(cycles)) = self.excluded_cycles.as_ref().map(ip::parse_excluded_cycles) {
+                lines.extend(ip::excluded_cycle_lines(&cycles));
+            }
+        }
+        let stated = matches!(partition, ip::Partition::Stated(_));
+        lines.extend(ip::partition_lines_from(
+            partition,
+            ip::EdgeNoun::DirectoryGroup,
+        ));
+        if stated {
+            if let Some(line) = crate::presentation::test_status::undetermined_files_line(
+                self.importer_test_status_undetermined.as_ref(),
+            ) {
+                lines.push(line);
+            }
+        }
+        if lines.is_empty() {
+            return;
+        }
+        if separate && !out.ends_with("\n\n") {
+            out.push('\n');
+        }
+        for l in lines {
+            out.push_str(&l);
+            out.push('\n');
+        }
     }
 
     /// TYPE-ONLY-IMPORTS-1: the NARROWED successor to the blanket `import type` caveat. On the SQLite
@@ -406,6 +492,7 @@ impl CyclesResponse {
             // FIXTURE-POLLUTION-1 §2.3: even with no cycles, disclose that this LiveGraph
             // serving path did not evaluate test composition — never a silent "no fixtures".
             self.push_test_composition_note(&mut out);
+            push_explicit_engine_line(&mut out);
             return out.trim_end().to_string();
         }
 
@@ -432,6 +519,7 @@ impl CyclesResponse {
         // evaluated on this serving path) rather than let the cycles read as production-vs-
         // test-classified. The daemon sets the note; absent on the SQLite route.
         self.push_test_composition_note(&mut out);
+        push_explicit_engine_line(&mut out);
         out.trim_end().to_string()
     }
 
@@ -452,6 +540,7 @@ impl CyclesResponse {
             // FIXTURE-POLLUTION-1 §2.3: even with no cycles, disclose that this LiveGraph
             // serving path did not evaluate test composition — never a silent "no fixtures".
             self.push_test_composition_note(&mut out);
+            push_explicit_engine_line(&mut out);
             return out.trim_end().to_string();
         }
 
@@ -478,6 +567,7 @@ impl CyclesResponse {
         // evaluated on this serving path) rather than let the cycles read as production-vs-
         // test-classified. The daemon sets the note; absent on the SQLite route.
         self.push_test_composition_note(&mut out);
+        push_explicit_engine_line(&mut out);
         out.trim_end().to_string()
     }
 
@@ -533,6 +623,24 @@ fn push_type_only_label(out: &mut String, cycle: &Cycle) {
             out.push('\n');
         }
     }
+}
+
+/// Which partition statement a MODULE-cycle render carries (TEST-EDGE-SCOPE-1B).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PartitionStatement {
+    /// The default and forced-SQLite routes: the payload's view, remainder and excluded cycles.
+    FromPayload,
+    /// The explicit `--engine livegraph|compare` routes: the unpartitioned graph, stated.
+    ExplicitEngine,
+}
+
+/// D-TESB-06: the explicit engines answer over the unpartitioned import graph — stated, so their
+/// counts are not read as the production view.
+fn push_explicit_engine_line(out: &mut String) {
+    out.push_str(&format!(
+        "\nNote: {}\n",
+        crate::presentation::import_partition::EXPLICIT_ENGINE_UNPARTITIONED
+    ));
 }
 
 fn truncate_uid(uid: &str) -> String {

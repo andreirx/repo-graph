@@ -151,6 +151,21 @@ pub struct ImportResult {
     pub depth: i64,
 }
 
+impl ImportResult {
+    /// TEST-EDGE-SCOPE-1B: the row's resolution class through the one vocabulary. A missing or
+    /// out-of-vocabulary resolution is an error (`find_imports` refuses such a row).
+    pub fn checked_import_class(
+        &self,
+    ) -> Result<
+        repo_graph_classification::import_partition::ImportClass,
+        repo_graph_classification::import_partition::ImportPartitionError,
+    > {
+        repo_graph_classification::import_partition::ImportClass::from_resolution(
+            self.resolution.as_deref().unwrap_or(""),
+        )
+    }
+}
+
 /// IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1: one IMPORTS edge in the BULK per-snapshot enumeration -- the
 /// importing file's path + the imported node's classification, for the repo-wide directional compare. The
 /// `source_file` is the importing FILE; `target_file` is the imported FILE path (empty for a non-FILE / no-file
@@ -230,12 +245,14 @@ pub struct BoundaryDeclaration {
     pub reason: Option<String>,
 }
 
-/// An IMPORTS edge between two file path prefixes.
+/// An IMPORTS edge between two file path prefixes, with its checked resolution class
+/// (TEST-EDGE-SCOPE-1B: boundaries judge certain imports and count the inferred ones).
 #[derive(Debug, Clone)]
 pub struct ImportEdgeResult {
     pub source_file: String,
     pub target_file: String,
     pub line: Option<i64>,
+    pub import_class: repo_graph_classification::import_partition::ImportClass,
 }
 
 /// A boundary violation: an IMPORTS edge crossing a declared boundary.
@@ -1357,6 +1374,10 @@ impl StorageConnection {
     ) -> Result<Vec<CycleResult>, StorageError> {
         use repo_graph_algorithms::{find_sccs_cancellable, Cancelled, DirectedEdge};
 
+        // TEST-EDGE-SCOPE-1B (D-TESB-14): the persisted graph admits every IMPORTS row; an
+        // out-of-vocabulary resolution is refused, never counted.
+        self.reject_unreadable_import_resolutions(snapshot_uid, "find_cycles")?;
+
         let node_kind = match level {
             "file" => "FILE",
             _ => "MODULE",
@@ -1456,51 +1477,6 @@ impl StorageConnection {
             })?
             .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
         Ok(map)
-    }
-
-    /// CYCLE-HONESTY-1 + TYPE-ONLY-IMPORTS-1: the MODULE→MODULE `IMPORTS` edges of one snapshot as
-    /// `(source_uid, target_uid, is_type_only)` triples — the SAME edge set `find_cycles_cancellable`
-    /// loads for its SCC pass (step 1), but returned so the SQLite cycles serve can attach the REAL
-    /// intra-SCC import edges to each rendered cycle (the renderer draws an arrow ONLY for a pair present
-    /// here) AND label each cycle type-only-vs-runtime.
-    ///
-    /// `is_type_only` is the stored per-module-edge disposition (TYPE-ONLY-IMPORTS-1 migration 032),
-    /// decoded via [`TypeOnlyDisposition::from_column_code`]: `Some(TypeOnly)` = a TS/JS `import type`
-    /// that vanishes at runtime; `Some(Runtime)` = a runtime import edge; `Some(Unreadable)` = the fact
-    /// was CORRUPT when computed (distinct from absent); `None` (SQL `NULL`) = the fact was NOT computed
-    /// for this edge (a snapshot indexed before type-only tracking, or a module edge whose conjunctive
-    /// aggregate could not be confirmed) — which the serve MUST render as Unknown-with-reason, NEVER
-    /// demote to runtime (honesty rule: unknown is never zero).
-    ///
-    /// `find_cycles` discards these after Tarjan; exposing them here keeps that widely-used method's
-    /// signature untouched. Read-only; no SCC work. `DISTINCT` mirrors the `find_cycles` load exactly
-    /// (one directed edge per ordered pair — `create_module_edges` writes exactly one row per pair, so
-    /// `is_type_only` is functionally determined by the pair and the DISTINCT is lossless).
-    pub fn module_import_edges(
-        &self,
-        snapshot_uid: &str,
-    ) -> Result<Vec<(String, String, Option<TypeOnlyDisposition>)>, StorageError> {
-        let mut stmt = self.connection().prepare(
-            "SELECT DISTINCT e.source_node_uid, e.target_node_uid, e.is_type_only
-             FROM edges e
-             JOIN nodes src ON e.source_node_uid = src.node_uid
-             JOIN nodes tgt ON e.target_node_uid = tgt.node_uid
-             WHERE e.snapshot_uid = ?
-               AND e.type = 'IMPORTS'
-               AND src.kind = 'MODULE'
-               AND tgt.kind = 'MODULE'",
-        )?;
-        let edges = stmt
-            .query_map(rusqlite::params![snapshot_uid], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    // Decode the stored code (NULL/0/1/2) into the disposition. NULL ⇒ None (absent).
-                    TypeOnlyDisposition::from_column_code(row.get::<_, Option<i64>>(2)?),
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(edges)
     }
 
     /// EC-M2-LEAF-SERVE-1: the per-file STRUCTURAL rows of one snapshot — `(path, stored language,
@@ -1653,6 +1629,9 @@ impl StorageConnection {
         &self,
         snapshot_uid: &str,
     ) -> Result<Vec<ModuleStatsResult>, StorageError> {
+        // TEST-EDGE-SCOPE-1B (D-TESB-14): the directory fans read the persisted graph (test-file
+        // imports kept, stated by `stats` — D-TESB-12); an unreadable resolution is refused.
+        self.reject_unreadable_import_resolutions(snapshot_uid, "compute_module_stats")?;
         let mut stmt = self.connection().prepare(
             "WITH
             -- CTE 1: Map each module to its owned files (single pass over OWNS edges)
@@ -1838,8 +1817,19 @@ impl StorageConnection {
             },
         )?;
 
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StorageError::from)
+        let rows = rows.collect::<Result<Vec<_>, _>>()?;
+        // TEST-EDGE-SCOPE-1B (D-TESB-14): each row's class is checked through the one vocabulary
+        // (`ImportResult::import_class`); an out-of-vocabulary resolution is a named error.
+        for r in &rows {
+            r.checked_import_class().map_err(|e| {
+                crate::import_partition_reads::unreadable_import_row(
+                    "find_imports",
+                    snapshot_uid,
+                    e,
+                )
+            })?;
+        }
+        Ok(rows)
     }
 
     /// IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1: enumerate ALL IMPORTS edges for a snapshot as
@@ -1907,6 +1897,9 @@ impl StorageConnection {
         admit_inferred: bool,
     ) -> Result<ShortestPathSearch, StorageError> {
         self.reject_unreadable_call_resolutions(snapshot_uid, "find_shortest_path")?;
+        // TEST-EDGE-SCOPE-1B (D-TESB-14): the `resolution IN (…)` hop filter below would drop an
+        // out-of-vocabulary IMPORTS value silently — refuse it first.
+        self.reject_unreadable_import_resolutions(snapshot_uid, "find_shortest_path")?;
         let not_found = || ShortestPathSearch {
             path: PathResult {
                 found: false,
@@ -3030,12 +3023,18 @@ impl StorageConnection {
                 "map_resolved_dep_edges_in_path",
             )?;
         }
+        // TEST-EDGE-SCOPE-1B (RG-REQ-002-L11): the IMPORTS share is CERTAIN imports only (the
+        // inferred ones are counted per file by `map_inferred_import_counts_in_path`); refuse an
+        // out-of-vocabulary value before the SQL filter could drop it.
+        self.reject_unreadable_import_resolutions(snapshot_uid, "map_resolved_dep_edges_in_path")?;
+        let certain = crate::import_partition_reads::certain_import_resolutions_sql();
         let sql = if g3_present {
             // IMPORTS owner-read UNION persisted CALLS pairs. UNION ALL is
             // exact: the two shares cannot collide (distinct type
             // strings); each share is already DISTINCT on its side. The
             // outer ORDER BY reproduces the fallback's total order.
-            "SELECT source_file, target_file, edge_type FROM ( \
+            format!(
+                "SELECT source_file, target_file, edge_type FROM ( \
                SELECT DISTINCT src_f.path AS source_file, tgt_f.path AS target_file, \
                                e.type AS edge_type \
                FROM edges e \
@@ -3044,6 +3043,7 @@ impl StorageConnection {
                JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid \
                JOIN files tgt_f ON tgt_n.file_uid = tgt_f.file_uid \
                WHERE e.snapshot_uid = ?1 AND e.type = 'IMPORTS' \
+                 AND e.resolution IN {certain} \
                  AND src_f.path <> tgt_f.path \
                  AND (src_f.path LIKE ?2 ESCAPE '\\' OR src_f.path = ?3) \
                UNION ALL \
@@ -3053,24 +3053,27 @@ impl StorageConnection {
                  AND (p.source_file LIKE ?2 ESCAPE '\\' OR p.source_file = ?3) \
              ) \
              ORDER BY source_file ASC, target_file ASC, edge_type ASC"
+            )
         } else {
             // Labeled live-derived fallback (pre-migration snapshot):
             // the pre-M-3a combined query. PYTHON-RECEIVER-BINDING-1: its CALLS share applies
             // the persisted family's rule — certain calls (`static`/`dynamic`) only.
-            "SELECT DISTINCT src_f.path, tgt_f.path, e.type \
+            format!(
+                "SELECT DISTINCT src_f.path, tgt_f.path, e.type \
              FROM edges e \
              JOIN nodes src_n ON e.source_node_uid = src_n.node_uid \
              JOIN files src_f ON src_n.file_uid = src_f.file_uid \
              JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid \
              JOIN files tgt_f ON tgt_n.file_uid = tgt_f.file_uid \
              WHERE e.snapshot_uid = ?1 \
-               AND (e.type = 'IMPORTS' \
+               AND ((e.type = 'IMPORTS' AND e.resolution IN {certain}) \
                     OR (e.type = 'CALLS' AND e.resolution IN ('static', 'dynamic'))) \
                AND src_f.path <> tgt_f.path \
                AND (src_f.path LIKE ?2 ESCAPE '\\' OR src_f.path = ?3) \
              ORDER BY src_f.path ASC, tgt_f.path ASC, e.type ASC"
+            )
         };
-        let mut stmt = self.connection().prepare(sql)?;
+        let mut stmt = self.connection().prepare(&sql)?;
         let rows = stmt.query_map(
             rusqlite::params![snapshot_uid, like_pattern, exact],
             |row| {
@@ -3083,6 +3086,38 @@ impl StorageConnection {
         )?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StorageError::from)
+    }
+
+    /// TEST-EDGE-SCOPE-1B (RG-REQ-002-L11): per source file under the prefix, how many INFERRED
+    /// file→file IMPORTS edges `map` leaves out of its certain import list (the per-file
+    /// `inferred_import_count`). Same scope rule as [`Self::map_resolved_dep_edges_in_path`]; an
+    /// out-of-vocabulary value is refused first. Files with none are absent.
+    pub fn map_inferred_import_counts_in_path(
+        &self,
+        snapshot_uid: &str,
+        path_prefix: &str,
+    ) -> Result<std::collections::BTreeMap<String, u64>, StorageError> {
+        self.reject_unreadable_import_resolutions(
+            snapshot_uid,
+            "map_inferred_import_counts_in_path",
+        )?;
+        let (like_pattern, exact) = Self::map_path_scope(path_prefix);
+        let mut stmt = self.connection().prepare(
+            "SELECT src_f.path, COUNT(*) FROM edges e \
+             JOIN nodes src_n ON e.source_node_uid = src_n.node_uid \
+             JOIN files src_f ON src_n.file_uid = src_f.file_uid \
+             JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid \
+             JOIN files tgt_f ON tgt_n.file_uid = tgt_f.file_uid \
+             WHERE e.snapshot_uid = ?1 AND e.type = 'IMPORTS' AND e.resolution = 'inferred' \
+               AND src_f.path <> tgt_f.path \
+               AND (src_f.path LIKE ?2 ESCAPE '\\' OR src_f.path = ?3) \
+             GROUP BY src_f.path ORDER BY src_f.path ASC",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![snapshot_uid, like_pattern, exact],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)),
+        )?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// MAP-FROM-INDEX-1: UNRESOLVED IMPORTS edges (source file → the import
@@ -3199,7 +3234,8 @@ impl StorageConnection {
             "SELECT
 			   src_f.path AS source_file,
 			   tgt_f.path AS target_file,
-			   e.line_start AS line
+			   e.line_start AS line,
+			   e.resolution AS resolution
 			 FROM edges e
 			 JOIN nodes src_n ON e.source_node_uid = src_n.node_uid
 			 JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid
@@ -3212,19 +3248,42 @@ impl StorageConnection {
 			 ORDER BY src_f.path, e.line_start",
         )?;
 
-        let rows = stmt.query_map(
-            rusqlite::params![snapshot_uid, src_pattern, tgt_pattern],
-            |row| {
+        let rows = stmt
+            .query_map(
+                rusqlite::params![snapshot_uid, src_pattern, tgt_pattern],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        // TEST-EDGE-SCOPE-1B (D-TESB-14): every row's class is checked through the one vocabulary;
+        // an out-of-vocabulary resolution is a named error, never judged as certain.
+        rows.into_iter()
+            .map(|(source_file, target_file, line, resolution)| {
+                let import_class =
+                    repo_graph_classification::import_partition::ImportClass::from_resolution(
+                        &resolution,
+                    )
+                    .map_err(|e| {
+                        crate::import_partition_reads::unreadable_import_row(
+                            "find_imports_between_paths",
+                            snapshot_uid,
+                            e,
+                        )
+                    })?;
                 Ok(ImportEdgeResult {
-                    source_file: row.get(0)?,
-                    target_file: row.get(1)?,
-                    line: row.get(2)?,
+                    source_file,
+                    target_file,
+                    line,
+                    import_class,
                 })
-            },
-        )?;
-
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StorageError::from)
+            })
+            .collect()
     }
 
     // ── Internal helpers ─────────────────────────────────────

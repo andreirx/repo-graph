@@ -12,18 +12,26 @@
 //! - Duplicate file ownership is an explicit error
 //! - Output is deterministically sorted
 //! - Counts use u64
+//! - Each import carries its partition (TEST-EDGE-SCOPE-1B): an edge counts only
+//!   the imports its view admits, carries the four partition counts of all its
+//!   imports, and the result carries the view's excluded remainder. The partition
+//!   policy itself lives in `import_partition.rs`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use crate::import_partition::{ImportPartition, ImportRemainder, ImportView, PartitionCounts};
 
 // ── Input DTOs ─────────────────────────────────────────────────────
 
 /// A resolved import between two files.
 ///
-/// Minimal normalized fact for derivation.
+/// Minimal normalized fact for derivation, with the partition of the import
+/// (its resolution class and its importer's test status).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedImportFact {
     pub source_file_uid: String,
     pub target_file_uid: String,
+    pub partition: ImportPartition,
 }
 
 /// A file ownership assignment.
@@ -55,6 +63,10 @@ pub struct ModuleEdgeDerivationInput {
 // ── Output DTOs ────────────────────────────────────────────────────
 
 /// A derived cross-module dependency edge.
+///
+/// `import_count` and `source_file_count` count only the imports the derivation's
+/// view admits; the partition counts of every cross-module import of the relation
+/// are carried by the derivation result ([`ModuleEdgeDerivationResult::partitions_of`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleDependencyEdge {
     pub source_module_uid: String,
@@ -113,13 +125,37 @@ impl std::error::Error for ModuleEdgeDerivationError {}
 /// Result of module edge derivation.
 #[derive(Debug, Clone)]
 pub struct ModuleEdgeDerivationResult {
-    /// Derived cross-module edges, sorted by (source_path, target_path).
+    /// Derived cross-module edges of the view (relations with at least one admitted
+    /// import), sorted by (source_path, target_path).
     pub edges: Vec<ModuleDependencyEdge>,
-    /// Diagnostic counts.
+    /// Diagnostic counts over the imports the view admits.
     pub diagnostics: ModuleEdgeDiagnostics,
+    /// The view the edges answer.
+    pub view: ImportView,
+    /// The cross-module imports the view excludes, and the relations that exist
+    /// only through them, per remainder group.
+    pub remainder: ImportRemainder,
+    /// The four partition counts of every edge in `edges`, keyed by its
+    /// (source module uid, target module uid): every cross-module import of the
+    /// relation in its own cell, admitted or not.
+    pub edge_partitions: BTreeMap<(String, String), PartitionCounts>,
 }
 
-/// Diagnostic counts from derivation.
+impl ModuleEdgeDerivationResult {
+    /// The partition counts of one edge of this result, or `None` when the pair is
+    /// not an edge of the result — absent evidence, never a measured zero
+    /// (RG-REQ-002-L04; D-TESB-17 row U2).
+    pub fn partitions_of(&self, edge: &ModuleDependencyEdge) -> Option<PartitionCounts> {
+        self.edge_partitions
+            .get(&(
+                edge.source_module_uid.clone(),
+                edge.target_module_uid.clone(),
+            ))
+            .copied()
+    }
+}
+
+/// Diagnostic counts from derivation, over the imports the view admits.
 #[derive(Debug, Clone, Default)]
 pub struct ModuleEdgeDiagnostics {
     /// Total resolved import facts processed.
@@ -136,21 +172,34 @@ pub struct ModuleEdgeDiagnostics {
 
 // ── Pure derivation function ───────────────────────────────────────
 
-/// Derive cross-module dependency edges from raw facts.
+/// Derive cross-module dependency edges from raw facts, admitting every import
+/// passed in whatever its partition (the view [`ImportView::ALL`]).
+///
+/// Callers that answer a partitioned surface use
+/// [`derive_module_dependency_edges_in_view`].
+pub fn derive_module_dependency_edges(
+    input: ModuleEdgeDerivationInput,
+) -> Result<ModuleEdgeDerivationResult, ModuleEdgeDerivationError> {
+    derive_module_dependency_edges_in_view(input, ImportView::ALL)
+}
+
+/// Derive the cross-module dependency edges of one view from raw facts.
 ///
 /// Algorithm:
 /// 1. Build file → module ownership index (error on duplicates)
 /// 2. Build module_uid → canonical_path lookup
-/// 3. For each resolved import:
-///    - Look up source file's module
-///    - Look up target file's module
-///    - If both owned AND different modules → cross-module edge
-/// 4. Aggregate by (source_module, target_module)
+/// 3. For each resolved import whose source and target files are owned by
+///    different modules, count it in its relation's partition cell; when the
+///    view admits it, also count it in the relation's import count, its source
+///    file set and the diagnostics
+/// 4. Emit the relations with at least one admitted import; the others form the
+///    remainder (with every excluded import, per group)
 /// 5. Sort deterministically
 ///
 /// Returns error if any file has duplicate ownership assignments.
-pub fn derive_module_dependency_edges(
+pub fn derive_module_dependency_edges_in_view(
     input: ModuleEdgeDerivationInput,
+    view: ImportView,
 ) -> Result<ModuleEdgeDerivationResult, ModuleEdgeDerivationError> {
     // 1. Build ownership index, detecting duplicates
     let ownership_index = build_ownership_index(&input.ownership)?;
@@ -167,13 +216,18 @@ pub fn derive_module_dependency_edges(
     let mut edge_aggregates: HashMap<(&str, &str), EdgeAggregate> = HashMap::new();
 
     for import in &input.imports {
-        diagnostics.imports_total += 1;
+        let admitted = view.admits(import.partition);
+        if admitted {
+            diagnostics.imports_total += 1;
+        }
 
         // Look up source module
         let source_module = match ownership_index.get(import.source_file_uid.as_str()) {
             Some(m) => *m,
             None => {
-                diagnostics.imports_source_unowned += 1;
+                if admitted {
+                    diagnostics.imports_source_unowned += 1;
+                }
                 continue;
             }
         };
@@ -182,33 +236,47 @@ pub fn derive_module_dependency_edges(
         let target_module = match ownership_index.get(import.target_file_uid.as_str()) {
             Some(m) => *m,
             None => {
-                diagnostics.imports_target_unowned += 1;
+                if admitted {
+                    diagnostics.imports_target_unowned += 1;
+                }
                 continue;
             }
         };
 
         // Skip intra-module imports
         if source_module == target_module {
-            diagnostics.imports_intra_module += 1;
+            if admitted {
+                diagnostics.imports_intra_module += 1;
+            }
             continue;
         }
 
-        diagnostics.imports_cross_module += 1;
-
-        // Aggregate
+        // Aggregate: every cross-module import lands in its partition cell.
         let agg = edge_aggregates
             .entry((source_module, target_module))
             .or_default();
-        agg.import_count += 1;
-        agg.source_files.insert(&import.source_file_uid);
+        agg.partitions.add(import.partition);
+        if admitted {
+            diagnostics.imports_cross_module += 1;
+            agg.import_count += 1;
+            agg.source_files.insert(&import.source_file_uid);
+        }
     }
 
-    // 4. Build output edges
+    // 4. The remainder over every relation, then the view's edges.
+    let remainder =
+        ImportRemainder::from_relations(view, edge_aggregates.values().map(|a| &a.partitions));
+    let mut edge_partitions = BTreeMap::new();
     let mut edges: Vec<ModuleDependencyEdge> = edge_aggregates
         .into_iter()
+        .filter(|(_, agg)| agg.import_count > 0)
         .filter_map(|((source_uid, target_uid), agg)| {
             let source_path = module_lookup.get(source_uid)?;
             let target_path = module_lookup.get(target_uid)?;
+            edge_partitions.insert(
+                (source_uid.to_string(), target_uid.to_string()),
+                agg.partitions,
+            );
             Some(ModuleDependencyEdge {
                 source_module_uid: source_uid.to_string(),
                 source_canonical_path: (*source_path).to_string(),
@@ -227,7 +295,13 @@ pub fn derive_module_dependency_edges(
             .then_with(|| a.target_canonical_path.cmp(&b.target_canonical_path))
     });
 
-    Ok(ModuleEdgeDerivationResult { edges, diagnostics })
+    Ok(ModuleEdgeDerivationResult {
+        edges,
+        diagnostics,
+        view,
+        remainder,
+        edge_partitions,
+    })
 }
 
 // ── Internal helpers ───────────────────────────────────────────────
@@ -235,8 +309,12 @@ pub fn derive_module_dependency_edges(
 /// Aggregation state for a single (source, target) module pair.
 #[derive(Debug, Default)]
 struct EdgeAggregate<'a> {
+    /// Admitted imports.
     import_count: u64,
+    /// Source files of the admitted imports.
     source_files: HashSet<&'a str>,
+    /// Every cross-module import of the relation, in its partition cell.
+    partitions: PartitionCounts,
 }
 
 /// Build file → module ownership index, erroring on duplicates.
@@ -270,11 +348,61 @@ fn build_ownership_index(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::import_partition::{ImportClass, ImporterStatus, RemainderCount};
+
+    const PROD_CERTAIN: ImportPartition = ImportPartition {
+        class: ImportClass::Certain,
+        status: ImporterStatus::Production,
+    };
+    const TEST_CERTAIN: ImportPartition = ImportPartition {
+        class: ImportClass::Certain,
+        status: ImporterStatus::Test,
+    };
+    const PROD_INFERRED: ImportPartition = ImportPartition {
+        class: ImportClass::Inferred,
+        status: ImporterStatus::Production,
+    };
+    const TEST_INFERRED: ImportPartition = ImportPartition {
+        class: ImportClass::Inferred,
+        status: ImporterStatus::Test,
+    };
+    const UNKNOWN_CERTAIN: ImportPartition = ImportPartition {
+        class: ImportClass::Certain,
+        status: ImporterStatus::Unknown,
+    };
 
     fn make_import(source: &str, target: &str) -> ResolvedImportFact {
+        make_partitioned_import(source, target, PROD_CERTAIN)
+    }
+
+    fn make_partitioned_import(
+        source: &str,
+        target: &str,
+        partition: ImportPartition,
+    ) -> ResolvedImportFact {
         ResolvedImportFact {
             source_file_uid: source.to_string(),
             target_file_uid: target.to_string(),
+            partition,
+        }
+    }
+
+    /// Three modules: app (files a1, a2, at), core (c), util (u).
+    fn three_module_input(imports: Vec<ResolvedImportFact>) -> ModuleEdgeDerivationInput {
+        ModuleEdgeDerivationInput {
+            imports,
+            ownership: vec![
+                make_ownership("a1", "mod-app"),
+                make_ownership("a2", "mod-app"),
+                make_ownership("at", "mod-app"),
+                make_ownership("c", "mod-core"),
+                make_ownership("u", "mod-util"),
+            ],
+            modules: vec![
+                make_module("mod-app", "app"),
+                make_module("mod-core", "core"),
+                make_module("mod-util", "util"),
+            ],
         }
     }
 
@@ -505,5 +633,175 @@ mod tests {
         assert_eq!(result.diagnostics.imports_intra_module, 1);
         assert_eq!(result.diagnostics.imports_source_unowned, 1);
         assert_eq!(result.diagnostics.imports_target_unowned, 1);
+    }
+
+    // ── Partitions (TEST-EDGE-SCOPE-1B) ────────────────────────────
+
+    #[test]
+    fn module_edge_carries_its_four_partition_counts_and_the_unknown_tally() {
+        let input = three_module_input(vec![
+            make_partitioned_import("a1", "c", PROD_CERTAIN),
+            make_partitioned_import("a2", "c", UNKNOWN_CERTAIN),
+            make_partitioned_import("at", "c", TEST_CERTAIN),
+            make_partitioned_import("a1", "c", PROD_INFERRED),
+            make_partitioned_import("at", "c", TEST_INFERRED),
+        ]);
+        let result =
+            derive_module_dependency_edges_in_view(input, ImportView::DEFAULT).expect("derivation");
+        assert_eq!(result.edges.len(), 1);
+        assert_eq!(
+            result.partitions_of(&result.edges[0]),
+            Some(PartitionCounts {
+                production_certain: 2,
+                test_certain: 1,
+                production_inferred: 1,
+                test_inferred: 1,
+                unknown_test_status: 1,
+            })
+        );
+        assert_eq!(result.edges[0].import_count, 2, "only the admitted cells");
+    }
+
+    #[test]
+    fn a_relation_in_two_partitions_counts_each_import_in_its_own_partition() {
+        let imports = vec![
+            make_partitioned_import("a1", "c", PROD_CERTAIN),
+            make_partitioned_import("at", "c", TEST_CERTAIN),
+            make_partitioned_import("at", "c", TEST_CERTAIN),
+        ];
+        let default = derive_module_dependency_edges_in_view(
+            three_module_input(imports.clone()),
+            ImportView::DEFAULT,
+        )
+        .expect("derivation");
+        let with_tests = derive_module_dependency_edges_in_view(
+            three_module_input(imports),
+            ImportView::CERTAIN_WITH_TESTS,
+        )
+        .expect("derivation");
+        assert_eq!(default.edges.len(), 1);
+        assert_eq!(with_tests.edges.len(), 1);
+        let parts = default
+            .partitions_of(&default.edges[0])
+            .expect("an edge of the result");
+        assert_eq!(Some(parts), with_tests.partitions_of(&with_tests.edges[0]));
+        assert_eq!(parts.production_certain, 1);
+        assert_eq!(parts.test_certain, 2);
+        assert_eq!(default.edges[0].import_count, 1);
+        assert_eq!(with_tests.edges[0].import_count, 3);
+        // The relation is in the view, so it is not a remainder relation; its test
+        // imports are remainder imports.
+        assert_eq!(
+            default.remainder.tests,
+            RemainderCount {
+                imports: 2,
+                edges: 0
+            }
+        );
+        assert!(with_tests.remainder.is_empty());
+    }
+
+    #[test]
+    fn view_edge_counts_only_admitted_imports_and_their_source_files() {
+        let input = three_module_input(vec![
+            make_partitioned_import("a1", "c", PROD_CERTAIN),
+            make_partitioned_import("a1", "c", PROD_CERTAIN),
+            make_partitioned_import("a2", "c", PROD_INFERRED),
+            make_partitioned_import("at", "c", TEST_CERTAIN),
+        ]);
+        let result =
+            derive_module_dependency_edges_in_view(input, ImportView::DEFAULT).expect("derivation");
+        let edge = &result.edges[0];
+        assert_eq!(edge.import_count, 2);
+        assert_eq!(
+            edge.source_file_count, 1,
+            "a2 and at contribute no admitted import"
+        );
+        assert_eq!(result.diagnostics.imports_cross_module, 2);
+        assert_eq!(result.diagnostics.imports_total, 2);
+        assert_eq!(result.view, ImportView::DEFAULT);
+    }
+
+    #[test]
+    fn a_relation_only_through_excluded_imports_leaves_the_view_and_is_counted_in_the_remainder() {
+        let input = || {
+            three_module_input(vec![
+                make_partitioned_import("a1", "c", PROD_CERTAIN),
+                make_partitioned_import("at", "u", TEST_CERTAIN),
+                make_partitioned_import("at", "u", TEST_CERTAIN),
+                make_partitioned_import("c", "u", PROD_INFERRED),
+                make_partitioned_import("u", "a1", TEST_INFERRED),
+            ])
+        };
+        let default = derive_module_dependency_edges_in_view(input(), ImportView::DEFAULT)
+            .expect("derivation");
+        let pairs: Vec<(&str, &str)> = default
+            .edges
+            .iter()
+            .map(|e| {
+                (
+                    e.source_canonical_path.as_str(),
+                    e.target_canonical_path.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(pairs, vec![("app", "core")]);
+        assert_eq!(
+            default.remainder.tests,
+            RemainderCount {
+                imports: 2,
+                edges: 1
+            }
+        );
+        assert_eq!(
+            default.remainder.inferred,
+            RemainderCount {
+                imports: 1,
+                edges: 1
+            }
+        );
+        assert_eq!(
+            default.remainder.tests_and_inferred,
+            RemainderCount {
+                imports: 1,
+                edges: 1
+            }
+        );
+        let all =
+            derive_module_dependency_edges_in_view(input(), ImportView::ALL).expect("derivation");
+        assert_eq!(all.edges.len(), 4);
+        assert!(all.remainder.is_empty());
+        // The one-argument derivation admits everything it is given.
+        let unscoped = derive_module_dependency_edges(input()).expect("derivation");
+        assert_eq!(unscoped.edges, all.edges);
+    }
+
+    #[test]
+    fn partitions_of_a_pair_outside_the_result_is_absent_never_zero() {
+        // D-TESB-17 row U2: a relation that exists only through test imports is not an
+        // edge of the default view, so its counts are absent from that result — never a
+        // measured all-zero record.
+        let input = || {
+            three_module_input(vec![
+                make_partitioned_import("a1", "c", PROD_CERTAIN),
+                make_partitioned_import("at", "u", TEST_CERTAIN),
+            ])
+        };
+        let default = derive_module_dependency_edges_in_view(input(), ImportView::DEFAULT)
+            .expect("derivation");
+        let all =
+            derive_module_dependency_edges_in_view(input(), ImportView::ALL).expect("derivation");
+        let outside = all
+            .edges
+            .iter()
+            .find(|e| e.target_canonical_path == "util")
+            .expect("the test-only relation is an edge of the widest view");
+        assert_eq!(default.partitions_of(outside), None);
+        assert_eq!(
+            all.partitions_of(outside).map(|p| p.test_certain),
+            Some(1),
+            "the same pair inside a result carries its measured counts"
+        );
+        assert!(default.partitions_of(&default.edges[0]).is_some());
     }
 }

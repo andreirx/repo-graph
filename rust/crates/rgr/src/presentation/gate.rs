@@ -294,11 +294,40 @@ impl GateResponse {
                 out.push_str(&format!("    computed: {}\n", obl.computed_verdict));
                 out.push_str(&format!("    effective: {}\n", obl.effective_verdict));
 
-                // Evidence display (method-specific)
-                out.push_str(&format!(
-                    "    evidence: {}\n",
-                    render_evidence(&obl.evidence)
-                ));
+                // Evidence display (method-specific). TEST-EDGE-SCOPE-1B (D-TESB-11): the
+                // inferred imports not judged render as their own line with a next action.
+                let mut evidence = obl.evidence.clone();
+                let not_judged = evidence
+                    .as_object_mut()
+                    .and_then(|o| o.remove("inferred_imports_not_judged"));
+                out.push_str(&format!("    evidence: {}\n", render_evidence(&evidence)));
+                match not_judged {
+                    Some(nj) => {
+                        let boundary = format!(
+                            "the boundaries of {}",
+                            obl.target.as_deref().unwrap_or("the target")
+                        );
+                        if let Some(line) =
+                            crate::presentation::import_partition::not_judged_line(&nj, &boundary)
+                        {
+                            out.push_str(&format!("    {line}\n"));
+                        }
+                    }
+                    // D-TESB-17 row U10: a current daemon states the count on every
+                    // arch/module-violations evaluation, zero included; its absence means a
+                    // daemon that predates the partition — stated, never read as zero.
+                    None if matches!(
+                        obl.method.as_str(),
+                        "arch_violations" | "module_violations"
+                    ) =>
+                    {
+                        out.push_str(&format!(
+                            "    {}\n",
+                            crate::presentation::import_partition::PARTITION_UNAVAILABLE
+                        ));
+                    }
+                    None => {}
+                }
 
                 // Waiver basis (when effective != computed)
                 if let Some(ref waiver) = obl.waiver_basis {
@@ -436,7 +465,17 @@ mod tests {
             operator: None,
             computed_verdict: computed.to_string(),
             effective_verdict: effective.to_string(),
-            evidence: serde_json::json!({}),
+            // A current daemon states the not-judged count on every arch/module-violations
+            // evaluation, zero included (D-TESB-17 fixture rule).
+            evidence: match method {
+                "arch_violations" => {
+                    serde_json::json!({"inferred_imports_not_judged": {"count": 0, "files": []}})
+                }
+                "module_violations" => serde_json::json!({
+                    "inferred_imports_not_judged": {"count": 0, "relations": []}
+                }),
+                _ => serde_json::json!({}),
+            },
             waiver_basis: None,
         }
     }
@@ -667,6 +706,54 @@ mod tests {
     }
 
     #[test]
+    fn gate_arch_violations_state_inferred_imports_not_judged() {
+        // D-TESB-11: the arch obligation's verdict judges certain imports; the inferred ones it
+        // would have judged render as one line citing the first file, never inside the evidence
+        // key=value dump.
+        let mut obl = make_obligation(
+            "REQ-ARCH",
+            1,
+            "o1",
+            "core stays clean",
+            "arch_violations",
+            "PASS",
+            "PASS",
+        );
+        obl.target = Some("src/core".to_string());
+        obl.evidence = serde_json::json!({
+            "violations": 0,
+            "inferred_imports_not_judged": {"count": 3, "files": ["src/core/a.py", "src/core/b.py"]}
+        });
+        let resp = make_response(
+            make_outcome("pass", "default", 0, make_counts(1, 1, 0, 0, 0, 0)),
+            vec![obl.clone()],
+        );
+        let out = resp.render_human();
+        assert!(out.contains("    evidence: violations=0\n"), "{out}");
+        assert!(
+            out.contains("    +3 inferred imports across the boundaries of src/core not judged (2 files; first: src/core/a.py) — investigate with rmap imports src/core/a.py --include-inferred\n"),
+            "{out}"
+        );
+        // The module-violations form names the source module of the first relation.
+        obl.method = "module_violations".to_string();
+        obl.evidence = serde_json::json!({
+            "violations": 0,
+            "inferred_imports_not_judged": {"count": 1, "relations": [
+                {"source": "db", "target": "util", "import_count": 1}
+            ]}
+        });
+        let out = make_response(
+            make_outcome("pass", "default", 0, make_counts(1, 1, 0, 0, 0, 0)),
+            vec![obl],
+        )
+        .render_human();
+        assert!(
+            out.contains("    +1 inferred import not judged — investigate with rmap modules deps db --include-inferred\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
     fn render_with_target_and_threshold() {
         let mut obl = make_obligation(
             "REQ-001",
@@ -823,5 +910,77 @@ mod tests {
         assert!(out.contains("kind: absolute_max"));
         assert!(out.contains("severity: fail"));
         assert!(out.contains("verdict: PASS"));
+    }
+
+    // ── TEST-EDGE-SCOPE-1B: D-TESB-17 (rows U10, W4) on `gate` ──
+
+    #[test]
+    fn gate_arch_violations_without_not_judged_evidence_states_the_partition_unavailable() {
+        let mut obl = make_obligation(
+            "REQ-1",
+            1,
+            "o1",
+            "core clean",
+            "arch_violations",
+            "PASS",
+            "PASS",
+        );
+        obl.evidence = serde_json::json!({"violation_count": 0});
+        let resp = make_response(
+            make_outcome("pass", "default", 0, make_counts(1, 1, 0, 0, 0, 0)),
+            vec![obl],
+        );
+        let out = resp.render_human();
+        assert!(
+            out.contains(crate::presentation::import_partition::PARTITION_UNAVAILABLE),
+            "{out}"
+        );
+        // A measured zero adds nothing.
+        let resp = make_response(
+            make_outcome("pass", "default", 0, make_counts(1, 1, 0, 0, 0, 0)),
+            vec![make_obligation(
+                "REQ-1",
+                1,
+                "o1",
+                "core clean",
+                "arch_violations",
+                "PASS",
+                "PASS",
+            )],
+        );
+        let out = resp.render_human();
+        assert!(
+            !out.contains("partition unavailable") && !out.contains("not judged"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn gate_non_numeric_not_judged_renders_unreadable() {
+        for bad in [
+            serde_json::json!({"count": "3", "files": ["a.py"]}),
+            serde_json::json!({"count": 0, "files": "a.py"}),
+        ] {
+            let mut obl = make_obligation(
+                "REQ-1",
+                1,
+                "o1",
+                "core clean",
+                "arch_violations",
+                "PASS",
+                "PASS",
+            );
+            obl.evidence =
+                serde_json::json!({"violation_count": 0, "inferred_imports_not_judged": bad});
+            let resp = make_response(
+                make_outcome("pass", "default", 0, make_counts(1, 1, 0, 0, 0, 0)),
+                vec![obl],
+            );
+            let out = resp.render_human();
+            assert!(
+                out.contains(crate::presentation::import_partition::NOT_JUDGED_UNREADABLE),
+                "{out}"
+            );
+        }
     }
 }

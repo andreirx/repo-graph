@@ -433,7 +433,33 @@ impl OrientResponse {
                 // the truly-empty case: no cycles AND nothing disclosed.
                 let has_disclosure =
                     matches!(test_only, Some(n) if n > 0) || matches!(unknown, Some(n) if n > 0);
-                if headline > 0 || has_disclosure {
+                // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): the cycles only through imports the
+                // default view excludes, stated with the `cycles` command that shows them — the
+                // same set `cycles` and explain name. A malformed key is stated, never dropped.
+                // One decode rule (D-TESB-17 row U9): no `import_view` → the unavailable clause;
+                // a partial or malformed payload → the unreadable clause, never "none excluded".
+                let excluded_clause = {
+                    use super::import_partition as ip;
+                    match ip::surface_partition(
+                        ev.get("import_view"),
+                        ev.get("import_remainder"),
+                        ev.get("excluded_cycles"),
+                        ev.get("importer_test_status_undetermined"),
+                        ip::Requires::CYCLES,
+                    ) {
+                        ip::Partition::Unavailable => {
+                            Some(ip::PARTITION_UNAVAILABLE_CLAUSE.to_string())
+                        }
+                        ip::Partition::Unreadable => {
+                            Some(ip::PARTITION_UNREADABLE_CLAUSE.to_string())
+                        }
+                        ip::Partition::Stated(_) => match ip::excluded_cycles_of(ev) {
+                            Some(Ok(excluded)) => ip::excluded_cycle_clause(&excluded),
+                            _ => Some(ip::PARTITION_UNREADABLE_CLAUSE.to_string()),
+                        },
+                    }
+                };
+                if headline > 0 || has_disclosure || excluded_clause.is_some() {
                     // Anchor honesty: with a split, the first entry in `cycles[]` (top-3) may be a
                     // demoted test-only/unknown ring — misrepresenting the example beside a
                     // production headline. Draw ONLY when there is no split
@@ -491,10 +517,13 @@ impl OrientResponse {
                     // Mirror `cycles`' "+M test-only (excluded)" AND unknown disclosures so the two
                     // surfaces tell ONE story about the same snapshot — via the SHARED clause helper
                     // (review-4 #3), so the wording cannot drift between the two headlines.
-                    if let Some(clause) =
+                    let clauses: Vec<String> =
                         crate::presentation::cycle_exclusion_clause(test_only, unknown)
-                    {
-                        line.push_str(&format!(" ({clause})"));
+                            .into_iter()
+                            .chain(excluded_clause)
+                            .collect();
+                    if !clauses.is_empty() {
+                        line.push_str(&format!(" ({})", clauses.join("; ")));
                     }
                     // COHERENCE-2 §2.2: render the SAME type-only verdict label `cycles` renders,
                     // via the SHARED `cycles::type_only_label`, so the two surfaces render the

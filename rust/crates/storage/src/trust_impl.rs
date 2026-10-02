@@ -31,9 +31,9 @@ use repo_graph_classification::types::{
 };
 use repo_graph_trust::storage_port::{
     BasisCodeCountRow, CallCertaintyCounts, ClassificationCountRow, CountByClassificationInput,
-    ExternalDependencyAttribution, NamedDependencyCount, PathPrefixModuleCycle,
-    QueryUnresolvedEdgesInput, ResolvedCallAggregate, TrustModuleStats, TrustStorageRead,
-    TrustUnresolvedEdgeSample, UnresolvedCallSite, UnresolvedEdgeBasisCode,
+    ExcludedConnectivity, ExternalDependencyAttribution, NamedDependencyCount,
+    PathPrefixModuleCycle, QueryUnresolvedEdgesInput, ResolvedCallAggregate, TrustModuleStats,
+    TrustStorageRead, TrustUnresolvedEdgeSample, UnresolvedCallSite, UnresolvedEdgeBasisCode,
 };
 
 use crate::connection::StorageConnection;
@@ -713,6 +713,9 @@ impl TrustStorageRead for StorageConnection {
         &self,
         snapshot_uid: &str,
     ) -> Result<Vec<PathPrefixModuleCycle>, StorageError> {
+        // TEST-EDGE-SCOPE-1B (D-TESB-14): this rule reads the persisted graph (test imports kept —
+        // a resolution-symptom rule, not connectivity); an unreadable resolution is refused.
+        self.reject_unreadable_import_resolutions(snapshot_uid, "find_path_prefix_module_cycles")?;
         // Mirrors TS findPathPrefixModuleCycles at
         // sqlite-storage.ts:2777.
         //
@@ -778,87 +781,38 @@ impl TrustStorageRead for StorageConnection {
         &self,
         snapshot_uid: &str,
     ) -> Result<Vec<TrustModuleStats>, StorageError> {
-        // TRUST-MODULE-EDGES-1 (RG-REQ-009-L02 / RG-REQ-004-L01): fan_in/fan_out are
-        // computed over the SAME derived module-dependency edge set that `modules list`
-        // and `modules deps` render — resolved file→file IMPORTS aggregated through
-        // `module_file_ownership` to the owning module candidate on BOTH endpoints, with
-        // intra-module imports excluded. This mirrors
-        // `classification::module_edges::derive_module_dependency_edges` in SQL:
-        //   fan_out(M) = COUNT(DISTINCT target module candidate) over cross-module imports whose
-        //               source file is owned by M;
-        //   fan_in(M)  = COUNT(DISTINCT source module candidate) over cross-module imports whose
-        //               target file is owned by M.
+        // TRUST-MODULE-EDGES-1 (RG-REQ-009-L02 / RG-REQ-004-L01) + TEST-EDGE-SCOPE-1B
+        // (RG-REQ-004-L12 "trust's connectivity reads the default partition", D-TESB-10):
+        // fan_in/fan_out are counted over the SAME derived module-dependency edge set `modules
+        // list` and `modules deps` render in their DEFAULT view — the partitioned file→file
+        // IMPORTS rows (`file_imports_with_partition`) aggregated through `module_file_ownership`
+        // to the owning module candidate on both endpoints by
+        // `classification::module_edges::derive_module_dependency_edges_in_view`, intra-module
+        // imports excluded. One computation; no SQL re-implementation of the rule.
         //
-        // The prior implementation (ORIENT-BUG-1, 28126a2) took the fans from IMPORTS
-        // edges between per-DIRECTORY MODULE nodes joined by `qualified_name =
-        // canonical_root_path` — the crate ROOT node, which owns no files, while the
-        // edges attach to the leaf directory node — so the join missed and every fan
-        // COALESCE'd to 0 on Cargo/Gradle/Maven/TS layouts (RC-5). A prefix-LIKE bridge
-        // is rejected: it would double-count nested candidates.
+        // `excluded_connectivity` counts, per module, the relations (in or out) that exist only
+        // through imports the default view excludes, under the smallest flag set that shows them.
         //
-        // Identity is UNCHANGED (MODULES-IDENTITY-2): the stable_key is still synthesized
-        // as `repo_uid:canonical_root_path:MODULE` and `file_count` is still the ownership
-        // count. Only the SOURCE of the fan counts changes.
+        // Identity is UNCHANGED (MODULES-IDENTITY-2): the stable_key is synthesized as
+        // `repo_uid:canonical_root_path:MODULE` and `file_count` is the ownership count.
         //
-        // `file_owner` restricts ownership rows to owners that are real module candidates
-        // for this snapshot, matching the pure derivation's `module_lookup` (an edge whose
-        // endpoint module is not a candidate is dropped there); `module_pairs` are the
-        // cross-module directed (source_module, target_module) pairs, one row per resolved
-        // file→file import that crosses a module boundary.
-        //
-        // ALIAS-SUSPICION-1 (RG-REQ-009-L04): the `alias_unresolved` LEFT JOIN counts, per
-        // module, the UNRESOLVED IMPORTS whose `basis_code` is
-        // `specifier_matches_project_alias` — the only basis meaning "an alias path did not
-        // resolve". It rides the SAME `module_file_ownership` join the fans use (one edge
-        // set, one ownership — RG-REQ-009-L02), reached from each unresolved edge's source
-        // node file via `nodes.file_uid`. The resolved-edge CTEs above are untouched: this
-        // is a read-only addition that gives the alias-suspicion downgrade an evidenced
-        // cause instead of a bare count of isolated modules.
+        // ALIAS-SUSPICION-1 (RG-REQ-009-L04): `alias_unresolved` counts, per module, the
+        // UNRESOLVED IMPORTS whose `basis_code` is `specifier_matches_project_alias`, over the
+        // same `module_file_ownership` join.
+        use repo_graph_classification::import_partition::{ImportView, RemainderGroup};
+        use repo_graph_classification::module_edges::{
+            derive_module_dependency_edges_in_view, FileOwnershipFact, ModuleEdgeDerivationInput,
+            ModuleRef, ResolvedImportFact,
+        };
+
         let mut stmt = self.connection().prepare(
-            "WITH file_owner AS ( \
-               SELECT o.file_uid AS file_uid, o.module_candidate_uid AS module_uid \
-               FROM module_file_ownership o \
-               JOIN module_candidates mc2 \
-                 ON mc2.module_candidate_uid = o.module_candidate_uid \
-                AND mc2.snapshot_uid = ?1 \
-               WHERE o.snapshot_uid = ?1 \
-             ), \
-             resolved_imports AS ( \
-               SELECT src.file_uid AS src_file, tgt.file_uid AS tgt_file \
-               FROM edges e \
-               JOIN nodes src ON e.source_node_uid = src.node_uid \
-               JOIN nodes tgt ON e.target_node_uid = tgt.node_uid \
-               WHERE e.snapshot_uid = ?1 \
-                 AND e.type = 'IMPORTS' \
-                 AND e.resolution = 'static' \
-                 AND src.file_uid IS NOT NULL \
-                 AND tgt.file_uid IS NOT NULL \
-             ), \
-             module_pairs AS ( \
-               SELECT so.module_uid AS src_mod, tg.module_uid AS tgt_mod \
-               FROM resolved_imports ri \
-               JOIN file_owner so ON so.file_uid = ri.src_file \
-               JOIN file_owner tg ON tg.file_uid = ri.tgt_file \
-               WHERE so.module_uid != tg.module_uid \
-             ) \
-             SELECT \
+            "SELECT \
+               mc.module_candidate_uid, \
                mc.repo_uid || ':' || mc.canonical_root_path || ':MODULE' AS stable_key, \
                mc.canonical_root_path AS path, \
-               COALESCE(fan_in.cnt, 0) AS fan_in, \
-               COALESCE(fan_out.cnt, 0) AS fan_out, \
                COALESCE(files.cnt, 0) AS file_count, \
                COALESCE(alias_unresolved.cnt, 0) AS alias_unresolved_imports \
              FROM module_candidates mc \
-             LEFT JOIN ( \
-               SELECT tgt_mod AS mid, COUNT(DISTINCT src_mod) AS cnt \
-               FROM module_pairs \
-               GROUP BY tgt_mod \
-             ) fan_in ON fan_in.mid = mc.module_candidate_uid \
-             LEFT JOIN ( \
-               SELECT src_mod AS mid, COUNT(DISTINCT tgt_mod) AS cnt \
-               FROM module_pairs \
-               GROUP BY src_mod \
-             ) fan_out ON fan_out.mid = mc.module_candidate_uid \
              LEFT JOIN ( \
                SELECT module_candidate_uid, COUNT(*) AS cnt \
                FROM module_file_ownership \
@@ -883,20 +837,118 @@ impl TrustStorageRead for StorageConnection {
                AND COALESCE(files.cnt, 0) > 0 \
              ORDER BY mc.canonical_root_path",
         )?;
+        let rows = stmt
+            .query_map(rusqlite::params![snapshot_uid], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)? as u64,
+                    row.get::<_, i64>(4)? as u64,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
 
-        let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {
-            Ok(TrustModuleStats {
-                stable_key: row.get(0)?,
-                path: row.get(1)?,
-                fan_in: row.get::<_, i64>(2).map(|v| v as u64)?,
-                fan_out: row.get::<_, i64>(3).map(|v| v as u64)?,
-                file_count: row.get::<_, i64>(4).map(|v| v as u64)?,
-                alias_unresolved_imports: row.get::<_, i64>(5).map(|v| v as u64)?,
+        // The module-edge derivation over every partition; the default view's relations are the
+        // ones with an admitted import (the SAME test `derive_module_dependency_edges_in_view`
+        // applies for DEFAULT, so the fans equal `modules deps`' default fans).
+        let candidates = self.get_module_candidates_for_snapshot(snapshot_uid)?;
+        let candidate_uids: std::collections::HashSet<&str> = candidates
+            .iter()
+            .map(|m| m.module_candidate_uid.as_str())
+            .collect();
+        let ownership: Vec<FileOwnershipFact> = self
+            .get_file_ownership_for_snapshot(snapshot_uid)?
+            .into_iter()
+            .filter(|o| candidate_uids.contains(o.module_candidate_uid.as_str()))
+            .map(|o| FileOwnershipFact {
+                file_uid: o.file_uid,
+                module_uid: o.module_candidate_uid,
             })
+            .collect();
+        let imports: Vec<ResolvedImportFact> = self
+            .file_imports_with_partition(snapshot_uid)?
+            .into_iter()
+            .map(|i| ResolvedImportFact {
+                source_file_uid: i.source_file_uid,
+                target_file_uid: i.target_file_uid,
+                partition: i.partition,
+            })
+            .collect();
+        let modules: Vec<ModuleRef> = candidates
+            .iter()
+            .map(|m| ModuleRef {
+                module_uid: m.module_candidate_uid.clone(),
+                canonical_path: m.canonical_root_path.clone(),
+            })
+            .collect();
+        let all = derive_module_dependency_edges_in_view(
+            ModuleEdgeDerivationInput {
+                imports,
+                ownership,
+                modules,
+            },
+            ImportView::ALL,
+        )
+        .map_err(|e| {
+            StorageError::SerializationError(format!(
+                "compute_module_stats: module edges cannot be derived: {e}"
+            ))
         })?;
-
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StorageError::from)
+        let view = ImportView::DEFAULT;
+        let mut fan_in: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
+        let mut fan_out: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
+        let mut excluded: std::collections::HashMap<&str, ExcludedConnectivity> =
+            std::collections::HashMap::new();
+        for edge in &all.edges {
+            let parts = all.partitions_of(edge).ok_or_else(|| {
+                StorageError::SerializationError(format!(
+                    "compute_module_stats: no partition counts for the module edge {} -> {}",
+                    edge.source_canonical_path, edge.target_canonical_path
+                ))
+            })?;
+            let (src, tgt) = (
+                edge.source_module_uid.as_str(),
+                edge.target_module_uid.as_str(),
+            );
+            if parts.admitted(view) > 0 {
+                *fan_out.entry(src).or_default() += 1;
+                *fan_in.entry(tgt).or_default() += 1;
+            } else if let Some(group) = RemainderGroup::ALL
+                .into_iter()
+                .find(|g| parts.excluded_in(view, *g) > 0)
+            {
+                for m in [src, tgt] {
+                    let e = excluded.entry(m).or_default();
+                    match group {
+                        RemainderGroup::Tests => e.tests += 1,
+                        RemainderGroup::Inferred => e.inferred += 1,
+                        RemainderGroup::TestsAndInferred => e.tests_and_inferred += 1,
+                    }
+                }
+            }
+        }
+        Ok(rows
+            .into_iter()
+            .map(
+                |(uid, stable_key, path, file_count, alias)| TrustModuleStats {
+                    fan_in: fan_in.get(uid.as_str()).copied().unwrap_or(0),
+                    fan_out: fan_out.get(uid.as_str()).copied().unwrap_or(0),
+                    // Measured over the complete derivation: a module with no excluded relation
+                    // has a measured zero, serialized (D-TESB-17 row U5).
+                    excluded_connectivity: Some(
+                        excluded.get(uid.as_str()).copied().unwrap_or_default(),
+                    ),
+                    stable_key,
+                    path,
+                    file_count,
+                    alias_unresolved_imports: alias,
+                },
+            )
+            .collect())
     }
 
     fn get_file_paths_by_repo(&self, repo_uid: &str) -> Result<Vec<String>, StorageError> {
@@ -1884,6 +1936,173 @@ mod tests {
 
         let stats = TrustStorageRead::compute_module_stats(&storage, &snap_uid).unwrap();
         assert_eq!(stats.len(), 0);
+    }
+
+    /// TEST-EDGE-SCOPE-1B fixture: module candidates `a`, `b`, `c`, one production file each plus
+    /// `a/t_test.ts` (test) and `c/t_test.ts` (test); `imports` are (source path, target path,
+    /// resolution).
+    fn partitioned_module_fixture(
+        storage: &mut StorageConnection,
+        snap_uid: &str,
+        imports: &[(&str, &str, &str)],
+    ) {
+        let files = [
+            ("a/x.ts", "a", 0),
+            ("a/t_test.ts", "a", 1),
+            ("b/x.ts", "b", 0),
+            ("c/x.ts", "c", 0),
+            ("c/t_test.ts", "c", 1),
+        ];
+        for m in ["a", "b", "c"] {
+            storage
+                .connection()
+                .execute(
+                    "INSERT INTO module_candidates (module_candidate_uid, snapshot_uid, repo_uid, \
+                     module_key, module_kind, canonical_root_path, confidence) \
+                     VALUES (?, ?, 'r1', ?, 'directory', ?, 1.0)",
+                    rusqlite::params![format!("mc_{m}"), snap_uid, format!("dir:{m}"), m],
+                )
+                .unwrap();
+        }
+        for (path, module, is_test) in files {
+            let uid = format!("r1:{path}");
+            storage
+                .connection()
+                .execute(
+                    "INSERT INTO files (file_uid, repo_uid, path, is_test, is_generated, is_excluded) \
+                     VALUES (?, 'r1', ?, ?, 0, 0)",
+                    rusqlite::params![uid, path, is_test],
+                )
+                .unwrap();
+            storage
+                .connection()
+                .execute(
+                    "INSERT INTO module_file_ownership (snapshot_uid, repo_uid, file_uid, \
+                     module_candidate_uid, assignment_kind, confidence) \
+                     VALUES (?, 'r1', ?, ?, 'directory', 1.0)",
+                    rusqlite::params![snap_uid, uid, format!("mc_{module}")],
+                )
+                .unwrap();
+            storage
+                .insert_nodes(&[crate::types::GraphNode {
+                    node_uid: format!("f:{path}"),
+                    snapshot_uid: snap_uid.to_string(),
+                    repo_uid: "r1".into(),
+                    stable_key: format!("r1:{path}:FILE"),
+                    kind: "FILE".into(),
+                    subtype: None,
+                    name: path.to_string(),
+                    qualified_name: Some(path.to_string()),
+                    file_uid: Some(uid),
+                    parent_node_uid: None,
+                    location: None,
+                    signature: None,
+                    visibility: None,
+                    doc_comment: None,
+                    metadata_json: None,
+                }])
+                .unwrap();
+        }
+        let edges: Vec<crate::types::GraphEdge> = imports
+            .iter()
+            .enumerate()
+            .map(|(i, (from, to, res))| crate::types::GraphEdge {
+                edge_uid: format!("imp{i}"),
+                snapshot_uid: snap_uid.to_string(),
+                repo_uid: "r1".into(),
+                source_node_uid: format!("f:{from}"),
+                target_node_uid: format!("f:{to}"),
+                edge_type: "IMPORTS".into(),
+                resolution: res.to_string(),
+                extractor: "ts-base:1".into(),
+                location: None,
+                metadata_json: None,
+            })
+            .collect();
+        storage.insert_edges(&edges).unwrap();
+    }
+
+    /// TEST-EDGE-SCOPE-1B (RG-REQ-004-L12, D-TESB-10): trust's fans are the module derivation's
+    /// DEFAULT view — a relation present in two partitions counts once, a relation only through a
+    /// test import does not count.
+    #[test]
+    fn trust_module_fans_come_from_the_default_view_derivation() {
+        let mut storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        partitioned_module_fixture(
+            &mut storage,
+            &snap_uid,
+            &[
+                ("a/x.ts", "b/x.ts", "static"),
+                ("a/t_test.ts", "b/x.ts", "static"),
+                ("c/t_test.ts", "a/x.ts", "static"),
+            ],
+        );
+        let stats = TrustStorageRead::compute_module_stats(&storage, &snap_uid).unwrap();
+        let by: std::collections::HashMap<&str, &TrustModuleStats> =
+            stats.iter().map(|m| (m.path.as_str(), m)).collect();
+        assert_eq!((by["a"].fan_in, by["a"].fan_out), (0, 1));
+        assert_eq!((by["b"].fan_in, by["b"].fan_out), (1, 0));
+        assert_eq!(
+            (by["c"].fan_in, by["c"].fan_out),
+            (0, 0),
+            "c→a exists only through a test"
+        );
+        // The same fans `modules deps` DEFAULT renders.
+        let facts = crate::import_partition_reads::tests::default_view_fans(&storage, &snap_uid);
+        for m in &stats {
+            let (fi, fo) = facts.get(m.path.as_str()).copied().unwrap_or((0, 0));
+            assert_eq!((m.fan_in, m.fan_out), (fi, fo), "{}", m.path);
+        }
+    }
+
+    #[test]
+    fn trust_module_connectivity_excluded_by_the_default_view_is_counted_by_flag_set() {
+        let mut storage = setup();
+        let snap_uid = setup_with_snapshot(&storage);
+        partitioned_module_fixture(
+            &mut storage,
+            &snap_uid,
+            &[
+                ("c/t_test.ts", "a/x.ts", "static"),
+                ("b/x.ts", "c/x.ts", "inferred"),
+                ("a/t_test.ts", "b/x.ts", "inferred"),
+            ],
+        );
+        let stats = TrustStorageRead::compute_module_stats(&storage, &snap_uid).unwrap();
+        let by: std::collections::HashMap<&str, &TrustModuleStats> =
+            stats.iter().map(|m| (m.path.as_str(), m)).collect();
+        for m in &stats {
+            assert_eq!(
+                (m.fan_in, m.fan_out),
+                (0, 0),
+                "nothing certain in production"
+            );
+        }
+        assert_eq!(
+            by["a"].excluded_connectivity,
+            Some(ExcludedConnectivity {
+                tests: 1,
+                inferred: 0,
+                tests_and_inferred: 1
+            })
+        );
+        assert_eq!(
+            by["b"].excluded_connectivity,
+            Some(ExcludedConnectivity {
+                tests: 0,
+                inferred: 1,
+                tests_and_inferred: 1
+            })
+        );
+        assert_eq!(
+            by["c"].excluded_connectivity,
+            Some(ExcludedConnectivity {
+                tests: 1,
+                inferred: 1,
+                tests_and_inferred: 0
+            })
+        );
     }
 
     #[test]

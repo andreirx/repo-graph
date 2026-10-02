@@ -699,6 +699,26 @@ impl ExplainResponse {
             }
         }
 
+        // TEST-EDGE-SCOPE-1B (RG-REQ-002-L11): the inferred imports not listed, with the command
+        // that lists them for this file (worded by `import_partition`).
+        if let Some(rem) = evidence.get("import_remainder") {
+            use crate::presentation::import_partition as ip;
+            let file = self
+                .focus
+                .resolved_path
+                .as_deref()
+                .or(self.focus.input.as_deref())
+                .unwrap_or("<file>");
+            match ip::remainder_of(rem) {
+                Ok(r) => {
+                    if let Some(clause) = ip::imports_command_clause(r.inferred.imports, file) {
+                        out.push_str(&bullet(&clause));
+                    }
+                }
+                Err(()) => out.push_str(&bullet(ip::PARTITION_UNREADABLE)),
+            }
+        }
+
         out
     }
 
@@ -775,7 +795,28 @@ impl ExplainResponse {
     /// over edges the import graph does not hold.
     fn render_cycles(&self, evidence: &serde_json::Value, full: bool) -> Option<String> {
         let count = evidence.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-        if count == 0 {
+        // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): the cycles only through excluded imports that
+        // involve the focus — the block renders when one exists even if none remains.
+        // One decode rule (D-TESB-17 row U9): no `import_view` → the unavailable line; a partial
+        // or malformed payload → ONE unreadable line, never "none excluded".
+        use crate::presentation::import_partition as ip;
+        let partition = ip::surface_partition(
+            evidence.get("import_view"),
+            evidence.get("import_remainder"),
+            evidence.get("excluded_cycles"),
+            evidence.get("importer_test_status_undetermined"),
+            ip::Requires::CYCLES,
+        );
+        let stated = matches!(partition, ip::Partition::Stated(_));
+        let excluded_clause = match partition {
+            ip::Partition::Unavailable => Some(ip::PARTITION_UNAVAILABLE.to_string()),
+            ip::Partition::Unreadable => Some(ip::PARTITION_UNREADABLE.to_string()),
+            ip::Partition::Stated(_) => match ip::excluded_cycles_of(evidence) {
+                Some(Ok(cycles)) => ip::excluded_cycle_clause(&cycles),
+                _ => Some(ip::PARTITION_UNREADABLE.to_string()),
+            },
+        };
+        if count == 0 && excluded_clause.is_none() {
             return None;
         }
 
@@ -807,6 +848,17 @@ impl ExplainResponse {
             }
             if items.len() > shown {
                 out.push_str(&format!("  ... ({} more)\n", items.len() - shown));
+            }
+        }
+
+        if let Some(clause) = excluded_clause {
+            out.push_str(&bullet(&clause));
+        }
+        if stated {
+            if let Some(line) = crate::presentation::test_status::undetermined_files_line(
+                evidence.get("importer_test_status_undetermined"),
+            ) {
+                out.push_str(&bullet(&line));
             }
         }
 

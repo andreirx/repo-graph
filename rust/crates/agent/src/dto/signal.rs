@@ -1406,6 +1406,147 @@ pub struct Signal {
     /// Freshness info for signals backed by Layer 2+ artifacts (ACR-6).
     /// None for signals backed by L0/L1 facts or governance overlays.
     pub(crate) freshness: Option<FreshnessInfo>,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-08): additive evidence keys merged into the serialized
+    /// `evidence` object (see [`EvidenceAdditions`]). `None` = the evidence serializes exactly
+    /// as its typed struct.
+    pub(crate) additions: Option<EvidenceAdditions>,
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-08): the additive, typed evidence keys of the import-partition
+/// signals — the import view, its remainder, the excluded cycles, the importer UNDETERMINED
+/// block, the inferred imports a boundary did not judge, and each rendered cycle's partition
+/// counts. The typed evidence structs are constructed by exhaustive literals across the
+/// workspace, so these keys ride beside them and are merged into the serialized `evidence`
+/// object (a key never overwrites one the evidence already carries). Absent keys are omitted.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct EvidenceAdditions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import_view: Option<repo_graph_classification::import_partition::ImportView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import_remainder: Option<repo_graph_classification::import_partition::ImportRemainder>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excluded_cycles: Option<Vec<ExcludedCycleEvidence>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub importer_test_status_undetermined: Option<crate::dto::test_status::UndeterminedTestFiles>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inferred_imports_not_judged: Option<InferredImportsNotJudgedEvidence>,
+    /// Each rendered cycle's four partition counts, by index into the evidence's item array
+    /// (`cycles` / `items`); `None` = not known for that item. When the additions carry
+    /// `import_view`, every item gets a `partitions` key: the counts, or `null` beside
+    /// `partitions_unavailable` naming why (an unmatched item, or one beyond the counts supplied)
+    /// — never omitted, never zeros (D-TESB-17 row U7).
+    #[serde(skip)]
+    pub item_partitions: Vec<Option<repo_graph_classification::import_partition::PartitionCounts>>,
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-03/08): one cycle that exists only through excluded imports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExcludedCycleEvidence {
+    /// Member qualified paths, sorted.
+    pub members: Vec<String>,
+    pub length: usize,
+    /// The complete flag set that shows the cycle.
+    pub flags: Vec<String>,
+    /// The shown cycles strictly inside it.
+    pub contains_shown: Vec<Vec<String>>,
+    pub partitions: repo_graph_classification::import_partition::PartitionCounts,
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-11): inferred imports across boundaries, counted and cited, never
+/// judged — one total for orient's `BOUNDARY_VIOLATIONS`, one entry per rule for explain.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum InferredImportsNotJudgedEvidence {
+    Total {
+        count: u64,
+        /// Sorted, distinct source files.
+        files: Vec<String>,
+    },
+    PerRule(Vec<InferredImportsNotJudgedRule>),
+}
+
+/// One boundary rule's inferred imports (explain's boundary section).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InferredImportsNotJudgedRule {
+    pub source_module: String,
+    pub target_module: String,
+    pub count: u64,
+    pub files: Vec<String>,
+}
+
+/// D-TESB-17 row U7: why a cycle item's `partitions` is `null` — its members match no cycle of
+/// the partitioned view, or more than one, or the storage read could not place every member.
+const ITEM_PARTITIONS_UNMATCHED: &str = "partition counts unknown: this cycle's members match no \
+     cycle of the partitioned directory graph, or more than one, or a member is not a directory \
+     module of it";
+
+/// D-TESB-17 row U7: why a cycle item's `partitions` is `null` — no counts were supplied for it.
+const ITEM_PARTITIONS_NOT_SUPPLIED: &str =
+    "partition counts unknown: none were supplied for this cycle";
+
+impl EvidenceAdditions {
+    /// Whether nothing would be added.
+    pub fn is_empty(&self) -> bool {
+        *self
+            == EvidenceAdditions {
+                item_partitions: self.item_partitions.clone(),
+                ..Default::default()
+            }
+            && self.item_partitions.iter().all(Option::is_none)
+    }
+
+    /// Merge into a serialized evidence value (an object); non-object evidence is left as is.
+    fn merge_into(&self, evidence: &mut serde_json::Value) -> Result<(), serde_json::Error> {
+        let serde_json::Value::Object(extra) = serde_json::to_value(self)? else {
+            return Ok(());
+        };
+        let Some(obj) = evidence.as_object_mut() else {
+            return Ok(());
+        };
+        for (k, v) in extra {
+            obj.entry(k).or_insert(v);
+        }
+        // D-TESB-17 row U7: a partition-aware answer (it carries `import_view`) carries every
+        // partition key; one its producer did not supply is written `null` (unreadable
+        // downstream), never omitted — absence then only ever means an older daemon.
+        let partitioned = self.import_view.is_some();
+        if partitioned {
+            for key in [
+                "import_remainder",
+                "excluded_cycles",
+                "importer_test_status_undetermined",
+            ] {
+                obj.entry(key).or_insert(serde_json::Value::Null);
+            }
+        }
+        for key in ["cycles", "items"] {
+            if let Some(serde_json::Value::Array(items)) = obj.get_mut(key) {
+                for (i, item) in items.iter_mut().enumerate() {
+                    let Some(item) = item.as_object_mut() else {
+                        continue;
+                    };
+                    match self.item_partitions.get(i) {
+                        Some(Some(parts)) => {
+                            item.entry("partitions")
+                                .or_insert(serde_json::to_value(parts)?);
+                        }
+                        Some(None) if partitioned => {
+                            item.entry("partitions").or_insert(serde_json::Value::Null);
+                            item.entry("partitions_unavailable")
+                                .or_insert(ITEM_PARTITIONS_UNMATCHED.into());
+                        }
+                        None if partitioned => {
+                            item.entry("partitions").or_insert(serde_json::Value::Null);
+                            item.entry("partitions_unavailable")
+                                .or_insert(ITEM_PARTITIONS_NOT_SUPPLIED.into());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Serialize for Signal {
@@ -1424,7 +1565,17 @@ impl Serialize for Signal {
         state.serialize_field("severity", &self.severity)?;
         state.serialize_field("category", &self.category)?;
         state.serialize_field("summary", &self.summary)?;
-        state.serialize_field("evidence", &self.evidence)?;
+        match self.additions.as_ref().filter(|a| !a.is_empty()) {
+            Some(additions) => {
+                let mut evidence =
+                    serde_json::to_value(&self.evidence).map_err(serde::ser::Error::custom)?;
+                additions
+                    .merge_into(&mut evidence)
+                    .map_err(serde::ser::Error::custom)?;
+                state.serialize_field("evidence", &evidence)?;
+            }
+            None => state.serialize_field("evidence", &self.evidence)?,
+        }
         state.serialize_field("source", &self.source)?;
         if !self.scope.is_direct() {
             state.serialize_field("scope", &self.scope)?;
@@ -1466,6 +1617,16 @@ impl Signal {
     pub fn freshness(&self) -> Option<&FreshnessInfo> {
         self.freshness.as_ref()
     }
+    /// TEST-EDGE-SCOPE-1B: the additive evidence keys, when any.
+    pub fn evidence_additions(&self) -> Option<&EvidenceAdditions> {
+        self.additions.as_ref()
+    }
+
+    /// TEST-EDGE-SCOPE-1B (D-TESB-08): attach additive evidence keys. Returns self for chaining.
+    pub fn with_evidence_additions(mut self, additions: EvidenceAdditions) -> Self {
+        self.additions = (!additions.is_empty()).then_some(additions);
+        self
+    }
 
     /// Rank is assigned by the ranking pass after all signals
     /// are collected. Callers must never set rank directly; this
@@ -1506,6 +1667,7 @@ impl Signal {
             source,
             scope: SignalScope::Direct,
             freshness: None,
+            additions: None,
         }
     }
 

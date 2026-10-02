@@ -186,6 +186,17 @@ pub struct ModulesListResponse {
     /// production files (`owned_files`). `None` = older daemon → no line. Additive.
     #[serde(default)]
     pub test_status_undetermined: Option<serde_json::Value>,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-08): the import view the edges answer. Absent = a daemon that
+    /// predates the partition (the renderer says so, never a zero remainder).
+    #[serde(default)]
+    pub import_view: Option<serde_json::Value>,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-08): the imports the view excludes, per flag set.
+    #[serde(default)]
+    pub import_remainder: Option<serde_json::Value>,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-09): the undetermined files among the production files
+    /// importing across modules.
+    #[serde(default)]
+    pub importer_test_status_undetermined: Option<serde_json::Value>,
 }
 
 impl ModulesListResponse {
@@ -443,7 +454,37 @@ impl ModulesListResponse {
         // so they can never disagree. An OLDER daemon omits the field (UNKNOWN) → the
         // edge list is labelled unavailable-with-reason, never a false zero.
         match &self.edges {
-            Some(edges) => self.render_edge_list(&mut out, edges, full),
+            Some(edges) => {
+                self.render_edge_list(&mut out, edges, full);
+                // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): the imports the view excludes, after the
+                // edge list, and the importer UNDETERMINED count (shared wording modules).
+                // One decode rule (D-TESB-17 row U9): a partial or malformed payload is ONE
+                // unreadable line, never "nothing excluded".
+                use super::import_partition::{
+                    partition_lines_from, surface_partition, EdgeNoun, Partition, Requires,
+                };
+                let partition = surface_partition(
+                    self.import_view.as_ref(),
+                    self.import_remainder.as_ref(),
+                    None,
+                    self.importer_test_status_undetermined.as_ref(),
+                    Requires::MODULE_EDGES,
+                );
+                let stated = matches!(partition, Partition::Stated(_));
+                for line in partition_lines_from(partition, EdgeNoun::CrossModule) {
+                    out.push_str(&format!("{line}\n"));
+                }
+                if let Some(line) = stated
+                    .then(|| {
+                        super::test_status::undetermined_files_line(
+                            self.importer_test_status_undetermined.as_ref(),
+                        )
+                    })
+                    .flatten()
+                {
+                    out.push_str(&format!("{line}\n"));
+                }
+            }
             None => self.render_edges_unavailable(&mut out),
         }
 

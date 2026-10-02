@@ -125,6 +125,8 @@ fn universe_name(u: TestStatusUniverse) -> &'static str {
         TestStatusUniverse::CandidateFiles => "candidate_files",
         TestStatusUniverse::OwnedFiles => "owned_files",
         TestStatusUniverse::GroupedFiles => "grouped_files",
+        TestStatusUniverse::CrossModuleImporters => "cross_module_importers",
+        TestStatusUniverse::CrossDirectoryImporters => "cross_directory_importers",
     }
 }
 

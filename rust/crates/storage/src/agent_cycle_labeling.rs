@@ -18,10 +18,15 @@
 //! at one site"). This module is the thin SQLite adapter: read the classification inputs, call
 //! the shared classifier, attach the per-cycle result. So `orient` and `cycles` cannot disagree.
 
-use repo_graph_agent::{AgentCycle, AgentStorageError};
+use repo_graph_agent::{
+    AgentCycle, AgentCyclePartitions, AgentExcludedCycle, AgentImportCyclePartition,
+    AgentImporterFile, AgentStorageError,
+};
+use repo_graph_classification::import_partition::ImportView;
 
 use crate::agent_impl::map_err;
 use crate::connection::StorageConnection;
+use crate::directory_module_edges::DirectoryModuleGraph;
 
 /// ORIENT-CYCLES-DISAGREE-1: attach the FIXTURE-POLLUTION-1 test-only classification to each
 /// module cycle at the SQLite SERVING computation for `orient`. The basis is the shared
@@ -59,20 +64,167 @@ enum ModuleNaming {
 /// [`label_module_cycles`] is that `modules` carries the QUALIFIED display names (see
 /// [`ModuleNaming::Qualified`]) — the identity `explain`'s focus reads have always rendered and the
 /// one `cycles`' member listing uses. Same computation, same reads, same honesty rules.
+///
+/// TEST-EDGE-SCOPE-1B (D-TESB-03): the edges the walk and the type-only verdict read are the
+/// requested VIEW's directory edges (`graph.view_edges(view)`) — the same edges the cycles were
+/// found over — never the unpartitioned persisted MODULE edges.
 pub(crate) fn label_focus_cycles(
     conn: &StorageConnection,
     snapshot_uid: &str,
     cycles: Vec<crate::queries::CycleResult>,
+    graph: &DirectoryModuleGraph,
+    view: ImportView,
 ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-    label_cycles(conn, snapshot_uid, cycles, ModuleNaming::Qualified)
+    label_cycles(
+        conn,
+        snapshot_uid,
+        cycles,
+        ModuleNaming::Qualified,
+        graph,
+        view,
+    )
 }
 
 pub(crate) fn label_module_cycles(
     conn: &StorageConnection,
     snapshot_uid: &str,
     cycles: Vec<crate::queries::CycleResult>,
+    graph: &DirectoryModuleGraph,
+    view: ImportView,
 ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-    label_cycles(conn, snapshot_uid, cycles, ModuleNaming::Short)
+    label_cycles(conn, snapshot_uid, cycles, ModuleNaming::Short, graph, view)
+}
+
+/// Which cycles of the view a cycle read returns.
+pub(crate) enum CycleScope<'a> {
+    /// Every cycle (`orient`'s repo read) — short member names.
+    Repo,
+    /// Cycles with a member at or under this path prefix — qualified member names.
+    Path(&'a str),
+    /// Cycles with this exact member — qualified member names.
+    Module(&'a str),
+}
+
+/// TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): the module cycles of the DEFAULT view, scoped and labeled —
+/// the body of the three `AgentStorageRead` cycle reads. The cycles are the SCCs of the view's
+/// query-time directory graph ([`DirectoryModuleGraph`]); the walk and type-only verdict read the
+/// view's edges. `op` names the read in errors.
+pub(crate) fn cycles_in_default_view(
+    conn: &StorageConnection,
+    snapshot_uid: &str,
+    scope: CycleScope<'_>,
+    cancel: repo_graph_algorithms::CancelCheck,
+    op: &'static str,
+) -> Result<Vec<AgentCycle>, AgentStorageError> {
+    let view = ImportView::DEFAULT;
+    let graph = conn
+        .directory_module_graph(snapshot_uid)
+        .map_err(map_err(op))?;
+    let cycles = graph.find_cycles(view, &mut *cancel).map_err(map_err(op))?;
+    let qualified = graph.qualified_names();
+    let qual = |n: &crate::queries::CycleNode| {
+        qualified
+            .get(&n.node_id)
+            .cloned()
+            .unwrap_or_else(|| n.name.clone())
+    };
+    let (filtered, repo) = match scope {
+        CycleScope::Repo => (cycles, true),
+        CycleScope::Path(prefix) => (
+            cycles
+                .into_iter()
+                .filter(|c| {
+                    c.nodes.iter().any(|n| {
+                        let qn = qual(n);
+                        qn == prefix || qn.starts_with(&format!("{prefix}/"))
+                    })
+                })
+                .collect(),
+            false,
+        ),
+        CycleScope::Module(module) => (
+            cycles
+                .into_iter()
+                .filter(|c| c.nodes.iter().any(|n| qual(n) == module))
+                .collect(),
+            false,
+        ),
+    };
+    if cancel().is_break() {
+        return Err(AgentStorageError::new(
+            op,
+            "cancelled (client disconnected before cycle labeling)",
+        ));
+    }
+    if repo {
+        label_module_cycles(conn, snapshot_uid, filtered, &graph, view)
+    } else {
+        label_focus_cycles(conn, snapshot_uid, filtered, &graph, view)
+    }
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-03, D-TESB-09): the import-partition facts of the directory cycle
+/// graph for `view` — the body of `AgentStorageRead::import_cycle_partition`.
+pub(crate) fn import_cycle_partition(
+    conn: &StorageConnection,
+    snapshot_uid: &str,
+    view: ImportView,
+    cancel: repo_graph_algorithms::CancelCheck,
+) -> Result<AgentImportCyclePartition, AgentStorageError> {
+    const OP: &str = "import_cycle_partition";
+    let graph = conn
+        .directory_module_graph(snapshot_uid)
+        .map_err(map_err(OP))?;
+    let cycles = graph.find_cycles(view, &mut *cancel).map_err(map_err(OP))?;
+    let qualified = graph.qualified_names();
+    let cycle_partitions = cycles
+        .iter()
+        .map(|c| {
+            let mut members: Vec<String> = c
+                .nodes
+                .iter()
+                .map(|n| {
+                    qualified
+                        .get(&n.node_id)
+                        .cloned()
+                        .unwrap_or_else(|| n.name.clone())
+                })
+                .collect();
+            members.sort();
+            let mut short_members: Vec<String> = c.nodes.iter().map(|n| n.name.clone()).collect();
+            short_members.sort();
+            AgentCyclePartitions {
+                members,
+                short_members,
+                partitions: graph.member_partitions(c.nodes.iter().map(|n| n.node_id.as_str())),
+            }
+        })
+        .collect();
+    let excluded_cycles = graph
+        .excluded_cycles(view, &mut *cancel)
+        .map_err(map_err(OP))?
+        .into_iter()
+        .map(|e| AgentExcludedCycle {
+            members: e.members,
+            flags: e.flags.iter().map(|f| f.to_string()).collect(),
+            contains_shown: e.contains_shown,
+            partitions: e.partitions,
+        })
+        .collect();
+    Ok(AgentImportCyclePartition {
+        view,
+        remainder: graph.remainder(view),
+        excluded_cycles,
+        cycle_partitions,
+        importers: graph
+            .production_importers(view)
+            .into_iter()
+            .map(|i| AgentImporterFile {
+                path: i.path,
+                is_test: i.is_test,
+            })
+            .collect(),
+    })
 }
 
 fn label_cycles(
@@ -80,10 +232,10 @@ fn label_cycles(
     snapshot_uid: &str,
     cycles: Vec<crate::queries::CycleResult>,
     naming: ModuleNaming,
+    graph: &DirectoryModuleGraph,
+    view: ImportView,
 ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-    let qualified = conn
-        .module_qualified_names(snapshot_uid)
-        .map_err(map_err("find_module_cycles"))?;
+    let qualified = graph.qualified_names();
     let files = repo_tracked_files(conn, snapshot_uid)?;
     let files_ref: Vec<(&str, bool)> = files.iter().map(|(p, t, _)| (p.as_str(), *t)).collect();
     // Per-cycle member qualified paths; a member uid with no MODULE qualified-name mapping is
@@ -104,13 +256,12 @@ fn label_cycles(
     // computed by the SAME shared kernel (`classify_cycles_type_only`) the `cycles` command's
     // serving computation calls — so the two surfaces cannot disagree (route-agreement DoD;
     // ORIENT-CYCLES-DISAGREE-1 "one derivation"). Inputs are assembled from the SAME reads the
-    // `cycles` route uses: the stored per-module-edge `is_type_only` fact (`module_import_edges`),
-    // per-file language (`get_files_by_repo`), and the qualified module directories. Both reads
-    // are CLASSIFIED (they determine a RENDERED verdict) so a genuine failure PROPAGATES — never a
-    // silent default (STANDING HONESTY RULE #1).
-    let module_edges = conn
-        .module_import_edges(snapshot_uid)
-        .map_err(map_err("find_module_cycles"))?;
+    // `cycles` route uses: the view's directory edges with their type-only disposition aggregated
+    // over the admitted contributors (TEST-EDGE-SCOPE-1B), per-file language
+    // (`get_files_by_repo`), and the qualified module directories. Both reads are CLASSIFIED (they
+    // determine a RENDERED verdict) so a genuine failure PROPAGATES — never a silent default
+    // (STANDING HONESTY RULE #1).
+    let module_edges = graph.view_edges(view);
     let edges_mapped: Vec<(&str, &str, Option<repo_graph_agent::EdgeTypeOnly>)> = module_edges
         .iter()
         .map(|(from, to, disp)| {
@@ -159,7 +310,7 @@ fn label_cycles(
 
     // COHERENCE-3 (§2.1): precompute each cycle's REAL directed walk via the SHARED
     // `cycle_walk` kernel — the SAME intra-SCC edge selection + walk finder the `cycles`
-    // command uses — over the SAME `module_import_edges` set already read above. `cycle_members`
+    // command uses — over the SAME view edges already read above. `cycle_members`
     // is `(node_id, qualified_display)` (the SAME identities the edges key on and the SAME display
     // `cycles` renders), so `orient`'s walk and `cycles`' walk cannot differ. A truncated edge set
     // (over `CYCLE_EDGE_CAP`) draws NO walk — an incomplete subset could imply a chain the full set
@@ -265,7 +416,7 @@ mod tests {
     use crate::queries::{CycleNode, CycleResult};
     use crate::types::{CreateSnapshotInput, GraphNode, TrackedFile};
     use repo_graph_agent::{CycleTestComposition, CycleTypeOnly};
-    use repo_graph_indexer::storage_port::{EdgeStorePort, TypeOnlyDisposition};
+    use repo_graph_classification::import_partition::ImportView;
 
     /// A MODULE node whose canonical directory is `qualified` (the classifier's ownership key).
     fn module_node(uid: &str, snapshot_uid: &str, qualified: &str) -> GraphNode {
@@ -290,6 +441,53 @@ mod tests {
             doc_comment: None,
             metadata_json: None,
         }
+    }
+
+    /// TEST-EDGE-SCOPE-1B: a FILE node for `path` (file uid `r1:{path}`) OWNED by `module_uid` — the
+    /// OWNS edge the query-time directory graph maps each importing file through.
+    fn owned_file_node(
+        storage: &mut StorageConnection,
+        s: &str,
+        module_uid: &str,
+        node_uid: &str,
+        path: &str,
+    ) {
+        storage
+            .insert_nodes(&[GraphNode {
+                node_uid: node_uid.to_string(),
+                snapshot_uid: s.to_string(),
+                repo_uid: "r1".to_string(),
+                stable_key: format!("r1:{path}:FILE"),
+                kind: "FILE".to_string(),
+                subtype: None,
+                name: path.rsplit('/').next().unwrap_or(path).to_string(),
+                qualified_name: Some(path.to_string()),
+                file_uid: Some(format!("r1:{path}")),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            }])
+            .unwrap();
+        let mut owns = make_edge(&format!("own_{node_uid}"), s, "r1", module_uid, node_uid);
+        owns.edge_type = "OWNS".to_string();
+        storage.insert_edges(&[owns]).unwrap();
+    }
+
+    /// TEST-EDGE-SCOPE-1B: a static file→file IMPORTS edge, optionally stamped `isTypeOnly`.
+    fn file_import(
+        uid: &str,
+        s: &str,
+        from: &str,
+        to: &str,
+        type_only: Option<bool>,
+    ) -> crate::types::GraphEdge {
+        let mut e = make_edge(uid, s, "r1", from, to);
+        e.edge_type = "IMPORTS".to_string();
+        e.metadata_json = type_only.map(|t| format!("{{\"isTypeOnly\":{t}}}"));
+        e
     }
 
     /// TYPE-ONLY-IMPORTS-1 (review-0 item 1): `orient`'s SQLite serving computation
@@ -336,27 +534,22 @@ mod tests {
             ])
             .unwrap();
 
-        // MODULE->MODULE IMPORTS edges (the set `module_import_edges` reads).
-        let imports = |uid: &str, from: &str, to: &str| {
-            let mut e = make_edge(uid, s, "r1", from, to);
-            e.edge_type = "IMPORTS".to_string();
-            e
-        };
+        // TEST-EDGE-SCOPE-1B: the file→file IMPORTS each module relation comes from, with the
+        // stamped `isTypeOnly` disposition; the view's directory edge aggregates them.
+        for (m, f, path) in [
+            ("m_a", "f_a", "src/a/index.ts"),
+            ("m_b", "f_b", "src/b/index.ts"),
+            ("m_c", "f_c", "src/c/index.ts"),
+            ("m_d", "f_d", "src/d/index.ts"),
+        ] {
+            owned_file_node(&mut storage, s, m, f, path);
+        }
         storage
             .insert_edges(&[
-                imports("e_ab", "m_a", "m_b"),
-                imports("e_ba", "m_b", "m_a"),
-                imports("e_cd", "m_c", "m_d"),
-                imports("e_dc", "m_d", "m_c"),
-            ])
-            .unwrap();
-        // Stamp the disposition column exactly as the orchestrator's write path does.
-        storage
-            .set_edge_type_only(&[
-                ("e_ab".to_string(), TypeOnlyDisposition::TypeOnly),
-                ("e_ba".to_string(), TypeOnlyDisposition::TypeOnly),
-                ("e_cd".to_string(), TypeOnlyDisposition::TypeOnly),
-                ("e_dc".to_string(), TypeOnlyDisposition::Runtime),
+                file_import("e_ab", s, "f_a", "f_b", Some(true)),
+                file_import("e_ba", s, "f_b", "f_a", Some(true)),
+                file_import("e_cd", s, "f_c", "f_d", Some(true)),
+                file_import("e_dc", s, "f_d", "f_c", Some(false)),
             ])
             .unwrap();
 
@@ -378,7 +571,9 @@ mod tests {
             },
         ];
 
-        let labeled = label_module_cycles(&storage, s, cycles).unwrap();
+        let graph = storage.directory_module_graph(s).unwrap();
+        let labeled =
+            label_module_cycles(&storage, s, cycles, &graph, ImportView::DEFAULT).unwrap();
         assert_eq!(
             labeled[0].type_only,
             Some(CycleTypeOnly::TypeOnly),
@@ -490,7 +685,9 @@ mod tests {
         ];
 
         // ── orient's serving computation (the code under test) ──
-        let orient = label_module_cycles(&storage, s, cycles.clone()).unwrap();
+        let graph = storage.directory_module_graph(s).unwrap();
+        let orient =
+            label_module_cycles(&storage, s, cycles.clone(), &graph, ImportView::DEFAULT).unwrap();
         let orient_comps: Vec<CycleTestComposition> = orient
             .iter()
             .map(|c| c.test_composition.clone().expect("SQLite path labels"))
@@ -559,19 +756,99 @@ mod tests {
                 make_file("r1", "src/c/lib.rs"),
             ])
             .unwrap();
-        let imports = |uid: &str, from: &str, to: &str| {
-            let mut e = make_edge(uid, &s, "r1", from, to);
-            e.edge_type = "IMPORTS".to_string();
-            e
-        };
+        // TEST-EDGE-SCOPE-1B: the ring comes from file→file IMPORTS under OWNS (the query-time
+        // directory graph), not from persisted MODULE→MODULE edges.
+        for (m, f, path) in [
+            ("m_a", "f_a", "src/a/lib.rs"),
+            ("m_b", "f_b", "src/b/lib.rs"),
+            ("m_c", "f_c", "src/c/lib.rs"),
+        ] {
+            owned_file_node(&mut storage, &s, m, f, path);
+        }
         storage
             .insert_edges(&[
-                imports("e_ab", "m_a", "m_b"),
-                imports("e_bc", "m_b", "m_c"),
-                imports("e_ca", "m_c", "m_a"),
+                file_import("e_ab", &s, "f_a", "f_b", None),
+                file_import("e_bc", &s, "f_b", "f_c", None),
+                file_import("e_ca", &s, "f_c", "f_a", None),
             ])
             .unwrap();
         (storage, s)
+    }
+
+    /// TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): the focus cycle reads answer the DEFAULT view — a ring
+    /// closed only by a test file's import is not a focus cycle — and `import_cycle_partition`
+    /// names it as excluded, with the remainder and the production importers.
+    #[test]
+    fn focus_cycle_reads_answer_the_default_view_with_their_remainder() {
+        use repo_graph_agent::AgentStorageRead;
+        let (mut storage, s) = three_module_ring();
+        // Replace the ring's closing import c→a by a TEST file's import.
+        storage
+            .connection()
+            .execute("DELETE FROM edges WHERE edge_uid = 'e_ca'", [])
+            .unwrap();
+        let mut t = make_file("r1", "src/c/lib_test.rs");
+        t.is_test = true;
+        storage.upsert_files(&[t]).unwrap();
+        owned_file_node(&mut storage, &s, "m_c", "f_ct", "src/c/lib_test.rs");
+        storage
+            .insert_edges(&[file_import("e_cta", &s, "f_ct", "f_a", None)])
+            .unwrap();
+
+        assert!(AgentStorageRead::find_module_cycles(&storage, &s)
+            .unwrap()
+            .is_empty());
+        assert!(
+            AgentStorageRead::find_cycles_involving_module(&storage, &s, "src/a")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            AgentStorageRead::find_cycles_involving_path(&storage, &s, "src")
+                .unwrap()
+                .is_empty()
+        );
+        let part = AgentStorageRead::import_cycle_partition(
+            &storage,
+            &s,
+            ImportView::DEFAULT,
+            &mut || std::ops::ControlFlow::Continue(()),
+        )
+        .unwrap();
+        assert_eq!(part.excluded_cycles.len(), 1);
+        assert_eq!(
+            part.excluded_cycles[0].members,
+            vec![
+                "src/a".to_string(),
+                "src/b".to_string(),
+                "src/c".to_string()
+            ]
+        );
+        assert_eq!(
+            part.excluded_cycles[0].flags,
+            vec!["include_tests".to_string()]
+        );
+        assert_eq!(part.remainder.tests.imports, 1);
+        assert!(!part.excludes_nothing());
+        // The production importers of the admitted cross-directory imports.
+        let paths: Vec<&str> = part.importers.iter().map(|i| i.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/a/lib.rs", "src/b/lib.rs"]);
+        // With tests included the ring is shown and nothing is excluded.
+        let with_tests = AgentStorageRead::import_cycle_partition(
+            &storage,
+            &s,
+            ImportView::CERTAIN_WITH_TESTS,
+            &mut || std::ops::ControlFlow::Continue(()),
+        )
+        .unwrap();
+        assert!(with_tests.excluded_cycles.is_empty());
+        assert_eq!(with_tests.cycle_partitions.len(), 1);
+        assert_eq!(
+            with_tests.cycle_partitions[0]
+                .partitions
+                .map(|p| p.test_certain),
+            Some(1)
+        );
     }
 
     /// EXPLAIN-CYCLES-HONEST-1 (§2.1): the MODULE-focus cycle read carries the SAME verified `walk`

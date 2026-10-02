@@ -224,18 +224,38 @@ pub fn assemble_from_requirements<S: GateStorageRead + ?Sized>(
                             target: target.clone(),
                             per_boundary_counts: Vec::new(),
                             has_any_boundary_for_target: false,
+                            per_boundary_inferred: Vec::new(),
                         }
                     } else {
+                        // TEST-EDGE-SCOPE-1B (D-TESB-11): certain imports of every test status are
+                        // judged; the inferred ones are counted with their source files, never
+                        // judged.
                         let mut per_boundary_counts = Vec::with_capacity(for_target.len());
+                        let mut per_boundary_inferred = Vec::with_capacity(for_target.len());
                         for b in &for_target {
                             let edges =
                                 storage.find_boundary_imports(snapshot_uid, &target, &b.forbids)?;
                             per_boundary_counts.push((b.forbids.clone(), edges.len()));
+                            let inferred = storage.find_inferred_boundary_imports(
+                                snapshot_uid,
+                                &target,
+                                &b.forbids,
+                            )?;
+                            let files: std::collections::BTreeSet<String> =
+                                inferred.iter().map(|e| e.source_file.clone()).collect();
+                            per_boundary_inferred.push((
+                                b.forbids.clone(),
+                                crate::compute::InferredImportsNotJudged {
+                                    count: inferred.len(),
+                                    files: files.into_iter().collect(),
+                                },
+                            ));
                         }
                         MethodEvidence::ArchViolations {
                             target,
                             per_boundary_counts,
                             has_any_boundary_for_target: true,
+                            per_boundary_inferred,
                         }
                     }
                 }
@@ -339,6 +359,7 @@ pub fn assemble_from_requirements<S: GateStorageRead + ?Sized>(
                     MethodEvidence::ModuleViolations {
                         violations_count: evidence.violations_count,
                         stale_declarations_count: evidence.stale_declarations_count,
+                        inferred_not_judged: evidence.inferred_not_judged,
                     }
                 }
 
@@ -395,6 +416,8 @@ mod tests {
         pub requirements: Vec<GateRequirement>,
         pub boundaries: Vec<GateBoundaryDeclaration>,
         pub boundary_edges: std::collections::HashMap<(String, String), Vec<GateImportEdge>>,
+        pub inferred_boundary_edges:
+            std::collections::HashMap<(String, String), Vec<GateImportEdge>>,
         pub coverage: Vec<GateMeasurement>,
         pub complexity: Vec<GateMeasurement>,
         pub hotspots: Vec<GateInference>,
@@ -438,6 +461,19 @@ mod tests {
             self.fail("find_boundary_imports")?;
             Ok(self
                 .boundary_edges
+                .get(&(source.to_string(), target.to_string()))
+                .cloned()
+                .unwrap_or_default())
+        }
+        fn find_inferred_boundary_imports(
+            &self,
+            _snapshot_uid: &str,
+            source: &str,
+            target: &str,
+        ) -> Result<Vec<GateImportEdge>, GateStorageError> {
+            self.fail("find_inferred_boundary_imports")?;
+            Ok(self
+                .inferred_boundary_edges
                 .get(&(source.to_string(), target.to_string()))
                 .cloned()
                 .unwrap_or_default())
@@ -690,6 +726,7 @@ mod tests {
         fake.module_violations = GateModuleViolationEvidence {
             violations_count: 0,
             stale_declarations_count: 0,
+            inferred_not_judged: vec![],
         };
 
         let report = assemble(
@@ -715,6 +752,7 @@ mod tests {
         fake.module_violations = GateModuleViolationEvidence {
             violations_count: 2,
             stale_declarations_count: 1,
+            inferred_not_judged: vec![],
         };
 
         let report = assemble(
@@ -752,5 +790,98 @@ mod tests {
             GateError::Storage(e) => assert_eq!(e.operation, "evaluate_module_violations"),
             other => panic!("expected Storage, got {:?}", other),
         }
+    }
+
+    /// TEST-EDGE-SCOPE-1B (D-TESB-11): the arch verdict judges certain imports; the inferred
+    /// ones across the same boundary are counted, never judged.
+    #[test]
+    fn arch_violations_judge_certain_imports_and_count_inferred_ones_not_judged() {
+        let mut fake = FakeStorage::default();
+        fake.requirements = vec![GateRequirement {
+            req_id: "REQ-1".into(),
+            version: 1,
+            obligations: vec![make_obl("o1", "arch_violations", Some("src/core"), None)],
+        }];
+        fake.boundaries = vec![GateBoundaryDeclaration {
+            boundary_module: "src/core".into(),
+            forbids: "src/adapters".into(),
+            reason: None,
+        }];
+        fake.inferred_boundary_edges.insert(
+            ("src/core".into(), "src/adapters".into()),
+            vec![
+                GateImportEdge {
+                    source_file: "src/core/z.py".into(),
+                    target_file: "src/adapters/b.py".into(),
+                },
+                GateImportEdge {
+                    source_file: "src/core/a.py".into(),
+                    target_file: "src/adapters/b.py".into(),
+                },
+            ],
+        );
+        let report = assemble(
+            &fake,
+            "r1",
+            "snap-1",
+            GateMode::Default,
+            "2026-04-15T00:00:00Z",
+        )
+        .unwrap();
+        assert_eq!(report.obligations[0].computed_verdict, Verdict::PASS);
+        assert_eq!(report.obligations[0].evidence["violation_count"], 0);
+        assert_eq!(
+            report.obligations[0].evidence["inferred_imports_not_judged"]["count"],
+            2
+        );
+        assert_eq!(report.outcome.exit_code, 0);
+    }
+
+    /// TEST-EDGE-SCOPE-1B (review-0 F-4): the not-judged evidence carries the sorted source files,
+    /// so the rendered next action cites a real file.
+    #[test]
+    fn arch_violations_not_judged_evidence_cites_the_source_files() {
+        let mut fake = FakeStorage::default();
+        fake.requirements = vec![GateRequirement {
+            req_id: "REQ-1".into(),
+            version: 1,
+            obligations: vec![make_obl("o1", "arch_violations", Some("src/core"), None)],
+        }];
+        fake.boundaries = vec![GateBoundaryDeclaration {
+            boundary_module: "src/core".into(),
+            forbids: "src/adapters".into(),
+            reason: None,
+        }];
+        fake.inferred_boundary_edges.insert(
+            ("src/core".into(), "src/adapters".into()),
+            vec![
+                GateImportEdge {
+                    source_file: "src/core/z.py".into(),
+                    target_file: "src/adapters/b.py".into(),
+                },
+                GateImportEdge {
+                    source_file: "src/core/a.py".into(),
+                    target_file: "src/adapters/c.py".into(),
+                },
+                GateImportEdge {
+                    source_file: "src/core/a.py".into(),
+                    target_file: "src/adapters/b.py".into(),
+                },
+            ],
+        );
+        let report = assemble(
+            &fake,
+            "r1",
+            "snap-1",
+            GateMode::Default,
+            "2026-04-15T00:00:00Z",
+        )
+        .unwrap();
+        let nj = &report.obligations[0].evidence["inferred_imports_not_judged"];
+        assert_eq!(nj["count"], 3);
+        assert_eq!(
+            nj["files"],
+            serde_json::json!(["src/core/a.py", "src/core/z.py"])
+        );
     }
 }

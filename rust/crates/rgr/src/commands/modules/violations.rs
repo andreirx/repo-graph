@@ -71,11 +71,25 @@ pub fn run_violations(args: &[String]) -> ExitCode {
 
     // Execute via daemon
     match execute_repo_request("violations", None) {
-        Ok(result) => output_result(
-            result,
-            json_mode,
-            |response: crate::presentation::violations::ViolationsResponse| response.render_human(),
-        ),
+        Ok(mut result) => {
+            // D-TESB-17: the JSON consumer boundary marks unreadable partition evidence.
+            if json_mode {
+                if let Err(e) = crate::presentation::import_partition::mark_partition_evidence(
+                    &mut result,
+                    crate::presentation::import_partition::JsonSurface::Violations,
+                ) {
+                    eprintln!("error: {e}");
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
+                }
+            }
+            output_result(
+                result,
+                json_mode,
+                |response: crate::presentation::violations::ViolationsResponse| {
+                    response.render_human()
+                },
+            )
+        }
         Err(err) => {
             print_daemon_error(&err, "violations");
             ExitCode::from(EXIT_RUNTIME_ERROR)
@@ -169,6 +183,15 @@ pub(super) fn run_modules_violations(args: &[String]) -> ExitCode {
             };
 
             if json_mode {
+                // D-TESB-17: the JSON consumer boundary marks unreadable partition evidence.
+                let mut result = result;
+                if let Err(e) = crate::presentation::import_partition::mark_partition_evidence(
+                    &mut result,
+                    crate::presentation::import_partition::JsonSurface::ModulesViolations,
+                ) {
+                    eprintln!("error: {e}");
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
+                }
                 // Machine mode: print full envelope
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {

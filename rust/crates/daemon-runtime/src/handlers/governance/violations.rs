@@ -10,6 +10,8 @@
 
 use std::collections::HashMap;
 
+use repo_graph_classification::import_partition::ImportClass;
+
 use repo_graph_daemon_transport::{DispatchResult, ErrorCode, ErrorDetail, Request};
 
 use crate::handlers::support::resolve_and_load_repo;
@@ -99,8 +101,11 @@ pub fn handle_violations(state: &DaemonState, request: &Request) -> DispatchResu
         });
     }
 
-    // For each unique rule, find violating IMPORTS edges
+    // For each unique rule, find violating IMPORTS edges. TEST-EDGE-SCOPE-1B (D-TESB-11): the
+    // rule judges CERTAIN imports of every test status; the INFERRED imports across it are counted
+    // with their sorted source files (so the rendered next action cites a real file), never judged.
     let mut declared_violations: Vec<BoundaryViolation> = Vec::new();
+    let mut declared_not_judged: Vec<serde_json::Value> = Vec::new();
 
     // Sort rules for deterministic output
     let mut rules: Vec<_> = rule_map.into_values().collect();
@@ -121,7 +126,27 @@ pub fn handle_violations(state: &DaemonState, request: &Request) -> DispatchResu
             }
         };
 
-        for edge in &edges {
+        let inferred: std::collections::BTreeSet<&str> = edges
+            .iter()
+            .filter(|e| e.import_class == ImportClass::Inferred)
+            .map(|e| e.source_file.as_str())
+            .collect();
+        let inferred_count = edges
+            .iter()
+            .filter(|e| e.import_class == ImportClass::Inferred)
+            .count();
+        if inferred_count > 0 {
+            declared_not_judged.push(serde_json::json!({
+                "boundary_module": boundary_module,
+                "forbidden_module": forbids,
+                "count": inferred_count,
+                "files": inferred.into_iter().collect::<Vec<_>>(),
+            }));
+        }
+        for edge in edges
+            .iter()
+            .filter(|e| e.import_class == ImportClass::Certain)
+        {
             declared_violations.push(BoundaryViolation {
                 boundary_module: boundary_module.clone(),
                 forbidden_module: forbids.clone(),
@@ -135,8 +160,13 @@ pub fn handle_violations(state: &DaemonState, request: &Request) -> DispatchResu
 
     // ── Section 2: Discovered module boundary violations ─────────────────
 
-    // Load module graph facts once
-    let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid) {
+    // Load module graph facts once — governance judges certain imports of every test status
+    // (D-TESB-READERS-1 §1: its ratified population is unchanged but for the resolution axis).
+    let facts = match load_module_graph_facts(
+        &storage,
+        &snapshot.snapshot_uid,
+        repo_graph_classification::import_partition::ImportView::CERTAIN_WITH_TESTS,
+    ) {
         Ok(f) => f,
         Err(e) => {
             // MODULE-OWNERSHIP-DUPLICATE-1: duplicate ownership → labeled
@@ -236,7 +266,7 @@ pub fn handle_violations(state: &DaemonState, request: &Request) -> DispatchResu
     let declarations_evaluated = discovered_result.declarations_evaluated;
     let armed = declarations_evaluated > 0;
 
-    let response = serde_json::json!({
+    let mut response = serde_json::json!({
         "command": "arch violations",
         "repo": repo_uid,
         "snapshot": snapshot.snapshot_uid,
@@ -254,6 +284,19 @@ pub fn handle_violations(state: &DaemonState, request: &Request) -> DispatchResu
         },
         "stale_declarations": stale_declarations_json,
     });
+    // TEST-EDGE-SCOPE-1B (D-TESB-11): additive; emitted on every answer, both halves, zeros
+    // included, so its absence can only mean a daemon that predates the partition (D-TESB-17
+    // row U10).
+    let discovered_not_judged = crate::import_partition_view::not_judged_relations_json(
+        &discovered_result.inferred_imports_not_judged,
+    );
+    let mut nj = serde_json::Map::new();
+    nj.insert(
+        "declared".into(),
+        serde_json::Value::Array(declared_not_judged),
+    );
+    nj.insert("discovered".into(), discovered_not_judged);
+    response["inferred_imports_not_judged"] = serde_json::Value::Object(nj);
 
     DispatchResult::success(&request.id, response)
 }

@@ -120,6 +120,13 @@ pub struct FileFact {
     pub is_generated: bool,
     #[serde(default)]
     pub symbol_count: u64,
+    /// TEST-EDGE-SCOPE-1B (RG-REQ-002-L11): the file's inferred imports, which the dependency
+    /// edges (certain imports only) leave out. A current daemon sends it on every file, zero
+    /// included; absent = a daemon that predates the partition (it listed inferred imports among
+    /// the edges), rendered as the partition-unavailable line — never a zero (D-TESB-17 row U10).
+    /// A present non-numeric value fails the whole payload's decode (W6: fails closed).
+    #[serde(default)]
+    pub inferred_import_count: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -689,7 +696,13 @@ fn render_file_map(
     let external: Vec<&str> = unresolved
         .map(|set| set.iter().copied().collect())
         .unwrap_or_default();
-    if !resolved.is_empty() || !external.is_empty() {
+    // TEST-EDGE-SCOPE-1B: the inferred imports not among the resolved targets, with the command
+    // that lists them (worded by `import_partition`).
+    let inferred_clause = match f.inferred_import_count {
+        Some(n) => crate::presentation::import_partition::imports_command_clause(n, &f.path),
+        None => Some(crate::presentation::import_partition::PARTITION_UNAVAILABLE.to_string()),
+    };
+    if !resolved.is_empty() || !external.is_empty() || inferred_clause.is_some() {
         s.push_str(&format!(
             "## Imports ({})\n",
             resolved.len() + external.len()
@@ -705,6 +718,9 @@ fn render_file_map(
             for t in &external {
                 s.push_str(&format!("- {}\n", t));
             }
+        }
+        if let Some(clause) = &inferred_clause {
+            s.push_str(&format!("{clause}\n"));
         }
         s.push('\n');
     }
@@ -972,6 +988,7 @@ mod tests {
                     is_test: false,
                     is_generated: false,
                     symbol_count: 4,
+                    inferred_import_count: Some(0),
                 },
                 FileFact {
                     path: "src/b.rs".to_string(),
@@ -981,6 +998,7 @@ mod tests {
                     is_test: false,
                     is_generated: false,
                     symbol_count: 1,
+                    inferred_import_count: Some(0),
                 },
                 FileFact {
                     path: "src/big.rs".to_string(),
@@ -990,6 +1008,7 @@ mod tests {
                     is_test: false,
                     is_generated: false,
                     symbol_count: 0,
+                    inferred_import_count: Some(0),
                 },
                 FileFact {
                     path: "src/data.bin".to_string(),
@@ -999,6 +1018,7 @@ mod tests {
                     is_test: false,
                     is_generated: false,
                     symbol_count: 0,
+                    inferred_import_count: Some(0),
                 },
                 FileFact {
                     path: "src/util/helper.rs".to_string(),
@@ -1008,6 +1028,7 @@ mod tests {
                     is_test: false,
                     is_generated: false,
                     symbol_count: 1,
+                    inferred_import_count: Some(0),
                 },
             ],
             symbols: vec![
@@ -1119,6 +1140,42 @@ mod tests {
             .find(|r| r.rel_path == rel)
             .unwrap_or_else(|| panic!("{} not rendered", rel))
             .contents
+    }
+
+    #[test]
+    fn map_file_imports_state_the_inferred_remainder() {
+        // RG-REQ-002-L11: a file's map lists its certain resolved imports and counts its inferred
+        // ones with the command that lists them; a file with none renders as before.
+        let before = render_maps(&fixture());
+        let mut facts = fixture();
+        facts.files[0].inferred_import_count = Some(2);
+        facts.files[1].inferred_import_count = Some(1);
+        let rendered = render_maps(&facts);
+        let a = dir_map(&rendered, "src/a_rs_MAP.md");
+        assert!(
+            a.contains(
+                "+2 inferred imports, not shown — rmap imports src/a.rs --include-inferred\n"
+            ),
+            "{a}"
+        );
+        let a_before = dir_map(&before, "src/a_rs_MAP.md");
+        assert!(
+            a.starts_with(a_before.split("## Imports").next().unwrap()),
+            "only the Imports section changes:\n{a}"
+        );
+        let b = dir_map(&rendered, "src/b_rs_MAP.md");
+        assert!(
+            b.contains("## Imports (")
+                && b.contains(
+                    "+1 inferred import, not shown — rmap imports src/b.rs --include-inferred"
+                ),
+            "{b}"
+        );
+        // Unchanged file maps (no inferred import) are byte-identical.
+        assert_eq!(
+            dir_map(&rendered, "src/util/helper_rs_MAP.md"),
+            dir_map(&before, "src/util/helper_rs_MAP.md")
+        );
     }
 
     #[test]
@@ -1469,6 +1526,7 @@ mod tests {
             is_test: false,
             is_generated: false,
             symbol_count: 0,
+            inferred_import_count: Some(0),
         };
         let facts = MapFacts {
             snapshot: "snap-abcdef012345-tail".to_string(),
@@ -1656,6 +1714,7 @@ mod tests {
                 is_test: false,
                 is_generated: false,
                 symbol_count: 0,
+                inferred_import_count: Some(0),
             }],
             ..Default::default()
         };
@@ -1695,6 +1754,7 @@ mod tests {
                 is_test: false,
                 is_generated: false,
                 symbol_count: 1,
+                inferred_import_count: Some(0),
             }],
             symbols: vec![SymbolFact {
                 file: "m/x.py".to_string(),
@@ -1748,6 +1808,7 @@ mod tests {
                     is_test: false,
                     is_generated: false,
                     symbol_count: 1,
+                    inferred_import_count: Some(0),
                 },
                 FileFact {
                     path: "lib/skip.bin".to_string(),
@@ -1757,6 +1818,7 @@ mod tests {
                     is_test: false,
                     is_generated: false,
                     symbol_count: 0,
+                    inferred_import_count: Some(0),
                 },
             ],
             symbols: vec![SymbolFact {
@@ -1846,6 +1908,42 @@ Present in the index but not mapped for symbols; listed so the map never hides a
                 "missing `{}` must fail closed at the DTO boundary, not default to \
                  an empty/zero fact claim (Rule 6: absent != known-empty)",
                 key
+            );
+        }
+    }
+
+    // ── TEST-EDGE-SCOPE-1B: D-TESB-17 (rows U10, W6) on `map` ──
+
+    #[test]
+    fn map_file_without_inferred_import_count_states_the_partition_unavailable() {
+        let mut facts = fixture();
+        facts.files[0].inferred_import_count = None;
+        let rendered = render_maps(&facts);
+        let a = dir_map(&rendered, "src/a_rs_MAP.md");
+        assert!(
+            a.contains(crate::presentation::import_partition::PARTITION_UNAVAILABLE),
+            "{a}"
+        );
+        // A measured zero adds nothing.
+        let zero = render_maps(&fixture());
+        assert!(!dir_map(&zero, "src/a_rs_MAP.md").contains("partition unavailable"));
+    }
+
+    #[test]
+    fn map_payload_with_a_non_numeric_inferred_import_count_fails_closed() {
+        for bad in [
+            serde_json::json!("2"),
+            serde_json::json!(-1),
+            serde_json::json!({"n": 2}),
+        ] {
+            let file = serde_json::json!({
+                "path": "src/a.rs", "language": "rust", "parse_status": "parsed",
+                "extractor": "rust-core:1", "is_test": false, "is_generated": false,
+                "symbol_count": 1, "inferred_import_count": bad
+            });
+            assert!(
+                serde_json::from_value::<FileFact>(file).is_err(),
+                "{bad}: a malformed count never decodes (the `MapFacts` payload that carries it fails closed), so no sidecar renders from it"
             );
         }
     }

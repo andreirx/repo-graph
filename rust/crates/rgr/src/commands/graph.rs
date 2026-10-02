@@ -210,6 +210,73 @@ fn extract_kind_flag(args: Vec<String>) -> (Vec<String>, String) {
     (out, kind)
 }
 
+/// TEST-EDGE-SCOPE-1B (RG-REQ-004-L12, D-TESB-05): the import-partition flags of a command. The
+/// default (neither) answers certain imports from production files; each flag widens the view and
+/// is sent to the daemon as the boolean parameter of the same name.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PartitionFlags {
+    pub(crate) include_tests: bool,
+    pub(crate) include_inferred: bool,
+}
+
+impl PartitionFlags {
+    /// Whether any flag widens the view.
+    pub(crate) fn any(&self) -> bool {
+        self.include_tests || self.include_inferred
+    }
+
+    /// Add the given flags to the daemon parameters (an absent flag is not sent, so a request
+    /// without flags is the request it was before the partition).
+    pub(crate) fn add_to_params(&self, params: &mut serde_json::Value) {
+        if self.include_tests {
+            params["include_tests"] = serde_json::Value::Bool(true);
+        }
+        if self.include_inferred {
+            params["include_inferred"] = serde_json::Value::Bool(true);
+        }
+    }
+}
+
+/// Remove `--include-inferred` and, when the command partitions by test status
+/// (`accept_include_tests`), `--include-tests` from the args. A flag the command does not accept
+/// stays in the args and is refused as an unknown flag by the caller.
+pub(crate) fn extract_partition_flags(
+    args: Vec<String>,
+    accept_include_tests: bool,
+) -> (Vec<String>, PartitionFlags) {
+    let mut flags = PartitionFlags::default();
+    let out = args
+        .into_iter()
+        .filter(|a| match a.as_str() {
+            "--include-inferred" => {
+                flags.include_inferred = true;
+                false
+            }
+            "--include-tests" if accept_include_tests => {
+                flags.include_tests = true;
+                false
+            }
+            _ => true,
+        })
+        .collect();
+    (out, flags)
+}
+
+/// D-TESB-06: the explicit `--engine livegraph|compare` routes serve the unpartitioned import
+/// graph, so a partition flag with them is a usage error — never silently ignored.
+fn refuse_partition_flags_with_explicit_engine(
+    flags: PartitionFlags,
+    engine: &str,
+) -> Result<(), String> {
+    if flags.any() && matches!(engine, "livegraph" | "compare") {
+        return Err(format!(
+            "error: --include-tests / --include-inferred are not supported with --engine {engine} \
+             (it serves the unpartitioned import graph); omit --engine to use them"
+        ));
+    }
+    Ok(())
+}
+
 /// `rmap dev <subcommand>` — hidden/dev-only commands (LIVEGRAPH-INTEGRATION-1B). NOT part of the
 /// default user workflow.
 pub fn run_dev(args: &[String]) -> ExitCode {
@@ -684,11 +751,27 @@ pub fn run_callees(args: &[String]) -> ExitCode {
 // Human mode (default): plain text showing route between symbols.
 // Machine mode (--json): full envelope.
 
-pub fn run_path(args: &[String]) -> ExitCode {
+/// The parsed `rmap path` arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PathArgs {
+    pub(crate) from: String,
+    pub(crate) to: String,
+    pub(crate) engine: String,
+    pub(crate) json_mode: bool,
+    /// D-TESB-15: walk inferred call/import hops too.
+    pub(crate) include_inferred: bool,
+}
+
+const PATH_USAGE: &str =
+    "usage: rmap path <from> <to> [--include-inferred] [--engine auto|sqlite|livegraph|compare] [--json]";
+
+/// Parse `rmap path` arguments (pure). `Err` carries the stderr text of a usage error (exit 1).
+pub(crate) fn parse_path_args(args: &[String]) -> Result<PathArgs, String> {
     // PATH-LIVEGRAPH-DEFAULT-1: extract --engine FIRST; `path` now DEFAULTS to `auto` (serve LiveGraph
     // when Exact/Fresh/complete, else labelled SQLite fallback — the daemon decides). `--engine sqlite`
     // forces SQLite, `--engine livegraph`/`compare` stay explicit. Then filter --json from the positionals.
     let (args, engine) = extract_engine_flag(args.to_vec());
+    let (args, flags) = extract_partition_flags(args, false);
     let mut json_mode = false;
     let positional: Vec<&String> = args
         .iter()
@@ -704,12 +787,30 @@ pub fn run_path(args: &[String]) -> ExitCode {
 
     // REG-1: two positional args (from, to), repo from cwd
     if positional.len() != 2 {
-        eprintln!("usage: rmap path <from> <to> [--engine auto|sqlite|livegraph|compare] [--json]");
-        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+        return Err(PATH_USAGE.to_string());
     }
+    refuse_partition_flags_with_explicit_engine(flags, &engine)?;
+    Ok(PathArgs {
+        from: positional[0].clone(),
+        to: positional[1].clone(),
+        engine,
+        json_mode,
+        include_inferred: flags.include_inferred,
+    })
+}
 
-    let from_query = positional[0];
-    let to_query = positional[1];
+pub fn run_path(args: &[String]) -> ExitCode {
+    let parsed = match parse_path_args(args) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("{msg}");
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+        }
+    };
+    let json_mode = parsed.json_mode;
+    let engine = parsed.engine.clone();
+    let from_query = &parsed.from;
+    let to_query = &parsed.to;
 
     let repo_path = match resolve_repo_from_cwd() {
         Ok(p) => p,
@@ -724,12 +825,15 @@ pub fn run_path(args: &[String]) -> ExitCode {
         Err(code) => return code,
     };
 
-    let params = serde_json::json!({
+    let mut params = serde_json::json!({
         "repo": repo_path,
         "from": from_query,
         "to": to_query,
         "engine": engine,
     });
+    if parsed.include_inferred {
+        params["include_inferred"] = serde_json::Value::Bool(true);
+    }
 
     match client.request("path", Some(params)) {
         Ok(result) => {
@@ -788,13 +892,27 @@ pub fn run_path(args: &[String]) -> ExitCode {
 // Human mode (default): plain text showing file dependencies.
 // Machine mode (--json): full envelope.
 
-pub fn run_imports(args: &[String]) -> ExitCode {
+/// The parsed `rmap imports` arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ImportsArgs {
+    pub(crate) engine: String,
+    pub(crate) file: Option<String>,
+    pub(crate) json_mode: bool,
+    /// RG-REQ-002-L11: list inferred imports too (the default lists certain ones and counts the
+    /// rest). Test status never filters this per-file answer (D-TESB-READERS-1 §1).
+    pub(crate) include_inferred: bool,
+}
+
+const IMPORTS_USAGE: &str =
+    "usage: rmap imports [<file>] [--include-inferred] [--engine auto|sqlite|livegraph|compare] [--json]";
+
+/// Parse and validate `rmap imports` arguments (pure). `Err` carries the stderr text (exit 1).
+pub(crate) fn parse_imports_args(args: &[String]) -> Result<ImportsArgs, String> {
     // IMPORTS-LIVEGRAPH-DEFAULT-1 (D2=B): extract --engine FIRST. Absent == `auto` -- the LiveGraph-first
     // default (per-call no-loss compare + labelled SQLite fallback). `--engine sqlite` is the explicit escape
     // hatch (unchanged listing); `--engine livegraph|compare` are the read-model / compare surfaces.
-    let (args, engine_raw) = extract_engine_flag(args.to_vec());
-    let engine = engine_raw.as_str();
-    let usage = "usage: rmap imports [<file>] [--engine auto|sqlite|livegraph|compare] [--json]";
+    let (args, engine) = extract_engine_flag(args.to_vec());
+    let (args, flags) = extract_partition_flags(args, false);
 
     // Parse --json + the optional positional <file> from the remaining args.
     let mut json_mode = false;
@@ -803,13 +921,62 @@ pub fn run_imports(args: &[String]) -> ExitCode {
         match a.as_str() {
             "--json" => json_mode = true,
             flag if flag.starts_with("--") => {
-                eprintln!("error: unknown flag: {flag}");
-                eprintln!("{usage}");
-                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+                return Err(format!("error: unknown flag: {flag}\n{IMPORTS_USAGE}"));
             }
             other => positional.push(other.to_string()),
         }
     }
+
+    // Validate the engine/arg combination (D6: sqlite REQUIRES <file>; livegraph file OPTIONAL
+    // -> repo-wide).
+    match engine.as_str() {
+        // auto (DEFAULT, LiveGraph-first) + sqlite (explicit escape hatch) are both single-file (file
+        // REQUIRED). The daemon routes on `engine`.
+        "auto" | "sqlite" if positional.len() != 1 => {
+            return Err(format!(
+                "error: imports requires exactly one <file>\n{IMPORTS_USAGE}"
+            ));
+        }
+        "auto" | "sqlite" => {}
+        "livegraph" if positional.len() > 1 => {
+            return Err(format!(
+                "error: at most one <file> (omit for a repo-wide view)\n{IMPORTS_USAGE}"
+            ));
+        }
+        // compare: WITH file -> per-file (READINESS-1); NO file -> repo-wide readiness aggregate
+        // (REPOWIDE-1 D6). At most one <file>.
+        "compare" if positional.len() > 1 => {
+            return Err(format!(
+                "error: at most one <file> (omit for the repo-wide readiness aggregate)\n{IMPORTS_USAGE}"
+            ));
+        }
+        "livegraph" | "compare" => {}
+        other => {
+            return Err(format!(
+                "error: unknown --engine '{other}' (supported: sqlite, livegraph, compare)"
+            ));
+        }
+    }
+    refuse_partition_flags_with_explicit_engine(flags, &engine)?;
+    Ok(ImportsArgs {
+        engine,
+        file: positional.into_iter().next(),
+        json_mode,
+        include_inferred: flags.include_inferred,
+    })
+}
+
+pub fn run_imports(args: &[String]) -> ExitCode {
+    let parsed = match parse_imports_args(args) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("{msg}");
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+        }
+    };
+    let engine = parsed.engine.as_str();
+    let json_mode = parsed.json_mode;
+    let positional: Vec<String> = parsed.file.iter().cloned().collect();
 
     let repo_path = match resolve_repo_from_cwd() {
         Ok(p) => p,
@@ -819,50 +986,13 @@ pub fn run_imports(args: &[String]) -> ExitCode {
         }
     };
 
-    // Validate the engine/arg combination + build params (D6: sqlite REQUIRES <file>; livegraph file OPTIONAL
-    // -> repo-wide).
-    let params = match engine {
-        "auto" | "sqlite" => {
-            // auto (DEFAULT, LiveGraph-first) + sqlite (explicit escape hatch) are both single-file (file
-            // REQUIRED). The daemon routes on `engine`.
-            if positional.len() != 1 {
-                eprintln!("error: imports requires exactly one <file>");
-                eprintln!("{usage}");
-                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
-            }
-            serde_json::json!({ "repo": repo_path, "engine": engine, "file": positional[0] })
-        }
-        "livegraph" => {
-            if positional.len() > 1 {
-                eprintln!("error: at most one <file> (omit for a repo-wide view)");
-                eprintln!("{usage}");
-                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
-            }
-            let mut p = serde_json::json!({ "repo": repo_path, "engine": "livegraph" });
-            if let Some(file) = positional.first() {
-                p["file"] = serde_json::Value::String(file.clone());
-            }
-            p
-        }
-        "compare" => {
-            // compare: WITH file -> per-file (READINESS-1); NO file -> repo-wide readiness aggregate
-            // (REPOWIDE-1 D6). At most one <file>.
-            if positional.len() > 1 {
-                eprintln!("error: at most one <file> (omit for the repo-wide readiness aggregate)");
-                eprintln!("{usage}");
-                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
-            }
-            let mut p = serde_json::json!({ "repo": repo_path, "engine": "compare" });
-            if let Some(file) = positional.first() {
-                p["file"] = serde_json::Value::String(file.clone());
-            }
-            p
-        }
-        other => {
-            eprintln!("error: unknown --engine '{other}' (supported: sqlite, livegraph, compare)");
-            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
-        }
-    };
+    let mut params = serde_json::json!({ "repo": repo_path, "engine": engine });
+    if let Some(file) = &parsed.file {
+        params["file"] = serde_json::Value::String(file.clone());
+    }
+    if parsed.include_inferred {
+        params["include_inferred"] = serde_json::Value::Bool(true);
+    }
 
     let mut client = match create_daemon_client("imports") {
         Ok(c) => c,
@@ -872,6 +1002,15 @@ pub fn run_imports(args: &[String]) -> ExitCode {
     match client.request("imports", Some(params)) {
         Ok(result) => {
             if json_mode {
+                // D-TESB-17: the JSON consumer boundary marks unreadable partition evidence.
+                let mut result = result;
+                if let Err(e) = crate::presentation::import_partition::mark_partition_evidence(
+                    &mut result,
+                    crate::presentation::import_partition::JsonSurface::Imports,
+                ) {
+                    eprintln!("error: {e}");
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
+                }
                 // Machine mode: the full envelope (the AUTHORITATIVE, complete evidence for livegraph, D4).
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
@@ -959,7 +1098,7 @@ pub fn run_imports(args: &[String]) -> ExitCode {
 /// engine/kind matrix has 4 live routes. Derived from the (engine, kind) pair; each maps to the daemon
 /// params + the human renderer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CyclesRoute {
+pub(crate) enum CyclesRoute {
     /// CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: the DEFAULT (`auto`, no flags) -- the cert-gated LiveGraph-first
     /// MODULE-cycle answer (the daemon serves LiveGraph on a GREEN repo cert, else a labelled SQLite fallback).
     AutoModule,
@@ -974,33 +1113,36 @@ enum CyclesRoute {
     CompareModule,
 }
 
-pub fn run_cycles(args: &[String]) -> ExitCode {
+const CYCLES_USAGE: &str = "usage: rmap cycles [--include-tests] [--include-inferred] [--engine auto|sqlite|livegraph|compare] [--kind file-import|module-import] [--json]";
+
+/// Parse and validate `rmap cycles` arguments (pure): the route, `--json`, and the partition
+/// flags (TEST-EDGE-SCOPE-1B). `Err` carries the stderr text of a usage error (exit 1).
+pub(crate) fn parse_cycles_args(
+    args: &[String],
+) -> Result<(CyclesRoute, bool, PartitionFlags), String> {
     // CYCLES-LIVEGRAPH-CLI-1: extract --engine + --kind FIRST. Default (no flags) = SQLite MODULE-import
     // cycles (unchanged). `--engine livegraph --kind file-import` = LiveGraph captured FILE import cycles
     // (a DIFFERENT graph; NO SQLite fallback). Then parse --json from the remaining positionals.
     let (args, engine_raw) = extract_engine_flag(args.to_vec());
     let (args, kind) = extract_kind_flag(args);
+    let (args, flags) = extract_partition_flags(args, true);
     // CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: absent engine == `auto` -- the cert-gated LiveGraph-first default
     // (the daemon serves LiveGraph module cycles when a GREEN repo no-loss certificate holds, else a labelled
     // SQLite fallback -- BYTE-IDENTICAL either way). `--engine sqlite` forces the SQLite escape hatch
     // (UNCHANGED); `--engine livegraph|compare` stay the explicit read-model / compare surfaces.
     let engine = engine_raw.as_str();
 
-    let usage =
-        "usage: rmap cycles [--engine auto|sqlite|livegraph|compare] [--kind file-import|module-import] [--json]";
     let mut json_mode = false;
     for arg in &args {
         match arg.as_str() {
             "--json" => json_mode = true,
             flag if flag.starts_with("--") => {
-                eprintln!("error: unknown flag: {flag}");
-                eprintln!("{usage}");
-                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+                return Err(format!("error: unknown flag: {flag}\n{CYCLES_USAGE}"));
             }
             other => {
-                eprintln!("error: unexpected argument: {other}");
-                eprintln!("{usage}");
-                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+                return Err(format!(
+                    "error: unexpected argument: {other}\n{CYCLES_USAGE}"
+                ));
             }
         }
     }
@@ -1015,34 +1157,44 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
         ("livegraph", "file-import") => CyclesRoute::LivegraphFile,
         ("livegraph", "module-import") => CyclesRoute::LivegraphModule,
         ("livegraph", _) => {
-            eprintln!("error: --engine livegraph requires --kind file-import or module-import");
-            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+            return Err(
+                "error: --engine livegraph requires --kind file-import or module-import"
+                    .to_string(),
+            );
         }
         ("sqlite", "file-import") => {
-            eprintln!("error: SQLite does not answer captured FILE import cycles; use --engine livegraph --kind file-import");
-            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+            return Err("error: SQLite does not answer captured FILE import cycles; use --engine livegraph --kind file-import".to_string());
         }
         ("compare", "module-import") => CyclesRoute::CompareModule,
         ("compare", "file-import") => {
-            eprintln!("error: --engine compare --kind file-import is not supported (FILE-import has no SQLite peer graph); use --kind module-import");
-            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+            return Err("error: --engine compare --kind file-import is not supported (FILE-import has no SQLite peer graph); use --kind module-import".to_string());
         }
         ("compare", _) => {
-            eprintln!("error: --engine compare requires --kind module-import");
-            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+            return Err("error: --engine compare requires --kind module-import".to_string());
         }
         (_, "file-import") => {
-            eprintln!("error: --kind file-import requires --engine livegraph");
-            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+            return Err("error: --kind file-import requires --engine livegraph".to_string());
         }
         (e, "") => {
-            eprintln!(
+            return Err(format!(
                 "error: unknown --engine '{e}' (supported: auto, sqlite, livegraph, compare)"
-            );
-            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+            ));
         }
         (_, k) => {
-            eprintln!("error: unknown --kind '{k}' (supported: file-import, module-import)");
+            return Err(format!(
+                "error: unknown --kind '{k}' (supported: file-import, module-import)"
+            ));
+        }
+    };
+    refuse_partition_flags_with_explicit_engine(flags, engine)?;
+    Ok((route, json_mode, flags))
+}
+
+pub fn run_cycles(args: &[String]) -> ExitCode {
+    let (route, json_mode, flags) = match parse_cycles_args(args) {
+        Ok(v) => v,
+        Err(msg) => {
+            eprintln!("{msg}");
             return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
         }
     };
@@ -1075,10 +1227,22 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
             serde_json::json!({ "repo": repo_path, "engine": "compare", "kind": "module-import" })
         }
     };
+    // TEST-EDGE-SCOPE-1B: the view's flags (refused above with the explicit engines).
+    let mut params = params;
+    flags.add_to_params(&mut params);
 
     match client.request("cycles", Some(params)) {
         Ok(result) => {
             if json_mode {
+                // D-TESB-17: the JSON consumer boundary marks unreadable partition evidence.
+                let mut result = result;
+                if let Err(e) = crate::presentation::import_partition::mark_partition_evidence(
+                    &mut result,
+                    crate::presentation::import_partition::JsonSurface::Cycles,
+                ) {
+                    eprintln!("error: {e}");
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
+                }
                 // Machine mode: print full envelope (includes scope/backend_used/answer_class/freshness/
                 // missing_partitions/degradation_reasons for the LiveGraph path; D5).
                 match serde_json::to_string_pretty(&result) {
@@ -1199,9 +1363,12 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
                             // The default (Auto), forced SQLite, and Compare all serve the generic MODULE
                             // renderer (byte-identical canonical cycles; backend_used/fallback_reason are
                             // ignored by CyclesResponse). Compare adds its summary line below.
-                            CyclesRoute::AutoModule
-                            | CyclesRoute::SqliteModule
-                            | CyclesRoute::CompareModule => response.render_human(),
+                            CyclesRoute::AutoModule | CyclesRoute::SqliteModule => {
+                                response.render_human()
+                            }
+                            // TEST-EDGE-SCOPE-1B (D-TESB-06): compare serves the unpartitioned
+                            // persisted graph and says so.
+                            CyclesRoute::CompareModule => response.render_human_explicit_engine(),
                         };
                         println!("{}", rendered);
                         if let Some(summary) = compare_summary {
@@ -1354,5 +1521,113 @@ pub fn run_stats(args: &[String]) -> ExitCode {
             }
         }
         Err(e) => handle_daemon_error(e),
+    }
+}
+
+#[cfg(test)]
+mod partition_flag_tests {
+    //! TEST-EDGE-SCOPE-1B (D-TESB-05/06/15): the partition flags on `cycles`, `imports`, `path`.
+    use super::*;
+
+    fn argv(s: &str) -> Vec<String> {
+        s.split_whitespace().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn cycles_partition_flag_with_livegraph_engine_is_a_usage_error() {
+        // Default route with each flag: accepted and sent.
+        let (route, json, flags) = parse_cycles_args(&argv("--include-tests --json")).unwrap();
+        assert_eq!(route, CyclesRoute::AutoModule);
+        assert!(json && flags.include_tests && !flags.include_inferred);
+        let (route, _, flags) =
+            parse_cycles_args(&argv("--engine sqlite --include-inferred --include-tests")).unwrap();
+        assert_eq!(route, CyclesRoute::SqliteModule);
+        assert_eq!(
+            flags,
+            PartitionFlags {
+                include_tests: true,
+                include_inferred: true
+            }
+        );
+        let mut params = serde_json::json!({"repo": "/r", "engine": "sqlite"});
+        flags.add_to_params(&mut params);
+        assert_eq!(params["include_tests"], true);
+        assert_eq!(params["include_inferred"], true);
+        // The explicit engines serve the unpartitioned graph: a flag with them is refused.
+        for bad in [
+            "--engine livegraph --kind module-import --include-tests",
+            "--engine livegraph --kind file-import --include-inferred",
+            "--engine compare --kind module-import --include-tests",
+        ] {
+            let err = parse_cycles_args(&argv(bad)).unwrap_err();
+            assert!(err.contains("not supported with --engine"), "{bad}: {err}");
+        }
+        // Without a flag the explicit engines parse as before, and no flag is sent by default.
+        assert_eq!(
+            parse_cycles_args(&argv("--engine livegraph --kind module-import"))
+                .unwrap()
+                .0,
+            CyclesRoute::LivegraphModule
+        );
+        let (_, _, none) = parse_cycles_args(&argv("")).unwrap();
+        let mut params = serde_json::json!({"repo": "/r", "engine": "auto"});
+        none.add_to_params(&mut params);
+        assert_eq!(params, serde_json::json!({"repo": "/r", "engine": "auto"}));
+    }
+
+    #[test]
+    fn imports_accepts_include_inferred() {
+        let a = parse_imports_args(&argv(
+            "tests/kafkatest/services/streams.py --include-inferred",
+        ))
+        .unwrap();
+        assert!(a.include_inferred);
+        assert_eq!(
+            a.file.as_deref(),
+            Some("tests/kafkatest/services/streams.py")
+        );
+        assert_eq!(a.engine, "auto");
+        assert!(!parse_imports_args(&argv("a.py")).unwrap().include_inferred);
+        // Test status never filters the per-file answer: `--include-tests` is not an imports flag.
+        assert!(parse_imports_args(&argv("a.py --include-tests"))
+            .unwrap_err()
+            .contains("unknown flag: --include-tests"));
+        for bad in [
+            "a.py --engine livegraph --include-inferred",
+            "a.py --engine compare --include-inferred",
+        ] {
+            assert!(parse_imports_args(&argv(bad))
+                .unwrap_err()
+                .contains("not supported with --engine"));
+        }
+        // The engine/file rules are unchanged.
+        assert!(parse_imports_args(&argv("--engine sqlite")).is_err());
+        assert!(parse_imports_args(&argv("--engine livegraph")).is_ok());
+    }
+
+    #[test]
+    fn path_accepts_include_inferred() {
+        let p = parse_path_args(&argv("A.f B.g --include-inferred --json")).unwrap();
+        assert_eq!((p.from.as_str(), p.to.as_str()), ("A.f", "B.g"));
+        assert!(p.include_inferred && p.json_mode);
+        assert_eq!(p.engine, "auto");
+        let p = parse_path_args(&argv("--include-inferred A.f B.g --engine sqlite")).unwrap();
+        assert!(p.include_inferred);
+        assert_eq!(p.engine, "sqlite");
+        assert!(!parse_path_args(&argv("A.f B.g")).unwrap().include_inferred);
+        assert!(parse_path_args(&argv("A.f --include-inferred")).is_err());
+    }
+
+    #[test]
+    fn path_partition_flag_with_livegraph_engine_is_a_usage_error() {
+        for bad in [
+            "A.f B.g --engine livegraph --include-inferred",
+            "A.f B.g --engine compare --include-inferred",
+        ] {
+            assert!(parse_path_args(&argv(bad))
+                .unwrap_err()
+                .contains("not supported with --engine"));
+        }
+        assert!(parse_path_args(&argv("A.f B.g --engine livegraph")).is_ok());
     }
 }

@@ -29,13 +29,22 @@ use crate::daemon_client::DaemonClient;
 
 // ── modules list command ─────────────────────────────────────────
 //
-// `rmap modules list [--json]`
+// `rmap modules list [--include-tests] [--include-inferred] [--json] [--full]`
 //
 // Human mode (default): plain text with module catalog.
 // Machine mode (--json): full envelope.
 
-pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
-    // ── Parse args (filter out --json / --full) ─────────────────
+const LIST_USAGE: &str =
+    "usage: rmap modules list [--include-tests] [--include-inferred] [--json] [--full]";
+
+/// Parse `rmap modules list` arguments (pure): `(json_mode, full, partition flags)`. `Err` carries
+/// the stderr text of a usage error (exit 1).
+pub(crate) fn parse_list_args(
+    args: &[String],
+) -> Result<(bool, bool, crate::commands::graph::PartitionFlags), String> {
+    // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): `--include-tests` / `--include-inferred` widen the
+    // import view (default: certain imports from production files).
+    let (args, flags) = crate::commands::graph::extract_partition_flags(args.to_vec(), true);
     let mut json_mode = false;
     // MODULE-EDGES-1 §2.1: `--full` uncaps the cross-module edge list (default
     // budgets it with an honest "(+N more — --full)"); the COMPLETE set always rides
@@ -43,7 +52,7 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
     let mut full = false;
     let mut unexpected: Option<&String> = None;
 
-    for arg in args {
+    for arg in &args {
         match arg.as_str() {
             "--json" => {
                 json_mode = true;
@@ -52,9 +61,7 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
                 full = true;
             }
             flag if flag.starts_with("--") => {
-                eprintln!("error: unknown flag: {}", flag);
-                eprintln!("usage: rmap modules list [--json] [--full]");
-                return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+                return Err(format!("error: unknown flag: {flag}\n{LIST_USAGE}"));
             }
             _ => {
                 if unexpected.is_none() {
@@ -65,12 +72,22 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
     }
 
     if let Some(arg) = unexpected {
-        eprintln!("error: unexpected argument: {}", arg);
-        eprintln!("usage: rmap modules list [--json] [--full]");
-        eprintln!();
-        eprintln!("Run from within a repo directory.");
-        return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+        return Err(format!(
+            "error: unexpected argument: {arg}\n{LIST_USAGE}\n\nRun from within a repo directory."
+        ));
     }
+    Ok((json_mode, full, flags))
+}
+
+pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
+    // ── Parse args (filter out --json / --full / the partition flags) ─────
+    let (json_mode, full, flags) = match parse_list_args(args) {
+        Ok(v) => v,
+        Err(msg) => {
+            eprintln!("{msg}");
+            return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
+        }
+    };
 
     // Get cwd for repo resolution
     let cwd = match std::env::current_dir() {
@@ -99,13 +116,23 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
     };
 
     // Build request params
-    let params = serde_json::json!({
+    let mut params = serde_json::json!({
         "repo": repo_path,
     });
+    flags.add_to_params(&mut params);
 
     match client.request("modules_list", Some(params)) {
         Ok(result) => {
             if json_mode {
+                // D-TESB-17: the JSON consumer boundary marks unreadable partition evidence.
+                let mut result = result;
+                if let Err(e) = crate::presentation::import_partition::mark_partition_evidence(
+                    &mut result,
+                    crate::presentation::import_partition::JsonSurface::ModulesList,
+                ) {
+                    eprintln!("error: {e}");
+                    return ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR);
+                }
                 // Machine mode: print full envelope
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {

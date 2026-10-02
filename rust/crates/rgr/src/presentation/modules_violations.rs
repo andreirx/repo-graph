@@ -105,6 +105,10 @@ pub struct ModulesViolationsResponse {
     /// explicit armed-and-clean render.
     #[serde(default)]
     pub declarations_checked: Option<u64>,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-11): the inferred imports the boundaries would have judged,
+    /// `{count, relations}`. Absent = none.
+    #[serde(default)]
+    pub inferred_imports_not_judged: Option<serde_json::Value>,
 }
 
 impl ModulesViolationsResponse {
@@ -157,6 +161,16 @@ impl ModulesViolationsResponse {
                 "stale declarations"
             )
         ));
+
+        // TEST-EDGE-SCOPE-1B (D-TESB-11): beside the verdict, the inferred imports not judged.
+        // D-TESB-17 row U10: absent = a daemon that predates the partition — stated, never zero.
+        let not_judged = match self.inferred_imports_not_judged.as_ref() {
+            Some(nj) => super::import_partition::not_judged_line(nj, ""),
+            None => Some(super::import_partition::PARTITION_UNAVAILABLE.to_string()),
+        };
+        if let Some(line) = not_judged {
+            out.push_str(&format!("{line}\n"));
+        }
 
         // -- Import analysis from diagnostics --
         if let Some(ref diag) = self.diagnostics {
@@ -242,6 +256,30 @@ impl ModulesViolationsResponse {
 mod tests {
     use super::*;
 
+    #[test]
+    fn modules_violations_state_inferred_imports_not_judged() {
+        // D-TESB-11: the boundaries judge certain imports; the inferred ones are counted with
+        // the source module of the first relation as the next action.
+        let mut resp = sample_violations_response();
+        resp.inferred_imports_not_judged = Some(serde_json::json!({
+            "count": 4,
+            "relations": [
+                {"source": "packages/cli", "target": "packages/internal", "import_count": 3},
+                {"source": "packages/web", "target": "packages/internal", "import_count": 1}
+            ]
+        }));
+        let out = resp.render_human();
+        assert!(
+            out.contains("2 discovered module violations\n1 stale declaration\n+4 inferred imports not judged — investigate with rmap modules deps packages/cli --include-inferred\n"),
+            "{out}"
+        );
+        // A malformed value is stated unreadable, never dropped.
+        resp.inferred_imports_not_judged = Some(serde_json::json!({"count": "x"}));
+        assert!(resp
+            .render_human()
+            .contains(crate::presentation::import_partition::NOT_JUDGED_UNREADABLE));
+    }
+
     fn sample_violations_response() -> ModulesViolationsResponse {
         ModulesViolationsResponse {
             command: "modules violations".to_string(),
@@ -282,6 +320,8 @@ mod tests {
             }),
             armed: Some(true),
             declarations_checked: Some(3),
+            // A current daemon states the count, zero included (D-TESB-17 fixture rule).
+            inferred_imports_not_judged: Some(serde_json::json!({"count": 0, "relations": []})),
         }
     }
 
@@ -305,6 +345,8 @@ mod tests {
             // Armed and clean: declarations exist, none violated.
             armed: Some(true),
             declarations_checked: Some(5),
+            // A current daemon states the count, zero included (D-TESB-17 fixture rule).
+            inferred_imports_not_judged: Some(serde_json::json!({"count": 0, "relations": []})),
         }
     }
 
@@ -407,5 +449,35 @@ mod tests {
             api_pos < cli_pos,
             "Violations should be sorted by (source, target)"
         );
+    }
+
+    // ── TEST-EDGE-SCOPE-1B: D-TESB-17 (rows U10, W4) on `modules violations` ──
+
+    #[test]
+    fn modules_violations_without_not_judged_evidence_states_the_partition_unavailable() {
+        let mut resp = sample_violations_response();
+        resp.inferred_imports_not_judged = None;
+        let out = resp.render_human();
+        assert!(
+            out.contains(crate::presentation::import_partition::PARTITION_UNAVAILABLE),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn modules_violations_non_numeric_not_judged_renders_unreadable() {
+        for bad in [
+            serde_json::json!({"count": "1", "relations": []}),
+            serde_json::json!({"count": 1, "relations": {"source": "db"}}),
+            serde_json::json!({"count": 1.5, "relations": []}),
+        ] {
+            let mut resp = sample_violations_response();
+            resp.inferred_imports_not_judged = Some(bad.clone());
+            let out = resp.render_human();
+            assert!(
+                out.contains(crate::presentation::import_partition::NOT_JUDGED_UNREADABLE),
+                "{bad}: {out}"
+            );
+        }
     }
 }

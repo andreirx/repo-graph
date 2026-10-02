@@ -28,6 +28,11 @@ pub struct DiscoveredModuleViolationsResult {
     /// Edge derivation diagnostics from the module graph facts.
     pub diagnostics: ModuleEdgeDiagnostics,
 
+    /// TEST-EDGE-SCOPE-1B (D-TESB-11): the relations whose INFERRED imports the same boundary rule
+    /// would have judged — counted, never judged (the evaluation above reads certain imports).
+    pub inferred_imports_not_judged:
+        Vec<repo_graph_classification::boundary_evaluator::ModuleBoundaryViolation>,
+
     /// GOV-ARMED-1: number of active boundary declarations loaded for the
     /// repo (the `declarations` rows with `kind='boundary' AND is_active=1`).
     /// This is a CONFIGURATION-PRESENCE fact: `> 0` means the repo has
@@ -86,12 +91,17 @@ pub fn evaluate_violations_from_facts(
         })
         .collect();
 
-    // 4. Evaluate boundaries against preloaded edges
+    // 4. Evaluate boundaries against preloaded edges; the inferred edges by the same rule, to
+    //    count what is not judged (TEST-EDGE-SCOPE-1B, D-TESB-11).
     let evaluation = evaluate_module_boundaries(&parsed_boundaries, &facts.edges, &module_index);
+    let inferred_imports_not_judged =
+        evaluate_module_boundaries(&parsed_boundaries, &facts.inferred_edges, &module_index)
+            .violations;
 
     Ok(DiscoveredModuleViolationsResult {
         evaluation,
         diagnostics: facts.diagnostics.clone(),
+        inferred_imports_not_judged,
         // Config presence = raw boundary declarations loaded for the repo.
         declarations_evaluated: declarations.len(),
     })
@@ -145,13 +155,54 @@ pub fn evaluate_violations_from_preloaded(
         })
         .collect();
 
-    // 3. Evaluate boundaries against preloaded edges
+    // 3. Evaluate boundaries against preloaded edges (and the inferred edges, counted only)
     let evaluation = evaluate_module_boundaries(&parsed_boundaries, &facts.edges, &module_index);
+    let inferred_imports_not_judged =
+        evaluate_module_boundaries(&parsed_boundaries, &facts.inferred_edges, &module_index)
+            .violations;
 
     Ok(DiscoveredModuleViolationsResult {
         evaluation,
         diagnostics: facts.diagnostics.clone(),
+        inferred_imports_not_judged,
         // Config presence = raw boundary declarations passed in.
         declarations_evaluated: declarations.len(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use repo_graph_classification::import_partition::ImportView;
+
+    /// TEST-EDGE-SCOPE-1B (D-TESB-11): `modules violations` judges certain imports of every test
+    /// status and counts the inferred imports the same rule would have judged.
+    #[test]
+    fn violations_count_inferred_imports_not_judged() {
+        let (storage, snap) = crate::facts::tests::partitioned_store();
+        for (from, forbids) in [("app", "core"), ("app", "util")] {
+            storage
+                .execute_raw(&format!(
+                    "INSERT INTO declarations (declaration_uid, repo_uid, target_stable_key, kind, \
+                     value_json, created_at, is_active) VALUES ('d-{from}-{forbids}', 'r1', \
+                     'r1:{from}:MODULE', 'boundary', '{{\"selectorDomain\":\"discovered_module\",\
+                     \"source\":{{\"canonicalRootPath\":\"{from}\"}},\"forbids\":\
+                     {{\"canonicalRootPath\":\"{forbids}\"}}}}', '2026-01-01T00:00:00Z', 1)"
+                ))
+                .unwrap();
+        }
+        let facts =
+            crate::facts::load_module_graph_facts(&storage, &snap, ImportView::CERTAIN_WITH_TESTS)
+                .unwrap();
+        let result = evaluate_violations_from_facts(&storage, "r1", &facts).unwrap();
+        // app→core (1 production + 1 test certain) and app→util (1 test certain) are judged.
+        assert_eq!(result.evaluation.violations.len(), 2);
+        // app→util also has one inferred import: counted, not judged.
+        assert_eq!(result.inferred_imports_not_judged.len(), 1);
+        assert_eq!(
+            result.inferred_imports_not_judged[0].target_canonical_path,
+            "util"
+        );
+        assert_eq!(result.inferred_imports_not_judged[0].import_count, 1);
+    }
 }

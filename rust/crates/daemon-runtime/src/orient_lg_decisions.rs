@@ -325,6 +325,20 @@ pub(crate) fn orient_callees_outcome_served(
 /// TS-only AND the cert is GREEN at the current fingerprint (proving LG == SQLite — RISK-E module-identity
 /// divergence). Else a labelled SQLite fallback. The repo-wide cert is a CONSERVATIVE gate for the
 /// symbol-focus module-context cycles variant (GREEN repo-wide implies the module subset matches too).
+///
+/// TEST-EDGE-SCOPE-1B (D-TESB-16, RG-REQ-002-L02): the provenance follows the value actually served.
+/// The cycles orient and explain serve answer the DEFAULT import view (certain production imports); the
+/// LiveGraph IR carries neither the resolution class nor the importer's test status, so when that view
+/// excludes any import of the directory population the outcome is
+/// `Fallback { LiveGraphPartitionedViewUnsupported }` — decided BEFORE any certificate is consulted,
+/// whether or not the exclusion changes an SCC, and never `LiveGraphCycleDivergence` (which keeps its
+/// meaning: the cycles certificate is not GREEN). The count is read through the same function as the
+/// `cycles` fastpath's fourth precondition ([`crate::import_partition_view::livegraph_cycles_eligible`]).
+/// A failed read is never taken as "excludes nothing": the leaf is then a labelled SQLite fallback
+/// naming that read, `PartitionEvidenceUnreadable` (INPUT-3 addendum — never `LiveGraphError`, whose
+/// contract is a LiveGraph engine error), and the read error is written to the daemon log. This is the
+/// ONE decision both cycle leaves read (orient's IMPORT_CYCLES via `orient_coherence`, explain's
+/// EXPLAIN_CYCLES via `explain_lg_serve::cycles_leaf_label`).
 pub(crate) fn orient_cycles_outcome(repo_state: &RepoState, snapshot_uid: &str) -> OrientLgOutcome {
     // Capture the LiveGraph posture + fingerprint under the read lock, then DROP it before the cert build
     // (the cert build acquires storage + the cycles_cert write lock and re-reads the livegraph; never
@@ -344,6 +358,26 @@ pub(crate) fn orient_cycles_outcome(repo_state: &RepoState, snapshot_uid: &str) 
             }
         }
     };
+    // D-TESB-16: a served view that excludes an import cannot be LiveGraph-corroborated (before any
+    // certificate is consulted; the livegraph read lock is already dropped). A failed read of that
+    // evidence is labelled as what it is (INPUT-3 addendum) and its error is logged, never discarded.
+    match read_default_view_excludes_nothing(repo_state, snapshot_uid) {
+        Ok(true) => {}
+        Ok(false) => {
+            return OrientLgOutcome::Fallback {
+                reason: FallbackReason::LiveGraphPartitionedViewUnsupported,
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "warning: cycle provenance — import-partition evidence unreadable for snapshot \
+                 {snapshot_uid} ({e}); the cycle leaves are labelled PartitionEvidenceUnreadable"
+            );
+            return OrientLgOutcome::Fallback {
+                reason: FallbackReason::PartitionEvidenceUnreadable,
+            };
+        }
+    }
     // If the answer-class ladder already failed, that is the outcome (the cert is irrelevant).
     match &served {
         OrientLgOutcome::Fallback { .. } => return served,
@@ -371,6 +405,28 @@ pub(crate) fn orient_cycles_outcome(repo_state: &RepoState, snapshot_uid: &str) 
             reason: FallbackReason::LiveGraphCycleDivergence,
         }
     }
+}
+
+/// D-TESB-16 (INPUT-3 addendum): whether the DEFAULT import view the cycle leaves serve excludes
+/// no import of the directory population — read through the same function as the `cycles`
+/// fastpath's fourth precondition. `Ok(true)`: it excludes nothing (the certificate ladder then
+/// decides); `Ok(false)`: it excludes at least one import; `Err(e)`: the evidence could not be read,
+/// `e` naming which read failed (`storage open: …` or `directory module graph read: …`) followed by
+/// the underlying error text, kept whole.
+pub(crate) fn read_default_view_excludes_nothing(
+    repo_state: &RepoState,
+    snapshot_uid: &str,
+) -> Result<bool, String> {
+    let conn = repo_state
+        .storage()
+        .map_err(|e| format!("storage open: {e}"))?;
+    let graph = conn
+        .directory_module_graph(snapshot_uid)
+        .map_err(|e| format!("directory module graph read: {e}"))?;
+    Ok(crate::import_partition_view::livegraph_cycles_eligible(
+        &graph,
+        repo_graph_classification::import_partition::ImportView::DEFAULT,
+    ))
 }
 
 /// The orient-exclusive COMPLEXITY no-loss cert (`ComplexityNoLossCert` + `orient_complexity_outcome`)

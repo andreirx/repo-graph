@@ -166,10 +166,17 @@ pub fn handle_map(state: &DaemonState, request: &Request) -> DispatchResult {
         "map manifest roots"
     );
 
+    // TEST-EDGE-SCOPE-1B (RG-REQ-002-L11): the dependency edges above carry CERTAIN imports only;
+    // each file's INFERRED imports are counted (`inferred_import_count`, additive, zero included).
+    let inferred_import_counts = read_or_error!(
+        storage.map_inferred_import_counts_in_path(&snapshot_uid, &path),
+        "map inferred import counts"
+    );
+
     let files_json: Vec<serde_json::Value> = files
         .into_iter()
         .map(|f| {
-            serde_json::json!({
+            let mut v = serde_json::json!({
                 "path": f.path,
                 "language": f.language,
                 "parse_status": f.parse_status,
@@ -179,7 +186,12 @@ pub fn handle_map(state: &DaemonState, request: &Request) -> DispatchResult {
                 "is_test": f.is_test,
                 "is_generated": f.is_generated,
                 "symbol_count": f.symbol_count,
-            })
+            });
+            // D-TESB-17 row U10: every file carries its count, a measured zero included (the
+            // read above is complete for the scoped files), so absence means an older daemon.
+            v["inferred_import_count"] =
+                serde_json::json!(inferred_import_counts.get(&f.path).copied().unwrap_or(0));
+            v
         })
         .collect();
 

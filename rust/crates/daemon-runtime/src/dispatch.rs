@@ -1622,6 +1622,28 @@ impl ServiceDispatcher {
         // unchanged single-file listing (the escape hatch); `livegraph` / `compare` = the read-model / compare
         // surfaces (unchanged, D6).
         let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("auto");
+        // TEST-EDGE-SCOPE-1B (RG-REQ-002-L11, D-TESB-05/06): `imports <file>` lists CERTAIN imports
+        // by default and counts the inferred ones; `include_inferred` (strict) lists them too and
+        // routes to SQLite (the LiveGraph IR has no resolution class). Test status never filters
+        // this per-file answer (D-TESB-READERS-1 §1).
+        let view = match crate::import_partition_view::read_import_view(&request.params) {
+            Ok(v) => v,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        if view.include_inferred && matches!(engine, "livegraph" | "compare") {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::InvalidRequest,
+                    "--include-inferred is not supported with --engine livegraph|compare: those engines serve the unpartitioned import graph",
+                ),
+            );
+        }
+        let engine = if view.include_inferred && engine == "auto" {
+            "sqlite"
+        } else {
+            engine
+        };
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
@@ -1755,15 +1777,16 @@ impl ServiceDispatcher {
                 snapshot,
                 fingerprint,
             };
-            return DispatchResult::success(
-                &request.id,
-                crate::livegraph_feed::imports_auto_response(
-                    &repo_state,
-                    &repo_uid,
-                    &epoch,
-                    file_path,
-                ),
+            let mut value = crate::livegraph_feed::imports_auto_response(
+                &repo_state,
+                &repo_uid,
+                &epoch,
+                file_path,
             );
+            if let Err(e) = crate::import_partition_view::partition_import_rows(&mut value, view) {
+                return DispatchResult::error(&request.id, e);
+            }
+            return DispatchResult::success(&request.id, value);
         }
 
         // ---- engine = sqlite (EXPLICIT escape hatch): the existing listing, UNCHANGED (no backend metadata). --
@@ -1777,14 +1800,15 @@ impl ServiceDispatcher {
             }
         };
 
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({
-                "file": file_path,
-                "imports": imports,
-                "count": imports.len(),
-            }),
-        )
+        let mut value = serde_json::json!({
+            "file": file_path,
+            "imports": imports,
+            "count": imports.len(),
+        });
+        if let Err(e) = crate::import_partition_view::partition_import_rows(&mut value, view) {
+            return DispatchResult::error(&request.id, e);
+        }
+        DispatchResult::success(&request.id, value)
     }
 
     /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
@@ -2422,6 +2446,24 @@ impl ServiceDispatcher {
         // question; NO SQLite fallback — D7). The daemon rejects unsupported combos defensively (D2/D6).
         let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("auto");
         let kind = Self::get_optional_string_param(&request.params, "kind").unwrap_or("");
+        // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12, D-TESB-05): the requested import view (strict flags).
+        // The explicit LiveGraph/compare engines serve the unpartitioned graph, so a partition flag
+        // with them is refused rather than silently ignored.
+        let view = match crate::import_partition_view::read_import_view(&request.params) {
+            Ok(v) => v,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        if view != repo_graph_classification::import_partition::ImportView::DEFAULT
+            && matches!(engine, "livegraph" | "compare")
+        {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::InvalidRequest,
+                    "--include-tests / --include-inferred are not supported with --engine livegraph|compare: those engines serve the unpartitioned import graph",
+                ),
+            );
+        }
 
         // DAEMON-CANCEL-1: map a cancellable cycles route's Result onto the dispatch
         // envelope. A checkpoint Break surfaces as `StorageError::Cancelled` →
@@ -2552,6 +2594,7 @@ impl ServiceDispatcher {
                     &repo_uid,
                     &display_name,
                     &epoch,
+                    view,
                     &mut checkpoint,
                 ));
             }
@@ -2585,11 +2628,25 @@ impl ServiceDispatcher {
         // client-cancel are NOT conflated: a real storage error stays InternalError; only
         // `StorageError::Cancelled` (the checkpoint-`Break` channel) maps to Cancelled.
         let query_start = Instant::now();
-        let cycles = {
+        // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): the SCCs of the requested view's query-time directory
+        // graph (the persisted MODULE edges carry neither the importer's test status nor a
+        // resolution class), with the view's REAL intra-SCC edges, the test-only classification, the
+        // per-cycle type-only verdict and the partition keys.
+        let body = {
             let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "finding_cycles");
-            match storage.find_cycles_cancellable(&snapshot.snapshot_uid, "module", &mut checkpoint)
-            {
-                Ok(c) => c,
+            let result = storage
+                .directory_module_graph(&snapshot.snapshot_uid)
+                .and_then(|graph| {
+                    crate::import_partition_view::sqlite_cycles_body(
+                        &storage,
+                        &repo_uid,
+                        &graph,
+                        view,
+                        &mut checkpoint,
+                    )
+                });
+            match result {
+                Ok(b) => b,
                 Err(repo_graph_storage::error::StorageError::Cancelled) => {
                     return DispatchResult::error(
                         &request.id,
@@ -2607,66 +2664,6 @@ impl ServiceDispatcher {
                 }
             }
         };
-        let qualified = match storage.module_qualified_names(&snapshot.snapshot_uid) {
-            Ok(q) => q,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
-        // CYCLE-HONESTY-1 (§2.1): the forced SQLite escape hatch also carries the REAL intra-SCC edges so it
-        // renders a verified walk (never a fabricated ring). Same edge set `find_cycles` loaded above.
-        let module_edges = match storage.module_import_edges(&snapshot.snapshot_uid) {
-            Ok(e) => e,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
-        let mut canonical_cycles = crate::cycle_output::sqlite_module_cycles_json_with_edges(
-            &cycles,
-            &qualified,
-            &module_edges,
-        );
-        // FIXTURE-POLLUTION-1 §2.2/§2.3: the forced `--engine sqlite` route reaches the
-        // stored `is_test` fact, so it classifies test-only cycles (the renderer demotes
-        // them below the real cycles). Conservative aggregation: a cycle is test-only iff
-        // every member module is wholly test-owned; an unclassifiable member ⇒ unknown (not
-        // demoted). CLASSIFIED read → a genuine error PROPAGATES (never a silent cycle).
-        let tracked_files = match storage.get_files_by_repo(&repo_uid) {
-            Ok(f) => f,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
-        let files: Vec<(&str, bool)> = tracked_files
-            .iter()
-            .map(|f| (f.path.as_str(), f.is_test))
-            .collect();
-        crate::cycle_output::label_test_only_cycles(&mut canonical_cycles, &files);
-        // TYPE-ONLY-IMPORTS-1: this forced `--engine sqlite` MODULE-cycle route reaches the stored
-        // per-module-edge `is_type_only` fact, so it attaches the PER-CYCLE type-only verdict (the precise
-        // successor of the blanket caveat) — only on TS/JS-member cycles (§5). Reuses `tracked_files`/
-        // `qualified` (already-CLASSIFIED reads whose errors propagated above) — no new fallible read.
-        let all_module_dirs: Vec<String> = qualified.values().cloned().collect();
-        let files_by_lang: Vec<(&str, Option<&str>)> = tracked_files
-            .iter()
-            .map(|f| (f.path.as_str(), f.language.as_deref()))
-            .collect();
-        crate::cycle_output::attach_type_only_labels(
-            &mut canonical_cycles,
-            &module_edges,
-            &files_by_lang,
-            &all_module_dirs,
-        );
-        let cycle_count = canonical_cycles.len();
         let query_ms = query_start.elapsed().as_millis();
 
         let total_ms = handler_start.elapsed().as_millis();
@@ -2681,23 +2678,13 @@ impl ServiceDispatcher {
             query_ms
         );
 
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({
-                "repo_uid": repo_uid,
-                "display_name": display_name,
-                "snapshot_uid": snapshot.snapshot_uid,
-                "cycles": canonical_cycles,
-                "count": cycle_count,
-                // Blanket caveat RETIRED on the SQLite route — the fact is now per-cycle (`type_only`);
-                // the renderer derives any residual hedge from those verdicts.
-                "ts_type_only_caveat": false,
-                // IMPORT-RESOLUTION-RUST-1 §2.5: module count + resolved cross-module import edge
-                // count so the zero-state states the graph size (already in hand, no new read).
-                "module_count": qualified.len(),
-                "module_edge_count": module_edges.len(),
-            }),
-        )
+        let mut value = serde_json::json!({
+            "repo_uid": repo_uid,
+            "display_name": display_name,
+            "snapshot_uid": snapshot.snapshot_uid,
+        });
+        value.as_object_mut().expect("json! object").extend(body);
+        DispatchResult::success(&request.id, value)
     }
 
     fn handle_path(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
@@ -2715,6 +2702,30 @@ impl ServiceDispatcher {
             Ok(t) => t,
             Err(e) => return DispatchResult::error(&request.id, e),
         };
+
+        // TEST-EDGE-SCOPE-1B (D-TESB-15): `include_inferred` (strict) answers the admitting walk's
+        // route with its inferred-hop count; it routes to SQLite (the LiveGraph IR has no inferred
+        // class) and is refused with the explicit LiveGraph/compare engines — before any read.
+        // Test status never filters `path` (its subject is reachability).
+        let include_inferred = match crate::import_partition_view::read_import_view(&request.params)
+        {
+            Ok(v) => v.include_inferred,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        if include_inferred
+            && matches!(
+                Self::get_optional_string_param(&request.params, "engine"),
+                Some("livegraph") | Some("compare")
+            )
+        {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::InvalidRequest,
+                    "--include-inferred is not supported with --engine livegraph|compare: those engines walk the certain graph only",
+                ),
+            );
+        }
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
@@ -2846,6 +2857,11 @@ impl ServiceDispatcher {
             &request.params,
             "engine",
         ));
+        let engine = if include_inferred {
+            crate::livegraph_feed::Engine::Sqlite
+        } else {
+            engine
+        };
         let repo_root =
             Self::get_optional_string_param(&request.params, "repo").unwrap_or_default();
 
@@ -2883,6 +2899,7 @@ impl ServiceDispatcher {
                     epoch.snapshot_uid(),
                     &from_sym.stable_key,
                     &to_sym.stable_key,
+                    include_inferred,
                 )
             },
             repo_root,
@@ -8376,6 +8393,12 @@ impl ServiceDispatcher {
             }
         };
 
+        // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12, D-TESB-05): the requested import view (strict flags).
+        let view = match crate::import_partition_view::read_import_view(&request.params) {
+            Ok(v) => v,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
         // Direction without module is invalid
         if direction != "all" && module_ref.is_none() {
             return DispatchResult::error(
@@ -8411,7 +8434,7 @@ impl ServiceDispatcher {
         };
 
         // Load module graph facts (service layer - single load with precomputed edges)
-        let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid) {
+        let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid, view) {
             Ok(f) => f,
             Err(e) => {
                 // MODULE-OWNERSHIP-DUPLICATE-1: duplicate ownership → labeled
@@ -8466,12 +8489,20 @@ impl ServiceDispatcher {
         let results: Vec<serde_json::Value> = filtered_edges
             .iter()
             .map(|e| {
-                serde_json::json!({
+                let mut row = serde_json::json!({
                     "source": e.source_canonical_path,
                     "target": e.target_canonical_path,
                     "import_count": e.import_count,
                     "source_file_count": e.source_file_count,
-                })
+                });
+                // TEST-EDGE-SCOPE-1B (D-TESB-08): the four partition counts of the relation, or
+                // null beside a reason (D-TESB-17 row U6).
+                if let serde_json::Value::Object(ref mut m) = row {
+                    m.extend(crate::import_partition_view::edge_partition_fields(
+                        &facts, e,
+                    ));
+                }
+                row
             })
             .collect();
 
@@ -8498,6 +8529,27 @@ impl ServiceDispatcher {
         if let Some(ref module_path) = resolved_module_path {
             response["module"] = serde_json::json!(module_path);
         }
+
+        // TEST-EDGE-SCOPE-1B (D-TESB-08/09): the view, the remainder over the relations this answer
+        // covers (the filter's), and the importer UNDETERMINED block over the answer's rows.
+        let mut fields =
+            crate::import_partition_view::module_edge_partition_fields(&facts, &filtered_edges);
+        let remainder = facts.remainder_where(|r| match &resolved_module_path {
+            None => true,
+            Some(m) => match direction {
+                "outbound" => r.source_canonical_path == *m,
+                "inbound" => r.target_canonical_path == *m,
+                _ => r.source_canonical_path == *m || r.target_canonical_path == *m,
+            },
+        });
+        fields.insert(
+            "import_remainder".into(),
+            crate::import_partition_view::remainder_json(&remainder),
+        );
+        response
+            .as_object_mut()
+            .expect("json! object")
+            .extend(fields);
 
         DispatchResult::success(&request.id, response)
     }
@@ -8540,7 +8592,14 @@ impl ServiceDispatcher {
         };
 
         // Load module graph facts (service layer)
-        let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid) {
+        // TEST-EDGE-SCOPE-1B (D-TESB-11, D-TESB-READERS-1 §1): governance judges CERTAIN imports of
+        // every test status; the inferred imports the rule would have judged are counted, never
+        // judged.
+        let facts = match load_module_graph_facts(
+            &storage,
+            &snapshot.snapshot_uid,
+            repo_graph_classification::import_partition::ImportView::CERTAIN_WITH_TESTS,
+        ) {
             Ok(f) => f,
             Err(e) => {
                 // MODULE-OWNERSHIP-DUPLICATE-1: duplicate ownership → labeled
@@ -8612,7 +8671,7 @@ impl ServiceDispatcher {
         let armed = declarations_evaluated > 0;
 
         // Build response
-        let response = serde_json::json!({
+        let mut response = serde_json::json!({
             "command": "modules violations",
             "repo": repo_uid,
             "snapshot": snapshot.snapshot_uid,
@@ -8635,6 +8694,11 @@ impl ServiceDispatcher {
                 "imports_cross_module": result.diagnostics.imports_cross_module,
             },
         });
+        // D-TESB-17 row U10: emitted on every answer, zero included.
+        response["inferred_imports_not_judged"] =
+            crate::import_partition_view::not_judged_relations_json(
+                &result.inferred_imports_not_judged,
+            );
 
         DispatchResult::success(&request.id, response)
     }
@@ -8848,8 +8912,11 @@ impl ServiceDispatcher {
             }
         };
 
-        // Load module graph facts
-        let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid) {
+        // Load module graph facts. TEST-EDGE-SCOPE-1B (D-TESB-12, D-TESB-READERS-1 §1): `modules
+        // show` keeps test-file imports (certain imports of every test status) and states that
+        // basis (`import_view`), so its rows are never read as the production view.
+        let show_view = repo_graph_classification::import_partition::ImportView::CERTAIN_WITH_TESTS;
+        let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid, show_view) {
             Ok(f) => f,
             Err(e) => {
                 // MODULE-OWNERSHIP-DUPLICATE-1: duplicate ownership → labeled
@@ -9185,6 +9252,7 @@ impl ServiceDispatcher {
             "violations": violations_output,
             "rollups_degraded": !violations_available,
             "warnings": warnings,
+            "import_view": crate::import_partition_view::view_json(show_view),
         });
 
         // Add evidence if non-empty
@@ -9241,8 +9309,14 @@ impl ServiceDispatcher {
             }
         };
 
-        // Load module graph facts
-        let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid) {
+        // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12, D-TESB-05): the requested import view (strict flags).
+        let view = match crate::import_partition_view::read_import_view(&request.params) {
+            Ok(v) => v,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        // Load module graph facts (the edges, rollups and edge list answer the view)
+        let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid, view) {
             Ok(f) => f,
             Err(e) => {
                 // MODULE-OWNERSHIP-DUPLICATE-1: duplicate ownership → labeled
@@ -9254,6 +9328,24 @@ impl ServiceDispatcher {
                 );
             }
         };
+        // D-TESB-11 / D-TESB-READERS-1 §1: the per-module violation counts are governance — they
+        // judge certain imports of every test status whatever view the edges answer.
+        let certain_with_tests =
+            repo_graph_classification::import_partition::ImportView::CERTAIN_WITH_TESTS;
+        let governance_facts = if view == certain_with_tests {
+            None
+        } else {
+            match load_module_graph_facts(&storage, &snapshot.snapshot_uid, certain_with_tests) {
+                Ok(f) => Some(f),
+                Err(e) => {
+                    return crate::module_degradation::module_facts_error_result(
+                        &request.id,
+                        "modules list",
+                        e,
+                    );
+                }
+            }
+        };
 
         // Load dead nodes (SYMBOL kind only)
         let dead_nodes = storage
@@ -9261,17 +9353,20 @@ impl ServiceDispatcher {
             .unwrap_or_default();
 
         // Evaluate violations (advisory)
-        let (violations_eval, violations_warning) =
-            match evaluate_violations_from_facts(&storage, &repo_uid, &facts) {
-                Ok(r) => (Some(r.evaluation), None::<String>),
-                Err(msg) => (
-                    None,
-                    Some(format!(
-                        "discovered-module violation rollups unavailable: {}",
-                        msg
-                    )),
-                ),
-            };
+        let (violations_eval, violations_warning) = match evaluate_violations_from_facts(
+            &storage,
+            &repo_uid,
+            governance_facts.as_ref().unwrap_or(&facts),
+        ) {
+            Ok(r) => (Some(r.evaluation), None::<String>),
+            Err(msg) => (
+                None,
+                Some(format!(
+                    "discovered-module violation rollups unavailable: {}",
+                    msg
+                )),
+            ),
+        };
 
         let violations_available = violations_eval.is_some();
 
@@ -9422,11 +9517,19 @@ impl ServiceDispatcher {
                 // fails the parse with its reason, never a fabricated blank/zero —
                 // review-0 item 3). `source_file_count` is not part of the row, so it is
                 // deliberately not projected here.
-                serde_json::json!({
+                let mut row = serde_json::json!({
                     "source": e.source_canonical_path,
                     "target": e.target_canonical_path,
                     "import_count": e.import_count,
-                })
+                });
+                // TEST-EDGE-SCOPE-1B (D-TESB-08): the relation's four partition counts, or null
+                // beside a reason (D-TESB-17 row U6).
+                if let serde_json::Value::Object(ref mut m) = row {
+                    m.extend(crate::import_partition_view::edge_partition_fields(
+                        &facts, e,
+                    ));
+                }
+                row
             })
             .collect();
 
@@ -9717,6 +9820,14 @@ impl ServiceDispatcher {
                 ),
             ),
         });
+        // TEST-EDGE-SCOPE-1B (D-TESB-08/09): the view, its remainder, and the importer
+        // UNDETERMINED block over the production files importing across modules.
+        if let serde_json::Value::Object(ref mut map) = response {
+            let all_edges: Vec<_> = facts.edges.iter().collect();
+            map.extend(crate::import_partition_view::module_edge_partition_fields(
+                &facts, &all_edges,
+            ));
+        }
         if let (serde_json::Value::Object(ref mut map), Some(reason)) =
             (&mut response, &http_boundary_link_degraded)
         {

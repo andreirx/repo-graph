@@ -417,3 +417,41 @@ fn orient_module_summary_grouped_count_equals_the_shared_function_over_grouped_f
         .contains("forced failure"));
     assert!(block.get("count").is_none());
 }
+
+/// TEST-EDGE-SCOPE-1B (RG-REQ-002-L11): explain <file> lists its certain imports and counts the
+/// inferred ones — never lists an inferred import as certain.
+#[test]
+fn explain_file_imports_list_certain_rows_and_count_inferred_ones() {
+    let mut fake = FakeAgentStorage::new();
+    seed_file_repo(&mut fake);
+    fake.file_imports.insert(
+        ("snap1".into(), "src/service.ts".into()),
+        vec![AgentImportEntry {
+            target_file: "src/model.ts".into(),
+        }],
+    );
+    fake.inferred_file_imports.insert(
+        ("snap1".into(), "src/service.ts".into()),
+        vec![
+            AgentImportEntry {
+                target_file: "src/a_property.py".into(),
+            },
+            AgentImportEntry {
+                target_file: "src/b_property.py".into(),
+            },
+        ],
+    );
+    let result = run_explain(&fake, "r1", "src/service.ts", Budget::Medium, TEST_NOW).unwrap();
+    let sig = result
+        .signals
+        .iter()
+        .find(|s| s.code() == SignalCode::ExplainImports)
+        .expect("EXPLAIN_IMPORTS");
+    let ev = serde_json::to_value(sig).unwrap()["evidence"].clone();
+    assert_eq!(ev["count"], 1);
+    assert_eq!(
+        ev["items"],
+        serde_json::json!([{"target_file": "src/model.ts"}])
+    );
+    assert_eq!(ev["import_remainder"]["inferred"]["imports"], 2);
+}

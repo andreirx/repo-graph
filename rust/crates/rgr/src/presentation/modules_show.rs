@@ -134,6 +134,10 @@ pub struct ModulesShowResponse {
     pub warnings: Vec<String>,
     #[serde(default)]
     pub evidence: Vec<ModuleEvidence>,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-12): the import view the dependencies answer — certain imports of
+    /// every test status. Absent = a daemon that predates the partition (no basis stated).
+    #[serde(default)]
+    pub import_view: Option<serde_json::Value>,
     // trust field omitted - complex nested structure, not needed for basic rendering
 }
 
@@ -184,6 +188,21 @@ impl ModulesShowResponse {
 
         // ── Relationships ──────────────────────────────────────────
         out.push_str("\nRelationships:\n");
+        // TEST-EDGE-SCOPE-1B (D-TESB-12, RG-REQ-002-L02): these rows keep imports from test files;
+        // state that basis inline (the production view is `modules deps`).
+        if self
+            .import_view
+            .as_ref()
+            .and_then(|v| v.get("include_tests"))
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            out.push_str(&format!(
+                "dependencies below include imports from test files — rmap modules deps {} shows \
+                 production imports\n",
+                super::import_partition::shell_quote(&self.module.canonical_root_path)
+            ));
+        }
         out.push_str(&format!(
             "  {}\n",
             format_count(
@@ -394,6 +413,7 @@ mod tests {
                 evidence_strength: "basic".to_string(),
                 dominant_language: "typescript".to_string(),
             }],
+            import_view: None,
         }
     }
 
@@ -429,6 +449,7 @@ mod tests {
             rollups_degraded: false,
             warnings: vec![],
             evidence: vec![],
+            import_view: None,
         }
     }
 
@@ -623,6 +644,27 @@ mod tests {
             "1 file whose test status can't be determined — open it and look inside \
              (of 100 owned files)",
             "{output}"
+        );
+    }
+
+    /// TEST-EDGE-SCOPE-1B (D-TESB-12): `modules show` keeps test imports and says so.
+    #[test]
+    fn modules_show_states_that_its_dependencies_include_test_imports() {
+        let mut r = sample_show_response();
+        let before = r.render_human();
+        assert!(!before.contains("dependencies below include imports from test files"));
+        r.import_view = Some(serde_json::json!({"include_tests": true, "include_inferred": false}));
+        let after = r.render_human();
+        let line = format!(
+            "dependencies below include imports from test files — rmap modules deps {} shows production imports",
+            r.module.canonical_root_path
+        );
+        assert!(after.lines().any(|l| l == line), "{after}");
+        let without: Vec<&str> = after.lines().filter(|l| *l != line).collect();
+        assert_eq!(
+            without,
+            before.lines().collect::<Vec<_>>(),
+            "only the basis line is added"
         );
     }
 }

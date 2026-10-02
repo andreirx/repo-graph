@@ -360,13 +360,40 @@ fn site_json(site: &AgentUnresolvedCallSite) -> Value {
 
 /// The SQLite `path` answer: the certain walk; when it finds no route, one admitting walk with the
 /// same bound, and — when that finds a route — `inferred_edges_on_route` and `search_depth`.
+///
+/// TEST-EDGE-SCOPE-1B (D-TESB-15): with `include_inferred` the answer IS the admitting walk's route
+/// (inferred call/import hops admitted), with `inferred_edges_on_route` stating how many of its hops
+/// are inferred, and `include_inferred: true`.
 pub(crate) fn sqlite_path_value(
     storage: &StorageConnection,
     repo_uid: &str,
     snapshot_uid: &str,
     from_stable_key: &str,
     to_stable_key: &str,
+    include_inferred: bool,
 ) -> Result<Value, StorageError> {
+    if include_inferred {
+        let admitted = storage.find_shortest_path(
+            snapshot_uid,
+            from_stable_key,
+            to_stable_key,
+            PATH_SEARCH_DEPTH,
+            true,
+        )?;
+        let found = admitted.path.found;
+        let mut value = json!({
+            "repo_uid": repo_uid,
+            "snapshot_uid": snapshot_uid,
+            "path": admitted.path,
+            "found": found,
+            "include_inferred": true,
+        });
+        if found {
+            value["inferred_edges_on_route"] = json!(admitted.inferred_edges_on_route);
+        }
+        value["search_depth"] = json!(PATH_SEARCH_DEPTH);
+        return Ok(value);
+    }
     let certain = storage.find_shortest_path(
         snapshot_uid,
         from_stable_key,

@@ -70,6 +70,28 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> OrientServeDecorator<'_, S>
             .map(|d| d.cycles.iter().map(|c| c.members.clone()).collect())
     }
 
+    /// TEST-EDGE-SCOPE-1B (D-TESB-06): whether the DEFAULT import view excludes no directory import
+    /// — the condition under which the LiveGraph module cycles (which admit every import) equal the
+    /// view's answer. Read from the pinned SQLite snapshot only when the M-2 cycle-VALUES gate could
+    /// serve at all (`false` otherwise: the decorator delegates either way).
+    fn default_view_excludes_nothing(
+        &self,
+        snapshot_uid: &str,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<bool, AgentStorageError> {
+        if !self.m2.cycle_values {
+            return Ok(false);
+        }
+        Ok(self
+            .inner
+            .import_cycle_partition(
+                snapshot_uid,
+                repo_graph_classification::import_partition::ImportView::DEFAULT,
+                cancel,
+            )?
+            .excludes_nothing())
+    }
+
     /// The cancellable sibling of [`Self::m2_module_cycles`] — threads the cooperative checkpoint
     /// into the LiveGraph SCC (DAEMON-CANCEL-1 discipline holds on the M-2 serve path too).
     /// `Err` = the peer disconnected mid-traversal (mapped to the standard cancelled storage error);
@@ -325,8 +347,14 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
     // (RATIFIED CYCLES-A posture, unchanged).
 
     fn find_module_cycles(&self, snapshot_uid: &str) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        if let Some(cycles) = self.m2_module_cycles() {
-            return Ok(cycles_repo_shape(&cycles));
+        // TEST-EDGE-SCOPE-1B (D-TESB-06): the LiveGraph cycles admit every import, so they are
+        // served only when the DEFAULT view excludes no directory import; otherwise delegate.
+        if self.default_view_excludes_nothing(snapshot_uid, &mut || {
+            std::ops::ControlFlow::Continue(())
+        })? {
+            if let Some(cycles) = self.m2_module_cycles() {
+                return Ok(cycles_repo_shape(&cycles));
+            }
         }
         self.inner.find_module_cycles(snapshot_uid)
     }
@@ -340,10 +368,14 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         snapshot_uid: &str,
         cancel: AgentCancelCheck<'_>,
     ) -> Result<Vec<AgentCycle>, AgentStorageError> {
-        if let Some(cycles) =
-            self.m2_module_cycles_cancellable("find_module_cycles", &mut *cancel)?
-        {
-            return Ok(cycles_repo_shape(&cycles));
+        // TEST-EDGE-SCOPE-1B (D-TESB-06): LiveGraph cycles only when the DEFAULT view excludes
+        // nothing on the directory population.
+        if self.default_view_excludes_nothing(snapshot_uid, &mut *cancel)? {
+            if let Some(cycles) =
+                self.m2_module_cycles_cancellable("find_module_cycles", &mut *cancel)?
+            {
+                return Ok(cycles_repo_shape(&cycles));
+            }
         }
         self.inner
             .find_module_cycles_cancellable(snapshot_uid, cancel)
@@ -374,6 +406,28 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
     ) -> Result<Vec<AgentImportEdge>, AgentStorageError> {
         self.inner
             .find_imports_between_paths(snapshot_uid, source_prefix, target_prefix)
+    }
+
+    fn find_inferred_imports_between_paths(
+        &self,
+        snapshot_uid: &str,
+        source_prefix: &str,
+        target_prefix: &str,
+    ) -> Result<Vec<AgentImportEdge>, AgentStorageError> {
+        self.inner
+            .find_inferred_imports_between_paths(snapshot_uid, source_prefix, target_prefix)
+    }
+
+    // TEST-EDGE-SCOPE-1B: the import partition always reads the pinned SQLite snapshot (the
+    // LiveGraph IR has no resolution class or test fact).
+    fn import_cycle_partition(
+        &self,
+        snapshot_uid: &str,
+        view: repo_graph_classification::import_partition::ImportView,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<repo_graph_agent::AgentImportCyclePartition, AgentStorageError> {
+        self.inner
+            .import_cycle_partition(snapshot_uid, view, cancel)
     }
 
     // EC-M2-LEAF-SERVE-1: MODULE_SUMMARY structural counts serve from the LiveGraph structural
@@ -529,6 +583,15 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
         file_path: &str,
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
         self.inner.find_file_imports(snapshot_uid, file_path)
+    }
+
+    fn find_inferred_file_imports(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
+        self.inner
+            .find_inferred_file_imports(snapshot_uid, file_path)
     }
 
     // EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): the two type-focus reads are SQLite-served, a plain
@@ -700,6 +763,16 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> GateStorageRead
     ) -> Result<Vec<GateImportEdge>, GateStorageError> {
         self.inner
             .find_boundary_imports(snapshot_uid, source_prefix, target_prefix)
+    }
+
+    fn find_inferred_boundary_imports(
+        &self,
+        snapshot_uid: &str,
+        source_prefix: &str,
+        target_prefix: &str,
+    ) -> Result<Vec<GateImportEdge>, GateStorageError> {
+        self.inner
+            .find_inferred_boundary_imports(snapshot_uid, source_prefix, target_prefix)
     }
 
     fn get_coverage_measurements(

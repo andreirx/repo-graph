@@ -36,6 +36,12 @@ pub enum TestStatusUniverse {
     OwnedFiles,
     /// Grouped non-test files (the `stats` / orient package groups).
     GroupedFiles,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-09): production files whose imports cross module
+    /// candidates in the view (`modules list`, `modules deps`, orient's module-edges line).
+    CrossModuleImporters,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-09): production files whose imports cross directory
+    /// modules in the view (`cycles`, orient's cycle line, explain's Import-cycles block).
+    CrossDirectoryImporters,
 }
 
 /// One surface's undetermined-file block, ONE shape for every surface:
@@ -268,5 +274,31 @@ mod tests {
             }),
             "a determined file's identity JSON is byte-identical to before"
         );
+    }
+
+    /// TEST-EDGE-SCOPE-1B (D-TESB-09): the two importer universes join 1A's closed set and
+    /// serialize snake_case, computed by the same one function.
+    #[test]
+    fn test_status_universes_include_cross_module_and_cross_directory_importers() {
+        for (u, name) in [
+            (
+                TestStatusUniverse::CrossModuleImporters,
+                "cross_module_importers",
+            ),
+            (
+                TestStatusUniverse::CrossDirectoryImporters,
+                "cross_directory_importers",
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(u).unwrap(), serde_json::json!(name));
+            let b = UndeterminedTestFiles::over_partition(
+                u,
+                [("db/c_test.c", Some(false)), ("db/db_impl.cc", Some(false))],
+            );
+            let v = serde_json::to_value(&b).unwrap();
+            assert_eq!(v["universe"], name);
+            assert_eq!(v["count"], 1);
+            assert_eq!(v["universe_count"], 2);
+        }
     }
 }

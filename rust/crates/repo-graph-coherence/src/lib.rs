@@ -110,6 +110,18 @@ pub enum CoherenceFallbackReason {
     /// callgraph contributor itself may be GREEN; a DIFFERENT bounded contributor (e.g. focus-resolution)
     /// was RED. COHERENCE-LEAF-SERVE-IMPL-1.
     LiveGraphBoundedServeDeclined,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-16): the served answer is an import view that excludes at least one
+    /// import (a test-file or inferred import, RG-REQ-004-L12); the LiveGraph IR holds neither the
+    /// resolution class nor the importer's test status, so it cannot answer that view and the SQLite
+    /// answer of the view is served. Claims nothing about the cycles certificate or whether the SCCs
+    /// differ — distinct from `LiveGraphCycleDivergence` (a certificate that is not GREEN).
+    LiveGraphPartitionedViewUnsupported,
+    /// TEST-EDGE-SCOPE-1B INPUT-3 (D-TESB-16 addendum): the import-partition evidence the
+    /// cycle-provenance decision reads (a storage open, or the directory-module graph of the DEFAULT
+    /// view) could not be read, so whether the LiveGraph could answer the served view is unknown;
+    /// the SQLite answer is served. Names the failed SQLite read — never a LiveGraph fault, never a
+    /// claim about the certificate or the SCCs.
+    PartitionEvidenceUnreadable,
 }
 
 impl CoherenceFallbackReason {
@@ -136,6 +148,10 @@ impl CoherenceFallbackReason {
             CoherenceFallbackReason::LiveGraphBoundedServeDeclined => {
                 "LiveGraphBoundedServeDeclined"
             }
+            CoherenceFallbackReason::LiveGraphPartitionedViewUnsupported => {
+                "LiveGraphPartitionedViewUnsupported"
+            }
+            CoherenceFallbackReason::PartitionEvidenceUnreadable => "PartitionEvidenceUnreadable",
         }
     }
 }
@@ -683,6 +699,51 @@ mod tests {
             serde_json::to_string(&CoherenceFallbackReason::LiveGraphStale).unwrap(),
             "\"LiveGraphStale\""
         );
+    }
+
+    /// TEST-EDGE-SCOPE-1B (D-TESB-16): the partition-view reason's `as_str` and serde wire name are
+    /// the variant name, and it is a distinct value from the certificate-divergence reason.
+    #[test]
+    fn partitioned_view_reason_as_str_and_serde_name_match_and_differ_from_cycle_divergence() {
+        let r = CoherenceFallbackReason::LiveGraphPartitionedViewUnsupported;
+        assert_eq!(r.as_str(), "LiveGraphPartitionedViewUnsupported");
+        assert_eq!(
+            serde_json::to_string(&r).unwrap(),
+            "\"LiveGraphPartitionedViewUnsupported\""
+        );
+        assert_eq!(
+            serde_json::from_str::<CoherenceFallbackReason>(
+                "\"LiveGraphPartitionedViewUnsupported\""
+            )
+            .unwrap(),
+            r
+        );
+        assert_ne!(r, CoherenceFallbackReason::LiveGraphCycleDivergence);
+        assert_ne!(
+            r.as_str(),
+            CoherenceFallbackReason::LiveGraphCycleDivergence.as_str()
+        );
+    }
+
+    /// TEST-EDGE-SCOPE-1B INPUT-3 (D-TESB-16 addendum): the unreadable-partition-evidence reason's
+    /// `as_str` and serde wire name are the variant name, and it is a distinct value from the
+    /// LiveGraph-engine-error reason (a failed SQLite partition read is not a LiveGraph fault).
+    #[test]
+    fn partition_evidence_unreadable_reason_as_str_and_serde_name_match_and_differ_from_livegraph_error(
+    ) {
+        let r = CoherenceFallbackReason::PartitionEvidenceUnreadable;
+        assert_eq!(r.as_str(), "PartitionEvidenceUnreadable");
+        assert_eq!(
+            serde_json::to_string(&r).unwrap(),
+            "\"PartitionEvidenceUnreadable\""
+        );
+        assert_eq!(
+            serde_json::from_str::<CoherenceFallbackReason>("\"PartitionEvidenceUnreadable\"")
+                .unwrap(),
+            r
+        );
+        assert_ne!(r, CoherenceFallbackReason::LiveGraphError);
+        assert_ne!(r.as_str(), CoherenceFallbackReason::LiveGraphError.as_str());
     }
 
     // ── TrustPosture projection ──

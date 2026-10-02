@@ -178,7 +178,12 @@ fn module_edges_headline_renders_when_present() {
         "top_module_edges": {"edges": [
             {"source": "client", "target": "lib", "import_count": 14},
             {"source": "server", "target": "lib", "import_count": 9}
-        ]}
+        ], "import_view": {"include_tests": false, "include_inferred": false},
+           "import_remainder": {"tests": {"imports": 0, "edges": 0},
+                                "inferred": {"imports": 0, "edges": 0},
+                                "tests_and_inferred": {"imports": 0, "edges": 0}},
+           "importer_test_status_undetermined": {"count": 0, "paths": [],
+               "universe": "cross_module_importers", "universe_count": 2, "unknown_count": 0}}
     }));
     let line = r.top_module_edges_line(OrientDepth::Small).unwrap();
     assert_eq!(
@@ -945,4 +950,39 @@ fn docs_line_caps_at_headline_limit() {
     assert!(out.contains("doc0"), "{out}");
     assert!(out.contains("doc5"), "{out}");
     assert!(!out.contains("doc6"), "cap must drop the 7th doc:\n{out}");
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-07): orient's module-edges line states the imports the default view
+/// excludes, with the `modules list` command that shows them; the importer UNDETERMINED count
+/// follows.
+#[test]
+fn orient_module_edges_line_states_the_remainder_with_the_modules_command() {
+    let r = response(json!({
+        "top_module_edges": {"edges": [
+            {"source": "db", "target": "include", "import_count": 66},
+            {"source": "table", "target": "include", "import_count": 30},
+            {"source": "db", "target": "util", "import_count": 24}
+        ],
+        "import_view": {"include_tests": false, "include_inferred": false},
+        "import_remainder": {"tests": {"imports": 89, "edges": 3},
+                             "inferred": {"imports": 0, "edges": 0},
+                             "tests_and_inferred": {"imports": 0, "edges": 0}},
+        "importer_test_status_undetermined": {"count": 1, "paths": ["db/c_test.c"],
+            "universe": "cross_module_importers", "universe_count": 64, "unknown_count": 0}}
+    }));
+    let line = r.top_module_edges_line(OrientDepth::Small).unwrap();
+    assert_eq!(
+        line,
+        "Module edges: db \u{2192} include (66), table \u{2192} include (30), db \u{2192} util (24) \
+         (+89 imports from test files, not shown — rmap modules list --include-tests)\n\
+         1 file whose test status can't be determined — open it and look inside (of 64 files importing across modules)"
+    );
+    // An older daemon (no `import_view`): the counts may include test imports — said so.
+    let old = response(json!({
+        "top_module_edges": {"edges": [{"source": "a", "target": "b", "import_count": 3}]}
+    }));
+    assert!(old
+        .top_module_edges_line(OrientDepth::Small)
+        .unwrap()
+        .contains("import partition unavailable from this daemon"));
 }

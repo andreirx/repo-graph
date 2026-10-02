@@ -562,6 +562,31 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for PartialSpy<'_, S> {
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
         self.0.find_file_imports(s, p)
     }
+    // TEST-EDGE-SCOPE-1B: the import-partition reads are SQLite-delegated on every path (the
+    // LiveGraph IR has no resolution class or test fact) — delegated, not recorded.
+    fn import_cycle_partition(
+        &self,
+        s: &str,
+        view: repo_graph_classification::import_partition::ImportView,
+        cancel: repo_graph_agent::AgentCancelCheck<'_>,
+    ) -> Result<repo_graph_agent::AgentImportCyclePartition, AgentStorageError> {
+        self.0.import_cycle_partition(s, view, cancel)
+    }
+    fn find_inferred_imports_between_paths(
+        &self,
+        s: &str,
+        a: &str,
+        b: &str,
+    ) -> Result<Vec<AgentImportEdge>, AgentStorageError> {
+        self.0.find_inferred_imports_between_paths(s, a, b)
+    }
+    fn find_inferred_file_imports(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
+        self.0.find_inferred_file_imports(s, p)
+    }
     // EXPLAIN-TYPE-SECTIONS-1: the two type-focus reads delegate to the inner port (unchanged).
     fn list_members_of_type(
         &self,
@@ -652,6 +677,14 @@ impl<S: GateStorageRead + ?Sized> GateStorageRead for PartialSpy<'_, S> {
         b: &str,
     ) -> Result<Vec<GateImportEdge>, GateStorageError> {
         self.0.find_boundary_imports(s, a, b)
+    }
+    fn find_inferred_boundary_imports(
+        &self,
+        s: &str,
+        a: &str,
+        b: &str,
+    ) -> Result<Vec<GateImportEdge>, GateStorageError> {
+        self.0.find_inferred_boundary_imports(s, a, b)
     }
     fn get_coverage_measurements(&self, s: &str) -> Result<Vec<GateMeasurement>, GateStorageError> {
         self.0.get_coverage_measurements(s)
@@ -1167,6 +1200,31 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for M2Spy<'_, S> {
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
         self.0.find_file_imports(s, p)
     }
+    // TEST-EDGE-SCOPE-1B: the import-partition reads are SQLite-delegated on every path (the
+    // LiveGraph IR has no resolution class or test fact) — delegated, not recorded.
+    fn import_cycle_partition(
+        &self,
+        s: &str,
+        view: repo_graph_classification::import_partition::ImportView,
+        cancel: repo_graph_agent::AgentCancelCheck<'_>,
+    ) -> Result<repo_graph_agent::AgentImportCyclePartition, AgentStorageError> {
+        self.0.import_cycle_partition(s, view, cancel)
+    }
+    fn find_inferred_imports_between_paths(
+        &self,
+        s: &str,
+        a: &str,
+        b: &str,
+    ) -> Result<Vec<AgentImportEdge>, AgentStorageError> {
+        self.0.find_inferred_imports_between_paths(s, a, b)
+    }
+    fn find_inferred_file_imports(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
+        self.0.find_inferred_file_imports(s, p)
+    }
     // EXPLAIN-TYPE-SECTIONS-1: the two type-focus reads delegate to the inner port (unchanged).
     fn list_members_of_type(
         &self,
@@ -1255,6 +1313,14 @@ impl<S: GateStorageRead + ?Sized> GateStorageRead for M2Spy<'_, S> {
         b: &str,
     ) -> Result<Vec<GateImportEdge>, GateStorageError> {
         self.0.find_boundary_imports(s, a, b)
+    }
+    fn find_inferred_boundary_imports(
+        &self,
+        s: &str,
+        a: &str,
+        b: &str,
+    ) -> Result<Vec<GateImportEdge>, GateStorageError> {
+        self.0.find_inferred_boundary_imports(s, a, b)
     }
     fn get_coverage_measurements(&self, s: &str) -> Result<Vec<GateMeasurement>, GateStorageError> {
         self.0.get_coverage_measurements(s)
@@ -1895,5 +1961,76 @@ fn m2_parity_full_serve_equals_sqlite_file_focus() {
             .iter()
             .any(|s| s.code() == repo_graph_agent::SignalCode::ModuleSummary),
         "FILE focus emits MODULE_SUMMARY (served from the LiveGraph inventory)"
+    );
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-06): the LiveGraph module cycles admit every import, so the orient
+/// decorator serves them only when the DEFAULT view excludes no directory import. Here the fixture's
+/// `lib → src` import comes from a TEST file: the M-2 cycle-VALUES gate is green, yet the decorator
+/// defers to the pinned SQLite snapshot, whose default view has no cycle (the one it has closes only
+/// through the test import).
+#[test]
+fn orient_livegraph_cycles_defer_to_sqlite_when_the_view_excludes_an_import() {
+    use repo_graph_agent::AgentStorageRead as _;
+    let f = test_fixture::build_fixture(false);
+    let storage = f.state.storage().unwrap();
+    let w = orient_serve_witness(&f.state, &f.snapshot_uid);
+    assert!(
+        w.m2.cycle_values,
+        "the cycle-VALUES gate is green on the faithful fixture"
+    );
+    let epoch = green_epoch(&f.state, &f.snapshot_uid);
+    {
+        // Before: nothing excluded ⇒ the decorator serves the LiveGraph cycles (the src↔lib ring).
+        let decorator = OrientServeDecorator::with_leaf_serves(
+            &f.state.livegraph,
+            &storage,
+            &epoch,
+            w.bounded,
+            w.m2,
+        );
+        let served = decorator.find_module_cycles(&f.snapshot_uid).unwrap();
+        assert_eq!(
+            served.len(),
+            1,
+            "the LiveGraph ring is served while the view excludes nothing"
+        );
+    }
+    storage
+        .execute_raw(&format!(
+            "UPDATE files SET is_test = 1 WHERE path = '{}'",
+            test_fixture::LIB_PATH
+        ))
+        .unwrap();
+    let decorator = OrientServeDecorator::with_leaf_serves(
+        &f.state.livegraph,
+        &storage,
+        &epoch,
+        w.bounded,
+        w.m2,
+    );
+    let served = decorator.find_module_cycles(&f.snapshot_uid).unwrap();
+    assert!(
+        served.is_empty(),
+        "the default view excludes the test import, so the decorator answers from SQLite: {served:?}"
+    );
+    let cancellable = decorator
+        .find_module_cycles_cancellable(
+            &f.snapshot_uid,
+            &mut || std::ops::ControlFlow::Continue(()),
+        )
+        .unwrap();
+    assert!(cancellable.is_empty());
+    let part = decorator
+        .import_cycle_partition(
+            &f.snapshot_uid,
+            repo_graph_classification::import_partition::ImportView::DEFAULT,
+            &mut || std::ops::ControlFlow::Continue(()),
+        )
+        .unwrap();
+    assert_eq!(
+        part.excluded_cycles.len(),
+        1,
+        "the ring is named as excluded"
     );
 }

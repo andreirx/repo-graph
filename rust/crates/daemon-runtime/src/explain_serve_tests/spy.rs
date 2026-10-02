@@ -301,6 +301,31 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for ServeSpy<'_, S> {
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
         self.inner.find_file_imports(s, p)
     }
+    // TEST-EDGE-SCOPE-1B: the import-partition reads are SQLite-delegated on every path (the
+    // LiveGraph IR has no resolution class or test fact) — delegated, not recorded.
+    fn import_cycle_partition(
+        &self,
+        s: &str,
+        view: repo_graph_classification::import_partition::ImportView,
+        cancel: repo_graph_agent::AgentCancelCheck<'_>,
+    ) -> Result<repo_graph_agent::AgentImportCyclePartition, AgentStorageError> {
+        self.inner.import_cycle_partition(s, view, cancel)
+    }
+    fn find_inferred_imports_between_paths(
+        &self,
+        s: &str,
+        a: &str,
+        b: &str,
+    ) -> Result<Vec<AgentImportEdge>, AgentStorageError> {
+        self.inner.find_inferred_imports_between_paths(s, a, b)
+    }
+    fn find_inferred_file_imports(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
+        self.inner.find_inferred_file_imports(s, p)
+    }
     // EXPLAIN-TYPE-SECTIONS-1 (ETS-C04): explicit delegating overrides — SQLite-served (recorded as
     // allowed reads), NEVER panicking like the six (b) methods.
     fn list_members_of_type(
@@ -383,6 +408,14 @@ impl<S: GateStorageRead + ?Sized> GateStorageRead for ServeSpy<'_, S> {
         b: &str,
     ) -> Result<Vec<GateImportEdge>, GateStorageError> {
         self.inner.find_boundary_imports(s, a, b)
+    }
+    fn find_inferred_boundary_imports(
+        &self,
+        s: &str,
+        a: &str,
+        b: &str,
+    ) -> Result<Vec<GateImportEdge>, GateStorageError> {
+        self.inner.find_inferred_boundary_imports(s, a, b)
     }
     fn get_coverage_measurements(&self, s: &str) -> Result<Vec<GateMeasurement>, GateStorageError> {
         self.inner.get_coverage_measurements(s)

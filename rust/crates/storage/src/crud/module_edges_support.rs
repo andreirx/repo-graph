@@ -2,24 +2,16 @@
 //!
 //! Provides minimal CRUD methods to load the raw facts needed for
 //! module edge derivation:
-//! - Resolved import edges (source file → target file)
 //! - File ownership (file → module)
+//!
+//! The partitioned import rows live in `crate::import_partition_reads`
+//! (TEST-EDGE-SCOPE-1B: one read, every resolution class, the importer's test status).
 //!
 //! The derivation itself is pure policy and lives in the classification
 //! crate. This module only loads the raw facts with minimal DTOs.
 
 use crate::connection::StorageConnection;
 use crate::error::StorageError;
-
-/// A resolved import edge between two files.
-///
-/// Minimal DTO for module edge derivation. Contains only the file UIDs
-/// needed to determine cross-module edges via ownership lookup.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedImportWithFiles {
-    pub source_file_uid: String,
-    pub target_file_uid: String,
-}
 
 /// A file ownership assignment.
 ///
@@ -31,48 +23,6 @@ pub struct FileOwnership {
 }
 
 impl StorageConnection {
-    /// Read all resolved import edges for a snapshot.
-    ///
-    /// Returns only IMPORTS edges with resolution = 'static' (resolved).
-    /// Order is deterministic: sorted by (source_file_uid, target_file_uid).
-    ///
-    /// The target_node_uid is resolved to its file_uid via the nodes table.
-    /// Edges where either source or target node has no file_uid are excluded.
-    pub fn get_resolved_imports_for_snapshot(
-        &self,
-        snapshot_uid: &str,
-    ) -> Result<Vec<ResolvedImportWithFiles>, StorageError> {
-        let conn = self.connection();
-        // No DISTINCT: derivation needs raw import multiplicity for import_count.
-        // Distinct-source-file counting happens in the pure derivation via HashSet.
-        let mut stmt = conn.prepare(
-            "SELECT src_node.file_uid AS source_file_uid,
-			        tgt_node.file_uid AS target_file_uid
-			 FROM edges e
-			 JOIN nodes src_node ON e.source_node_uid = src_node.node_uid
-			 JOIN nodes tgt_node ON e.target_node_uid = tgt_node.node_uid
-			 WHERE e.snapshot_uid = ?
-			   AND e.type = 'IMPORTS'
-			   AND e.resolution = 'static'
-			   AND src_node.file_uid IS NOT NULL
-			   AND tgt_node.file_uid IS NOT NULL
-			 ORDER BY source_file_uid ASC, target_file_uid ASC",
-        )?;
-
-        let rows = stmt.query_map([snapshot_uid], |row| {
-            Ok(ResolvedImportWithFiles {
-                source_file_uid: row.get("source_file_uid")?,
-                target_file_uid: row.get("target_file_uid")?,
-            })
-        })?;
-
-        let mut results = Vec::new();
-        for row in rows {
-            results.push(row?);
-        }
-        Ok(results)
-    }
-
     /// Read all file ownership assignments for a snapshot.
     ///
     /// Returns one row per (file, module) assignment from the
@@ -621,7 +571,7 @@ pub struct ModuleFileEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crud::test_helpers::{fresh_storage, make_edge, make_file, make_node, make_repo};
+    use crate::crud::test_helpers::{fresh_storage, make_file, make_node, make_repo};
     use crate::types::CreateSnapshotInput;
 
     fn setup_test_snapshot(conn: &StorageConnection) -> (String, String) {
@@ -765,212 +715,6 @@ mod tests {
         );
         assert_eq!(facts[0].specifier, "asgiref.sync");
         assert!(facts[0].is_import_edge, "an IMPORTS edge is an import site");
-    }
-
-    // ── Resolved imports tests ─────────────────────────────────────
-
-    #[test]
-    fn get_resolved_imports_returns_empty_for_empty_snapshot() {
-        let conn = fresh_storage();
-        let (_, snapshot_uid) = setup_test_snapshot(&conn);
-
-        let result = conn
-            .get_resolved_imports_for_snapshot(&snapshot_uid)
-            .expect("query");
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn get_resolved_imports_returns_only_resolved_imports() {
-        let mut conn = fresh_storage();
-        let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
-
-        // Create files
-        let file_a = make_file(&repo_uid, "src/a.ts");
-        let file_b = make_file(&repo_uid, "src/b.ts");
-        conn.upsert_files(&[file_a.clone(), file_b.clone()])
-            .expect("upsert files");
-
-        // Create nodes with file_uid
-        let node_a = make_node(
-            "node-a",
-            &snapshot_uid,
-            &repo_uid,
-            "key-a",
-            &file_a.file_uid,
-            "a",
-        );
-        let node_b = make_node(
-            "node-b",
-            &snapshot_uid,
-            &repo_uid,
-            "key-b",
-            &file_b.file_uid,
-            "b",
-        );
-        conn.insert_nodes(&[node_a, node_b]).expect("insert nodes");
-
-        // Create resolved IMPORTS edge
-        let mut edge = make_edge("edge-1", &snapshot_uid, &repo_uid, "node-a", "node-b");
-        edge.edge_type = "IMPORTS".to_string();
-        edge.resolution = "static".to_string();
-        conn.insert_edges(&[edge]).expect("insert edge");
-
-        let result = conn
-            .get_resolved_imports_for_snapshot(&snapshot_uid)
-            .expect("query");
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].source_file_uid, file_a.file_uid);
-        assert_eq!(result[0].target_file_uid, file_b.file_uid);
-    }
-
-    #[test]
-    fn get_resolved_imports_excludes_unresolved_edges() {
-        let mut conn = fresh_storage();
-        let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
-
-        // Create files and nodes
-        let file_a = make_file(&repo_uid, "src/a.ts");
-        let file_b = make_file(&repo_uid, "src/b.ts");
-        conn.upsert_files(&[file_a.clone(), file_b.clone()])
-            .expect("upsert files");
-
-        let node_a = make_node(
-            "node-a",
-            &snapshot_uid,
-            &repo_uid,
-            "key-a",
-            &file_a.file_uid,
-            "a",
-        );
-        let node_b = make_node(
-            "node-b",
-            &snapshot_uid,
-            &repo_uid,
-            "key-b",
-            &file_b.file_uid,
-            "b",
-        );
-        conn.insert_nodes(&[node_a, node_b]).expect("insert nodes");
-
-        // Create UNRESOLVED IMPORTS edge (resolution != 'static')
-        let mut edge = make_edge("edge-1", &snapshot_uid, &repo_uid, "node-a", "node-b");
-        edge.edge_type = "IMPORTS".to_string();
-        edge.resolution = "unresolved".to_string();
-        conn.insert_edges(&[edge]).expect("insert edge");
-
-        let result = conn
-            .get_resolved_imports_for_snapshot(&snapshot_uid)
-            .expect("query");
-
-        // Unresolved edge should not be included
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn get_resolved_imports_excludes_non_import_edges() {
-        let mut conn = fresh_storage();
-        let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
-
-        // Create files and nodes
-        let file_a = make_file(&repo_uid, "src/a.ts");
-        let file_b = make_file(&repo_uid, "src/b.ts");
-        conn.upsert_files(&[file_a.clone(), file_b.clone()])
-            .expect("upsert files");
-
-        let node_a = make_node(
-            "node-a",
-            &snapshot_uid,
-            &repo_uid,
-            "key-a",
-            &file_a.file_uid,
-            "a",
-        );
-        let node_b = make_node(
-            "node-b",
-            &snapshot_uid,
-            &repo_uid,
-            "key-b",
-            &file_b.file_uid,
-            "b",
-        );
-        conn.insert_nodes(&[node_a, node_b]).expect("insert nodes");
-
-        // Create CALLS edge (not IMPORTS)
-        let mut edge = make_edge("edge-1", &snapshot_uid, &repo_uid, "node-a", "node-b");
-        edge.edge_type = "CALLS".to_string();
-        edge.resolution = "static".to_string();
-        conn.insert_edges(&[edge]).expect("insert edge");
-
-        let result = conn
-            .get_resolved_imports_for_snapshot(&snapshot_uid)
-            .expect("query");
-
-        // CALLS edge should not be included
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn get_resolved_imports_preserves_multiplicity() {
-        // Storage returns raw import edges without deduplication.
-        // Derivation layer handles distinct-file counting via HashSet.
-        let mut conn = fresh_storage();
-        let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
-
-        // Create files and multiple nodes per file
-        let file_a = make_file(&repo_uid, "src/a.ts");
-        let file_b = make_file(&repo_uid, "src/b.ts");
-        conn.upsert_files(&[file_a.clone(), file_b.clone()])
-            .expect("upsert files");
-
-        let node_a1 = make_node(
-            "node-a1",
-            &snapshot_uid,
-            &repo_uid,
-            "key-a1",
-            &file_a.file_uid,
-            "fn1",
-        );
-        let node_a2 = make_node(
-            "node-a2",
-            &snapshot_uid,
-            &repo_uid,
-            "key-a2",
-            &file_a.file_uid,
-            "fn2",
-        );
-        let node_b = make_node(
-            "node-b",
-            &snapshot_uid,
-            &repo_uid,
-            "key-b",
-            &file_b.file_uid,
-            "b",
-        );
-        conn.insert_nodes(&[node_a1, node_a2, node_b])
-            .expect("insert nodes");
-
-        // Two IMPORTS edges from different nodes in file_a to file_b
-        let mut edge1 = make_edge("edge-1", &snapshot_uid, &repo_uid, "node-a1", "node-b");
-        edge1.edge_type = "IMPORTS".to_string();
-        edge1.resolution = "static".to_string();
-
-        let mut edge2 = make_edge("edge-2", &snapshot_uid, &repo_uid, "node-a2", "node-b");
-        edge2.edge_type = "IMPORTS".to_string();
-        edge2.resolution = "static".to_string();
-
-        conn.insert_edges(&[edge1, edge2]).expect("insert edges");
-
-        let result = conn
-            .get_resolved_imports_for_snapshot(&snapshot_uid)
-            .expect("query");
-
-        // Both edges returned — raw multiplicity preserved for import_count
-        assert_eq!(result.len(), 2);
-        // Both point to the same file pair
-        assert!(result.iter().all(|r| r.source_file_uid == file_a.file_uid));
-        assert!(result.iter().all(|r| r.target_file_uid == file_b.file_uid));
     }
 
     // ── File ownership tests ───────────────────────────────────────

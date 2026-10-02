@@ -193,6 +193,87 @@ pub struct AgentImportEdge {
     pub target_file: String,
 }
 
+// ── Import partition of the cycle graph (TEST-EDGE-SCOPE-1B) ─────
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-03): a directory-module cycle that exists only through imports
+/// the requested view excludes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentExcludedCycle {
+    /// Member directory modules' qualified paths, sorted.
+    pub members: Vec<String>,
+    /// The complete flag set that shows the cycle (`include_tests`, `include_inferred`).
+    pub flags: Vec<String>,
+    /// The requested view's cycles strictly inside this one (sorted member lists).
+    pub contains_shown: Vec<Vec<String>>,
+    /// Every import between two members, in its partition cell.
+    pub partitions: repo_graph_classification::import_partition::PartitionCounts,
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-09): a production-partition importer file of the view's
+/// cross-directory imports — the universe of the importer UNDETERMINED count.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentImporterFile {
+    pub path: String,
+    /// The stored `is_test` flag; `None` = the file has no tracked-file row.
+    pub is_test: Option<bool>,
+}
+
+/// TEST-EDGE-SCOPE-1B (RG-REQ-004-L12, D-TESB-03): the import-partition facts of the
+/// directory-module graph the cycle reads answer, for one view — what the view excludes,
+/// the cycles that exist only through it, each shown cycle's four partition counts, and
+/// the production importers the UNDETERMINED count is stated over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentImportCyclePartition {
+    pub view: repo_graph_classification::import_partition::ImportView,
+    /// The cross-directory imports the view excludes, per remainder group.
+    pub remainder: repo_graph_classification::import_partition::ImportRemainder,
+    /// Every excluded cycle of the repository (sorted by members).
+    pub excluded_cycles: Vec<AgentExcludedCycle>,
+    /// Each cycle of the view with the partition counts of every import between two of its
+    /// members.
+    pub cycle_partitions: Vec<AgentCyclePartitions>,
+    /// The production-partition importer files of the view's cross-directory imports.
+    pub importers: Vec<AgentImporterFile>,
+}
+
+impl AgentImportCyclePartition {
+    /// Whether the view excludes no cross-directory import (the LiveGraph routes may serve).
+    pub fn excludes_nothing(&self) -> bool {
+        self.remainder.is_empty()
+    }
+
+    /// The partition counts of the shown cycle whose members (qualified paths, or short names —
+    /// any order) are `members`; `None` when no cycle, or more than one, matches, or the matched
+    /// cycle's counts are absent.
+    pub fn partitions_of(
+        &self,
+        members: &[String],
+    ) -> Option<repo_graph_classification::import_partition::PartitionCounts> {
+        let mut key = members.to_vec();
+        key.sort();
+        let mut hits = self
+            .cycle_partitions
+            .iter()
+            .filter(|c| c.members == key || c.short_members == key);
+        match (hits.next(), hits.next()) {
+            (Some(c), None) => c.partitions,
+            _ => None,
+        }
+    }
+}
+
+/// TEST-EDGE-SCOPE-1B: one cycle of the view and the partition counts of its member imports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentCyclePartitions {
+    /// Member qualified paths, sorted.
+    pub members: Vec<String>,
+    /// Member short names, sorted (orient's repo cycles carry short names).
+    pub short_members: Vec<String>,
+    /// `None` when the storage read could not place every member in the directory graph —
+    /// unknown, never zeros (D-TESB-17 rows U4, U7).
+    pub partitions: Option<repo_graph_classification::import_partition::PartitionCounts>,
+}
+
 // ── Boundary links freshness (ACR-6) ─────────────────────────────
 
 /// Freshness summary for `boundary_interaction_links` table.
@@ -801,10 +882,11 @@ pub trait AgentStorageRead {
         repo_uid: &str,
     ) -> Result<Vec<AgentBoundaryDeclaration>, AgentStorageError>;
 
-    /// Return IMPORTS edges where the source file path is under
-    /// `source_prefix` AND the target file path is under
-    /// `target_prefix`. Used to detect boundary violations given
-    /// a declaration.
+    /// Return the CERTAIN (`static`/`dynamic`) IMPORTS edges where the source file path is
+    /// under `source_prefix` AND the target file path is under `target_prefix`, of every test
+    /// status. Used to judge boundary violations given a declaration; the inferred imports it
+    /// leaves out are [`find_inferred_imports_between_paths`](Self::find_inferred_imports_between_paths)
+    /// (TEST-EDGE-SCOPE-1B, D-TESB-11).
     fn find_imports_between_paths(
         &self,
         snapshot_uid: &str,
@@ -1078,6 +1160,37 @@ pub trait AgentStorageRead {
         self.find_cycles_involving_module(snapshot_uid, module_qualified_name)
     }
 
+    /// TEST-EDGE-SCOPE-1B (RG-REQ-004-L12, D-TESB-03): the import-partition facts of the
+    /// directory-module cycle graph for `view` — the remainder, the excluded cycles, each shown
+    /// cycle's partition counts and the production importer files. The three cycle reads above
+    /// answer the DEFAULT view; this read states what that answer leaves out. REQUIRED (no default
+    /// body): a defaulted "nothing excluded" would be a measured absence nobody measured.
+    fn import_cycle_partition(
+        &self,
+        snapshot_uid: &str,
+        view: repo_graph_classification::import_partition::ImportView,
+        cancel: AgentCancelCheck<'_>,
+    ) -> Result<AgentImportCyclePartition, AgentStorageError>;
+
+    /// TEST-EDGE-SCOPE-1B (RG-REQ-002-L11): the INFERRED IMPORTS edges between two path prefixes —
+    /// the remainder [`find_imports_between_paths`](Self::find_imports_between_paths) (certain
+    /// imports only) does not judge. REQUIRED (no default body).
+    fn find_inferred_imports_between_paths(
+        &self,
+        snapshot_uid: &str,
+        source_prefix: &str,
+        target_prefix: &str,
+    ) -> Result<Vec<AgentImportEdge>, AgentStorageError>;
+
+    /// TEST-EDGE-SCOPE-1B (RG-REQ-002-L11): the distinct target files a file imports through
+    /// INFERRED IMPORTS edges — the remainder [`find_file_imports`](Self::find_file_imports)
+    /// (certain imports only) leaves out. REQUIRED (no default body).
+    fn find_inferred_file_imports(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<AgentImportEntry>, AgentStorageError>;
+
     // ── Explain-focus methods ───────────────────────────────────
 
     /// List SYMBOL nodes in a specific file, ordered by line_start
@@ -1097,8 +1210,9 @@ pub trait AgentStorageRead {
         path_prefix: &str,
     ) -> Result<Vec<AgentFileEntry>, AgentStorageError>;
 
-    /// Return distinct target file paths imported by a source file
-    /// via IMPORTS edges.
+    /// Return distinct target file paths imported by a source file via CERTAIN
+    /// (`static`/`dynamic`) IMPORTS edges; the inferred ones are
+    /// [`find_inferred_file_imports`](Self::find_inferred_file_imports) (TEST-EDGE-SCOPE-1B).
     fn find_file_imports(
         &self,
         snapshot_uid: &str,

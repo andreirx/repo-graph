@@ -115,6 +115,19 @@ pub struct GateModuleViolationEvidence {
     pub violations_count: usize,
     /// Count of stale boundary declarations (informational).
     pub stale_declarations_count: usize,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-11): the relations whose INFERRED imports would violate a
+    /// boundary — counted, never judged (the verdict reads `violations_count`, over certain
+    /// imports of every test status).
+    pub inferred_not_judged: Vec<GateNotJudgedRelation>,
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-11): one module relation whose inferred imports a discovered
+/// boundary would have judged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateNotJudgedRelation {
+    pub source_module: String,
+    pub target_module: String,
+    pub import_count: usize,
 }
 
 /// One active waiver matching a specific

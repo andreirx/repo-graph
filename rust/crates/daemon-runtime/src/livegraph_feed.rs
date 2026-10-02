@@ -245,6 +245,21 @@ pub enum FallbackReason {
     /// `LiveGraphCallgraphDivergence` (the callgraph contributor itself may be GREEN here — a DIFFERENT
     /// bounded contributor, e.g. focus-resolution, was RED).
     LiveGraphBoundedServeDeclined,
+    /// TEST-EDGE-SCOPE-1B (D-TESB-16): the requested import view excludes at least one import (a
+    /// test-file or inferred import, RG-REQ-004-L12); the LiveGraph IR carries neither the resolution
+    /// class nor the importer's test status, so it cannot answer that view -> the SQLite answer of the
+    /// view is served, labelled. Asserts nothing about the cycles certificate or whether an SCC
+    /// differs (an excluded import may be redundant) — distinct from `LiveGraphCycleDivergence`,
+    /// which keeps its meaning: the cycle no-loss certificate is not GREEN.
+    LiveGraphPartitionedViewUnsupported,
+    /// TEST-EDGE-SCOPE-1B INPUT-3 (D-TESB-16 addendum): the import-partition evidence the
+    /// cycle-provenance decision reads (a storage open, or the directory-module graph of the DEFAULT
+    /// view) could not be read, so whether the LiveGraph could answer the served view is unknown ->
+    /// the SQLite answer is served, labelled. Names the SQLite read that failed; claims nothing
+    /// about the LiveGraph's health, the cycles certificate or the SCCs — distinct from
+    /// `LiveGraphError` (a LiveGraph engine error) and from `LiveGraphPartitionedViewUnsupported`
+    /// (which asserts the view excludes an import — here that was not read).
+    PartitionEvidenceUnreadable,
 }
 
 impl FallbackReason {
@@ -267,6 +282,10 @@ impl FallbackReason {
             FallbackReason::LiveGraphComplexityDivergence => "LiveGraphComplexityDivergence",
             FallbackReason::LiveGraphCallgraphDivergence => "LiveGraphCallgraphDivergence",
             FallbackReason::LiveGraphBoundedServeDeclined => "LiveGraphBoundedServeDeclined",
+            FallbackReason::LiveGraphPartitionedViewUnsupported => {
+                "LiveGraphPartitionedViewUnsupported"
+            }
+            FallbackReason::PartitionEvidenceUnreadable => "PartitionEvidenceUnreadable",
         }
     }
 }
@@ -2542,14 +2561,20 @@ fn serve_cycles_fastpath(
 
 /// The SQLite default cycles answer (CANONICAL, CYCLES-OUTPUT-CONTRACT-1) + the fastpath metadata. Reads SQLite
 /// (`find_cycles` + `module_qualified_names`) -- the fallback / cert-not-green path.
+// TEST-EDGE-SCOPE-1B: the view and its graph join the route's identity arguments; one call site.
+#[allow(clippy::too_many_arguments)]
 fn serve_cycles_sqlite(
     repo_state: &RepoState,
     repo_uid: &str,
     display_name: &str,
     snapshot_uid: &str,
     fallback_reason: FallbackReason,
-    // DAEMON-CANCEL-1: cooperative checkpoint threaded into the SQLite SCC Tarjan
-    // (`find_cycles_cancellable`) so the DEFAULT `cycles` fallback cancels mid-flight.
+    // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12): the requested view and its directory graph, read once
+    // by the caller.
+    view: repo_graph_classification::import_partition::ImportView,
+    graph: &repo_graph_storage::directory_module_edges::DirectoryModuleGraph,
+    // DAEMON-CANCEL-1: cooperative checkpoint threaded into the view's SCC Tarjan so the DEFAULT
+    // `cycles` fallback cancels mid-flight.
     cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
 ) -> Result<Value, repo_graph_storage::error::StorageError> {
     // D-S = S-A: one fresh per-operation connection for these reads.
@@ -2558,66 +2583,21 @@ fn serve_cycles_sqlite(
             "failed to open storage connection: {e}"
         ))
     })?;
-    let sqlite_cycles = conn.find_cycles_cancellable(snapshot_uid, "module", cancel)?;
-    let qualified = conn.module_qualified_names(snapshot_uid)?;
-    // CYCLE-HONESTY-1 (§2.1): attach the REAL intra-SCC MODULE→MODULE IMPORTS edges so the renderer can draw
-    // a verified walk. These are the SAME edges `find_cycles` loaded for its SCC pass; the renderer draws an
-    // arrow ONLY for a pair present here.
-    let module_edges = conn.module_import_edges(snapshot_uid)?;
-    let mut cycles = crate::cycle_output::sqlite_module_cycles_json_with_edges(
-        &sqlite_cycles,
-        &qualified,
-        &module_edges,
-    );
-    // FIXTURE-POLLUTION-1 §2.2/§2.3: classify test-only cycles (e.g. the xpart-monorepo
-    // fixture) so the renderer demotes them below the real cycles. The SQLite route reaches
-    // the stored `is_test` fact (the LiveGraph fastpath does not — §2.3 asymmetry).
-    // Conservative aggregation: a cycle is test-only iff EVERY member module is wholly
-    // test-owned; an unclassifiable member ⇒ unknown (not demoted). CLASSIFIED read → a
-    // genuine error PROPAGATES.
-    let tracked = conn.get_files_by_repo(repo_uid)?;
-    let files: Vec<(&str, bool)> = tracked
-        .iter()
-        .map(|f| (f.path.as_str(), f.is_test))
-        .collect();
-    crate::cycle_output::label_test_only_cycles(&mut cycles, &files);
-    // TYPE-ONLY-IMPORTS-1: on this SQLite MODULE-cycle route the stored per-module-edge `is_type_only`
-    // fact IS reachable, so we attach the PER-CYCLE type-only verdict (the precise successor of the
-    // blanket caveat). The verdict is attached only to TS/JS-member cycles (§5 — non-TS cycles' import
-    // edges are runtime by definition, label absent, byte-stable). Deepest-ownership TS membership reuses
-    // the already-read `tracked`/`qualified` (both already CLASSIFIED reads whose errors propagated
-    // above) — no new fallible read.
-    let all_module_dirs: Vec<String> = qualified.values().cloned().collect();
-    let files_by_lang: Vec<(&str, Option<&str>)> = tracked
-        .iter()
-        .map(|f| (f.path.as_str(), f.language.as_deref()))
-        .collect();
-    crate::cycle_output::attach_type_only_labels(
-        &mut cycles,
-        &module_edges,
-        &files_by_lang,
-        &all_module_dirs,
-    );
-    let count = cycles.len();
-    Ok(json!({
+    // TEST-EDGE-SCOPE-1B: the SCCs of the requested view's query-time directory graph, with the
+    // view's REAL intra-SCC edges (CYCLE-HONESTY-1), the test-only classification
+    // (FIXTURE-POLLUTION-1) and the per-cycle type-only verdict (TYPE-ONLY-IMPORTS-1), plus the
+    // partition keys (the remainder, the excluded cycles, the importer block).
+    let body =
+        crate::import_partition_view::sqlite_cycles_body(&conn, repo_uid, graph, view, cancel)?;
+    let mut value = json!({
         "repo_uid": repo_uid,
         "display_name": display_name,
         "snapshot_uid": snapshot_uid,
-        "cycles": cycles,
-        "count": count,
         "backend_used": "sqlite",
         "fallback_reason": fallback_reason.as_str(),
-        // IMPORT-RESOLUTION-RUST-1 §2.5: the module count and the resolved cross-module import
-        // edge count, so the zero-state can say "over N modules / E resolved import edges"
-        // instead of a bare "no cycles" that hides an EMPTY graph. Both are already in hand
-        // (`qualified`/`module_edges`) — no new read.
-        "module_count": qualified.len(),
-        "module_edge_count": module_edges.len(),
-        // The blanket repo-level caveat is RETIRED on the SQLite route (the fact is now computed
-        // per cycle); the renderer derives any residual hedge from the per-cycle `type_only` verdicts
-        // (a narrowed footer only where genuine Unknown remains).
-        "ts_type_only_caveat": false,
-    }))
+    });
+    value.as_object_mut().expect("json! object").extend(body);
+    Ok(value)
 }
 
 /// CYCLE-HONESTY-1 (§2.4, ts-caveat-basis C1 REPO-level + review-2 route-consistency): true iff the
@@ -2763,6 +2743,23 @@ fn cycles_fastpath_or_sqlite(
     }
 }
 
+/// TEST-EDGE-SCOPE-1B (D-TESB-06/16): the `cycles` fastpath's fourth precondition. A LiveGraph answer that
+/// is otherwise servable is declined when the requested view excludes an import of the directory
+/// population, and the decline names `LiveGraphPartitionedViewUnsupported` — never
+/// `LiveGraphCycleDivergence`, which means a certificate that is not GREEN. An unmet precondition keeps
+/// its own reason (the LiveGraph was not the thing to decline).
+fn partition_view_precondition(
+    precondition_met: bool,
+    precondition_reason: FallbackReason,
+    view_excludes_nothing: bool,
+) -> (bool, FallbackReason) {
+    if precondition_met && !view_excludes_nothing {
+        (false, FallbackReason::LiveGraphPartitionedViewUnsupported)
+    } else {
+        (precondition_met, precondition_reason)
+    }
+}
+
 /// W-B-EPOCH-IMPL-2B (D-EP capture for `cycles`; `daemon-w-b-epoch-1.md` §6.4): the CYCLES-cert LG-serve
 /// eligibility WITNESS, captured BUILD-THEN-PEEK. The cycles sibling of [`import_cert_eligibility`] /
 /// [`crate::callgraph_cert::callgraph_cert_eligibility`] (callers/callees use the CALLGRAPH cert, `imports`
@@ -2847,9 +2844,25 @@ pub fn cycles_auto_response(
     repo_uid: &str,
     display_name: &str,
     epoch: &RequestEpoch,
+    // TEST-EDGE-SCOPE-1B (RG-REQ-004-L12, D-TESB-06): the requested import view.
+    view: repo_graph_classification::import_partition::ImportView,
     cancel: &mut dyn FnMut() -> std::ops::ControlFlow<()>,
 ) -> Result<Value, repo_graph_storage::error::StorageError> {
     let snapshot_uid = epoch.snapshot_uid();
+    // TEST-EDGE-SCOPE-1B (D-TESB-06, F-TESB-CYCLE): the LiveGraph IR carries neither a resolution
+    // class nor a test fact, so the fastpath's FOURTH precondition is that the requested view
+    // excludes no import of the DIRECTORY-module population `cycles` runs over. The directory graph
+    // is read once here and serves the SQLite fallback and the partition keys of either route.
+    let graph = {
+        let conn = repo_state.storage().map_err(|e| {
+            repo_graph_storage::error::StorageError::InvalidArgument(format!(
+                "failed to open storage connection for the import view: {e}"
+            ))
+        })?;
+        conn.directory_module_graph(snapshot_uid)?
+    };
+    let view_excludes_nothing =
+        crate::import_partition_view::livegraph_cycles_eligible(&graph, view);
     // SQLite-FREE: the module-cycle answer-class (the precondition), the LiveGraph cycles (the served answer),
     // and the current fingerprint -- all from a single LiveGraph read lock.
     let (precondition_met, precondition_reason, lg_cycles, current_fp) = {
@@ -2899,7 +2912,11 @@ pub fn cycles_auto_response(
     // EV-A: serve the LiveGraph fastpath iff the resident fingerprint still equals the captured green-validated
     // eligibility witness; mismatch / None (a swap/straddle since capture, or no GREEN cycles cert) -> SQLite.
     let epoch_eligible = current_fp.is_some() && current_fp.as_ref() == epoch.fingerprint.as_ref();
-    cycles_fastpath_or_sqlite(
+    // D-TESB-06/16: when the view excludes an import, the LiveGraph (which carries no partition)
+    // cannot answer the view ⇒ the labelled SQLite answer in the view, named for that cause.
+    let (precondition_met, precondition_reason) =
+        partition_view_precondition(precondition_met, precondition_reason, view_excludes_nothing);
+    let mut out = cycles_fastpath_or_sqlite(
         precondition_met,
         precondition_reason,
         epoch_eligible,
@@ -2919,11 +2936,19 @@ pub fn cycles_auto_response(
                 display_name,
                 snapshot_uid,
                 reason,
+                view,
+                &graph,
                 cancel,
             )
         },
-        cancel,
-    )
+        &mut *cancel,
+    )?;
+    // The LiveGraph fastpath served (the view excludes nothing): state the view and its (empty)
+    // remainder all the same, and each cycle's partition counts.
+    if out.get("import_view").is_none() {
+        crate::import_partition_view::attach_cycle_partition(&mut out, &graph, view, cancel)?;
+    }
+    Ok(out)
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -3790,19 +3815,29 @@ mod tests {
         #[test]
         fn import_cert_eligibility_is_some_only_on_green_at_the_exact_resident_fingerprint() {
             let f = test_fixture::build_fixture(false);
-            // The faithful fixture has NO import edges -> the import cert builds YELLOW (`met == 0`) -> the
-            // warm builds it, the peek finds it non-GREEN -> no witness (eager SQLite).
-            assert!(
-                import_cert_eligibility(&f.state, test_fixture::REPO, &f.snapshot_uid).is_none(),
-                "no import-bearing files -> YELLOW import cert -> no eligibility witness"
-            );
-            // Pre-store a GREEN import cert at EXACTLY the resident fingerprint (what the producer stores on a
-            // no-loss repo). The warm sees a valid (non-stale) cert -> NO rebuild -> the peek hits -> Some(fp),
-            // and the witness IS the exact resident-and-validated fingerprint.
             let resident_fp = {
                 let guard = f.state.livegraph.read();
                 import_cert_fingerprint(&guard.as_ref().unwrap().live_partitions(), &f.snapshot_uid)
             };
+            // TEST-EDGE-SCOPE-1B (D-PSI-R1-VOCAB fixture correction): the fixture's IMPORTS rows now carry
+            // the canonical `static` resolution (they carried the out-of-vocabulary `resolved`, which the
+            // strict import readers refuse), so the faithful mirror's imports are resolved-local and the
+            // warm build is GREEN. The property under test is unchanged: a witness ONLY on a GREEN cert at
+            // EXACTLY the resident fingerprint, and never a stale one.
+            //
+            // A NON-GREEN cert at the resident fingerprint: the warm sees a valid (non-stale) cert -> NO
+            // rebuild -> the peek finds it non-GREEN -> no witness (eager SQLite).
+            *f.state.import_cert.write() = Some(ImportNoLossCert {
+                verdict: "RED".to_string(),
+                fingerprint: resident_fp.clone(),
+            });
+            assert!(
+                import_cert_eligibility(&f.state, test_fixture::REPO, &f.snapshot_uid).is_none(),
+                "a non-GREEN import cert at the resident fingerprint -> no eligibility witness"
+            );
+            // Pre-store a GREEN import cert at EXACTLY the resident fingerprint (what the producer stores on a
+            // no-loss repo). The warm sees a valid (non-stale) cert -> NO rebuild -> the peek hits -> Some(fp),
+            // and the witness IS the exact resident-and-validated fingerprint.
             *f.state.import_cert.write() = Some(ImportNoLossCert {
                 verdict: "GREEN".to_string(),
                 fingerprint: resident_fp.clone(),
@@ -3816,12 +3851,26 @@ mod tests {
 
             // Honesty under a lazy rebuild straddle (§6.4): a swap bumps the partition epoch so the resident
             // fingerprint MOVES; the pre-stored GREEN cert is now at the OLD fp; the warm rebuilds at the NEW
-            // fp (YELLOW, no imports) and the peek at the new fp finds no GREEN -> None. The stale GREEN
-            // witness is NEVER returned (monotonic epochs: the old fp never recurs).
+            // fp and the peek answers at the new fp only. The stale pre-swap witness is NEVER returned
+            // (monotonic epochs: the old fp never recurs).
             swap_livegraph(&f.state);
+            let moved_fp = {
+                let guard = f.state.livegraph.read();
+                import_cert_fingerprint(&guard.as_ref().unwrap().live_partitions(), &f.snapshot_uid)
+            };
+            assert_ne!(
+                moved_fp, resident_fp,
+                "the swap moved the resident fingerprint"
+            );
+            let after = import_cert_eligibility(&f.state, test_fixture::REPO, &f.snapshot_uid);
+            assert_ne!(
+                after.as_deref(),
+                Some(resident_fp.as_str()),
+                "after a swap the witness is never the stale pre-swap fingerprint"
+            );
             assert!(
-                import_cert_eligibility(&f.state, test_fixture::REPO, &f.snapshot_uid).is_none(),
-                "after a swap the witness is None, never the stale pre-swap fingerprint"
+                after.is_none() || after.as_deref() == Some(moved_fp.as_str()),
+                "a witness after the swap is the moved resident fingerprint or none"
             );
 
             // No resident LiveGraph -> None (eager SQLite).
@@ -4006,15 +4055,29 @@ mod tests {
             let epoch = capture(&f.state, &f.snapshot_uid, fingerprint);
 
             // Steady state (no swap): the epoch matches the resident fingerprint -> serve the LiveGraph cycles.
-            let v = cycles_auto_response(&f.state, test_fixture::REPO, "disp", &epoch, &mut never)
-                .unwrap();
+            let v = cycles_auto_response(
+                &f.state,
+                test_fixture::REPO,
+                "disp",
+                &epoch,
+                repo_graph_classification::import_partition::ImportView::DEFAULT,
+                &mut never,
+            )
+            .unwrap();
             assert_eq!(v["backend_used"], "livegraph");
 
             // EV-A: a mid-request swap moves the resident fingerprint; the captured epoch no longer matches ->
             // fail soft to the canonical SQLite answer AT THE PINNED snapshot (coherent at the pin).
             swap_livegraph(&f.state);
-            let v2 = cycles_auto_response(&f.state, test_fixture::REPO, "disp", &epoch, &mut never)
-                .unwrap();
+            let v2 = cycles_auto_response(
+                &f.state,
+                test_fixture::REPO,
+                "disp",
+                &epoch,
+                repo_graph_classification::import_partition::ImportView::DEFAULT,
+                &mut never,
+            )
+            .unwrap();
             assert_eq!(v2["backend_used"], "sqlite");
             assert_eq!(
                 v2["snapshot_uid"], f.snapshot_uid,
@@ -4050,9 +4113,15 @@ mod tests {
                 "faithful TS fixture -> GREEN cycles cert -> the auto route is fastpath-eligible"
             );
             let epoch = capture(&f.state, &f.snapshot_uid, fingerprint);
-            let auto =
-                cycles_auto_response(&f.state, test_fixture::REPO, "disp", &epoch, &mut never)
-                    .unwrap();
+            let auto = cycles_auto_response(
+                &f.state,
+                test_fixture::REPO,
+                "disp",
+                &epoch,
+                repo_graph_classification::import_partition::ImportView::DEFAULT,
+                &mut never,
+            )
+            .unwrap();
             assert_eq!(
                 auto["backend_used"], "livegraph",
                 "GREEN cert -> the DEFAULT route SERVES the LiveGraph fastpath (not a silent SQLite fallback)"
@@ -4094,9 +4163,15 @@ mod tests {
             // SQLite answer via the `auto` route after a mid-request swap moves the resident fingerprint: the
             // captured epoch no longer matches -> fail soft to the canonical SQLite answer at the pin.
             swap_livegraph(&f.state);
-            let sqlite =
-                cycles_auto_response(&f.state, test_fixture::REPO, "disp", &epoch, &mut never)
-                    .unwrap();
+            let sqlite = cycles_auto_response(
+                &f.state,
+                test_fixture::REPO,
+                "disp",
+                &epoch,
+                repo_graph_classification::import_partition::ImportView::DEFAULT,
+                &mut never,
+            )
+            .unwrap();
             assert_eq!(sqlite["backend_used"], "sqlite");
             assert!(sqlite["count"].as_u64().unwrap() >= 1);
 
@@ -4149,9 +4224,15 @@ mod tests {
             let fingerprint = cycles_cert_eligibility(&f.state, &f.snapshot_uid, &mut never)
                 .expect("eligibility never errors here");
             let epoch = capture(&f.state, &f.snapshot_uid, fingerprint);
-            let auto =
-                cycles_auto_response(&f.state, test_fixture::REPO, "disp", &epoch, &mut never)
-                    .unwrap();
+            let auto = cycles_auto_response(
+                &f.state,
+                test_fixture::REPO,
+                "disp",
+                &epoch,
+                repo_graph_classification::import_partition::ImportView::DEFAULT,
+                &mut never,
+            )
+            .unwrap();
             assert_eq!(auto["backend_used"], "livegraph");
             let auto_note = auto["test_composition_note"]
                 .as_str()
@@ -4210,9 +4291,15 @@ mod tests {
             // SQLite route (auto after a swap moves the resident fingerprint): it classifies per
             // cycle, so the top-level asymmetry note is ABSENT — never a false "not evaluated".
             swap_livegraph(&f.state);
-            let sqlite =
-                cycles_auto_response(&f.state, test_fixture::REPO, "disp", &epoch, &mut never)
-                    .unwrap();
+            let sqlite = cycles_auto_response(
+                &f.state,
+                test_fixture::REPO,
+                "disp",
+                &epoch,
+                repo_graph_classification::import_partition::ImportView::DEFAULT,
+                &mut never,
+            )
+            .unwrap();
             assert_eq!(sqlite["backend_used"], "sqlite");
             assert!(
                 sqlite["test_composition_note"].is_null(),
@@ -4533,6 +4620,42 @@ mod tests {
         .expect("not-eligible serves SQLite and never errors");
         assert_eq!(out["backend_used"], "sqlite");
         assert_eq!(out["reason"], "LiveGraphCycleDivergence");
+    }
+
+    /// D-TESB-16: a servable LiveGraph answer (precondition met, GREEN certificate at the epoch) is
+    /// declined when the view excludes an import, and the JSON `fallback_reason` names the partitioned
+    /// view — never a cycle divergence the certificate does not claim.
+    #[test]
+    fn cycles_fastpath_refused_for_an_excluded_import_names_the_partitioned_view_not_a_divergence()
+    {
+        let (met, reason) =
+            partition_view_precondition(true, FallbackReason::LiveGraphUnavailable, false);
+        assert!(!met);
+        let out = cycles_fastpath_or_sqlite(
+            met,
+            reason,
+            true, // epoch_eligible: a GREEN cycles certificate at the captured fingerprint
+            || panic!("must NOT serve LiveGraph for a view that excludes an import"),
+            |r, _c| Ok(json!({"backend_used": "sqlite", "fallback_reason": r.as_str()})),
+            &mut || std::ops::ControlFlow::Continue(()),
+        )
+        .unwrap();
+        assert_eq!(out["backend_used"], "sqlite");
+        assert_eq!(
+            out["fallback_reason"],
+            "LiveGraphPartitionedViewUnsupported"
+        );
+        assert_ne!(out["fallback_reason"], "LiveGraphCycleDivergence");
+        // Nothing excluded: the precondition and its reason are untouched.
+        assert_eq!(
+            partition_view_precondition(true, FallbackReason::LiveGraphUnavailable, true),
+            (true, FallbackReason::LiveGraphUnavailable)
+        );
+        // An unmet precondition keeps its own reason.
+        assert_eq!(
+            partition_view_precondition(false, FallbackReason::LiveGraphPartial, false),
+            (false, FallbackReason::LiveGraphPartial)
+        );
     }
 
     #[test]

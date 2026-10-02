@@ -100,6 +100,7 @@ fn suspicious_modules_basis_in_reader_frame_no_internal_wording() {
         suspicious_zero_connectivity: true,
         alias_unresolved_imports: 0,
         trust_notes: vec![],
+        excluded_connectivity: Some(Default::default()),
     }];
     let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
     assert!(
@@ -143,6 +144,7 @@ fn suspicious_modules_rows_name_failed_alias_imports_only_where_they_exist() {
             suspicious_zero_connectivity: true,
             alias_unresolved_imports: 55,
             trust_notes: vec!["alias_resolution_candidate".into()],
+            excluded_connectivity: Some(Default::default()),
         },
         ModuleTrustRow {
             module_stable_key: "repo:packages/engine:MODULE".into(),
@@ -153,6 +155,7 @@ fn suspicious_modules_rows_name_failed_alias_imports_only_where_they_exist() {
             suspicious_zero_connectivity: true,
             alias_unresolved_imports: 0,
             trust_notes: vec!["isolated".into()],
+            excluded_connectivity: Some(Default::default()),
         },
     ];
     let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
@@ -1745,4 +1748,116 @@ fn trust_json_round_trips_inferred_calls() {
     assert!(plain["value"]["resolution"]["value"]
         .get("inferred_calls")
         .is_none());
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-10): a zero-connectivity module whose only relations run through
+/// imports from test files says so, with the command that shows them — never read as a resolution
+/// failure.
+#[test]
+fn trust_suspicious_row_names_connectivity_only_through_excluded_imports() {
+    let mut r = report();
+    r.modules = vec![ModuleTrustRow {
+        module_stable_key: "repo:system-tests:MODULE".into(),
+        qualified_name: "system-tests".into(),
+        fan_in: 0,
+        fan_out: 0,
+        file_count: 7,
+        suspicious_zero_connectivity: true,
+        alias_unresolved_imports: 0,
+        trust_notes: vec!["isolated".into()],
+        excluded_connectivity: Some(repo_graph_trust::storage_port::ExcludedConnectivity {
+            tests: 3,
+            inferred: 0,
+            tests_and_inferred: 0,
+        }),
+    }];
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains(
+            "system-tests — connected only through imports from test files (rmap modules deps system-tests --include-tests)"
+        ),
+        "{out}"
+    );
+}
+
+/// TEST-EDGE-SCOPE-1B (D-TESB-17 row U5): a zero-connectivity row from a daemon that predates the
+/// partition (no `excluded_connectivity`) says the partition is unavailable — never read as
+/// "nothing excluded".
+#[test]
+fn trust_suspicious_row_without_excluded_connectivity_states_the_partition_unavailable() {
+    let mut r = report();
+    r.modules = vec![ModuleTrustRow {
+        module_stable_key: "repo:system-tests:MODULE".into(),
+        qualified_name: "system-tests".into(),
+        fan_in: 0,
+        fan_out: 0,
+        file_count: 7,
+        suspicious_zero_connectivity: true,
+        alias_unresolved_imports: 0,
+        trust_notes: vec!["isolated".into()],
+        excluded_connectivity: None,
+    }];
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        out.contains(&format!(
+            "system-tests — {}",
+            crate::presentation::import_partition::PARTITION_UNAVAILABLE_CLAUSE
+        )),
+        "{out}"
+    );
+    // A measured zero adds nothing.
+    let mut r = report();
+    r.modules = vec![ModuleTrustRow {
+        module_stable_key: "repo:iso:MODULE".into(),
+        qualified_name: "iso".into(),
+        fan_in: 0,
+        fan_out: 0,
+        file_count: 2,
+        suspicious_zero_connectivity: true,
+        alias_unresolved_imports: 0,
+        trust_notes: vec!["isolated".into()],
+        excluded_connectivity: Some(Default::default()),
+    }];
+    let out = render_trust_envelope(&trust_to_coherent(r, warm_posture(), false));
+    assert!(
+        !out.contains("partition unavailable") && !out.contains("connected only"),
+        "{out}"
+    );
+}
+
+/// D-TESB-17 row W5: the report rgr decodes for `rmap trust` fails with an error naming the field
+/// on a present, malformed `excluded_connectivity` — never a defaulted zero.
+#[test]
+fn trust_report_with_a_non_numeric_excluded_connectivity_fails_to_decode_naming_the_field() {
+    let mut r = report();
+    r.modules = vec![ModuleTrustRow {
+        module_stable_key: "repo:core:MODULE".into(),
+        qualified_name: "core".into(),
+        fan_in: 0,
+        fan_out: 0,
+        file_count: 2,
+        suspicious_zero_connectivity: true,
+        alias_unresolved_imports: 0,
+        trust_notes: vec![],
+        excluded_connectivity: Some(Default::default()),
+    }];
+    let env = trust_to_coherent(r, warm_posture(), false);
+    let good = serde_json::to_value(&env).unwrap();
+    assert!(serde_json::from_value::<TrustEnvelope>(good.clone()).is_ok());
+    let text = good.to_string();
+    let needle = r#""excluded_connectivity":{"tests":0,"inferred":0,"tests_and_inferred":0}"#;
+    assert!(text.contains(needle), "{text}");
+    for bad in [
+        r#""excluded_connectivity":{"tests":"x","inferred":0,"tests_and_inferred":0}"#,
+        r#""excluded_connectivity":7"#,
+        r#""excluded_connectivity":{"tests":0,"inferred":0}"#,
+    ] {
+        let doc: serde_json::Value = serde_json::from_str(&text.replace(needle, bad)).unwrap();
+        let err = serde_json::from_value::<TrustEnvelope>(doc)
+            .expect_err("a malformed excluded_connectivity never decodes");
+        assert!(
+            err.to_string().contains("excluded_connectivity"),
+            "{bad}: {err}"
+        );
+    }
 }

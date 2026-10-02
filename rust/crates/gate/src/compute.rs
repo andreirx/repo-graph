@@ -39,6 +39,15 @@ use crate::types::{
 
 // ── Method-specific pre-fetched evidence ─────────────────────────
 
+/// TEST-EDGE-SCOPE-1B (D-TESB-11): the inferred imports across one boundary that the verdict
+/// does not judge — their count and their sorted, distinct source files (so a rendered next
+/// action can cite a real file).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InferredImportsNotJudged {
+    pub count: usize,
+    pub files: Vec<String>,
+}
+
 /// Evidence bundle for a single obligation, pre-fetched by
 /// `assemble` based on the obligation's method. `compute`
 /// dispatches on the variant and performs only numeric/logical
@@ -62,6 +71,10 @@ pub enum MethodEvidence {
         /// gate.rs treats both as MISSING_EVIDENCE with a
         /// single reason string — we preserve that behavior.
         has_any_boundary_for_target: bool,
+        /// TEST-EDGE-SCOPE-1B (D-TESB-11, RG-REQ-002-L11): per boundary, the INFERRED imports
+        /// that cross it — counted, never judged. The verdict reads only
+        /// `per_boundary_counts` (certain imports of every test status).
+        per_boundary_inferred: Vec<(String, InferredImportsNotJudged)>,
     },
 
     /// `coverage_threshold` evidence: the full list of
@@ -100,6 +113,9 @@ pub enum MethodEvidence {
     ModuleViolations {
         violations_count: usize,
         stale_declarations_count: usize,
+        /// TEST-EDGE-SCOPE-1B (D-TESB-11): the inferred imports the boundaries would have
+        /// judged, per violating relation — counted, never judged.
+        inferred_not_judged: Vec<crate::types::GateNotJudgedRelation>,
     },
 
     /// Obligation's `target` was absent where the method
@@ -300,7 +316,13 @@ fn evaluate_obligation(
             target: _,
             per_boundary_counts,
             has_any_boundary_for_target,
-        } => evaluate_arch_violations(&mut eval, per_boundary_counts, has_any_boundary_for_target),
+            per_boundary_inferred,
+        } => evaluate_arch_violations(
+            &mut eval,
+            per_boundary_counts,
+            has_any_boundary_for_target,
+            per_boundary_inferred,
+        ),
 
         MethodEvidence::CoverageThreshold {
             target: _,
@@ -338,12 +360,37 @@ fn evaluate_obligation(
         MethodEvidence::ModuleViolations {
             violations_count,
             stale_declarations_count,
+            inferred_not_judged,
         } => {
-            evaluate_module_violations(&mut eval, violations_count, stale_declarations_count);
+            evaluate_module_violations(
+                &mut eval,
+                violations_count,
+                stale_declarations_count,
+                &inferred_not_judged,
+            );
         }
     }
 
+    // TEST-EDGE-SCOPE-1B INPUT-3 (D-TESB-17 rule part 2, row U10): the two import-judging methods
+    // state the not-judged count on EVERY evaluation — also where nothing was judged (a missing
+    // target) — so its absence can only mean a daemon that predates the partition.
+    state_nothing_judged_when_absent(&mut eval);
     eval
+}
+
+/// D-TESB-17 row U10: an `arch_violations` / `module_violations` evaluation that judged nothing
+/// states a measured zero (`{count: 0, files: []}` / `{count: 0, relations: []}`) rather than
+/// omitting the key — an omitted key is read as a daemon that predates the partition. Never
+/// overwrites a stated value; the verdict never reads it.
+fn state_nothing_judged_when_absent(eval: &mut ObligationEvaluation) {
+    let zero = match eval.method.as_str() {
+        "arch_violations" => serde_json::json!({"count": 0, "files": []}),
+        "module_violations" => serde_json::json!({"count": 0, "relations": []}),
+        _ => return,
+    };
+    if let Some(obj) = eval.evidence.as_object_mut() {
+        obj.entry("inferred_imports_not_judged").or_insert(zero);
+    }
 }
 
 fn reason_for_missing_params(method: &str) -> String {
@@ -364,12 +411,16 @@ fn evaluate_arch_violations(
     eval: &mut ObligationEvaluation,
     per_boundary_counts: Vec<(String, usize)>,
     has_any_boundary_for_target: bool,
+    per_boundary_inferred: Vec<(String, InferredImportsNotJudged)>,
 ) {
     if !has_any_boundary_for_target {
         eval.computed_verdict = Verdict::MISSING_EVIDENCE;
         eval.effective_verdict = EffectiveVerdict::MISSING_EVIDENCE;
         eval.evidence = serde_json::json!({
             "reason": "no boundary declarations for target",
+            // Nothing was judged, so nothing inferred went unjudged: a measured zero, emitted
+            // so its absence can only mean an older daemon (D-TESB-17 row U10).
+            "inferred_imports_not_judged": {"count": 0, "files": []},
         });
         return;
     }
@@ -385,6 +436,19 @@ fn evaluate_arch_violations(
     eval.effective_verdict = verdict.into();
     eval.evidence = serde_json::json!({
         "violation_count": total_violations,
+    });
+    // TEST-EDGE-SCOPE-1B (D-TESB-11): the inferred imports across these boundaries are counted,
+    // never judged (the verdict never reads them). Additive and emitted on every evaluation,
+    // `{count: 0, files: []}` included, so its absence can only mean a daemon that predates the
+    // partition (D-TESB-17 row U10).
+    let not_judged: usize = per_boundary_inferred.iter().map(|(_, n)| n.count).sum();
+    let files: std::collections::BTreeSet<&str> = per_boundary_inferred
+        .iter()
+        .flat_map(|(_, n)| n.files.iter().map(String::as_str))
+        .collect();
+    eval.evidence["inferred_imports_not_judged"] = serde_json::json!({
+        "count": not_judged,
+        "files": files.into_iter().collect::<Vec<_>>(),
     });
 }
 
@@ -459,6 +523,7 @@ fn evaluate_module_violations(
     eval: &mut ObligationEvaluation,
     violations_count: usize,
     stale_declarations_count: usize,
+    inferred_not_judged: &[crate::types::GateNotJudgedRelation],
 ) {
     let verdict = if violations_count == 0 {
         Verdict::PASS
@@ -470,6 +535,20 @@ fn evaluate_module_violations(
     eval.evidence = serde_json::json!({
         "violations_count": violations_count,
         "stale_declarations_count": stale_declarations_count,
+    });
+    // TEST-EDGE-SCOPE-1B (D-TESB-11): additive; emitted on every evaluation, zero included
+    // (D-TESB-17 row U10).
+    let not_judged: usize = inferred_not_judged.iter().map(|r| r.import_count).sum();
+    eval.evidence["inferred_imports_not_judged"] = serde_json::json!({
+        "count": not_judged,
+        "relations": inferred_not_judged
+            .iter()
+            .map(|r| serde_json::json!({
+                "source": r.source_module,
+                "target": r.target_module,
+                "import_count": r.import_count,
+            }))
+            .collect::<Vec<_>>(),
     });
 }
 
@@ -758,6 +837,7 @@ mod tests {
                 target: "src/core".into(),
                 per_boundary_counts: vec![("src/adapters".into(), 0)],
                 has_any_boundary_for_target: true,
+                per_boundary_inferred: vec![],
             },
         );
         let report = compute(input);
@@ -780,12 +860,128 @@ mod tests {
                 target: "src/core".into(),
                 per_boundary_counts: vec![("src/adapters".into(), 2), ("src/cli".into(), 1)],
                 has_any_boundary_for_target: true,
+                per_boundary_inferred: vec![],
             },
         );
         let report = compute(input);
         assert_eq!(report.obligations[0].computed_verdict, Verdict::FAIL);
         assert_eq!(report.obligations[0].evidence["violation_count"], 3);
         assert_eq!(report.outcome.exit_code, 1);
+    }
+
+    /// TEST-EDGE-SCOPE-1B (D-TESB-11): inferred imports are counted in the evidence and never
+    /// move the verdict — a boundary with only inferred crossings passes, with certain crossings
+    /// fails, whatever the inferred count.
+    #[test]
+    fn arch_violations_inferred_count_never_changes_the_verdict() {
+        for (certain, inferred, expected) in [
+            (0usize, 5usize, Verdict::PASS),
+            (1, 0, Verdict::FAIL),
+            (1, 5, Verdict::FAIL),
+        ] {
+            let r = req(
+                "REQ-1",
+                1,
+                vec![obl("o1", "arch_violations", Some("src/core"), None)],
+            );
+            let mut input = empty_input(vec![r], GateMode::Default);
+            input.method_evidence.insert(
+                key("REQ-1", 1, "o1"),
+                MethodEvidence::ArchViolations {
+                    target: "src/core".into(),
+                    per_boundary_counts: vec![("src/adapters".into(), certain)],
+                    has_any_boundary_for_target: true,
+                    per_boundary_inferred: vec![(
+                        "src/adapters".into(),
+                        InferredImportsNotJudged {
+                            count: inferred,
+                            files: (0..inferred.min(1))
+                                .map(|_| "src/core/a.py".to_string())
+                                .collect(),
+                        },
+                    )],
+                },
+            );
+            let report = compute(input);
+            assert_eq!(report.obligations[0].computed_verdict, expected);
+            assert_eq!(report.obligations[0].evidence["violation_count"], certain);
+            assert_eq!(
+                report.obligations[0].evidence["inferred_imports_not_judged"]["count"],
+                inferred
+            );
+        }
+    }
+
+    /// D-TESB-17 row U10: both governance evidences state the not-judged count on every
+    /// evaluation, a measured zero included — never omitted at zero — and the zero moves neither
+    /// the verdict nor the exit code.
+    #[test]
+    fn arch_and_module_violations_evidence_state_zero_inferred_imports_not_judged() {
+        let r = req(
+            "REQ-1",
+            1,
+            vec![
+                obl("o1", "arch_violations", Some("src/core"), None),
+                obl("o2", "module_violations", None, None),
+            ],
+        );
+        let mut input = empty_input(vec![r], GateMode::Default);
+        input.method_evidence.insert(
+            key("REQ-1", 1, "o1"),
+            MethodEvidence::ArchViolations {
+                target: "src/core".into(),
+                per_boundary_counts: vec![("src/adapters".into(), 0)],
+                has_any_boundary_for_target: true,
+                per_boundary_inferred: vec![],
+            },
+        );
+        input.method_evidence.insert(
+            key("REQ-1", 1, "o2"),
+            MethodEvidence::ModuleViolations {
+                violations_count: 0,
+                stale_declarations_count: 0,
+                inferred_not_judged: vec![],
+            },
+        );
+        let report = compute(input);
+        let by = |id: &str| {
+            report
+                .obligations
+                .iter()
+                .find(|o| o.obligation_id == id)
+                .unwrap()
+        };
+        assert_eq!(
+            by("o1").evidence["inferred_imports_not_judged"],
+            serde_json::json!({"count": 0, "files": []})
+        );
+        assert_eq!(
+            by("o2").evidence["inferred_imports_not_judged"],
+            serde_json::json!({"count": 0, "relations": []})
+        );
+        assert_eq!(by("o1").computed_verdict, Verdict::PASS);
+        assert_eq!(by("o2").computed_verdict, Verdict::PASS);
+        assert_eq!(report.outcome.exit_code, 0);
+    }
+
+    /// D-TESB-17 row U10 (INPUT-3): an `arch_violations` obligation without a target judges nothing
+    /// and still states the not-judged count as a measured zero, so a consumer never reads its
+    /// evidence as a daemon that predates the partition; its verdict stays MISSING_EVIDENCE.
+    #[test]
+    fn arch_violations_without_a_target_states_zero_inferred_imports_not_judged() {
+        let r = req("REQ-1", 1, vec![obl("o1", "arch_violations", None, None)]);
+        let mut input = empty_input(vec![r], GateMode::Default);
+        input
+            .method_evidence
+            .insert(key("REQ-1", 1, "o1"), MethodEvidence::TargetMissing);
+        let report = compute(input);
+        let o = &report.obligations[0];
+        assert_eq!(o.computed_verdict, Verdict::MISSING_EVIDENCE);
+        assert_eq!(
+            o.evidence["inferred_imports_not_judged"],
+            serde_json::json!({"count": 0, "files": []})
+        );
+        assert_eq!(o.evidence["reason"], "target or threshold not specified");
     }
 
     #[test]
@@ -802,6 +998,7 @@ mod tests {
                 target: "src/core".into(),
                 per_boundary_counts: vec![],
                 has_any_boundary_for_target: false,
+                per_boundary_inferred: vec![],
             },
         );
         let report = compute(input);
@@ -1060,6 +1257,7 @@ mod tests {
                 target: "src/core".into(),
                 per_boundary_counts: vec![("src/adapters".into(), 5)],
                 has_any_boundary_for_target: true,
+                per_boundary_inferred: vec![],
             },
         );
         input.matching_waivers.insert(
@@ -1103,6 +1301,7 @@ mod tests {
                 target: "src/core".into(),
                 per_boundary_counts: vec![("src/adapters".into(), 0)],
                 has_any_boundary_for_target: true,
+                per_boundary_inferred: vec![],
             },
         );
         input.matching_waivers.insert(
@@ -1142,6 +1341,7 @@ mod tests {
                 target: "src/core".into(),
                 per_boundary_counts: vec![],
                 has_any_boundary_for_target: false,
+                per_boundary_inferred: vec![],
             },
         );
         let report = compute(input);
@@ -1163,6 +1363,7 @@ mod tests {
                 target: "src/core".into(),
                 per_boundary_counts: vec![],
                 has_any_boundary_for_target: false,
+                per_boundary_inferred: vec![],
             },
         );
         let report = compute(input);
@@ -1184,6 +1385,7 @@ mod tests {
                 target: "src/core".into(),
                 per_boundary_counts: vec![],
                 has_any_boundary_for_target: false,
+                per_boundary_inferred: vec![],
             },
         );
         let report = compute(input);
@@ -1212,6 +1414,7 @@ mod tests {
             MethodEvidence::ModuleViolations {
                 violations_count: 0,
                 stale_declarations_count: 0,
+                inferred_not_judged: vec![],
             },
         );
         let report = compute(input);
@@ -1229,6 +1432,7 @@ mod tests {
             MethodEvidence::ModuleViolations {
                 violations_count: 3,
                 stale_declarations_count: 1,
+                inferred_not_judged: vec![],
             },
         );
         let report = compute(input);
@@ -1251,6 +1455,7 @@ mod tests {
             MethodEvidence::ModuleViolations {
                 violations_count: 0,
                 stale_declarations_count: 5,
+                inferred_not_judged: vec![],
             },
         );
         let report = compute(input);
@@ -1278,6 +1483,7 @@ mod tests {
             MethodEvidence::ModuleViolations {
                 violations_count: 0,
                 stale_declarations_count: 0,
+                inferred_not_judged: vec![],
             },
         );
         let report = compute(input);
@@ -1425,6 +1631,7 @@ mod tests {
                 target: "src/core".into(),
                 per_boundary_counts: vec![],
                 has_any_boundary_for_target: false,
+                per_boundary_inferred: vec![],
             },
         );
         input.quality_assessment_facts = vec![quality_fact(
