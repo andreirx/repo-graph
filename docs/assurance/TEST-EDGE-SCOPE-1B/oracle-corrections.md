@@ -244,3 +244,90 @@ The INPUT-3 corrections authored by PREP-4 are approved; any "Approver: PENDING"
 - TESB-PATH-WITNESS → A (a CLI inferred-call witness; the inferred-import walk proven by the C06 unit test; `path` file endpoints recorded as a follow-up).
 
 Accepted by PREP-4 review-1 (codex gpt-6-sol). Carried as INPUT-3. The human may override either operator ruling.
+
+# INPUT-4 entries (2026-10-02)
+
+Baseline these entries enter: `docs/requirements/baselines/TEST-EDGE-SCOPE-1B-INPUT-4.json`. Admitted baseline before them: `TEST-EDGE-SCOPE-1B-INPUT-3.json` (committed at cabf3b86). Trigger: the operator's standing gate suite on the admission-3 candidate (`.agent-manager/slices/TEST-EDGE-SCOPE-1B/candidate-admission-3.patch`, 94 paths; all sixteen checks passed; ruled shippable by the HUMAN with three follow-ups, D-TESB-SHIP-1 draft) failed 4 of 4 runs, at low load, in `rust/crates/daemon-runtime/tests/concurrency_dispatch.rs`. Author: document item TEST-EDGE-SCOPE-1B-PREP-5 (builder role, claude-opus-5-5). Independent review of this entry: pending (the PREP-5 reviewer). Every entry above is unchanged.
+
+## A-6 — 2026-10-02 — allocation amendment: the cancellation fixture stores the file-level shape, and the whole daemon-runtime suite is bound
+
+- **Authority.** The HUMAN, 2026-10-02: "Fix the fixture first". The PREP-5 packet's task: add the fixture file to the candidate paths with the ring in the shape 1B reads; close the class; bind the whole daemon-runtime suite fail-closed with the three test names. The packet names this amendment "A-3". That ID is INPUT-3's entry above, and an ID is never reused, so this entry is A-6.
+- **Finding (operator gate, recorded by the manager).**
+  - `dispatched_cycles_cancels_mid_tarjan_when_peer_disconnects` (:636): "cycles: ran to completion instead of cancelling mid-flight".
+  - `dispatched_default_cycles_cancels_via_sqlite_fallback` (:797) and `dispatched_default_cycles_cancels_during_cert_build` (:925): `left: Some(0)`, `right: Some(1)`.
+
+  No allocation check bound the file. TESB-C06 ran `--lib` and asserted `tests/` unchanged.
+- **Cause, verified (OBSERVED at HEAD cabf3b86 and in the admission-3 patch).**
+  - `inject_module_ring` (:488–517) stores the ring only as MODULE nodes `cm{i}` and MODULE→MODULE `IMPORTS` rows.
+  - In the candidate, `cycles --engine sqlite` (dispatch.rs), the default route's `serve_cycles_sqlite`, and orient's and explain's cycle reads (storage `agent_impl.rs`) all derive the directory graph through `StorageConnection::directory_module_graph`. That function reads `file_imports_with_partition` (FILE-bearing endpoints, the importer's `files.is_test`) × `get_file_ownership_from_owns_edges` (MODULE→FILE `OWNS`).
+  - The fixture has neither FILE nodes nor OWNS, so every view of its ring is empty.
+  - The cycles certificate build (`livegraph_feed.rs::module_cycle_compare_data_cancellable` → `find_cycles_cancellable`) is unchanged by the candidate and still reads the persisted MODULE graph (P-TESB-02).
+  - `find_sccs_cancellable` consults its checkpoint once per 256 DFS steps (graph-algorithms `scc.rs`), so an empty or tiny graph emits none.
+- **Class and rule.**
+  - Class 1: a fixture that stands for an index but stores a shape the reader under test does not read, so the proof runs over an empty view.
+  - Class 2, its enabler: a touched crate's integration suite that no check binds.
+  - Rule 1: a fixture stores what an index stores for the reader under test.
+  - Rule 2: the whole suite of every touched daemon crate is bound.
+  - For class 1 the shape is a `files` row, a FILE node, an `OWNS` edge (`resolution: "static"`, as `indexer/src/orchestrator.rs:1407-1421` writes it) and a production file→file `static` IMPORTS edge per ring step. The persisted MODULE ring stays, because the certificate build reads it.
+  - For class 2: daemon-runtime's integration targets were the gap. rgr's integration targets other than the trust seam are also unbound, but none injects IMPORTS rows. They stay the operator gate's (CLAUDE.md "Gates in a relay run").
+- **Class sweep (2026-10-02).** Integration `tests/` directories of every crate were searched for `"IMPORTS"`, `EdgeType::Imports`, `insert_edges` and `INSERT INTO edges`, plus the storage parity fixture corpus.
+
+  | Hit | Disposition |
+  |---|---|
+  | `daemon-runtime/tests/concurrency_dispatch.rs::inject_module_ring` (6 callers) | INSTANCE — fixed by this amendment. Callers: the three gate failures, plus `dispatched_orient_cancels_mid_cycle_tarjan_when_peer_disconnects`, `dispatched_explain_cancels_mid_cycle_tarjan_when_peer_disconnects` and `live_peer_orient_and_explain_complete_on_large_fixture`. Those three were not among the gate's failures, but over the admission-3 fixture their named cycle Tarjan had no ring to traverse. Where they cancelled is not established (INFERRED; §8 CANCEL-LOOP-IDENTITY). All six are bound by name in TESB-C17. |
+  | same file, `inject_stats_fixture` | not an instance: `stats` keeps the persisted MODULE fans (P-TESB-02/03, D-TESB-12), the shape it stores; its cancellation is the SQL interrupt. Unchanged. |
+  | same file, `module_ring_livegraph` | not an instance: LiveGraph IR, not stored rows. `dispatched_default_cycles_cancels_via_livegraph_module_tarjan` is bound by name in TESB-C17, because it runs through 1B's changed `cycles_auto_response`. |
+  | `storage/tests/agent_impl.rs`, `call_aggregate_families.rs`, `gate_impl.rs` | not instances: every endpoint of an injected IMPORTS row is a FILE or SYMBOL node carrying a `file_uid`, the shape `file_imports_with_partition` reads. Bound by TESB-C03 (the whole storage suite), which passed at admission 3. |
+  | `storage/tests/parity.rs`, `resolved_call_aggregate.rs`, `storage-parity-fixtures/` | no IMPORTS rows. |
+  | `agent/tests/*`, `rgr/tests/*`, `repo-index/tests/*`, `repo-graph-scip-ingest/tests/harness.rs` | assertions on output, comments, or a real fixture indexed through the indexer (the stored shape is the indexer's). |
+- **Allocation change.**
+  - Paths 94 → 95: `rust/crates/daemon-runtime/tests/concurrency_dispatch.rs`, fixture only. The fixture rule, the uid constraints and the kept MODULE ring are stated in TESB-C17's inputs.
+  - New check TESB-C17: `cargo test -p repo-graph-daemon-runtime` (unit suite, every integration target, doc-tests), fail-closed in TESB-C06's form, with seven names: the three failures, the LiveGraph sibling, and the three other fixture users. Further guards:
+    - `concurrency_dispatch` lists exactly 18 tests;
+    - the integration targets list at least 168;
+    - `tests/` is otherwise unchanged, with no untracked file;
+    - the fixture file differs, its diff removes no line other than a `//` comment, and it adds an `"OWNS"` edge and an `upsert_files` call.
+  - TESB-C06's `tests/`-unchanged guard excludes that one file.
+  - §0's P-TESB-02/05 proofs, §3's RG-REQ-011 row, §5 (C17 after C06; the regression baseline recorded on the candidate before the fixture changes), §6 (seventeen checks) and §8 (CANCEL-LOOP-IDENTITY) follow.
+  - Obligation IDs unchanged.
+- **Counts (EXECUTED 2026-10-02 at HEAD cabf3b86, `cargo test -p repo-graph-daemon-runtime -- --list`; the candidate adds no integration test).** `concurrency_dispatch` 18. The 24 integration targets: 168. Unit suite: 829 (TESB-C06's floor 877 applies to the candidate). Doc-tests: 2. `--test '*' -- --list` gives 168; `--test concurrency_dispatch -- --list` gives 18.
+- **Probes (EXECUTED 2026-10-02).** Every scratch path was PREP-5-owned and removed: the worktree `/private/tmp/TEST-EDGE-SCOPE-1B-PREP-5-probe` (detached at cabf3b86) and the captures in `/tmp/tesb5`.
+
+  | Probe | Expected | Actual |
+  |---|---|---|
+  | `bash -n` on the seventeen check commands | 0 | 0 for all seventeen |
+  | C17 name loop and negative greps, synthetic log with the seven names `ok` | 0 | 0 |
+  | the same, `dispatched_default_cycles_cancels_during_cert_build` missing | 1 | 1, `MISSING dispatched_default_cycles_cancels_during_cert_build` |
+  | the same, `…via_sqlite_fallback ... FAILED` | 1 | 1 |
+  | the same, a `thread '…' panicked at` line | 1 | 1 |
+  | C17 diff guards, fixture file unchanged | 1 | 1 |
+  | an additive fixture (`upsert_files`, `"OWNS"`) plus one rewritten `//` comment | 0 | 0 |
+  | the same plus a removed assertion-message line | 1 | 1 |
+  | additive with `upsert_files` but no `"OWNS"` | 1 | 1 |
+  | an untracked file in `tests/` | 1 | 1 |
+  | another `tests/` file changed | 1 | 1 |
+  | TESB-C06's narrowed guard, only the fixture file changed | 0 | 0 |
+  | TESB-C06's narrowed guard, another `tests/` file changed | 1 | 1 |
+
+- **Limits.** The fixture itself and the whole-suite run are the implementation's, and are not run here (no cargo beyond `-- --list`). The fixed tests can pass only if the default partitioned view contains the ring (the connected count is 1, served by SQLite) and the Tarjan runs long enough to checkpoint. That is a prediction from the source, INFERRED. The `panicked at` negative grep now also scans the integration targets' output. If a passing integration test printed such a line, C17 would fail closed, never pass falsely; no such line was observed, because none was run.
+
+## A-6 addendum — 2026-10-02 (INPUT-4 cycle 2) — what TESB-C17 proves about cancellation
+
+- **Authority.** PREP-5 review-0 (`.agent-manager/slices/TEST-EDGE-SCOPE-1B-PREP-5/review-0.json`, refinement-required), finding C17, verifiability, under RG-REQ-004-L07: "`TESB-C17.expected`, the allocation's `acceptanceBoundary`, and §3 call the orient and explain results proof of cancellation inside their cycle Tarjan loops. But `assert_cancelled_in_flight` checks only `Cancelled` and a message containing 'during.' … The new fixture makes the ring available; it does not identify which loop caused a cancellation." Required action: keep the names and assertions; state that C17 verifies the full suite, the connected default cycle result and cancellation responses over a fixture visible to the partitioned reader; mark cancellation in the named loop unverified; keep CANCEL-LOOP-IDENTITY; propose a later assertion or rename.
+- **Verified.** `assert_cancelled_in_flight` (concurrency_dispatch.rs:447-466 at HEAD) asserts the code and the substring "during". `cancel::loop_checkpoint` (daemon-runtime `cancel.rs:192-200`) returns `Break` on a failed heartbeat emit. The phase label travels in the heartbeat and not in the error, so no current assertion can name the loop.
+- **Class and rule.** Class: an evidence claim taken from a test's name rather than from its assertions. The same wording covered the `cycles` routes and the certificate build too, not only orient and explain. Rule: a check's `expected`, and every proof cell that cites the check, state only what the bound assertions establish. Anything the names add is marked UNVERIFIED and has a follow-up.
+- **Superseded wording (kept above as written).** A-6's text needs no change: it already calls the orient and explain cancellation sites "not established (INFERRED)". The slice document's wording is corrected; its §9 entry for INPUT-4 cycle 2 lists the sites. The superseded `expected` of TESB-C17 read: "… `cycles --engine sqlite`, the default `cycles` route's SQLite fallback and its certificate build each cancel DURING their Tarjan when the peer disconnects, … orient's and explain's cycle Tarjans cancel mid-flight and run to an identical, complete answer for a live peer …".
+- **Follow-up.** §8 CANCEL-LOOP-IDENTITY offers three options: A, assert the failing heartbeat's phase; B, rename the tests to what they assert; C, leave them. A is recommended. The names and assertions are unchanged in INPUT-4, by the human's ruling "Fix the fixture first".
+- **No allocation change beyond wording.** Paths stay at 95 and checks at 17. Commands, obligation IDs and counts are unchanged.
+
+## A-6 addendum 2 — 2026-10-02 (INPUT-4 cycle 3) — C17 states only what its assertions show
+
+- **Authority.** PREP-5 review-1 (`.agent-manager/slices/TEST-EDGE-SCOPE-1B-PREP-5/review-1.json`, refinement-required, finding TESB-C17, verifiability). The review says the acceptance boundary claims a disconnected peer "receives" `Cancelled`, while `FailAfter` only simulates a failed emitter write and the assertion checks the dispatch result. It also says `expected` and the P-TESB-02 cell claim a "divergent certificate", while the test asserts only `count == 1` and `backend_used == "sqlite"`. Required action, wording only: dispatch returns `Cancelled` after a simulated disconnect; the connected call serves one cycle through SQLite; certificate behaviour stays with the bound certificate checks.
+- **Verified.** `FailAfter::emit` (concurrency_dispatch.rs:431-439) returns `EmitError("simulated peer disconnect")` after `ok_for` emits. `assert_is_coherence_envelope` (:1613-1620) checks that four keys are present. The connected assertions of the seven tests are listed in TESB-C17's inputs ("THE ASSERTIONS"). No C17 test reads the cycles certificate.
+- **Class and rule.** The class is the same as in the first addendum, found again one level down: a claim taken from a test's name or doc comment ("in-flight", "delivery", "divergent cert") rather than from its assertions. The closing rule is now mechanical: C17's inputs carry the assertion list, and every C17 claim — its `expected`, the acceptance boundary, the §0 and §3 proof cells, the Status line and the §9 history — is written only from that list.
+- **Superseded wording (quoted).** TESB-C17 `expected`, cycle 2: "… for a connected peer, the default `cycles` answers the 1000-module ring as one cycle served by SQLite (`count` 1, `backend_used` "sqlite": the default partitioned view contains it), with the certificate built over the persisted MODULE ring and divergent, and `orient`/`explain` return the same complete envelope twice …". P-TESB-02 cell, cycle 2: "C17 (connected, the certificate built over the persisted MODULE ring diverges and SQLite serves the ring as one cycle; INPUT-4 A-6)". Acceptance boundary, cycle 2: "a disconnected peer receives `Cancelled` with "during", never a completed answer".
+- **Allocation change.** `P-TESB-02` is removed from TESB-C17's `obligationIds`; it stays covered by C03, C06, C11 and C13. Wording changes are as listed in the slice document's §9 entry for INPUT-4 cycle 3. Commands, paths, counts, test names and assertions are unchanged.
+
+## Operator confirmation (2026-10-02, in-place-manager) — A-3 and its revisions
+
+A-3 is approved under the HUMAN's ruling of 2026-10-02, "Fix the fixture first". It allocates `daemon-runtime/tests/concurrency_dispatch.rs`, rebuilds the cancellation ring in the file-level shape the partitioned `cycles` reads, and binds the whole daemon-runtime suite as TESB-C17. Any "Approver: PENDING" line on A-3 is resolved by this entry. Accepted by PREP-5 review-2 (codex gpt-6-sol). Carried as INPUT-4.
