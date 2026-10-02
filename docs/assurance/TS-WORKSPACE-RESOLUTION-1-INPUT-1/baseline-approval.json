@@ -1,0 +1,76 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "TS-WORKSPACE-RESOLUTION-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/TS-WORKSPACE-RESOLUTION-1-INPUT-1.json",
+    "sha256": "sha256:3fde1c33c5f33bd0a81a676e4128466fa3a1584f31415129bd9b1de82c5e1367"
+  },
+  "review": {
+    "path": "docs/assurance/TS-WORKSPACE-RESOLUTION-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:50bff20fdc180a2c924b181d726990654d47c93a6a177007f057ecd097fdccdd"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-TS-WORKSPACE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TS-WORKSPACE-1.md",
+        "sha256": "sha256:ae5be8b869a7cd221f51a5c55d42125eafac401c7a00d6e93b55ab00020225f4"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-PSI-R1-VOCAB",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSI-R1-VOCAB.md",
+        "sha256": "sha256:9fefd3779c40ddf74db9f3298ca5d8f055b5089ee1b1f619b0a5d15d15023eb1"
+      }
+    },
+    {
+      "id": "D-TESB-READERS-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TESB-READERS-1.md",
+        "sha256": "sha256:b7c5079782261a3abfd2f4a7fecbb89104ca53ff35a06464aeab33f6259abdf7"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-02T22:20:10.090Z",
+  "rationale": "Document item TS-WORKSPACE-RESOLUTION-1-PREP-2 accepted at cycle 2 (codex gpt-6-sol), authored fresh under RG-REQ-006-L04 as amended by CC-19 (D-TS-WORKSPACE-1 = A, human 2026-09-26): an import naming an npm workspace member whose declared entry is not indexed resolves INFERRED to the member's indexed source entry, recording the source and every explicit root-export declared target as candidates with the reason; an indexed declared target prevents the inferred binding; deps counts a TS inferred edge only after checking its carrier and target, with a named error for invalid evidence. 9 checks; field proofs on FRAKTAG, amodx, storybook, vscode (indexer:1.5.0 roots)."
+}
