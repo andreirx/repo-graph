@@ -1,0 +1,76 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "CPP-INCLUDE-BASENAME-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/CPP-INCLUDE-BASENAME-1-INPUT-2.json",
+    "sha256": "sha256:7f941e185c0cf4363acc4b581364c5e378c0841b8d48fea484df0e8158e2f3a3"
+  },
+  "review": {
+    "path": "docs/assurance/CPP-INCLUDE-BASENAME-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:59a722207723a999191f72f164efcca59f5ba75c04795941c286dbac83cc824f"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-CIB-REVIEW-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CIB-REVIEW-1.md",
+        "sha256": "sha256:9fb5e241565cf239eaebe18a742e8ac1dab80e0c7fd7823832170198ac79b058"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-PSI-R1-VOCAB",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSI-R1-VOCAB.md",
+        "sha256": "sha256:9fefd3779c40ddf74db9f3298ca5d8f055b5089ee1b1f619b0a5d15d15023eb1"
+      }
+    },
+    {
+      "id": "D-TESB-READERS-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TESB-READERS-1.md",
+        "sha256": "sha256:b7c5079782261a3abfd2f4a7fecbb89104ca53ff35a06464aeab33f6259abdf7"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-02T19:18:31.655Z",
+  "rationale": "Document item CPP-INCLUDE-BASENAME-1-PREP-4 accepted at cycle 2 (codex gpt-6-sol): rebase under RG-BOOTSTRAP-INPUT-11 after nine shipped slices \u2014 RMAP_AUTO_REINDEX=off on every isolated invocation (load-bearing: the slice bumps INDEXER_VERSION), CIB-owned before-roots (nginx/leveldb/poco, indexer:1.4.0, durable copy retained), literals and renderer lines re-verified at HEAD after TEST-EDGE-SCOPE-1B, both gates (TS1, 1B accepted records) verified fail-closed, CIB-C05 refuses a non-empty WAL before copying (review-0). OC-1..OC-9."
+}
