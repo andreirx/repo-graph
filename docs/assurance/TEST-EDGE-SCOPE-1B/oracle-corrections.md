@@ -405,3 +405,84 @@ Baseline these entries enter: `docs/requirements/baselines/TEST-EDGE-SCOPE-1B-IN
 ## Operator confirmation (2026-10-02, in-place-manager) — the INPUT-5 correction and the restored roots
 
 The TESB-C14 correction authored by PREP-6 is approved; any "Approver: PENDING" line on it is resolved by this entry. TESB-FIELD-EVIDENCE-4 (admission-4 review-0) is resolved as option A by the operator: the five before-roots were re-captured on 2026-10-02 with the same producer (HEAD's release binary; `git diff a85f6239 HEAD -- rust` empty) on checkouts at exactly their recorded commits and dirty states; `source.txt` in each root records this; a durable copy is kept at `~/repo-graph-retained/TEST-EDGE-SCOPE-1B-before/`. Accepted by PREP-6 review-1 (codex gpt-6-sol). Carried as INPUT-5.
+
+---
+
+# INPUT-6 entries (2026-10-02)
+
+Baseline these entries enter: `docs/requirements/baselines/TEST-EDGE-SCOPE-1B-INPUT-6.json`. Admitted baseline before them: `TEST-EDGE-SCOPE-1B-INPUT-5.json` (committed at 774cecca). Trigger: implementation review-0 of the admission-5 candidate (`.agent-manager/slices/TEST-EDGE-SCOPE-1B/review-0.json`, verdict `decision-required`; the candidate is `.agent-manager/slices/TEST-EDGE-SCOPE-1B/candidate-admission-5.patch`, 95 paths, byte-identical to `candidate-admission-4.patch`, sha256 `55e43da90a04b605dc2ed74fe7beecee64380ed85adaf74433be2c628c9995a2`, EXECUTED `cmp`). On the re-captured before-roots, 15 of 17 checks passed, including C12 and the fail-closed C14. TESB-C11 and TESB-C13 failed on the oracle text, not on the product. The reviewer's decision TESB-FIELD-ORACLES, option A: "amend only C11/C13 oracle text … Check the C11 SCC member set and each displayed walk edge; allow documented metadata after C13's exact source-state fields." The operator (in-place-manager) took A; the human may override. Author: document item TEST-EDGE-SCOPE-1B-PREP-7 (builder role, claude-opus-5-5). Independent review of these entries: pending (the PREP-7 reviewer). Every entry above is unchanged.
+
+## OC-4 — 2026-10-02 — oracle correction: TESB-C11 does not pin a cycle walk
+
+- **Authority.** Review-0: "C11 pins a particular *before* cycle walk. … `cycle_walk.rs` sorts neighbours by node UID; the indexer creates directory-module UIDs with UUID v4. The re-captured store prints `db → util → helpers/memenv → db`, not the pinned `db → table → db`. I checked that the actual walk's three arrows are edges in the captured SCC, whose four-member set is unchanged." Option A, as the operator worded it in the PREP-7 packet: assert (a) the excluded cycle's member set is exactly {db, table, util, helpers/memenv}, (b) every displayed arrow is an edge of that SCC, checked against the store, (c) `table → db` is present under `--include-tests` and absent by default, as before; pin no walk order anywhere in the document.
+- **Historical result, kept.** The INPUT-5 C11 command (774cecca) held, verbatim:
+  - `has(rd(T + "b-orient.txt"), "1 import cycle (db -> table -> db). Docs: README.md, CONTRIBUTING.md.")`
+  - `be = rd(T + "b-ex.txt"); has(be, "Import cycles (1)"); has(be, "  - Cycle 1 (4 modules): db -> table -> db")`
+
+  Admission 5 ran it: exit 1, `AssertionError: ('missing line', '1 import cycle (db -> table -> db). Docs: README.md, CONTRIBUTING.md.')` (`/tmp/tesb-a5-run-TESB-C11.out`, OBSERVED). HEAD printed, on a copy of the re-captured leveldb root, `1 import cycle (db -> util -> helpers/memenv -> db). Docs: README.md, CONTRIBUTING.md.` (`/tmp/tesb-c11-b-orient.txt` line 4) and `  - Cycle 1 (4 modules): db -> util -> helpers/memenv -> db` / `    (+ 1 more member in this cycle)` (`/tmp/tesb-c11-b-ex.txt` lines 27–28), both OBSERVED. The builder's diagnostic, with only those two literals made soft, printed `TESB-C11 ok` (`.agent-manager/slices/TEST-EDGE-SCOPE-1B/build-progress.md`). **The admission-5 C11 result is a failure and stays one. The diagnostic is not a pass of C11.**
+- **Store facts (EXECUTED, read-only, python `sqlite3 ?immutable=1` over `/private/tmp/TEST-EDGE-SCOPE-1B-leveldb-before`, with C11's own `facts`/`dir_graph`/`sccs` functions).** All 498 file→file IMPORTS rows are `static`. Test-inclusive directory graph, edges among the four members: `db→table`, `db→util`, `helpers/memenv→db`, `helpers/memenv→util`, `table→db`, `table→util`, `util→helpers/memenv`; its SCCs: exactly `[(db, helpers/memenv, table, util)]`. Default (production) graph, the same members: `db→table`, `db→util`, `helpers/memenv→util`, `table→util`; no SCC. So both walks, `db→table→db` and `db→util→helpers/memenv→db`, are closed walks over edges of the same SCC, and `table → db` exists only through test imports.
+- **Class and rule.** Class: an oracle that pins a rendering whose order follows an identifier that the source does not determine (here a UUID v4 node UID). Rule: no rendered cycle walk is pinned as text anywhere in the slice document. A walk is asserted as exactly one walk line, closed (first member = last), every arrow an edge of the asserted SCC in the store; the SCC is asserted by its member set; an off-walk count line, where rendered, together with the walk accounts for the member set.
+- **New lines (verbatim in the allocation; they replace the two lines above).**
+  ```
+  # orient and explain: a rendered cycle walk is never pinned as text (OC-4; the walk order follows node UIDs, §8 CYCLE-WALK-DETERMINISM-1)
+  SCC = ("db", "helpers/memenv", "table", "util")
+  ADJ = dir_graph(Fx, True, False)[0]
+  assert sccs(ADJ) == [SCC] and members(b) == [SCC], ("the before view's one SCC is exactly the four members", sccs(ADJ), members(b))
+  assert "db" in ADJ["table"] and "db" not in dir_graph(Fx, False, False)[0].get("table", set()), "table -> db exists only through imports from test files"
+  def ring(text, pattern):
+      hits = [m.group(1) for m in (re.fullmatch(pattern, l) for l in text.splitlines()) if m]
+      assert len(hits) == 1, ("one rendered cycle walk", pattern, hits)
+      w = hits[0].split(" -> ")
+      assert len(w) >= 3 and w[0] == w[-1], ("a closed walk", w)
+      for x, y in zip(w, w[1:]):
+          assert x in SCC and y in SCC and y in ADJ.get(x, set()), ("a displayed arrow that is not an edge of the SCC in the store", x, y)
+      return w
+  ring(rd(T + "b-orient.txt"), r"1 import cycle \((.+)\)\. Docs: README\.md, CONTRIBUTING\.md\.")
+  ...
+  be = rd(T + "b-ex.txt"); has(be, "Import cycles (1)"); we = ring(be, r"  - Cycle 1 \(4 modules\): (.+)")
+  k = len(SCC) - len(set(we))
+  assert [l for l in be.splitlines() if re.fullmatch(r"\s*\(\+ \d+ more members? in this cycle\)", l)] == ([] if k == 0 else ["    (+ %d more member%s in this cycle)" % (k, "" if k == 1 else "s")]), ("the walk and the off-walk count account for the member set", k)
+  ```
+  Kept, unchanged: `members(b) == [("db", "helpers/memenv", "table", "util")]`, the candidate's `excluded_cycles` = that set under `include_tests`, `members(at) == members(b)`, the store recomputation `ex`, and requirement (c) "as before": `("table", "db", 3) in edges(amt) and not any(e[:2] == ("table", "db") for e in edges(am))` and the `modules deps table` rows. The new store assertion on `table → db` adds the directory level; it does not replace the module level.
+- **Class sweep (EXECUTED, python over the whole slice document).** Patterns: `\w+ (->|→) \w+ (->|→)`, `Cycle \d+ \(\d+ modules\):`, `import cycle \(`, and the same over every check's `command`, `inputs`, `environment` and `expected`. Hits: C11's command (the two lines above, changed); §1's leveldb grounding (it quoted HEAD's walk from the 2026-09-29 root; now an observation of each root, no pin); §2.2's field-witness row (`leveldb's db → table → db leaves cycles`; now the SCC by its members, citing RG-REQ-004-L12's wording). Not walks: `table -> db` as a `modules deps` row (§2.4, C11); the check order `C01 → C02 → …` in §5. C12, C13 and C15 pin no walk: they compare before and after binaries on one store, where the UIDs are the same. After the edit, no check command contains a `x -> y -> z` string (EXECUTED).
+- **Probes (EXECUTED 2026-10-02).** "Captures" are the admission-5 run's `/tmp/tesb-c11-*` files (all written 2026-10-02 18:14 local by one run, OBSERVED `ls -T`); the store is the manager's leveldb root, read immutably. No rmap, no cargo.
+
+  | Probe | Expected | Actual |
+  |---|---|---|
+  | N0 the new assertion lines alone, real captures | pass | pass, walk `['db', 'util', 'helpers/memenv', 'db']` |
+  | N1 the same, the oracle's member set without `util` (`SCC = ("db", "helpers/memenv", "table")`) | fail | `AssertionError: ("the before view's one SCC is exactly the four members", …)` |
+  | N2 captures edited to the 2026-09-29 walk (`db -> table -> db`, `(+ 2 more members in this cycle)`) | pass (walk order is not pinned) | pass, walk `['db', 'table', 'db']` |
+  | N3 orient capture edited to `db -> helpers/memenv -> db` (`db→helpers/memenv` is not an edge) | fail | `AssertionError: ('a displayed arrow that is not an edge of the SCC in the store', 'db', 'helpers/memenv')` |
+  | N4 explain capture's off-walk line edited to `(+ 2 more members …)` beside a three-member walk | fail | `AssertionError: ('the walk and the off-walk count account for the member set', 1)` |
+  | N5 the WHOLE corrected C11 Python, extracted from the allocation, real captures | `TESB-C11 ok` | `TESB-C11 ok`, exit 0 |
+  | N6 the WHOLE INPUT-5 C11 Python, real captures | the admission-5 failure | `AssertionError: ('missing line', '1 import cycle (db -> table -> db). …')` |
+- **Limits.** N5 runs C11's Python over captures from the admission-5 run. It is not a rerun of C11: the shell part (worktree, builds, serving, `rg-store-diff`) did not run here. The corrected C11 must run on the next admission. The walk check proves that each displayed arrow is a store edge; it does not prove that the walk is the one `cycle_walk.rs` would choose, which is the subject of CYCLE-WALK-DETERMINISM-1.
+
+## OC-5 — 2026-10-02 — oracle correction: TESB-C13's `source.txt` preconditions accept the documented suffix
+
+- **Authority.** Review-0: "C13 pins the end of each `source.txt` line. The re-captured grpc-java and FRAKTAG lines have the required commit and dirty counts, followed by `captured=… producer=…`. The approved `$`-anchored greps reject those lines." Option A: require the exact commit and `dirty=<n>` fields and accept the documented trailing metadata.
+- **Historical result, kept.** The INPUT-5 C13 command (774cecca) held `grep -q '^grpc-java f43013161b3c dirty=2997$' $R-grpc-java-before/source.txt && grep -q '^FRAKTAG 9bea3a5e4d32 dirty=14$' $R-FRAKTAG-before/source.txt`. Admission 5: exit 1 with empty output (`/tmp/tesb-a5-run-TESB-C13.out`, 0 bytes, OBSERVED), before any product assertion; its trap was not yet set, so the worktree survived. The builder's diagnostic with `dirty=2997( |$)` / `dirty=14( |$)` passed (`/tmp/tesb-a5-run-C13-diag.out`, `TESB-C13 ok`). **The admission-5 C13 result is a failure and stays one. The diagnostic is not a pass of C13.**
+- **The real lines (OBSERVED, first line of each root's `source.txt`).** `grpc-java f43013161b3c dirty=2997 captured=2026-10-02T14:25:01Z producer=rmap 0.19.0` and `FRAKTAG 9bea3a5e4d32 dirty=14 captured=2026-10-02T14:25:19Z producer=rmap 0.19.0`. The format `<repo> <commit> dirty=<n> captured=<iso> producer=<rmap version>` is the one the INPUT-5 record above documents.
+- **Class and rule.** Class: a source-state precondition that anchors the end of a record whose documented format carries trailing fields. Rule: require the repository name, the 12-character commit and the `dirty=<n>` field exactly; accept only the documented suffix ` captured=<YYYY-MM-DDThh:mm:ssZ> producer=rmap <x.y.z>`, or none; anything else after `dirty=<n>` fails. The diagnostic's `( |$)` would also have accepted an undocumented suffix, so it is not used.
+- **New lines (verbatim in the allocation).** `grep -Eq '^grpc-java f43013161b3c dirty=2997( captured=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z producer=rmap [0-9]+\.[0-9]+\.[0-9]+)?$' $R-grpc-java-before/source.txt && grep -Eq '^FRAKTAG 9bea3a5e4d32 dirty=14( captured=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z producer=rmap [0-9]+\.[0-9]+\.[0-9]+)?$' $R-FRAKTAG-before/source.txt`.
+- **Class sweep.** No other check command reads a `source.txt` (EXECUTED, python over all seventeen commands). C11 and C12 assert their checkouts with `git rev-parse --short=12 HEAD` and `git status --porcelain`; C14 digests the roots and does not parse `source.txt`.
+- **Probes (EXECUTED 2026-10-02, grep -E on macOS).**
+
+  | Probe | Expected | Actual |
+  |---|---|---|
+  | Q1 grpc-java root's real `source.txt` | match | match |
+  | Q2 FRAKTAG root's real `source.txt` | match | match |
+  | Q3 grpc-java line, commit `f43013161b3d` | no match | no match |
+  | Q4 FRAKTAG line, commit `9bea3a5e4d33` | no match | no match |
+  | Q5 grpc-java line, `dirty=29970` | no match | no match |
+  | Q6 grpc-java line in the INPUT-5 form (no suffix) | match | match |
+  | Q7 grpc-java line with an undocumented suffix ` garbage` | no match | no match |
+  | Q8 FRAKTAG line, `dirty=1` | no match | no match |
+  | Q9 the two greps extracted verbatim from the allocation, real roots | exit 0 | exit 0 |
+  | Q10 the same, the oracle's grpc-java commit changed to `f43013161b3d` | exit ≠ 0 | exit 1 |
+  | Q11 the INPUT-5 grep, real grpc-java root | (the finding) | no match |
+- **Limits.** The probes test the two preconditions only. The corrected C13 must run on the next admission.
+
+## Operator confirmation (2026-10-02, in-place-manager) — the INPUT-6 corrections
+
+The C11 and C13 corrections authored by PREP-7 are approved (admission-5 review-0's option A; text-only); any "Approver: PENDING" line on them is resolved by this entry. The follow-up CYCLE-WALK-DETERMINISM-1 is recorded: a cycle's rendered walk order follows random node UIDs, so two indexes of one commit can print different walks of the same cycle (RG-REQ-001-L09); outside this allocation. Accepted by PREP-7 review-0 (codex gpt-6-sol). Carried as INPUT-6.
