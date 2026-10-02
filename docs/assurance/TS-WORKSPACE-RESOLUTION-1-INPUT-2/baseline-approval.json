@@ -1,0 +1,83 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "TS-WORKSPACE-RESOLUTION-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/TS-WORKSPACE-RESOLUTION-1-INPUT-2.json",
+    "sha256": "sha256:e3d0b62d3222ebff53ccc1fab09ed8a6fb0356cd46c727b850ea48c645ac1cd2"
+  },
+  "review": {
+    "path": "docs/assurance/TS-WORKSPACE-RESOLUTION-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:c14c05904a6dbd0015dd219dd0e5d5f038828ffd7a2d59c3bd294507f9b465f8"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-TS-WORKSPACE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TS-WORKSPACE-1.md",
+        "sha256": "sha256:ae5be8b869a7cd221f51a5c55d42125eafac401c7a00d6e93b55ab00020225f4"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-PSI-R1-VOCAB",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-PSI-R1-VOCAB.md",
+        "sha256": "sha256:9fefd3779c40ddf74db9f3298ca5d8f055b5089ee1b1f619b0a5d15d15023eb1"
+      }
+    },
+    {
+      "id": "D-TESB-READERS-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TESB-READERS-1.md",
+        "sha256": "sha256:b7c5079782261a3abfd2f4a7fecbb89104ca53ff35a06464aeab33f6259abdf7"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-TWR-REVIEW-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TWR-REVIEW-1.md",
+        "sha256": "sha256:44956b9295f6c01e5ce7ea7a70f4cb2fd40b0115916e9d625477f424e252710e"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-02T23:35:36.851Z",
+  "rationale": "Document item TS-WORKSPACE-RESOLUTION-1-PREP-3 accepted at cycle 1 (codex gpt-6-sol): the four decisions of implementation review-0 (D-TWR-REVIEW-1, operator, each the reviewer's option A) \u2014 the LiveGraph-route note states only what the rule does, declared entries carry Main/Export origin with completions on Main only, the storage reader inventory test joins the allocation (A-1), TWR-C07 normalizes the repository uid on unresolved target keys (the operator's rg-store-diff fix d4da906 validated on FRAKTAG). 9 checks."
+}
