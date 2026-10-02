@@ -331,3 +331,77 @@ Baseline these entries enter: `docs/requirements/baselines/TEST-EDGE-SCOPE-1B-IN
 ## Operator confirmation (2026-10-02, in-place-manager) — A-3 and its revisions
 
 A-3 is approved under the HUMAN's ruling of 2026-10-02, "Fix the fixture first". It allocates `daemon-runtime/tests/concurrency_dispatch.rs`, rebuilds the cancellation ring in the file-level shape the partitioned `cycles` reads, and binds the whole daemon-runtime suite as TESB-C17. Any "Approver: PENDING" line on A-3 is resolved by this entry. Accepted by PREP-5 review-2 (codex gpt-6-sol). Carried as INPUT-4.
+
+# INPUT-5 entries (2026-10-02)
+
+Baseline these entries enter: `docs/requirements/baselines/TEST-EDGE-SCOPE-1B-INPUT-5.json`. Admitted baseline before them: `TEST-EDGE-SCOPE-1B-INPUT-4.json` (committed at 7a948ff5). Trigger: implementation review-0 of the admission-4 candidate (`.agent-manager/slices/TEST-EDGE-SCOPE-1B/review-0.json`, decision-required; candidate saved at `.agent-manager/slices/TEST-EDGE-SCOPE-1B/candidate-admission-4.patch`, 95 paths). Author: document item TEST-EDGE-SCOPE-1B-PREP-6 (builder role, claude-opus-5-5). Independent review of these entries: pending (the PREP-6 reviewer). Every entry above is unchanged.
+
+## Record — 2026-10-02 — the manager's before-roots were lost and re-captured (no oracle change)
+
+- **Authority.** Review-0, "Blocking evidence gap": "All five manager-owned `*-before` roots required by TESB-C11–C14 are absent. The current run therefore has C11, C12, and C13 at **execution-failed**, not pass." DECISION_REQUIRED TESB-FIELD-EVIDENCE-4, option A: "restore the exact HEAD-produced roots, then rerun C11–C14". The operator (in-place-manager) took A: lost infrastructure is restored, not waived. The human may override.
+- **What the operator did (from the PREP-6 packet).** The roots captured 2026-09-29 had been purged from `/private/tmp`. All five were re-captured with the same producer: HEAD's release binary, and `git diff a85f6239 HEAD -- rust` is empty. The checkouts were at the recorded states: poco 49af4000f99f clean, leveldb 7ee830d02b62 clean, kafka 0dad6a7c9c0a clean, grpc-java f43013161b3c dirty=2997, FRAKTAG 9bea3a5e4d32 dirty=14. A durable copy is at `~/repo-graph-retained/TEST-EDGE-SCOPE-1B-before/`.
+- **Verified by this item (OBSERVED, read-only).** The five directories exist. The first line of each `source.txt` names the recorded commit and dirty count and `producer=rmap 0.19.0`, for example `grpc-java f43013161b3c dirty=2997 captured=2026-10-02T14:25:01Z producer=rmap 0.19.0`. The file counts are poco 6, leveldb 6, kafka 6, grpc-java 6, FRAKTAG 5. The durable copy holds five directories (2.9 GB). This item did not verify that the re-captured stores equal the lost ones: no digest of the lost roots survives (the admission-4 `build-progress.md` has a `registry-before` line and no `roots-before` line).
+- **Consequence.** C11–C13 must run on the next admission against these roots. The admission-3 field results stay historical evidence; they are not evidence for this admission. No command or expected value changes.
+
+## OC-3 — 2026-10-02 — oracle correction: TESB-C14 is fail-closed
+
+- **Authority.** Review-0: "TESB-C14 is a false-positive oracle. Its command separates the digest comparisons from later checks with `;`, so a failed roots comparison can still yield exit 0. `/tmp/tesb-run-TESB-C14.out` reports missing roots and then `TESB-C14 ok`. Correct the check in the allocation; do not record this run as a pass." The PREP-6 packet adds a second requirement: the `roots-before` line that the builder records must also fail closed when a root is absent.
+- **Historical result, kept.** The INPUT-4 command, quoted from 7a948ff5: `… && test "$(grep -E '^roots-before [0-9a-f]{64}$' … | tail -1 | cut -d' ' -f2)" = "$(find /private/tmp/TEST-EDGE-SCOPE-1B-poco-before … -type f | sort | xargs shasum -a 256 | shasum -a 256 | cut -d' ' -f1)" && PIDS=$(pgrep -x rmapd | paste -sd, -); { [ -z "$PIDS" ] || ! ps -o command= -p "$PIDS" | grep -v '/\.local/bin/rmapd' | grep -q .; } && for d in …`. The admission-4 capture `/tmp/tesb-run-TESB-C14.out` (OBSERVED, 442 bytes) holds five `find: …-before: No such file or directory` lines and then `TESB-C14 ok: 95 changed paths, all allocated`. The admission-4 record has no `roots-before` line, so the roots comparison compared an empty string with a digest and failed. Only the `;` turned that failure into exit 0. **The admission-4 C14 result is not a pass, and it is not evidence for P-TESB-06 or for the RG-REQ-011 IDs that C14 carries.**
+- **Class and rule.** Class: an assertion in a check command whose failure does not set the command's exit status. Two forms occur: a top-level separator breaks the `&&` chain, or an expansion (`$(find …)`) hides a failed listing and produces a digest of a shorter list. Rule: TESB-C14 runs under `set -euo pipefail`. Every precondition and comparison is its own statement that ends the command on failure (`|| fail "<reason>"`, or `|| { echo …; exit 1; }`). The roots digest is one snippet, from `R=(` to the digest's `exit 1; }`, and the snippet text is identical in TESB-C14 and in the §5 step-0 recording command. The snippet requires each root to exist and to hold at least one file before it digests the roots. The rmapd check fails if `pgrep` (status other than 0 or 1), `ps` or `grep` fails. The leftover-worktree check uses `case` on the captured `git worktree list`, not `! … | grep -q`, so a pipe status cannot hide a match.
+- **Kept assertions:** the registry digest is unchanged; the roots digest is unchanged; no `rmapd` other than `~/.local/bin/rmapd` runs; no builder root `/private/tmp/TEST-EDGE-SCOPE-1B-{before,leveldb-copy,leveldb-fresh,poco-copy,kafka-copy,grpc-java-copy,FRAKTAG-copy,plain,path}` remains; no `TEST-EDGE-SCOPE-1B-before` worktree remains; the Python allocation/paths check passes. The Python text is unchanged.
+- **Class sweep.** The other sixteen commands were split at top level. Their top-level `;` separate only assignments, function definitions or loop syntax, and every loop body ends in `|| exit 1` or `|| { …; exit 1; }`. No other command takes a digest or a listing of roots. Result: no other instance.
+- **Probes (EXECUTED 2026-10-02).** The new C14 command and the step-0 recording command ran exactly as extracted from the slice document (`bash -n` exit 0 for both, and for all seventeen check commands). Most probes ran in a scratch worktree, `/private/tmp/TEST-EDGE-SCOPE-1B-PREP-6-probe`, detached at 7a948ff5, with its own `.agent-manager/slices/TEST-EDGE-SCOPE-1B/build-progress.md`. "OLD" is the INPUT-4 command from 7a948ff5. The manager roots were read only. The single rename was of the directory itself, and a trap restored it.
+
+  | Probe | Expected | Actual |
+  |---|---|---|
+  | P1 step-0 recording, all five roots present | exit 0, two lines appended | exit 0, `registry-before 4762fd94…` and `roots-before 7d4b12c7…` |
+  | P2 C14, all present | exit 0, `ok` | exit 0, `TESB-C14 ok: 0 changed paths, all allocated` |
+  | P3a recording, `…-leveldb-before` renamed | exit ≠ 0, nothing appended | exit 1, `FAIL: before-root missing or empty: /private/tmp/TEST-EDGE-SCOPE-1B-leveldb-before`; the file is byte-identical |
+  | P3b C14, the same root renamed | exit ≠ 0, no `ok` | exit 1, the same `FAIL:` line, no `ok` |
+  | P3c OLD C14, the same root renamed | (the defect) | exit 0, `find: …: No such file or directory` and then `TESB-C14 ok` |
+  | P3d C14, the name restored | exit 0, `ok` | exit 0, `ok` |
+  | P4 C14, recorded registry digest altered | exit ≠ 0, no `ok` | exit 1, `TESB-C14 FAIL: operator registry changed` |
+  | P4 OLD, the same | (the defect) | exit 0, `TESB-C14 ok` |
+  | P5 C14, recorded roots digest altered | exit ≠ 0, no `ok` | exit 1, `TESB-C14 FAIL: manager before-roots changed` |
+  | P6 C14, no `build-progress.md` | exit ≠ 0 | exit 1, `TESB-C14 FAIL: no .agent-manager/…/build-progress.md` |
+  | P6b C14, an empty `build-progress.md` | exit ≠ 0 | exit 1, `TESB-C14 FAIL: no registry-before line in …` |
+  | P12 C14, the admission-4 record shape (a registry line, no roots line), in `/private/tmp/TEST-EDGE-SCOPE-1B-PREP-6-p2` | exit ≠ 0 | exit 1, `TESB-C14 FAIL: no roots-before line in …` |
+  | P7 C14, `/private/tmp/TEST-EDGE-SCOPE-1B-plain` present (empty directory made and removed by this item) | exit ≠ 0 | exit 1, `TESB-C14 FAIL: LEFT plain` |
+  | P8 C14, worktree `/private/tmp/TEST-EDGE-SCOPE-1B-PREP-6-wt-TEST-EDGE-SCOPE-1B-before` present | exit ≠ 0 | exit 1, `TESB-C14 FAIL: worktree TEST-EDGE-SCOPE-1B-before remains` |
+  | P9 C14's rmapd lines (verbatim), a foreign `rmapd` running (a symlink to `/bin/sleep` under `/private/tmp/TEST-EDGE-SCOPE-1B-PREP-6-fake`) | exit ≠ 0 | exit 1, `TESB-C14 FAIL: rmapd other than the operator's ~/.local/bin/rmapd: /private/tmp/TEST-EDGE-SCOPE-1B-PREP-6-fake/rmapd 30` |
+  | P9b the same lines, only the operator's `~/.local/bin/rmapd` running | exit 0 | exit 0 |
+  | P10 C14, an untracked unallocated file in the worktree | exit ≠ 0, no `ok` | exit 1, the Python `AssertionError` and then `TESB-C14 FAIL: allocation/paths check failed` |
+  | P11 C14, everything restored | exit 0, `ok` | exit 0, `ok` |
+
+  The digest of the five roots was `7d4b12c73d44a41e9aef3d3638bf130177bde9cf8c9e3401752190a57e9170b0` before and after the probes. A first P9 attempt, with a copied `sleep` binary, tested nothing, because macOS killed the copy before the check ran. It was repeated with a symlink (the P9 row). Everything this item created was removed: both worktrees, the fake directory, `…-plain`, `…-PREP-6-p2` and the `/tmp/tesb6` captures.
+- **Limits.** P2 and P11 ran C14 in a worktree at HEAD with no candidate applied, so the Python check saw 0 changed paths. The candidate case (95 allocated paths) is the implementation's. P9 ran the rmapd lines on their own. The full command reaches those lines only after the roots digest has passed, and that path was proven by P2. The next builder records a fresh `registry-before`/`roots-before` pair at step 0, so no admission-4 record is reused.
+
+## OC-3 addendum — 2026-10-02 (INPUT-5 cycle 2) — the rmapd check compares the executable path exactly
+
+- **Authority.** PREP-6 review-0 (`.agent-manager/slices/TEST-EDGE-SCOPE-1B-PREP-6/review-0.json`, refinement-required, finding TESB-C14, RG-REQ-011-L06): "It excludes any command containing `/.local/bin/rmapd`, not just `$HOME/.local/bin/rmapd`. For example, `/private/tmp/fake/.local/bin/rmapd 30` passes that filter … Compare the executable path with the operator's exact installed path, then probe a foreign `rmapd` under a different `.local/bin` directory. Keep the current probe that accepts the operator process."
+- **Superseded text (cycle 1, kept as written in OC-3 above).** `if [ -n "$PIDS" ]; then CMDS=$(ps -o command= -p "$(printf '%s\n' "$PIDS" | paste -sd, -)") || fail "ps failed for rmapd pids $PIDS"; OTHER=$(printf '%s\n' "$CMDS" | grep -v '/\.local/bin/rmapd') || [ $? -eq 1 ] || fail "grep failed"; [ -z "$OTHER" ] || fail "rmapd other than the operator's ~/.local/bin/rmapd: $OTHER"; fi`. The INPUT-4 command had the same substring filter. OC-3's P9 row ("a foreign `rmapd` … exit 1") is correct for its fake, but it did not test a fake under another `.local/bin`.
+- **Further fact (EXECUTED).** `ps -o comm=` and `ps -o command=` print argv[0] on macOS. With `(exec -a "$HOME/.local/bin/rmapd" <fake>/.local/bin/rmapd 900)`, ps printed comm `/Users/apple/.lo…` and command `/Users/apple/.local/bin/rmapd 900`, while the executable was `/bin/sleep` (lsof txt and `proc_pidpath`). So an exact comparison of `comm` would still be a proxy.
+- **Class and rule.** Class: an identity assertion that accepts something that looks like the identity instead of the identity itself. Rule: for each pid that `pgrep -x rmapd` lists, read the kernel's executable path with `proc_pidpath` (macOS libproc, `python3 -c`). Require it to equal exactly `$HOME/.local/bin/rmapd`. If the path cannot be read, fail. `$HOME/.local/bin/rmapd` is a regular file, not a symlink (OBSERVED, `ls -l`), so the resolved executable path of the operator's daemon is that path (EXECUTED: `proc_pidpath(8278)` = `/Users/apple/.local/bin/rmapd`).
+- **New lines (verbatim in the allocation).** `PIDS=$(pgrep -x rmapd) || [ $? -eq 1 ] || fail "pgrep failed"` and `for p in $PIDS; do EXE=$(python3 -c '…proc_pidpath…' "$p") || fail "executable path of rmapd pid $p unreadable"; [ "$EXE" = "$HOME/.local/bin/rmapd" ] || fail "rmapd other than the operator's $HOME/.local/bin/rmapd: pid $p runs $EXE"; done`.
+- **Probes (EXECUTED 2026-10-02).** The scratch worktree `/private/tmp/TEST-EDGE-SCOPE-1B-PREP-6-probe` was detached at 7a948ff5, and the fakes ran under `/private/tmp/TEST-EDGE-SCOPE-1B-PREP-6-fake`; both were removed by a trap. "rmapd lines" means the two lines run verbatim under `set -euo pipefail` with `fail` defined. "CYCLE1" means the superseded cycle-1 line. The full C14 is the command as it now stands in the allocation.
+
+  | Probe | Expected | Actual |
+  |---|---|---|
+  | R0 step-0 recording | exit 0 | exit 0 |
+  | R1 full C14, only the operator's `~/.local/bin/rmapd` (pid 8278) running | exit 0, `ok` | exit 0, `TESB-C14 ok` |
+  | R5 rmapd lines, operator only | exit 0 | exit 0 |
+  | R2 rmapd lines, a fake at `…-PREP-6-fake/.local/bin/rmapd 900` (a symlink to `/bin/sleep`) | exit 1 | exit 1, `TESB-C14 FAIL: rmapd other than the operator's /Users/apple/.local/bin/rmapd: pid 87342 runs /bin/sleep` |
+  | R2 CYCLE1 line, the same fake | (the finding) | exit 0: passes |
+  | R4 full C14, the same fake | exit 1, no `ok` | exit 1, the same FAIL line, no `ok` |
+  | R3 rmapd lines, the fake with argv[0] = `/Users/apple/.local/bin/rmapd` | exit 1 | exit 1, `… pid 87427 runs /bin/sleep` |
+  | R3 CYCLE1 line, the same spoof | (proxy defect) | exit 0: passes |
+  | R5b rmapd lines, the fakes stopped | exit 0 | exit 0 |
+  | R6 full C14, `…-leveldb-before` renamed (the cycle-1 property is kept) | exit 1, no `ok` | exit 1, `FAIL: before-root missing or empty: …` |
+  | R7 full C14, everything restored | exit 0, `ok` | exit 0, `ok` |
+
+  The digest of the five roots was `7d4b12c73d44a41e9aef3d3638bf130177bde9cf8c9e3401752190a57e9170b0` before and after. After cleanup, only the operator's pid 8278 matched `pgrep -x rmapd`.
+- **Limits.** The check is macOS-only (libproc); the allocation already names macOS paths (`$HOME/Library/Application Support`). A process that exits between `pgrep` and `proc_pidpath` makes the check fail; the remedy is to rerun it. A second process that runs the operator's installed binary itself would pass, as it did under every earlier form of this check. The assertion is about which executable runs, not how many instances run.
+
+## Operator confirmation (2026-10-02, in-place-manager) — the INPUT-5 correction and the restored roots
+
+The TESB-C14 correction authored by PREP-6 is approved; any "Approver: PENDING" line on it is resolved by this entry. TESB-FIELD-EVIDENCE-4 (admission-4 review-0) is resolved as option A by the operator: the five before-roots were re-captured on 2026-10-02 with the same producer (HEAD's release binary; `git diff a85f6239 HEAD -- rust` empty) on checkouts at exactly their recorded commits and dirty states; `source.txt` in each root records this; a durable copy is kept at `~/repo-graph-retained/TEST-EDGE-SCOPE-1B-before/`. Accepted by PREP-6 review-1 (codex gpt-6-sol). Carried as INPUT-5.
