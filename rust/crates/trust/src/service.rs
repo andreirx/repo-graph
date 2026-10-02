@@ -1889,6 +1889,47 @@ mod tests {
         // Dead-code caveat removed: `rmap dead` surface is disabled.
     }
 
+    // ── IMPORTS-family sum propagation (CPP-INCLUDE-BASENAME-1, F-CIB-TRUST-PROPAGATION) ──
+
+    #[test]
+    fn a_lone_non_legacy_unresolved_import_category_lowers_import_graph_and_change_impact() {
+        // The only unresolved imports are two Java wildcards: no `imports_file_not_found` row.
+        let mut input = minimal_input();
+        let mut breakdown = BTreeMap::new();
+        breakdown.insert("imports_wildcard".into(), 2);
+        input.diagnostics = Some(ExtractionDiagnostics {
+            inferred_calls: None,
+            diagnostics_version: 1,
+            edges_total: 10,
+            unresolved_total: 2,
+            unresolved_breakdown: breakdown,
+        });
+
+        let report = compute_trust_report(&input);
+        let rel = &report.summary.reliability;
+        assert_eq!(rel.import_graph.level, ReliabilityLevel::LOW);
+        assert_eq!(
+            rel.import_graph.reasons,
+            vec!["unresolved_imports=2".to_string()]
+        );
+        assert_eq!(rel.change_impact.level, ReliabilityLevel::LOW);
+        assert_eq!(
+            rel.change_impact.reasons,
+            vec!["import_graph_reliability_low".to_string()]
+        );
+        assert!(report
+            .caveats
+            .iter()
+            .any(|c| c.contains("Import-graph reliability is LOW")));
+        assert!(report
+            .caveats
+            .iter()
+            .any(|c| c.contains("Change-impact reliability is LOW")));
+        // Fields not derived from the IMPORTS sum do not move.
+        assert_eq!(rel.call_graph.level, ReliabilityLevel::HIGH);
+        assert_eq!(rel.dead_code.level, ReliabilityLevel::HIGH);
+    }
+
     // ── Call resolution rate edge case ────────────────────────
 
     #[test]

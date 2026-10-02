@@ -24,7 +24,7 @@ use repo_graph_classification::types::{
     ImportBinding, ImportKind, SourceLocation, UnresolvedEdgeCategory,
 };
 
-use crate::include_resolver::{IncludeResolutionMap, ResolutionStatus};
+use crate::include_resolver::{IncludePathMatch, IncludeResolutionMap, ResolutionStatus};
 use crate::storage_port::TypeOnlyDisposition;
 use crate::types::{EdgeType, ExtractedEdge, Resolution};
 
@@ -80,6 +80,15 @@ pub const NAME_ONLY_REASON_SELF_CALL_RECEIVER_UNPROVEN: &str = "self_call_receiv
 /// retargeted (D-CERTAINTY-MARK-1's word; the reason the edge is `inferred`, not `static`).
 pub const PYTHON_SUBMODULE_BASIS: &str = "python_submodule";
 
+/// CPP-INCLUDE-BASENAME-1 (RG-REQ-006-L11, RG-REQ-002-L11): the `basis` values the C/C++ include
+/// suffix/basename stage writes into an include's `metadata_json`, beside `candidates` (the FILE
+/// stable keys it matched). `unique_suffix` rides a `static` edge; `unique_basename` an `inferred`
+/// edge; the two ambiguous values an unresolved `imports_ambiguous_match` row — never an edge.
+pub const INCLUDE_UNIQUE_SUFFIX_BASIS: &str = "unique_suffix";
+pub const INCLUDE_UNIQUE_BASENAME_BASIS: &str = "unique_basename";
+pub const INCLUDE_AMBIGUOUS_SUFFIX_BASIS: &str = "ambiguous_suffix";
+pub const INCLUDE_AMBIGUOUS_BASENAME_BASIS: &str = "ambiguous_basename";
+
 /// Provenance prefixes of the C and C++ extractors (`ExtractedEdge.extractor`), whose
 /// values are `c-core:<version>` / `cpp-core:<version>` (see the two extractors'
 /// `EXTRACTOR_NAME`). CPP-DECLARATORS-1 §2.6 (operator ruling A, 2026-09-06): an
@@ -91,7 +100,9 @@ pub const PYTHON_SUBMODULE_BASIS: &str = "python_submodule";
 const C_EXTRACTOR_PREFIX: &str = "c-core:";
 const CPP_EXTRACTOR_PREFIX: &str = "cpp-core:";
 
-/// Does this edge's provenance make it a C/C++ inheritance `Implements` edge (spec §2.6)?
+/// Was this edge written by the C or C++ extractor? Gates the C/C++ inheritance `Implements`
+/// affinity (CPP-DECLARATORS-1 spec §2.6) and the include suffix/basename stage
+/// (CPP-INCLUDE-BASENAME-1).
 fn is_c_family_extractor(extractor: &str) -> bool {
     extractor.starts_with(C_EXTRACTOR_PREFIX) || extractor.starts_with(CPP_EXTRACTOR_PREFIX)
 }
@@ -240,6 +251,20 @@ enum TargetResolution {
         /// Why the edge is inferred (`PYTHON_SUBMODULE_BASIS`).
         basis: &'static str,
     },
+    /// CPP-INCLUDE-BASENAME-1 (RG-REQ-006-L11): a C/C++ include no earlier stage resolved, bound
+    /// by the include suffix/basename stage to its one indexed candidate — `static` on a unique
+    /// path suffix (fed to `resolved_import_pairs` like any certain import), `inferred` on a unique
+    /// basename (kept out of them, RG-REQ-002-L11). `metadata_json` is the extractor's carrier with
+    /// `basis` and `candidates` merged in.
+    IncludeBound {
+        target_uid: String,
+        resolution: Resolution,
+        metadata_json: String,
+    },
+    /// CPP-INCLUDE-BASENAME-1: a C/C++ include whose path suffix or basename matches several
+    /// indexed files. Unresolved as `ImportsAmbiguousMatch`, never a pick; `metadata_json` carries
+    /// the ambiguous basis and every candidate.
+    IncludeAmbiguous { metadata_json: String },
     /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L02 / RG-REQ-002-L11): a Python `obj.m()` on an
     /// untyped receiver whose method name has exactly ONE candidate. The name alone is not
     /// evidence, so the edge is written `resolution: inferred` with its basis, its receiver text and
@@ -572,6 +597,49 @@ pub fn resolve_edges(
                     )),
                 });
             }
+            // CPP-INCLUDE-BASENAME-1: a bound include. Its resolution comes from the stage
+            // (`static` on a unique suffix, `inferred` on a unique basename); only a certain one
+            // feeds the persisted MODULE→MODULE graph.
+            TargetResolution::IncludeBound {
+                target_uid,
+                resolution,
+                metadata_json,
+            } => {
+                if resolution != Resolution::Inferred {
+                    resolved_import_pairs.push((
+                        edge.source_node_uid.clone(),
+                        target_uid.clone(),
+                        import_edge_type_only(edge),
+                    ));
+                }
+                resolved.push(ResolvedEdge {
+                    edge_uid: edge.edge_uid.clone(),
+                    snapshot_uid: edge.snapshot_uid.clone(),
+                    repo_uid: edge.repo_uid.clone(),
+                    source_node_uid: edge.source_node_uid.clone(),
+                    target_node_uid: target_uid,
+                    edge_type: edge.edge_type,
+                    resolution,
+                    extractor: edge.extractor.clone(),
+                    location: edge.location,
+                    metadata_json: Some(metadata_json),
+                });
+            }
+            // CPP-INCLUDE-BASENAME-1: an ambiguous suffix or basename. Counted with the include-root
+            // overlap under the one C/C++ ambiguity category; the carrier says which shape.
+            TargetResolution::IncludeAmbiguous { metadata_json } => {
+                let source_file_uid = index
+                    .node_uid_to_file_uid
+                    .get(&edge.source_node_uid)
+                    .cloned();
+                let mut unresolved_edge = edge.clone();
+                unresolved_edge.metadata_json = Some(metadata_json);
+                still_unresolved.push(CategorizedUnresolvedEdge {
+                    edge: unresolved_edge,
+                    category: UnresolvedEdgeCategory::ImportsAmbiguousMatch,
+                    source_file_uid,
+                });
+            }
             // PYTHON-RECEIVER-BINDING-1: a name-only binding on an untyped receiver. Resolved to
             // the single candidate but marked INFERRED with its basis, receiver and pool of one
             // (RG-REQ-005-L02, RG-REQ-002-L11) — overriding the extractor's `static`.
@@ -816,8 +884,93 @@ fn resolve_import_ladder(edge: &ExtractedEdge, index: &ResolverIndex) -> TargetR
             &index.nodes_by_stable_key,
             &edge.repo_uid,
         ),
+        // Stage 6 (CPP-INCLUDE-BASENAME-1, RG-REQ-006-L11): a C/C++ include the include resolver
+        // answered Unresolved (its Ambiguous answer returned above) and stages 1-4 missed. Runs
+        // last, so it never changes an include an earlier stage resolves (RG-REQ-006-L03).
+        None if is_c_family_extractor(&edge.extractor) => {
+            resolve_include_suffix_or_basename(edge, index).unwrap_or(TargetResolution::Unresolved)
+        }
         None => TargetResolution::Unresolved,
     }
+}
+
+/// CPP-INCLUDE-BASENAME-1 (RG-REQ-006-L11 as ratified; RG-REQ-002-L11): the C/C++ include
+/// suffix/basename stage. Asks the include map what the indexed file list says about the
+/// specifier and decides:
+///
+/// - a unique path suffix (two or more segments) whose FILE node exists → `static`, basis
+///   `unique_suffix`;
+/// - a unique basename (one segment) whose FILE node exists → `inferred`, basis `unique_basename`
+///   (a file of that name exists; nothing says the build's include path reaches it);
+/// - several matches → unresolved ambiguous, basis `ambiguous_suffix`/`ambiguous_basename`, every
+///   candidate recorded;
+/// - no match, a declined specifier, or a unique candidate without a FILE node → `None` (the row
+///   stays unresolved exactly as before).
+///
+/// Every outcome merges `basis` and `candidates` (FILE stable keys) into the extractor's carrier,
+/// keeping its keys. A present carrier that is not a JSON object declines the stage (`None`):
+/// the row is never overwritten and never coerced. PURE: reads only the resolver index.
+fn resolve_include_suffix_or_basename(
+    edge: &ExtractedEdge,
+    index: &ResolverIndex,
+) -> Option<TargetResolution> {
+    let include_map = index.include_resolver.as_ref()?;
+    let mut carrier = match edge.metadata_json.as_deref() {
+        None => serde_json::Map::new(),
+        Some(raw) => match serde_json::from_str::<serde_json::Value>(raw) {
+            Ok(serde_json::Value::Object(obj)) => obj,
+            // Unparseable, or JSON that is not an object: decline, leave the row as it is.
+            Ok(_) | Err(_) => return None,
+        },
+    };
+    let file_key = |path: &str| format!("{}:{}:FILE", edge.repo_uid, path);
+    let (basis, candidates, bound) =
+        match include_map.match_path_suffix_or_basename(&edge.target_key) {
+            IncludePathMatch::Declined | IncludePathMatch::NoMatch => return None,
+            IncludePathMatch::UniqueSuffix(path) => (
+                INCLUDE_UNIQUE_SUFFIX_BASIS,
+                vec![file_key(&path)],
+                Some(Resolution::Static),
+            ),
+            IncludePathMatch::UniqueBasename(path) => (
+                INCLUDE_UNIQUE_BASENAME_BASIS,
+                vec![file_key(&path)],
+                Some(Resolution::Inferred),
+            ),
+            IncludePathMatch::AmbiguousSuffix(paths) => (
+                INCLUDE_AMBIGUOUS_SUFFIX_BASIS,
+                paths.iter().map(|p| file_key(p)).collect(),
+                None,
+            ),
+            IncludePathMatch::AmbiguousBasename(paths) => (
+                INCLUDE_AMBIGUOUS_BASENAME_BASIS,
+                paths.iter().map(|p| file_key(p)).collect(),
+                None,
+            ),
+        };
+    // A unique candidate binds only to its FILE node; without one the row stays as it is.
+    let bound = match bound {
+        Some(resolution) => Some((
+            resolution,
+            index
+                .nodes_by_stable_key
+                .get(&candidates[0])?
+                .node_uid
+                .clone(),
+        )),
+        None => None,
+    };
+    carrier.insert("basis".to_string(), serde_json::json!(basis));
+    carrier.insert("candidates".to_string(), serde_json::json!(candidates));
+    let metadata_json = serde_json::Value::Object(carrier).to_string();
+    Some(match bound {
+        Some((resolution, target_uid)) => TargetResolution::IncludeBound {
+            target_uid,
+            resolution,
+            metadata_json,
+        },
+        None => TargetResolution::IncludeAmbiguous { metadata_json },
+    })
 }
 
 /// Convert Option<String> to TargetResolution.
@@ -5591,5 +5744,273 @@ mod tests {
         );
         assert_init_static(&result, &e);
         assert_eq!(result.resolved_import_pairs.len(), 1);
+    }
+
+    // ── C/C++ include suffix / basename stage (CPP-INCLUDE-BASENAME-1, RG-REQ-006-L11) ──
+
+    const C_EXTRACTOR: &str = "c-core:0.1.0";
+
+    /// A resolver index built the way the orchestrator builds it over `paths`: every path is a
+    /// FILE node (`n:<path>`, file uid `r1:<path>`), with the production file-resolution,
+    /// per-TU include, include-root and Java suffix maps.
+    fn c_include_index(paths: &[&str]) -> ResolverIndex {
+        let mut index = empty_index();
+        let all: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
+        index.file_resolution = build_file_resolution_map(&all, "r1");
+        index.per_file_include_resolution = build_per_file_include_resolution(&all, "r1");
+        index.include_resolver = Some(crate::include_resolver::build_include_resolution_map(
+            &all,
+            "r1",
+            &crate::include_resolver::IncludeResolverConfig::default(),
+        ));
+        index.java_suffix_index = build_java_suffix_index(&all);
+        for p in &all {
+            let node = py_file_node(p);
+            index
+                .node_uid_to_file_uid
+                .insert(node.node_uid.clone(), node.file_uid.clone().unwrap());
+            index
+                .nodes_by_uid
+                .insert(node.node_uid.clone(), node.clone());
+            index
+                .nodes_by_stable_key
+                .insert(node.stable_key.clone(), node);
+        }
+        index
+    }
+
+    /// A C include edge from the FILE node of `from` with the carrier the orchestrator stores on
+    /// every include (`{"isTypeOnly":false}`).
+    fn c_include(uid: &str, from: &str, specifier: &str) -> ExtractedEdge {
+        let mut e = make_edge(uid, specifier, EdgeType::Imports);
+        e.source_node_uid = format!("n:{from}");
+        e.extractor = C_EXTRACTOR.into();
+        e.metadata_json = Some(r#"{"isTypeOnly":false}"#.into());
+        e
+    }
+
+    fn carrier(raw: &Option<String>) -> serde_json::Value {
+        serde_json::from_str(raw.as_deref().expect("a carrier")).expect("a JSON carrier")
+    }
+
+    #[test]
+    fn include_unique_multi_segment_suffix_resolves_static_with_its_basis() {
+        let index = c_include_index(&["app/main.cpp", "lib/src/util/foo.h", "lib/src/util/bar.h"]);
+        let e = c_include("e1", "app/main.cpp", "util/foo.h");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1, "{:?}", result.still_unresolved);
+        assert!(result.still_unresolved.is_empty());
+        let r = &result.resolved[0];
+        assert_eq!(r.target_node_uid, "n:lib/src/util/foo.h");
+        assert_eq!(
+            r.resolution,
+            Resolution::Static,
+            "a unique path suffix is certain"
+        );
+        assert_eq!(
+            carrier(&r.metadata_json),
+            serde_json::json!({
+                "isTypeOnly": false,
+                "basis": "unique_suffix",
+                "candidates": ["r1:lib/src/util/foo.h:FILE"],
+            })
+        );
+        assert_eq!(
+            result.resolved_import_pairs,
+            vec![(
+                "n:app/main.cpp".to_string(),
+                "n:lib/src/util/foo.h".to_string(),
+                Some(TypeOnlyDisposition::Runtime)
+            )],
+            "a certain import feeds the persisted module graph"
+        );
+    }
+
+    #[test]
+    fn include_unique_basename_resolves_inferred_with_its_candidate_and_basis() {
+        let index = c_include_index(&["src/event/ngx_event.c", "src/core/ngx_core.h"]);
+        let e = c_include("e1", "src/event/ngx_event.c", "ngx_core.h");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1, "{:?}", result.still_unresolved);
+        let r = &result.resolved[0];
+        assert_eq!(r.target_node_uid, "n:src/core/ngx_core.h");
+        assert_eq!(
+            r.resolution,
+            Resolution::Inferred,
+            "a unique basename is a candidate to investigate, never static"
+        );
+        assert_eq!(
+            carrier(&r.metadata_json),
+            serde_json::json!({
+                "isTypeOnly": false,
+                "basis": "unique_basename",
+                "candidates": ["r1:src/core/ngx_core.h:FILE"],
+            })
+        );
+        assert!(
+            result.resolved_import_pairs.is_empty(),
+            "an inferred import never feeds the persisted module graph"
+        );
+
+        // An include without a carrier gets one holding only the two keys.
+        let mut bare = e.clone();
+        bare.metadata_json = None;
+        let result = resolve_edges(std::slice::from_ref(&bare), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].resolution, Resolution::Inferred);
+        assert_eq!(
+            carrier(&result.resolved[0].metadata_json),
+            serde_json::json!({
+                "basis": "unique_basename",
+                "candidates": ["r1:src/core/ngx_core.h:FILE"],
+            })
+        );
+    }
+
+    #[test]
+    fn include_non_unique_suffix_or_basename_stays_unresolved_ambiguous_with_candidates() {
+        // Basename: `ngx_time.h` exists under unix/ and win32/.
+        let index = c_include_index(&[
+            "src/core/ngx_core.h",
+            "src/os/win32/ngx_time.h",
+            "src/os/unix/ngx_time.h",
+        ]);
+        let e = c_include("e1", "src/core/ngx_core.h", "ngx_time.h");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(result.resolved.is_empty(), "never a pick");
+        assert_eq!(result.still_unresolved.len(), 1);
+        let u = &result.still_unresolved[0];
+        assert_eq!(u.category, UnresolvedEdgeCategory::ImportsAmbiguousMatch);
+        assert_eq!(u.edge.target_key, "ngx_time.h");
+        assert_eq!(
+            carrier(&u.edge.metadata_json),
+            serde_json::json!({
+                "isTypeOnly": false,
+                "basis": "ambiguous_basename",
+                "candidates": ["r1:src/os/unix/ngx_time.h:FILE", "r1:src/os/win32/ngx_time.h:FILE"],
+            })
+        );
+
+        // Suffix: `util/foo.h` ends two indexed paths.
+        let index = c_include_index(&["app/main.cpp", "b/util/foo.h", "a/util/foo.h"]);
+        let e = c_include("e2", "app/main.cpp", "util/foo.h");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(result.resolved.is_empty());
+        assert!(result.resolved_import_pairs.is_empty());
+        let u = &result.still_unresolved[0];
+        assert_eq!(u.category, UnresolvedEdgeCategory::ImportsAmbiguousMatch);
+        assert_eq!(
+            carrier(&u.edge.metadata_json),
+            serde_json::json!({
+                "isTypeOnly": false,
+                "basis": "ambiguous_suffix",
+                "candidates": ["r1:a/util/foo.h:FILE", "r1:b/util/foo.h:FILE"],
+            })
+        );
+    }
+
+    #[test]
+    fn include_suffix_stage_runs_only_after_every_earlier_stage_misses() {
+        let unchanged = Some(r#"{"isTypeOnly":false}"#.to_string());
+
+        // Same directory wins although the basename is not unique.
+        let index = c_include_index(&["src/a/main.c", "src/a/foo.h", "src/b/foo.h"]);
+        let e = c_include("e1", "src/a/main.c", "foo.h");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].target_node_uid, "n:src/a/foo.h");
+        assert_eq!(result.resolved[0].resolution, Resolution::Static);
+        assert_eq!(
+            result.resolved[0].metadata_json, unchanged,
+            "no basis on an earlier stage's answer"
+        );
+
+        // A derived include root wins although the path suffix is not unique.
+        let index = c_include_index(&[
+            "Net/src/a.cpp",
+            "Foundation/include/Poco/Exception.h",
+            "Other/Poco/Exception.h",
+        ]);
+        let e = c_include("e2", "Net/src/a.cpp", "Poco/Exception.h");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(
+            result.resolved[0].target_node_uid,
+            "n:Foundation/include/Poco/Exception.h"
+        );
+        assert_eq!(result.resolved[0].metadata_json, unchanged);
+
+        // Include-root overlap stays the root resolver's ambiguity, without a basis.
+        let index = c_include_index(&[
+            "Net/src/b.cpp",
+            "Foundation/include/Poco/Exception.h",
+            "Util/include/Poco/Exception.h",
+        ]);
+        let e = c_include("e3", "Net/src/b.cpp", "Poco/Exception.h");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(result.resolved.is_empty());
+        assert_eq!(
+            result.still_unresolved[0].category,
+            UnresolvedEdgeCategory::ImportsAmbiguousMatch
+        );
+        assert_eq!(result.still_unresolved[0].edge.metadata_json, unchanged);
+
+        // The repo-prefix stage wins although the path suffix is not unique (never a flip).
+        let index = c_include_index(&["src/x.c", "lib/util.h", "other/lib/util.h"]);
+        let e = c_include("e4", "src/x.c", "lib/util.h");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].target_node_uid, "n:lib/util.h");
+        assert_eq!(result.resolved[0].resolution, Resolution::Static);
+        assert_eq!(result.resolved[0].metadata_json, unchanged);
+    }
+
+    #[test]
+    fn non_c_family_import_never_reaches_the_suffix_or_basename_stage() {
+        let index = c_include_index(&["src/app.ts", "x/core.h", "lib/util/foo.ts"]);
+        for extractor in [
+            "ts-core:0.2.0",
+            "python-core:0.2.0",
+            "rust-core:0.2.0",
+            "java-core:0.1.0",
+            "test:1",
+        ] {
+            for spec in ["core.h", "util/foo.ts"] {
+                let mut e = c_include("e1", "src/app.ts", spec);
+                e.extractor = extractor.into();
+                let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+                assert!(result.resolved.is_empty(), "{extractor} {spec}");
+                assert_eq!(result.still_unresolved.len(), 1, "{extractor} {spec}");
+                let u = &result.still_unresolved[0];
+                assert_eq!(
+                    u.category,
+                    UnresolvedEdgeCategory::ImportsFileNotFound,
+                    "{extractor} {spec}"
+                );
+                assert_eq!(u.edge.metadata_json, e.metadata_json, "{extractor} {spec}");
+            }
+        }
+    }
+
+    #[test]
+    fn include_with_malformed_metadata_declines_the_suffix_stage() {
+        let index = c_include_index(&["src/event/ngx_event.c", "src/core/ngx_core.h"]);
+        for raw in ["not json", "[1,2]", "\"isTypeOnly\"", "7"] {
+            let mut e = c_include("e1", "src/event/ngx_event.c", "ngx_core.h");
+            e.metadata_json = Some(raw.to_string());
+            let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+            assert!(result.resolved.is_empty(), "{raw}");
+            let u = &result.still_unresolved[0];
+            assert_eq!(
+                u.category,
+                UnresolvedEdgeCategory::ImportsFileNotFound,
+                "{raw}"
+            );
+            assert_eq!(
+                u.edge.metadata_json.as_deref(),
+                Some(raw),
+                "never overwritten, never coerced"
+            );
+        }
     }
 }

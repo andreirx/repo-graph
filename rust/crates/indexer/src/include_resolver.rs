@@ -27,7 +27,7 @@
 //!
 //! All functions are PURE. No I/O, no storage access.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -294,14 +294,68 @@ pub fn build_include_resolution_map(
     IncludeResolutionMap {
         resolver,
         indexed_files,
+        files_by_basename: build_basename_index(file_paths),
         repo_uid: repo_uid.to_string(),
     }
+}
+
+/// CPP-INCLUDE-BASENAME-1 (RG-REQ-006-L11): the indexed file list bucketed by basename — basename
+/// → every repo-relative path carrying it, SORTED and deduplicated, so a lookup's answer and its
+/// candidate order never depend on the file list's order (RG-REQ-001-L09).
+///
+/// - what: the lookup structure of [`IncludeResolutionMap::match_path_suffix_or_basename`]; one
+///   producer ([`build_include_resolution_map`]) and one consumer (that method).
+/// - axis of variation: none introduced — a plain map, the `JavaSuffixIndex` shape
+///   (`resolver::build_java_suffix_index`): a lookup scans only the files sharing the
+///   specifier's last segment.
+/// - rejected simpler: scanning the `indexed_files` set per include (O(files) per include on the
+///   resolution hot path).
+fn build_basename_index(file_paths: &[String]) -> HashMap<String, Vec<String>> {
+    let mut index: HashMap<String, Vec<String>> = HashMap::new();
+    for path in file_paths {
+        let basename = path.rsplit('/').next().unwrap_or(path);
+        index
+            .entry(basename.to_string())
+            .or_default()
+            .push(path.clone());
+    }
+    for paths in index.values_mut() {
+        paths.sort();
+        paths.dedup();
+    }
+    index
+}
+
+/// CPP-INCLUDE-BASENAME-1 (RG-REQ-006-L11): what the indexed file list says about an include
+/// specifier by its path suffix or basename alone. Paths are repo-relative; candidate lists are
+/// sorted. A PURE answer over the file list: whether a match may bind, and with what certainty, is
+/// the resolver's decision (`resolver::resolve_include_suffix_or_basename`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IncludePathMatch {
+    /// Not a path this lookup reads: a `:` (a stable-key form), a `..` component, or nothing left
+    /// after dropping `.` and empty components.
+    Declined,
+    /// No indexed file ends with the specifier (two or more segments) or carries it as its exact
+    /// basename (one segment).
+    NoMatch,
+    /// Two or more segments; exactly one indexed path equals the joined segments or ends with
+    /// `/` + them.
+    UniqueSuffix(String),
+    /// Two or more segments; several indexed paths end with them — every one.
+    AmbiguousSuffix(Vec<String>),
+    /// One segment; exactly one indexed file has that exact basename. A candidate, never a suffix
+    /// match: a file of that name exists, but nothing says the build's include path reaches it.
+    UniqueBasename(String),
+    /// One segment; several indexed files have that exact basename — every one.
+    AmbiguousBasename(Vec<String>),
 }
 
 /// Stateful include resolution map that can resolve includes on demand.
 pub struct IncludeResolutionMap {
     resolver: IncludeResolver,
     indexed_files: HashSet<String>,
+    /// CPP-INCLUDE-BASENAME-1: built once from the same file list as `indexed_files`.
+    files_by_basename: HashMap<String, Vec<String>>,
     repo_uid: String,
 }
 
@@ -336,6 +390,54 @@ impl IncludeResolutionMap {
             _ => None,
         }
     }
+
+    /// CPP-INCLUDE-BASENAME-1 (RG-REQ-006-L11): match an include specifier against the indexed
+    /// file list by path suffix (two or more segments) or exact basename (one segment), after
+    /// dropping `.` and empty components. Never completes an extension (`foo` never matches
+    /// `foo.h`) and matches a suffix only at a `/` boundary (`util/foo.h` never matches
+    /// `myutil/foo.h`). PURE; independent of the source file and of the include roots.
+    pub fn match_path_suffix_or_basename(&self, include_specifier: &str) -> IncludePathMatch {
+        if include_specifier.contains(':') {
+            return IncludePathMatch::Declined;
+        }
+        let segments: Vec<&str> = include_specifier
+            .split('/')
+            .filter(|s| !s.is_empty() && *s != ".")
+            .collect();
+        if segments.is_empty() || segments.contains(&"..") {
+            return IncludePathMatch::Declined;
+        }
+        let basename = segments[segments.len() - 1];
+        let Some(same_basename) = self.files_by_basename.get(basename) else {
+            return IncludePathMatch::NoMatch;
+        };
+        if segments.len() == 1 {
+            return match same_basename.as_slice() {
+                [] => IncludePathMatch::NoMatch,
+                [one] => IncludePathMatch::UniqueBasename(one.clone()),
+                many => IncludePathMatch::AmbiguousBasename(many.to_vec()),
+            };
+        }
+        let suffix = segments.join("/");
+        let matches: Vec<String> = same_basename
+            .iter()
+            .filter(|path| ends_at_directory_boundary(path, &suffix))
+            .cloned()
+            .collect();
+        match matches.as_slice() {
+            [] => IncludePathMatch::NoMatch,
+            [one] => IncludePathMatch::UniqueSuffix(one.clone()),
+            _ => IncludePathMatch::AmbiguousSuffix(matches),
+        }
+    }
+}
+
+/// True iff `path` equals `suffix` or ends with `/` + `suffix`.
+fn ends_at_directory_boundary(path: &str, suffix: &str) -> bool {
+    path == suffix
+        || path
+            .strip_suffix(suffix)
+            .is_some_and(|head| head.ends_with('/'))
 }
 
 // ── Tests ────────────────────────────────────────────────────────
@@ -964,5 +1066,165 @@ mod tests {
 
         let key = map.get_resolved_key("src/main.c", "missing.h", false);
         assert_eq!(key, None);
+    }
+
+    // ── CPP-INCLUDE-BASENAME-1: the path-suffix / basename lookup (RG-REQ-006-L11) ──
+
+    /// The include resolution map built exactly as the orchestrator builds it (no configured
+    /// roots), over the given indexed file list.
+    fn map_of(paths: &[&str]) -> IncludeResolutionMap {
+        let owned: Vec<String> = paths.iter().map(|s| s.to_string()).collect();
+        build_include_resolution_map(&owned, "r1", &IncludeResolverConfig::default())
+    }
+
+    #[test]
+    fn unique_multi_segment_suffix_matches_one_indexed_file() {
+        let map = map_of(&["app/main.cpp", "lib/src/util/foo.h", "lib/src/util/bar.h"]);
+        let want = IncludePathMatch::UniqueSuffix("lib/src/util/foo.h".to_string());
+        assert_eq!(map.match_path_suffix_or_basename("util/foo.h"), want);
+        // The whole path is a suffix of itself.
+        assert_eq!(
+            map.match_path_suffix_or_basename("lib/src/util/foo.h"),
+            want
+        );
+        // `.` and empty components are dropped before matching.
+        assert_eq!(map.match_path_suffix_or_basename("./util//foo.h"), want);
+    }
+
+    #[test]
+    fn non_unique_multi_segment_suffix_lists_every_candidate() {
+        let map = map_of(&["b/util/foo.h", "a/util/foo.h", "c/other/foo.h"]);
+        assert_eq!(
+            map.match_path_suffix_or_basename("util/foo.h"),
+            IncludePathMatch::AmbiguousSuffix(vec![
+                "a/util/foo.h".to_string(),
+                "b/util/foo.h".to_string(),
+            ]),
+            "every candidate ending in the suffix, sorted; the third `foo.h` is not one"
+        );
+    }
+
+    #[test]
+    fn multi_segment_suffix_matches_only_at_a_directory_boundary() {
+        // `myutil/foo.h` ends with the text `util/foo.h` but not at a `/` boundary.
+        let map = map_of(&["x/myutil/foo.h"]);
+        assert_eq!(
+            map.match_path_suffix_or_basename("util/foo.h"),
+            IncludePathMatch::NoMatch
+        );
+        let map = map_of(&["x/myutil/foo.h", "y/util/foo.h"]);
+        assert_eq!(
+            map.match_path_suffix_or_basename("util/foo.h"),
+            IncludePathMatch::UniqueSuffix("y/util/foo.h".to_string()),
+            "only the boundary match counts, so the one boundary match is unique"
+        );
+    }
+
+    #[test]
+    fn single_segment_unique_basename_is_an_inferred_candidate_never_a_suffix_match() {
+        let map = map_of(&["src/core/ngx_core.h", "src/event/ngx_event.c"]);
+        assert_eq!(
+            map.match_path_suffix_or_basename("ngx_core.h"),
+            IncludePathMatch::UniqueBasename("src/core/ngx_core.h".to_string()),
+            "one segment, one file of that basename: a basename candidate, not a suffix match"
+        );
+    }
+
+    #[test]
+    fn single_segment_non_unique_basename_lists_every_candidate() {
+        let map = map_of(&["src/os/win32/ngx_time.h", "src/os/unix/ngx_time.h"]);
+        assert_eq!(
+            map.match_path_suffix_or_basename("ngx_time.h"),
+            IncludePathMatch::AmbiguousBasename(vec![
+                "src/os/unix/ngx_time.h".to_string(),
+                "src/os/win32/ngx_time.h".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn single_segment_with_no_indexed_basename_matches_nothing() {
+        let map = map_of(&["src/core/ngx_config.h"]);
+        assert_eq!(
+            map.match_path_suffix_or_basename("stddef.h"),
+            IncludePathMatch::NoMatch
+        );
+        assert_eq!(
+            map.match_path_suffix_or_basename("ngx_auto_headers.h"),
+            IncludePathMatch::NoMatch
+        );
+        assert_eq!(
+            map.match_path_suffix_or_basename("sys/types.h"),
+            IncludePathMatch::NoMatch
+        );
+    }
+
+    #[test]
+    fn basename_match_is_exact_never_extension_completion() {
+        let map = map_of(&["include/foo.h", "src/foo.hpp", "src/xfoo.h"]);
+        assert_eq!(
+            map.match_path_suffix_or_basename("foo"),
+            IncludePathMatch::NoMatch,
+            "an extensionless specifier never completes to foo.h or foo.hpp"
+        );
+        assert_eq!(
+            map.match_path_suffix_or_basename("foo.h"),
+            IncludePathMatch::UniqueBasename("include/foo.h".to_string()),
+            "exact basename only: neither xfoo.h nor foo.hpp"
+        );
+        assert_eq!(
+            map.match_path_suffix_or_basename("Foo.h"),
+            IncludePathMatch::NoMatch,
+            "case-sensitive"
+        );
+    }
+
+    #[test]
+    fn dot_dot_or_stable_key_specifier_is_declined() {
+        let map = map_of(&["deps/sljit/sljitLir.c", "src/foo.h"]);
+        for spec in [
+            "../deps/sljit/sljitLir.c",
+            "a/../foo.h",
+            "r1:src/foo.h:FILE",
+            "",
+            ".",
+            "./",
+            "//",
+        ] {
+            assert_eq!(
+                map.match_path_suffix_or_basename(spec),
+                IncludePathMatch::Declined,
+                "{spec:?} is declined"
+            );
+        }
+    }
+
+    #[test]
+    fn suffix_index_is_built_from_the_indexed_file_list_only() {
+        // Only the indexed list is consulted: a basename that exists nowhere in it never matches.
+        let map = map_of(&["a/util/foo.h"]);
+        assert_eq!(
+            map.match_path_suffix_or_basename("bar.h"),
+            IncludePathMatch::NoMatch
+        );
+        // The answer and the candidate order do not depend on the file list's order.
+        let forward = ["x/a.h", "y/a.h", "z/q/a.h", "q/a.h", "w/q/a.h"];
+        let mut reversed = forward;
+        reversed.reverse();
+        for spec in ["a.h", "q/a.h"] {
+            assert_eq!(
+                map_of(&forward).match_path_suffix_or_basename(spec),
+                map_of(&reversed).match_path_suffix_or_basename(spec),
+                "{spec}"
+            );
+        }
+        assert_eq!(
+            map_of(&reversed).match_path_suffix_or_basename("q/a.h"),
+            IncludePathMatch::AmbiguousSuffix(vec![
+                "q/a.h".to_string(),
+                "w/q/a.h".to_string(),
+                "z/q/a.h".to_string(),
+            ])
+        );
     }
 }

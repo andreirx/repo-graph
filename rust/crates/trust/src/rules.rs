@@ -10,6 +10,8 @@
 //!   MEDIUM — reliable enough for orientation but not decision-critical
 //!   LOW    — do not act on this command's output without manual verification
 
+use repo_graph_classification::types::MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES;
+
 use crate::types::{
     DowngradeTrigger, ExtractionDiagnostics, ReliabilityAxisScore, ReliabilityLevel,
 };
@@ -394,13 +396,28 @@ pub(crate) fn sum_unresolved_calls(diagnostics: &ExtractionDiagnostics) -> u64 {
 
 /// Sum unresolved counts for IMPORTS-family categories.
 ///
-/// Mirror of `sumUnresolvedImports` from `rules.ts:330`.
+/// CPP-INCLUDE-BASENAME-1 (D-CIB-COUNT-1 = A, RG-REQ-002-L02): the family is the ONE shared set
+/// the `modules list` headline counts, `MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES` (one
+/// definition, two readers), each category keyed by its serialized name — the key the indexer
+/// writes into `unresolved_breakdown`. A category absent from the breakdown has no rows (the
+/// indexer writes a key only for a category it counted), the same reading `sum_unresolved_calls`
+/// applies. Formerly the single key `imports_file_not_found`, a narrower basis than the name.
 pub(crate) fn sum_unresolved_imports(diagnostics: &ExtractionDiagnostics) -> u64 {
-    diagnostics
-        .unresolved_breakdown
-        .get("imports_file_not_found")
-        .copied()
-        .unwrap_or(0)
+    MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES
+        .iter()
+        .map(|category| {
+            let key = match serde_json::to_value(category) {
+                Ok(serde_json::Value::String(key)) => key,
+                // A unit variant of a `rename_all = "snake_case"` enum serializes to its name.
+                other => unreachable!("unresolved category {category:?} serialized as {other:?}"),
+            };
+            diagnostics
+                .unresolved_breakdown
+                .get(&key)
+                .copied()
+                .unwrap_or(0)
+        })
+        .sum()
 }
 
 /// The zero-connectivity predicate, defined ONCE.
@@ -999,18 +1016,35 @@ mod tests {
     }
 
     #[test]
-    fn sum_unresolved_imports_picks_imports_family() {
+    fn sum_unresolved_imports_sums_every_category_of_the_shared_imports_set() {
+        // CPP-INCLUDE-BASENAME-1 (D-CIB-COUNT-1 = A): one count in each of the four IMPORTS
+        // categories the modules-list headline counts, plus a CALLS category that is not one.
         let mut breakdown = BTreeMap::new();
-        breakdown.insert("imports_file_not_found".into(), 7);
+        breakdown.insert("imports_file_not_found".into(), 1);
+        breakdown.insert("imports_ambiguous_match".into(), 1);
+        breakdown.insert("imports_wildcard".into(), 1);
+        breakdown.insert("imports_ambiguous_suffix".into(), 1);
         breakdown.insert("calls_obj_method_needs_type_info".into(), 10);
         let diag = ExtractionDiagnostics {
             inferred_calls: None,
             diagnostics_version: 1,
             edges_total: 100,
-            unresolved_total: 17,
+            unresolved_total: 14,
             unresolved_breakdown: breakdown,
         };
-        assert_eq!(sum_unresolved_imports(&diag), 7);
+        assert_eq!(sum_unresolved_imports(&diag), 4);
+
+        // A category with no rows is absent from the breakdown and adds nothing.
+        let mut breakdown = BTreeMap::new();
+        breakdown.insert("imports_wildcard".into(), 2);
+        let diag = ExtractionDiagnostics {
+            inferred_calls: None,
+            diagnostics_version: 1,
+            edges_total: 10,
+            unresolved_total: 2,
+            unresolved_breakdown: breakdown,
+        };
+        assert_eq!(sum_unresolved_imports(&diag), 2);
     }
 
     #[test]

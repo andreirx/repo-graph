@@ -49,6 +49,90 @@ pub struct ImportEntry {
     pub evidence: Vec<String>,
     #[serde(default)]
     pub depth: u32,
+    /// CPP-INCLUDE-BASENAME-1 (RG-REQ-002-L11): why the row is bound, as the daemon recorded it
+    /// (`None` = no `reason` key).
+    #[serde(default)]
+    pub reason: Option<ImportEntryReason>,
+}
+
+/// CPP-INCLUDE-BASENAME-1: the decoded `reason` of an import row — the storage read's three
+/// forms, plus any other shape (JSON this build did not produce), kept as found so the row still
+/// renders and says the reason is unreadable.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum ImportEntryReason {
+    Recorded {
+        basis: String,
+        candidates: Vec<String>,
+    },
+    Unreadable {
+        unreadable: String,
+    },
+    Missing {
+        missing: String,
+    },
+    Other(serde_json::Value),
+}
+
+/// The one row form of an `imports <file>` listing, shared by the default and the compare
+/// listings: `  <symbol>  depth=<d>  <resolution>`, where an `inferred` row's resolution states
+/// its reason ([`inferred_row_state`]).
+fn format_import_row(imp: &ImportEntry) -> String {
+    let resolution = if imp.resolution == "inferred" {
+        inferred_row_state(imp)
+    } else if imp.resolution.is_empty() {
+        "-".to_string()
+    } else {
+        imp.resolution.clone()
+    };
+    format!(
+        "  {}  depth={}  {}
+",
+        imp.symbol, imp.depth, resolution
+    )
+}
+
+/// CPP-INCLUDE-BASENAME-1 (RG-REQ-002-L11, RG-REQ-002-L04): what an inferred row says about its
+/// reason. The renderer prints JSON it did not produce, so it re-checks the one agreement it prints
+/// — a `unique_basename` reason with exactly one candidate equal to the row's own `file` — and
+/// states every other reason as unreadable, never as evidence. A C/C++ inferred row without a
+/// reason (its reason carrier was lost) says so with the remedy; any other row without a reason
+/// prints `inferred`, as before.
+fn inferred_row_state(imp: &ImportEntry) -> String {
+    const MISSING: &str = "inferred (reason missing — re-index)";
+    let unreadable = |what: &str| format!("inferred: reason unreadable ({what})");
+    match &imp.reason {
+        Some(ImportEntryReason::Recorded { basis, candidates }) => {
+            if basis != "unique_basename" {
+                return unreadable(&format!("basis {basis} on an inferred row"));
+            }
+            match candidates.as_slice() {
+                [one] if *one == imp.file => format!("inferred: unique basename → {one}"),
+                [one] => unreadable(&format!("candidate {one} is not the row's file")),
+                many => unreadable(&format!(
+                    "{} candidates under a unique basename",
+                    many.len()
+                )),
+            }
+        }
+        Some(ImportEntryReason::Unreadable { unreadable: what }) => unreadable(what),
+        Some(ImportEntryReason::Missing { .. }) => MISSING.to_string(),
+        Some(ImportEntryReason::Other(value)) => {
+            if value.is_object() && value.get("basis").is_none() {
+                unreadable("the reason has no basis")
+            } else {
+                unreadable("a reason this build does not read")
+            }
+        }
+        None if imp
+            .evidence
+            .iter()
+            .any(|e| e.starts_with("c-core:") || e.starts_with("cpp-core:")) =>
+        {
+            MISSING.to_string()
+        }
+        None => "inferred".to_string(),
+    }
 }
 
 /// Response structure for imports command.
@@ -93,17 +177,9 @@ impl ImportsResponse {
         out.push('\n');
 
         // ── Import list ────────────────────────────────────────────
+        // The symbol is the display name (usually the imported file path).
         for imp in &self.imports {
-            // Use symbol as the display name (usually the imported file path)
-            let name = &imp.symbol;
-            let depth = imp.depth;
-            let resolution = if imp.resolution.is_empty() {
-                "-"
-            } else {
-                &imp.resolution
-            };
-
-            out.push_str(&format!("  {}  depth={}  {}\n", name, depth, resolution));
+            out.push_str(&format_import_row(imp));
         }
 
         self.push_partition_lines(&mut out);
@@ -347,15 +423,7 @@ impl ImportsCompareResponse {
         if !self.imports.is_empty() {
             out.push('\n');
             for imp in &self.imports {
-                let resolution = if imp.resolution.is_empty() {
-                    "-"
-                } else {
-                    &imp.resolution
-                };
-                out.push_str(&format!(
-                    "  {}  depth={}  {}\n",
-                    imp.symbol, imp.depth, resolution
-                ));
+                out.push_str(&format_import_row(imp));
             }
         }
         // ── Compare summary (the sidecar) ──
@@ -579,6 +647,7 @@ mod tests {
                     resolution: "static".to_string(),
                     evidence: vec!["cpp-core:0.1.0".to_string()],
                     depth: 1,
+                    reason: None,
                 },
                 ImportEntry {
                     node_id: "n2".to_string(),
@@ -592,6 +661,7 @@ mod tests {
                     resolution: "static".to_string(),
                     evidence: vec![],
                     depth: 1,
+                    reason: None,
                 },
                 ImportEntry {
                     node_id: "n3".to_string(),
@@ -605,6 +675,7 @@ mod tests {
                     resolution: "unresolved".to_string(),
                     evidence: vec![],
                     depth: 1,
+                    reason: None,
                 },
             ],
             import_view: Some(default_view()),
@@ -970,6 +1041,239 @@ mod tests {
                 "{bad}: {out}"
             );
             assert!(!out.contains("not shown"), "{out}");
+        }
+    }
+
+    // ── CPP-INCLUDE-BASENAME-1: the reason on an inferred row (D-CIB-REASON-1) ──────────
+
+    /// A row as the daemon serializes it.
+    fn row_json(
+        path: &str,
+        resolution: &str,
+        evidence: &str,
+        reason: Option<serde_json::Value>,
+    ) -> serde_json::Value {
+        let mut row = serde_json::json!({
+            "node_id": "n", "symbol": path, "kind": "FILE", "file": path,
+            "edge_type": "IMPORTS", "resolution": resolution,
+            "evidence": if evidence.is_empty() { vec![] } else { vec![evidence] }, "depth": 1
+        });
+        if let Some(reason) = reason {
+            row["reason"] = reason;
+        }
+        row
+    }
+
+    /// An `--include-inferred` listing of `src/core/ngx_config.h` over the given rows.
+    fn listing_with_inferred(rows: Vec<serde_json::Value>) -> ImportsResponse {
+        serde_json::from_value(serde_json::json!({
+            "file": "src/core/ngx_config.h",
+            "imports": rows,
+            "import_view": {"include_tests": false, "include_inferred": true},
+            "import_remainder": zero_remainder(),
+        }))
+        .unwrap()
+    }
+
+    /// The single row line of a one-row listing.
+    fn only_row(resp: &ImportsResponse) -> String {
+        let out = resp.render_human();
+        let rows: Vec<&str> = out.lines().filter(|l| l.starts_with("  ")).collect();
+        assert_eq!(rows.len(), 1, "{out}");
+        rows[0].to_string()
+    }
+
+    const LINUX: &str = "src/os/unix/ngx_linux_config.h";
+
+    #[test]
+    fn inferred_unique_basename_row_renders_its_reason_and_candidate() {
+        let resp = listing_with_inferred(vec![row_json(
+            LINUX,
+            "inferred",
+            "c-core:0.1.0",
+            Some(serde_json::json!({"basis": "unique_basename", "candidates": [LINUX]})),
+        )]);
+        assert_eq!(
+            resp.render_human(),
+            format!(
+                "Imports: src/core/ngx_config.h\n\n1 import\n\n  {LINUX}  depth=1  inferred: unique basename → {LINUX}\n"
+            )
+        );
+    }
+
+    #[test]
+    fn inferred_row_with_an_unreadable_reason_says_so_never_bare_inferred() {
+        let resp = listing_with_inferred(vec![row_json(
+            LINUX,
+            "inferred",
+            "c-core:0.1.0",
+            Some(serde_json::json!({"unreadable": "candidates is empty"})),
+        )]);
+        assert_eq!(
+            only_row(&resp),
+            format!("  {LINUX}  depth=1  inferred: reason unreadable (candidates is empty)")
+        );
+    }
+
+    #[test]
+    fn inferred_row_whose_reason_disagrees_with_the_row_is_unreadable_never_evidence() {
+        // JSON this build did not produce: the renderer re-checks the one agreement it prints.
+        let disagreements = [
+            serde_json::json!({"basis": "unique_basename", "candidates": ["src/os/win32/ngx_win32_config.h"]}),
+            serde_json::json!({"basis": "unique_basename", "candidates": [LINUX, "src/x.h"]}),
+            serde_json::json!({"basis": "unique_basename", "candidates": []}),
+            serde_json::json!({"basis": "unique_suffix", "candidates": [LINUX]}),
+            serde_json::json!({"basis": "python_submodule", "candidates": [LINUX]}),
+            serde_json::json!({"candidates": [LINUX]}),
+            serde_json::json!("unique_basename"),
+        ];
+        for reason in disagreements {
+            let resp = listing_with_inferred(vec![row_json(
+                LINUX,
+                "inferred",
+                "c-core:0.1.0",
+                Some(reason.clone()),
+            )]);
+            let line = only_row(&resp);
+            let prefix = format!("  {LINUX}  depth=1  inferred: reason unreadable (");
+            assert!(
+                line.starts_with(&prefix) && line.ends_with(')'),
+                "{reason}: {line}"
+            );
+            assert!(
+                !line.contains('→'),
+                "{reason}: never printed as evidence: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn row_without_a_rendered_reason_prints_exactly_as_before() {
+        // A static row (its reason stays in JSON), another producer's inferred row without a
+        // reason, and a row whose evidence names no producer.
+        let resp = listing_with_inferred(vec![
+            row_json(
+                "lib/src/util/foo.h",
+                "static",
+                "cpp-core:0.2.0",
+                Some(
+                    serde_json::json!({"basis": "unique_suffix", "candidates": ["lib/src/util/foo.h"]}),
+                ),
+            ),
+            row_json("pkg/sub.py", "inferred", "python-core:0.2.0", None),
+            row_json("src/x.h", "inferred", "", None),
+            row_json("src/y.h", "static", "c-core:0.1.0", None),
+        ]);
+        assert_eq!(
+            resp.render_human(),
+            "Imports: src/core/ngx_config.h\n\n4 imports\n\n  \
+             lib/src/util/foo.h  depth=1  static\n  \
+             pkg/sub.py  depth=1  inferred\n  \
+             src/x.h  depth=1  inferred\n  \
+             src/y.h  depth=1  static\n"
+        );
+    }
+
+    #[test]
+    fn compare_listing_prints_the_same_rows_as_the_default_listing() {
+        let rows = vec![
+            row_json(
+                LINUX,
+                "inferred",
+                "c-core:0.1.0",
+                Some(serde_json::json!({"basis": "unique_basename", "candidates": [LINUX]})),
+            ),
+            row_json("src/core/ngx_core.h", "inferred", "c-core:0.1.0", None),
+            row_json("src/event/ngx_event.h", "static", "c-core:0.1.0", None),
+        ];
+        let default = listing_with_inferred(rows.clone());
+        let compare: ImportsCompareResponse = serde_json::from_value(serde_json::json!({
+            "file": "src/core/ngx_config.h",
+            "imports": rows,
+            "comparison": {"status": "SqliteFallback"},
+        }))
+        .unwrap();
+        let row_lines = |out: String| -> Vec<String> {
+            out.lines()
+                .filter(|l| l.starts_with("  ") && l.contains("depth="))
+                .map(str::to_string)
+                .collect()
+        };
+        let d = row_lines(default.render_human());
+        assert_eq!(d.len(), 3);
+        assert_eq!(d, row_lines(compare.render_human()));
+    }
+
+    #[test]
+    fn import_entry_decodes_a_reason_its_unreadable_form_its_missing_form_and_its_absence() {
+        let decode = |reason: Option<serde_json::Value>| -> ImportEntry {
+            serde_json::from_value(row_json(LINUX, "inferred", "c-core:0.1.0", reason)).unwrap()
+        };
+        assert_eq!(
+            decode(Some(
+                serde_json::json!({"basis": "unique_basename", "candidates": [LINUX]})
+            ))
+            .reason,
+            Some(ImportEntryReason::Recorded {
+                basis: "unique_basename".into(),
+                candidates: vec![LINUX.into()],
+            })
+        );
+        assert_eq!(
+            decode(Some(
+                serde_json::json!({"unreadable": "basis is not a string"})
+            ))
+            .reason,
+            Some(ImportEntryReason::Unreadable {
+                unreadable: "basis is not a string".into()
+            })
+        );
+        assert_eq!(
+            decode(Some(serde_json::json!({"missing": "no reason carrier"}))).reason,
+            Some(ImportEntryReason::Missing {
+                missing: "no reason carrier".into()
+            })
+        );
+        assert_eq!(decode(None).reason, None);
+    }
+
+    #[test]
+    fn inferred_row_whose_reason_is_missing_for_a_null_carrier_says_re_index() {
+        let resp = listing_with_inferred(vec![row_json(
+            LINUX,
+            "inferred",
+            "c-core:0.1.0",
+            Some(serde_json::json!({"missing": "no reason carrier"})),
+        )]);
+        assert_eq!(
+            only_row(&resp),
+            format!("  {LINUX}  depth=1  inferred (reason missing — re-index)")
+        );
+    }
+
+    #[test]
+    fn inferred_row_whose_reason_is_missing_for_a_carrier_without_basis_says_re_index() {
+        let resp = listing_with_inferred(vec![row_json(
+            LINUX,
+            "inferred",
+            "cpp-core:0.2.0",
+            Some(serde_json::json!({"missing": "reason carrier has no basis"})),
+        )]);
+        assert_eq!(
+            only_row(&resp),
+            format!("  {LINUX}  depth=1  inferred (reason missing — re-index)")
+        );
+    }
+
+    #[test]
+    fn c_family_inferred_row_without_a_reason_key_says_reason_missing_never_bare_inferred() {
+        for evidence in ["c-core:0.1.0", "cpp-core:0.2.0"] {
+            let resp = listing_with_inferred(vec![row_json(LINUX, "inferred", evidence, None)]);
+            assert_eq!(
+                only_row(&resp),
+                format!("  {LINUX}  depth=1  inferred (reason missing — re-index)"),
+                "{evidence}"
+            );
         }
     }
 }

@@ -1,0 +1,572 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-CPP-INCLUDE-BASENAME-1-0",
+  "workItemId": "CPP-INCLUDE-BASENAME-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/CPP-INCLUDE-BASENAME-1-INPUT-2.json",
+    "sha256": "sha256:7f941e185c0cf4363acc4b581364c5e378c0841b8d48fea484df0e8158e2f3a3"
+  },
+  "allocation": {
+    "path": "docs/slices/cpp-include-basename-1.md",
+    "sha256": "sha256:21aeacda71e8611ee1027e3eaf052192e2d1c5ef58f510e953314c8cb3db0ec4"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "0304ece957c2fcef49daa1b242818bc9c1732473",
+    "entries": [
+      {
+        "path": "rust/crates/classification/src/types.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:675dc9d9a0c48312558e1c90240b71ef0ba75f3000a268c97a558f0133638d45",
+          "byteLength": 53203
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:cd674774bfc9d442ec9879011a84327d822fc4bbfdf8c45909a036a9b8c9bd6c",
+          "byteLength": 53829
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/livegraph_feed.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:725e62a1cce2a08a89e0e6a8ee23bf7f017abfd8939557d2c23321d9aa93afb3",
+          "byteLength": 261141
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:8f8409a789589527d30860a63aefe0e04957896eef0723acfc4807d537c33e6b",
+          "byteLength": 261167
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/include_resolver.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:75d851902307ab6f2d2cf78f990a8e4b7d64403b9e916f8739fc9c25f0983333",
+          "byteLength": 36631
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:67a91b09d673b4f062215e1eaa0d20a5bb39e55eb190eb9029e255eda4de2f12",
+          "byteLength": 47644
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/orchestrator.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:b282ea60a8f1f0e847669af198ce911e1e8d1b1a53725fb8f86f47f2d5ce326e",
+          "byteLength": 189673
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:911a0bd17304c84f9c2c6e38c3c43a898ae2d3287c3ad6cd84fd8b5abecc4dd9",
+          "byteLength": 189673
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/resolver.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:6e8f64dab1385daf16e115ff34442e23cb0d50a3b28726292c9540e84292c4d2",
+          "byteLength": 250066
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:00f29d7df24326c3dc5e55d94d89d28eef7273bc0b5a8bd6032511c5624c019a",
+          "byteLength": 269444
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/tests/cpp_include_roots.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:615c73cb38b7cfe7fcbe4654ac475d6ed4fede3b6bda45232e6a7247e2d9194b",
+          "byteLength": 7776
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:57c7627adabcd026cdce2f94c1cf5b31799e5a00d9c9435d940fb853ab13b08e",
+          "byteLength": 20782
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/imports.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:17c8174fa419383a443dadb55a1b8635e465ce1c7d33e8c34928c12a37352d0b",
+          "byteLength": 36085
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:46a2dd008baa870e0eda0a3bc5966ba9290ace7103f696f089df15879a1870aa",
+          "byteLength": 47885
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/queries.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:1403b61b522fe0a5a3ce33cefcb38b861ee99a803bb67aa21d65cabe11df2e52",
+          "byteLength": 279232
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:1d57990cd7b6e3f3dad06be98c5bf6617cc8ff0a44064f27edf82fcfb3050c3c",
+          "byteLength": 296951
+        }
+      },
+      {
+        "path": "rust/crates/trust/src/rules.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:70bdbd2994240ee3da8bcc9d5172b67a3edc0f6310f7a55912fdecefe12bc73c",
+          "byteLength": 39892
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:9137e944c103e4182cecfe288a17116f5462bcee4e10bc5e4bf93848f2c169e0",
+          "byteLength": 41815
+        }
+      },
+      {
+        "path": "rust/crates/trust/src/service.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:3559e35dbd4ebdb43499f9140f6964b59fa4adcbc6faabbe107dafaba0037aed",
+          "byteLength": 104679
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:d648176770ed704edef789d72faf4c85a3dff348eef2121e16f40637b0a96344",
+          "byteLength": 106330
+        }
+      }
+    ],
+    "sha256": "sha256:d6d8521d7e32d4cdff625e021ade58b12ca24d6d193ab9f544c8b486bb812a5f"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-CPP-INCLUDE-BASENAME-1-0"
+  },
+  "checks": [
+    {
+      "checkId": "CIB-C01",
+      "obligationIds": [
+        "RG-REQ-006-L11",
+        "RG-REQ-002-L11",
+        "RG-REQ-006-L03",
+        "RG-REQ-006-L05",
+        "RG-REQ-006-L01",
+        "RG-REQ-006-L02",
+        "RG-REQ-006-L04",
+        "RG-REQ-004-L02",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L04",
+        "P-CIB-01",
+        "P-CIB-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "git cat-file -e HEAD:docs/assurance/TOOLCHAIN-STALENESS-1/implementation-review.json && git show HEAD:docs/assurance/TOOLCHAIN-STALENESS-1/implementation-review.json | python3 -c \"import json,sys; d=json.load(sys.stdin); sys.exit(0 if (d.get('workItemId'), d.get('result')) == ('TOOLCHAIN-STALENESS-1', 'accepted') else 1)\" && git cat-file -e HEAD:docs/assurance/TEST-EDGE-SCOPE-1B/implementation-review.json && git show HEAD:docs/assurance/TEST-EDGE-SCOPE-1B/implementation-review.json | python3 -c \"import json,sys; d=json.load(sys.stdin); sys.exit(0 if (d.get('workItemId'), d.get('result')) == ('TEST-EDGE-SCOPE-1B', 'accepted') else 1)\" && ( set -o pipefail; cargo test -p repo-graph-indexer 2>&1 | tee /tmp/cib-01.txt ) && grep -qE '^test result: ok\\.' /tmp/cib-01.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/cib-01.txt && for t in unique_multi_segment_suffix_matches_one_indexed_file non_unique_multi_segment_suffix_lists_every_candidate multi_segment_suffix_matches_only_at_a_directory_boundary single_segment_unique_basename_is_an_inferred_candidate_never_a_suffix_match single_segment_non_unique_basename_lists_every_candidate single_segment_with_no_indexed_basename_matches_nothing basename_match_is_exact_never_extension_completion dot_dot_or_stable_key_specifier_is_declined suffix_index_is_built_from_the_indexed_file_list_only include_unique_multi_segment_suffix_resolves_static_with_its_basis include_unique_basename_resolves_inferred_with_its_candidate_and_basis include_non_unique_suffix_or_basename_stays_unresolved_ambiguous_with_candidates include_suffix_stage_runs_only_after_every_earlier_stage_misses non_c_family_import_never_reaches_the_suffix_or_basename_stage include_with_malformed_metadata_declines_the_suffix_stage ambiguous_when_multiple_roots_have_same_header angle_bracket_ambiguous_when_multiple_matches angle_bracket_resolves_if_local_header_exists angle_bracket_resolves_via_conventional_root angle_bracket_skips_same_dir angle_bracket_unresolved_when_no_local_match configured_and_conventional_both_matching_is_ambiguous configured_root_resolves derived_root_ambiguous_when_two_derived_roots_hold_the_header derived_root_angle_bracket_resolves derived_root_ignores_a_file_named_include derived_root_is_case_sensitive derived_root_pooled_with_configured_root_is_ambiguous derived_root_resolves_header_under_nested_inc_dir derived_root_resolves_header_under_nested_include_dir derived_root_same_directory_hit_still_wins derived_roots_are_deterministic_regardless_of_file_order header_to_header_same_dir header_to_header_via_include_root inc_root_resolves include_root_resolves no_sibling_directory_magic no_suffix_guessing normalize_removes_dot normalize_removes_empty_segments normalize_resolves_dotdot quoted_still_checks_same_dir_first resolution_map_get_resolved_key same_directory_resolves same_directory_wins_over_include_root src_include_root_resolves subpath_does_not_match_basename subpath_include_resolves categorize_imports java_import_resolves_to_file_node java_import_wildcard_is_named_basis per_file_include_resolution_different_directory per_file_include_resolution_same_directory resolve_import_by_stable_key resolve_import_via_extensionless_file_resolution resolve_import_via_per_tu_include resolve_import_via_repo_prefix_fallback stage_3_5_gated_off_for_non_rust_imports build_toolchain_json_lists_extractor_names_in_order_then_the_indexer_version; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/cib-01.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/cib-01.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-indexer -- --list 2>/dev/null | grep -c ': test$')\" -ge 504 && python3 - <<'PY'\nimport subprocess, re\ndef sh(*a): return subprocess.run(a, capture_output=True, text=True, check=True).stdout\ndef body(src, name, indent):\n    pad = \" \" * indent\n    key = pad + \"fn \" + name + \"(\"\n    i = src.find(key)\n    assert i >= 0 and src.find(key, i + 1) < 0, (\"exactly one test fn\", name)\n    j = src.find(\"\\n\" + pad + \"}\\n\", i)\n    assert j > i, (\"end of test fn\", name)\n    return src[i:j]\ndef same(path, names, indent):\n    head, cur = sh(\"git\", \"show\", \"HEAD:./\" + path), open(path, encoding=\"utf-8\").read()\n    for n in names:\n        assert body(head, n, indent) == body(cur, n, indent), (\"existing test body changed\", path, n)\ndef head_tests(path):\n    return re.findall(r\"#\\[test\\]\\s*\\n\\s*fn (\\w+)\\(\", sh(\"git\", \"show\", \"HEAD:./\" + path))\ndef changed(p): return [l for l in sh(\"git\", \"diff\", \"-U0\", \"HEAD\", \"--\", p).splitlines() if l[:1] in \"+-\" and not l.startswith((\"+++\", \"---\"))]\nsame(\"crates/indexer/src/include_resolver.rs\", ['ambiguous_when_multiple_roots_have_same_header', 'angle_bracket_ambiguous_when_multiple_matches', 'angle_bracket_resolves_if_local_header_exists', 'angle_bracket_resolves_via_conventional_root', 'angle_bracket_skips_same_dir', 'angle_bracket_unresolved_when_no_local_match', 'configured_and_conventional_both_matching_is_ambiguous', 'configured_root_resolves', 'derived_root_ambiguous_when_two_derived_roots_hold_the_header', 'derived_root_angle_bracket_resolves', 'derived_root_ignores_a_file_named_include', 'derived_root_is_case_sensitive', 'derived_root_pooled_with_configured_root_is_ambiguous', 'derived_root_resolves_header_under_nested_inc_dir', 'derived_root_resolves_header_under_nested_include_dir', 'derived_root_same_directory_hit_still_wins', 'derived_roots_are_deterministic_regardless_of_file_order', 'header_to_header_same_dir', 'header_to_header_via_include_root', 'inc_root_resolves', 'include_root_resolves', 'no_sibling_directory_magic', 'no_suffix_guessing', 'normalize_removes_dot', 'normalize_removes_empty_segments', 'normalize_resolves_dotdot', 'quoted_still_checks_same_dir_first', 'resolution_map_get_resolved_key', 'same_directory_resolves', 'same_directory_wins_over_include_root', 'src_include_root_resolves', 'subpath_does_not_match_basename', 'subpath_include_resolves'], 4)\nsame(\"crates/indexer/src/resolver.rs\", ['categorize_imports', 'java_import_resolves_to_file_node', 'java_import_wildcard_is_named_basis', 'per_file_include_resolution_different_directory', 'per_file_include_resolution_same_directory', 'resolve_import_by_stable_key', 'resolve_import_via_extensionless_file_resolution', 'resolve_import_via_per_tu_include', 'resolve_import_via_repo_prefix_fallback', 'stage_3_5_gated_off_for_non_rust_imports'], 4)\ndef ver(src):\n    m = re.findall(r'^pub const INDEXER_VERSION: &str = \"(indexer:(\\d+)\\.(\\d+)\\.(\\d+))\";$', src, re.M)\n    assert len(m) == 1, (\"exactly one INDEXER_VERSION declaration\", m)\n    return m[0][0], tuple(int(x) for x in m[0][1:])\nORCH, COMP = \"crates/indexer/src/orchestrator.rs\", \"crates/repo-index/src/compose.rs\"\noh, oc = sh(\"git\", \"show\", \"HEAD:./\" + ORCH), open(ORCH, encoding=\"utf-8\").read()\nH, hv = ver(oh)\nC, cv = ver(oc)\nassert cv == (hv[0], hv[1] + 1, 0), (\"INDEXER_VERSION moves up exactly one minor from HEAD's\", H, C)\nassert H not in oc and oc == oh.replace(H, C), (\"orchestrator.rs differs from HEAD by exactly the version literal, swapped on every line that holds it (the declaration and the test that pins it)\", changed(ORCH))\nassert changed(COMP) == [] and re.findall(r\"^    let extractor = orchestrator::INDEXER_VERSION;$\", open(COMP, encoding=\"utf-8\").read(), re.M) == [\"    let extractor = orchestrator::INDEXER_VERSION;\"], (\"compose.rs reads INDEXER_VERSION by name and is unchanged\", changed(COMP))\ndef grep_counts(lit, *rev):\n    out = subprocess.run([\"git\", \"grep\", \"-c\", \"-F\", lit, *rev, \"--\", \"*.rs\"], capture_output=True, text=True).stdout\n    return {l.rsplit(\":\", 1)[0][len(rev[0]) + 1 if rev else 0:]: int(l.rsplit(\":\", 1)[1]) for l in out.splitlines()}\ndef outside(counts): return {p: n for p, n in counts.items() if p != ORCH and n}\nassert outside(grep_counts(H)) == outside(grep_counts(H, \"HEAD\")), (\"the old literal moves nowhere else\", grep_counts(H, \"HEAD\"), grep_counts(H))\nassert outside(grep_counts(C)) == outside(grep_counts(C, \"HEAD\")), (\"the new literal is added nowhere outside the orchestrator\", grep_counts(C, \"HEAD\"), grep_counts(C))\nprint(\"CIB-C01 source assertions ok:\", H, \"->\", C)\nPY",
+        "cwd": "rust",
+        "environment": "candidate tree; fail-closed gate: TOOLCHAIN-STALENESS-1's and TEST-EDGE-SCOPE-1B's implementation-review records exist at HEAD with result accepted",
+        "inputs": "The WHOLE indexer test run (489 listed at cea4e2ee, EXECUTED `cargo test -p repo-graph-indexer -- --list`; floor >= 504 = 489 + 9 + 6), run in a subshell with pipefail so the && chain carries cargo's own status. THE RULE (RG-REQ-006-L11 as ratified; section 2.1): a pure suffix/basename lookup built ONCE per `IncludeResolutionMap` from the same indexed file list the include roots are derived from (`build_include_resolution_map`, include_resolver.rs:274-299), and a Stage 6 in `resolver.rs resolve_import_ladder` (:755-821, which `resolve_target`'s Imports arm calls at :676 after PYTHON-SUBMODULE-IMPORT-1's Python stage) at its final `None` arm (:819) - so it runs ONLY when the include resolver answered Unresolved (an Ambiguous answer returns at :775-778) AND every existing stage 1-4 of `resolve_import_target` (:833-896) missed AND the edge is not Java (the Stage 5 arm, :813-818) AND the edge's extractor is C/C++ (`is_c_family_extractor`, resolver.rs:95-97). `IncludeResolver::resolve` (include_resolver.rs:100-187) is NOT changed: its 33 tests stay byte-identical by body. Nine NEW include_resolver tests and six NEW resolver tests as named; the 33 existing include_resolver tests and ten existing resolver import-stage tests by name AND unchanged body (`no_suffix_guessing`, include_resolver.rs:739, stays as found - it tests that extensionless `foo` never completes to `foo.h`, which the exact-basename rule preserves). VERSION (D-REFRESH-STALE-1 = B; D-CIB-L06-1 = B: this slice owns the bump; what an existing store then shows is TOOLCHAIN-STALENESS-1's under RG-REQ-001-L06): `pub const INDEXER_VERSION` (orchestrator.rs:66, `indexer:1.4.0` at cea4e2ee) moves up exactly one minor from HEAD's value; orchestrator.rs differs from HEAD by exactly that literal, swapped on every line that holds it - the declaration and the three lines of `build_toolchain_json_lists_extractor_names_in_order_then_the_indexer_version` (:4383/:4386/:4391), which is bound by name; compose.rs is unchanged and reads `orchestrator::INDEXER_VERSION` by name (compose.rs:1648 at cea4e2ee - it no longer holds a literal copy, so it is not a candidate path); the old literal moves nowhere else and the new one is added nowhere outside the orchestrator (the accepted PSI/PRB-C01 form; OC-4)."
+      },
+      "expected": "exit 0: an include no existing stage resolves binds static only on a unique path suffix of two or more segments (basis unique_suffix) and inferred - marked, with its one candidate and the basis unique_basename, outside the persisted module graph - only on a unique basename; a non-unique match stays unresolved as imports_ambiguous_match with every candidate recorded; an extensionless, dot-dot or key-form specifier and every non-C/C++ import are untouched; every existing include-resolver and import-stage test is preserved by name and body - no behavior change for any include an earlier stage resolves (RG-REQ-006-L03 never-flip); the indexer version moves by exactly one minor, swapped on every line that pins it, and compose.rs reads it by name, unchanged",
+      "candidateSha256": "sha256:d6d8521d7e32d4cdff625e021ade58b12ca24d6d193ab9f544c8b486bb812a5f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "CIB-C01 source assertions ok: indexer:1.4.0 -> indexer:1.5.0; lib 496 passed; 0 failed",
+        "supportingEvidence": [
+          "/tmp/cib-C01-run.txt",
+          "/tmp/cib-C01-rerun.txt",
+          "/tmp/cib-01.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CIB-C02",
+      "obligationIds": [
+        "RG-REQ-006-L05",
+        "RG-REQ-006-L06",
+        "RG-REQ-006-L07",
+        "RG-REQ-006-L08",
+        "RG-REQ-006-L09",
+        "RG-REQ-006-L10",
+        "RG-REQ-006-L13",
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L05",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L07",
+        "RG-REQ-002-L08",
+        "RG-REQ-002-L09",
+        "RG-REQ-002-L10",
+        "RG-REQ-004-L12",
+        "RG-REQ-011-L07",
+        "P-CIB-02",
+        "P-CIB-05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( set -o pipefail; cargo test -p repo-graph-classification 2>&1 | tee /tmp/cib-02.txt ) && grep -qE '^test result: ok\\.' /tmp/cib-02.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/cib-02.txt && test \"$(cargo test -p repo-graph-classification -- --list 2>/dev/null | grep -c ': test$')\" -ge 315 && git -C .. diff HEAD --quiet -- rust/crates/classification/src/unresolved_classifier.rs rust/crates/agent rust/crates/module-queries rust/crates/cpp-extractor rust/crates/c-extractor ':(exclude)rust/crates/storage/src/queries.rs' rust/crates/storage ':(exclude)rust/crates/trust/src/rules.rs' ':(exclude)rust/crates/trust/src/service.rs' rust/crates/trust ':(exclude)rust/crates/rgr/src/presentation/imports.rs' rust/crates/rgr ':(exclude)rust/crates/daemon-runtime/src/livegraph_feed.rs' rust/crates/daemon-runtime && python3 - <<'PY'\nimport subprocess, re\ndef sh(*a): return subprocess.run(a, capture_output=True, text=True, check=True).stdout\ndef body(src, name, indent):\n    pad = \" \" * indent\n    key = pad + \"fn \" + name + \"(\"\n    i = src.find(key)\n    assert i >= 0 and src.find(key, i + 1) < 0, (\"exactly one test fn\", name)\n    j = src.find(\"\\n\" + pad + \"}\\n\", i)\n    assert j > i, (\"end of test fn\", name)\n    return src[i:j]\ndef same(path, names, indent):\n    head, cur = sh(\"git\", \"show\", \"HEAD:./\" + path), open(path, encoding=\"utf-8\").read()\n    for n in names:\n        assert body(head, n, indent) == body(cur, n, indent), (\"existing test body changed\", path, n)\ndef head_tests(path):\n    return re.findall(r\"#\\[test\\]\\s*\\n\\s*fn (\\w+)\\(\", sh(\"git\", \"show\", \"HEAD:./\" + path))\ndef changed(p): return [l for l in sh(\"git\", \"diff\", \"-U0\", \"HEAD\", \"--\", p).splitlines() if l[:1] in \"+-\" and not l.startswith((\"+++\", \"---\"))]\nT = \"crates/classification/src/types.rs\"\nd = changed(T)\ncode = [l for l in d if l[1:].strip() and not l[1:].strip().startswith(\"//\")]\nassert d and not code, (\"types.rs changes only documentation\", code)\nfull = sh(\"git\", \"diff\", \"-U3\", \"HEAD\", \"--\", T)\nassert \"ImportsAmbiguousMatch\" in full and \"MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES\" in full, \"the edited doc comments are ImportsAmbiguousMatch's and the shared set's\"\ncur = open(T, encoding=\"utf-8\").read()\nassert \"pub const MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES: [UnresolvedEdgeCategory; 4] = [\" in cur, \"the shared set keeps its four entries\"\nprint(\"CIB-C02 ok: classification diff is documentation only (%d lines)\" % len(d))\nPY",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "The WHOLE classification test run (315 at cea4e2ee, EXECUTED `-- --list`; floor >= 315; no new test - the category set, the classifier and the headline set are unchanged). `classification/src/types.rs` changes ONLY documentation: `UnresolvedEdgeCategory::ImportsAmbiguousMatch` (types.rs:268-270) names the three C/C++ ambiguity shapes (root overlap; non-unique path suffix; non-unique basename - the shape in `metadata_json.basis`), and `MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES` (types.rs:325-352) names its second reader, trust's `sum_unresolved_imports`; no variant, serde name, `is_imports_category` arm or set entry changes. Byte-identity of every file outside the ten candidate paths in the storage, trust, rgr and daemon-runtime crates (the modules-list headline reader dispatch.rs:9608-9631 included) and of the classifier, agent, module-queries and both C-family extractors."
+      },
+      "expected": "exit 0: the unresolved-category vocabulary, the classifier and every untouched reader file are byte-identical - no behavior change outside the allocated paths; the only classification edits are the honest documentation of the category that now also carries the suffix and basename ambiguity shapes and of the shared set's two readers",
+      "candidateSha256": "sha256:d6d8521d7e32d4cdff625e021ade58b12ca24d6d193ab9f544c8b486bb812a5f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "CIB-C02 ok: classification diff is documentation only (26 lines)",
+        "supportingEvidence": [
+          "/tmp/cib-C02-run.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CIB-C03",
+      "obligationIds": [
+        "RG-REQ-006-L11",
+        "RG-REQ-002-L11",
+        "RG-REQ-006-L03",
+        "RG-REQ-004-L02",
+        "RG-REQ-002-L02",
+        "P-CIB-01",
+        "P-CIB-02",
+        "P-CIB-05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( set -o pipefail; cargo test -p repo-graph-repo-index 2>&1 | tee /tmp/cib-03.txt ) && grep -qE '^test result: ok\\.' /tmp/cib-03.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/cib-03.txt && for t in nginx_style_single_segment_include_resolves_inferred_by_unique_basename unique_multi_segment_suffix_include_resolves_static refresh_turns_an_inferred_unique_basename_include_ambiguous_when_a_second_header_is_added trust_unresolved_import_figure_equals_the_modules_list_headline_on_one_snapshot indexed_cpp_include_resolves_through_nested_include_root indexed_cpp_include_ambiguous_across_two_include_roots_is_counted_not_bound; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/cib-03.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/cib-03.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-repo-index -- --list 2>/dev/null | grep -c ': test$')\" -ge 461 && python3 - <<'PY'\nimport subprocess, re\ndef sh(*a): return subprocess.run(a, capture_output=True, text=True, check=True).stdout\ndef body(src, name, indent):\n    pad = \" \" * indent\n    key = pad + \"fn \" + name + \"(\"\n    i = src.find(key)\n    assert i >= 0 and src.find(key, i + 1) < 0, (\"exactly one test fn\", name)\n    j = src.find(\"\\n\" + pad + \"}\\n\", i)\n    assert j > i, (\"end of test fn\", name)\n    return src[i:j]\ndef same(path, names, indent):\n    head, cur = sh(\"git\", \"show\", \"HEAD:./\" + path), open(path, encoding=\"utf-8\").read()\n    for n in names:\n        assert body(head, n, indent) == body(cur, n, indent), (\"existing test body changed\", path, n)\ndef head_tests(path):\n    return re.findall(r\"#\\[test\\]\\s*\\n\\s*fn (\\w+)\\(\", sh(\"git\", \"show\", \"HEAD:./\" + path))\ndef changed(p): return [l for l in sh(\"git\", \"diff\", \"-U0\", \"HEAD\", \"--\", p).splitlines() if l[:1] in \"+-\" and not l.startswith((\"+++\", \"---\"))]\nsame(\"crates/repo-index/tests/cpp_include_roots.rs\", ['indexed_cpp_include_resolves_through_nested_include_root', 'indexed_cpp_include_ambiguous_across_two_include_roots_is_counted_not_bound'], 0)\nprint(\"CIB-C03 existing integration test bodies unchanged\")\nPY",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "The WHOLE repo-index test run (457 at cea4e2ee, EXECUTED `-- --list`; floor >= 461 = 457 + 4). Four NEW end-to-end tests in `repo-index/tests/cpp_include_roots.rs` through the real extract -> resolve -> store pipeline: `nginx_style_single_segment_include_resolves_inferred_by_unique_basename` (`src/core/ngx_core.h`; `src/event/ngx_event.c` with `#include <ngx_core.h>` and `#include <ngx_time.h>`; `src/os/unix/ngx_time.h` and `src/os/win32/ngx_time.h`; no `include/` directory: ONE IMPORTS edge `inferred` with `basis = unique_basename`, `candidates = [<src/core/ngx_core.h FILE key>]` and the extractor's keys kept; ONE unresolved row `imports_ambiguous_match` with `basis = ambiguous_basename` and both candidate keys; no MODULE->MODULE edge `src/event -> src/core`); `unique_multi_segment_suffix_include_resolves_static` (`app/main.cpp` with `#include \"util/foo.h\"`, the only `util/foo.h` at `lib/src/util/foo.h`: ONE IMPORTS edge `static`, `basis = unique_suffix`, and the MODULE->MODULE edge `app -> lib/src/util`); `refresh_turns_an_inferred_unique_basename_include_ambiguous_when_a_second_header_is_added` (D-CIB-REFRESH-1 = A: index `src/app/main.c` with `#include <foo.h>` and `src/lib/foo.h` -> inferred edge; add `src/other/foo.h`, leave main.c unchanged; `refresh_into_storage` -> main.c's content hash is identical across the two snapshots (it was copied forward, `query_file_version_hashes`) AND its include is now ONE unresolved `imports_ambiguous_match` row with `basis = ambiguous_basename` and both candidate keys, with no IMPORTS edge from main.c - refresh re-resolves every include of the snapshot, orchestrator.rs:1033-1063); `trust_unresolved_import_figure_equals_the_modules_list_headline_on_one_snapshot` (D-CIB-COUNT-1 = A: one index of a fixture with one C include of an unindexed header (`imports_file_not_found`), one C include whose basename exists twice (`imports_ambiguous_match`) and one Java `import com.acme.*;` (`imports_wildcard`): `assemble_trust_report`'s `summary.reliability.import_graph.reasons` holds `unresolved_imports=3`, and the sum of `count_unresolved_edges_by_classification` over `MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES` - the modules-list headline's read - is 3). The two existing tests by name and unchanged body."
+      },
+      "expected": "exit 0: both binding shapes and the ambiguous case hold end to end; a refresh re-resolves a copied-forward include against the current file list, so a second header of the same basename turns the inferred binding ambiguous; trust's unresolved-import figure and the modules-list headline are one number on one snapshot; the include-root behavior CPP-INCLUDE-ROOTS-1 shipped is preserved by name and body - no behavior change",
+      "candidateSha256": "sha256:d6d8521d7e32d4cdff625e021ade58b12ca24d6d193ab9f544c8b486bb812a5f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "CIB-C03 existing integration test bodies unchanged",
+        "supportingEvidence": [
+          "/tmp/cib-C03-run.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CIB-C07",
+      "obligationIds": [
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L10",
+        "P-CIB-05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( set -o pipefail; cargo test -p repo-graph-trust 2>&1 | tee /tmp/cib-07.txt ) && grep -qE '^test result: ok\\.' /tmp/cib-07.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/cib-07.txt && for t in sum_unresolved_imports_sums_every_category_of_the_shared_imports_set a_lone_non_legacy_unresolved_import_category_lowers_import_graph_and_change_impact sum_unresolved_calls_sums_calls_family import_low_with_unresolved_imports minimal_input_produces_all_high_reliability caveats_for_non_high_levels; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/cib-07.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/cib-07.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-trust -- --list 2>/dev/null | grep -c ': test$')\" -ge 129 && python3 - <<'PY'\nimport subprocess, re\ndef sh(*a): return subprocess.run(a, capture_output=True, text=True, check=True).stdout\ndef body(src, name, indent):\n    pad = \" \" * indent\n    key = pad + \"fn \" + name + \"(\"\n    i = src.find(key)\n    assert i >= 0 and src.find(key, i + 1) < 0, (\"exactly one test fn\", name)\n    j = src.find(\"\\n\" + pad + \"}\\n\", i)\n    assert j > i, (\"end of test fn\", name)\n    return src[i:j]\ndef same(path, names, indent):\n    head, cur = sh(\"git\", \"show\", \"HEAD:./\" + path), open(path, encoding=\"utf-8\").read()\n    for n in names:\n        assert body(head, n, indent) == body(cur, n, indent), (\"existing test body changed\", path, n)\ndef head_tests(path):\n    return re.findall(r\"#\\[test\\]\\s*\\n\\s*fn (\\w+)\\(\", sh(\"git\", \"show\", \"HEAD:./\" + path))\ndef changed(p): return [l for l in sh(\"git\", \"diff\", \"-U0\", \"HEAD\", \"--\", p).splitlines() if l[:1] in \"+-\" and not l.startswith((\"+++\", \"---\"))]\nR = \"crates/trust/src/rules.rs\"\nold, new = \"sum_unresolved_imports_picks_imports_family\", \"sum_unresolved_imports_sums_every_category_of_the_shared_imports_set\"\ncur = open(R, encoding=\"utf-8\").read()\nassert (\"fn \" + old + \"(\") not in cur and (\"fn \" + new + \"(\") in cur, \"the test is renamed to what it proves\"\nsame(R, [t for t in head_tests(R) if t != old], 4)\ni = cur.find(\"pub(crate) fn sum_unresolved_imports(\"); j = cur.find(\"\\n}\\n\", i)\nf = cur[i:j]\nassert i >= 0 and \"MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES\" in f and '\"imports_file_not_found\"' not in f, (\"sum_unresolved_imports reads the shared set, never one literal key\", f)\nS = \"crates/trust/src/service.rs\"\nsame(S, head_tests(S), 4)\nassert not [l for l in changed(S) if l.startswith(\"-\")], (\"service.rs only gains lines\", changed(S))\nmark = \"#[cfg(test)]\\nmod tests {\"\nhs, cs = sh(\"git\", \"show\", \"HEAD:./\" + S), open(S, encoding=\"utf-8\").read()\nassert hs.count(mark) == 1 and cs.count(mark) == 1 and hs.split(mark)[0] == cs.split(mark)[0], \"service.rs production code is byte-identical; only its test module grows\"\nassert \"fn a_lone_non_legacy_unresolved_import_category_lowers_import_graph_and_change_impact(\" in cs.split(mark)[1], \"the propagation test lives in service.rs's test module\"\nprint(\"CIB-C07 ok: trust sums the shared IMPORTS set; every other rules.rs/service.rs test unchanged by body; service.rs production code unchanged\")\nPY",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "The WHOLE trust test run (128 at cea4e2ee, EXECUTED `-- --list`; floor >= 129 = 128 + 1). `sum_unresolved_imports` (trust/src/rules.rs:395-404, doc 'Sum unresolved counts for IMPORTS-family categories') sums `unresolved_breakdown` over every category of `MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES` (each keyed by its serialized name, the key the indexer writes, orchestrator.rs:1114-1122) instead of the single key `imports_file_not_found`; its test `sum_unresolved_imports_picks_imports_family` (:1001-1013, which asserted the narrow behavior under the family name) is renamed `sum_unresolved_imports_sums_every_category_of_the_shared_imports_set` and asserts that one count in each of the four categories plus a CALLS category sums to the four. F-CIB-TRUST-PROPAGATION: the sum feeds `compute_import_graph_reliability` (service.rs:343-347 and :375-379; rules.rs:228-256 - any unresolved import makes the axis LOW with reason `unresolved_imports=N`), whose level feeds `compute_change_impact_reliability` (service.rs:397-401; rules.rs:337-369 - LOW with reason `import_graph_reliability_low`) and the two caveats (service.rs:245-257); ONE NEW test in service.rs's test module, `a_lone_non_legacy_unresolved_import_category_lowers_import_graph_and_change_impact`, runs `compute_trust_report` on `minimal_input()` (all axes HIGH) with diagnostics whose ONLY unresolved category is `imports_wildcard: 2` and asserts import_graph = LOW with reasons exactly [`unresolved_imports=2`], change_impact = LOW with reasons exactly [`import_graph_reliability_low`], the two caveats 'Import-graph reliability is LOW' and 'Change-impact reliability is LOW' present, and call_graph and dead_code still HIGH - the transition HEAD's single-key sum missed (it reads 0 there and leaves both axes HIGH). Every other test of rules.rs and service.rs is unchanged by body; service.rs's production code is byte-identical (only its test module grows); `sum_unresolved_calls_sums_calls_family`, `import_low_with_unresolved_imports`, `minimal_input_produces_all_high_reliability` and `caveats_for_non_high_levels` pass unchanged."
+      },
+      "expected": "exit 0: trust's unresolved-import figure counts the whole IMPORTS family through the one shared set the modules-list headline reads (one definition, two readers), and every field derived from that figure - the import-graph level and reason, the change-impact level and reason, their caveats - moves with it, as tested; every trust field not derived from it (CALLS sums, call-graph and dead-code axes, category, classification and module rows) is preserved unchanged - no behavior change there; the renamed test states what it proves",
+      "candidateSha256": "sha256:d6d8521d7e32d4cdff625e021ade58b12ca24d6d193ab9f544c8b486bb812a5f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "CIB-C07 ok: trust sums the shared IMPORTS set",
+        "supportingEvidence": [
+          "/tmp/cib-C07-run.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CIB-C08",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L08",
+        "P-CIB-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( set -o pipefail; cargo test -p repo-graph-storage 2>&1 | tee /tmp/cib-08s.txt ) && grep -qE '^test result: ok\\.' /tmp/cib-08s.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/cib-08s.txt && for t in find_imports_row_without_a_recorded_basis_carries_no_reason find_imports_bound_include_carries_its_basis_and_candidate_paths find_imports_malformed_reason_carrier_is_unreadable_never_dropped find_imports_row_of_another_basis_carries_no_reason find_imports_reason_that_contradicts_its_edge_is_unreadable_never_evidence find_imports_c_family_inferred_row_with_a_null_carrier_reports_its_reason_missing find_imports_c_family_inferred_row_whose_carrier_lacks_a_basis_reports_its_reason_missing; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/cib-08s.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/cib-08s.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-storage -- --list 2>/dev/null | grep -c ': test$')\" -ge 812 && ( set -o pipefail; cargo test -p repo-graph-rgr --lib 2>&1 | tee /tmp/cib-08r.txt ) && grep -qE '^test result: ok\\.' /tmp/cib-08r.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/cib-08r.txt && for t in inferred_unique_basename_row_renders_its_reason_and_candidate inferred_row_with_an_unreadable_reason_says_so_never_bare_inferred inferred_row_whose_reason_disagrees_with_the_row_is_unreadable_never_evidence row_without_a_rendered_reason_prints_exactly_as_before compare_listing_prints_the_same_rows_as_the_default_listing import_entry_decodes_a_reason_its_unreadable_form_its_missing_form_and_its_absence inferred_row_whose_reason_is_missing_for_a_null_carrier_says_re_index inferred_row_whose_reason_is_missing_for_a_carrier_without_basis_says_re_index c_family_inferred_row_without_a_reason_key_says_reason_missing_never_bare_inferred render_imports_shows_header render_imports_shows_count render_imports_singular_count render_imports_shows_entries render_imports_shows_depth render_imports_shows_resolution render_empty_imports compare_render_shows_sqlite_listing_and_summary compare_render_regression_is_loud; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/cib-08r.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/cib-08r.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-rgr --lib -- --list 2>/dev/null | grep -c ': test$')\" -ge 1440 && ( set -o pipefail; cargo test -p repo-graph-daemon-runtime --lib 2>&1 | tee /tmp/cib-08d.txt ) && grep -qE '^test result: ok\\.' /tmp/cib-08d.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/cib-08d.txt && for t in imports_auto_body_serves_livegraph_or_falls_back; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/cib-08d.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/cib-08d.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-daemon-runtime --lib -- --list 2>/dev/null | grep -c ': test$')\" -ge 877 && python3 - <<'PY'\nimport subprocess, re\ndef sh(*a): return subprocess.run(a, capture_output=True, text=True, check=True).stdout\ndef body(src, name, indent):\n    pad = \" \" * indent\n    key = pad + \"fn \" + name + \"(\"\n    i = src.find(key)\n    assert i >= 0 and src.find(key, i + 1) < 0, (\"exactly one test fn\", name)\n    j = src.find(\"\\n\" + pad + \"}\\n\", i)\n    assert j > i, (\"end of test fn\", name)\n    return src[i:j]\ndef same(path, names, indent):\n    head, cur = sh(\"git\", \"show\", \"HEAD:./\" + path), open(path, encoding=\"utf-8\").read()\n    for n in names:\n        assert body(head, n, indent) == body(cur, n, indent), (\"existing test body changed\", path, n)\ndef head_tests(path):\n    return re.findall(r\"#\\[test\\]\\s*\\n\\s*fn (\\w+)\\(\", sh(\"git\", \"show\", \"HEAD:./\" + path))\ndef changed(p): return [l for l in sh(\"git\", \"diff\", \"-U0\", \"HEAD\", \"--\", p).splitlines() if l[:1] in \"+-\" and not l.startswith((\"+++\", \"---\"))]\nQ, P, L = \"crates/storage/src/queries.rs\", \"crates/rgr/src/presentation/imports.rs\", \"crates/daemon-runtime/src/livegraph_feed.rs\"\nsame(Q, head_tests(Q), 4)\nsame(P, head_tests(P), 4)\nsame(L, [t for t in head_tests(L) if t != \"imports_auto_body_serves_livegraph_or_falls_back\"], 4)\nd = changed(L)\nassert len(d) == 1 and re.fullmatch(r\"\\+\\s+reason: None,\", d[0]), (\"livegraph_feed.rs gains exactly the new field in its ImportResult test literal\", d)\nassert ['render_imports_shows_header', 'render_imports_shows_count', 'render_imports_singular_count', 'render_imports_shows_entries', 'render_imports_shows_depth', 'render_imports_shows_resolution', 'render_empty_imports', 'compare_render_shows_sqlite_listing_and_summary', 'compare_render_regression_is_loud'] == [t for t in ['render_imports_shows_header', 'render_imports_shows_count', 'render_imports_singular_count', 'render_imports_shows_entries', 'render_imports_shows_depth', 'render_imports_shows_resolution', 'render_empty_imports', 'compare_render_shows_sqlite_listing_and_summary', 'compare_render_regression_is_loud'] if t in head_tests(P)], \"the bound renderer tests exist at HEAD\"\nprint(\"CIB-C08 ok: every existing storage/rgr/livegraph_feed test unchanged by body; the daemon carries the row unchanged\")\nPY",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "D-CIB-REASON-1 = A; F-CIB-REASON-VALIDITY. F-CIB-MISSING-REASON. STORAGE (whole run; 805 at cea4e2ee, EXECUTED `-- --list`; floor >= 812 = 805 + 7): `find_imports` (storage/src/queries.rs:1776-1833) also selects `e.metadata_json` and the target node's `stable_key` and sets `ImportResult.reason` by ONE validity rule, judged against the row's own edge. OWNERSHIP: a C/C++ `inferred` edge (`e.extractor`, carried as `evidence`, starts `c-core:`/`cpp-core:` - only this slice writes one) must carry a valid reason and is never ABSENT; ABSENT (key serde-skipped; the row serializes exactly as at HEAD) only for a `static` row or a row of another extractor with a NULL carrier, an object without `basis`, or a string `basis` outside the four this slice writes (PYTHON-SUBMODULE-IMPORT-1's `python_submodule`); PRESENT-MISSING for a C/C++ `inferred` edge with a NULL carrier (`{missing: \"no reason carrier\"}`) or an object without `basis` (`{missing: \"reason carrier has no basis\"}`); PRESENT-VALID `{basis, candidates: [<target path>]}` only when `basis` is `unique_basename` on an `inferred` edge or `unique_suffix` on a `static` edge AND `candidates` is an array of exactly one string equal to the edge's own target stable key, whose node is a FILE; otherwise `{unreadable: <what failed>}` - never dropped, never defaulted, never presented as evidence: the carrier is not a JSON object; `basis` is not a string; `candidates` is missing, not an array, holds a non-string, is empty or holds more than one entry under a unique basis; the one candidate is not the edge's target or the target is not a FILE; the basis disagrees with the edge's resolution (`unique_basename` on a static edge, `unique_suffix` on an inferred one); an `ambiguous_basename`/`ambiguous_suffix` basis on a bound edge (an ambiguous include is never an edge); a string `basis` outside the four on a C/C++ `inferred` edge. Seven NEW storage tests: absent (a static C/C++ include row and a non-C/C++ inferred row, both unchanged), another basis (a Python `python_submodule` row, unchanged), valid (both unique bases), malformed structure, `find_imports_reason_that_contradicts_its_edge_is_unreadable_never_evidence` over every contradiction case above, and one per missing carrier state - `find_imports_c_family_inferred_row_with_a_null_carrier_reports_its_reason_missing`, `find_imports_c_family_inferred_row_whose_carrier_lacks_a_basis_reports_its_reason_missing`. RGR (--lib; 1431 at cea4e2ee, EXECUTED `--lib -- --list`; floor >= 1440 = 1431 + 9): `ImportEntry` decodes `reason`; ONE row formatter serves `ImportsResponse` and `ImportsCompareResponse` (imports.rs:96-107 and :347-359 today duplicate it) and re-checks the reason against its own row, since it renders JSON it did not produce: an `inferred` row whose reason is `unique_basename` with exactly one candidate equal to the row's `file` prints `  <path>  depth=<d>  inferred: unique basename → <candidate>`; an `inferred` row whose reason is `unreadable` prints `  <path>  depth=<d>  inferred: reason unreadable (<what failed>)`; an `inferred` row whose reason disagrees with the row (another candidate, several candidates, `unique_suffix`, no basis, a basis this build does not read) prints `  <path>  depth=<d>  inferred: reason unreadable (<what disagrees>)`; an `inferred` row whose reason is `missing`, or a C/C++ `inferred` row (by `evidence`) with no `reason` key, prints `  <path>  depth=<d>  inferred (reason missing — re-index)`; every `static` row and every other row without a reason prints exactly as at HEAD (a static row's reason stays in JSON). Nine NEW renderer tests incl. `inferred_row_whose_reason_disagrees_with_the_row_is_unreadable_never_evidence` over each disagreement and one per missing state - `inferred_row_whose_reason_is_missing_for_a_null_carrier_says_re_index`, `inferred_row_whose_reason_is_missing_for_a_carrier_without_basis_says_re_index`, `c_family_inferred_row_without_a_reason_key_says_reason_missing_never_bare_inferred` - with `import_entry_decodes_a_reason_its_unreadable_form_its_missing_form_and_its_absence` decoding all four forms; the nine existing renderer tests by name and unchanged body (the `sample_imports` fixture gains only the new field). DAEMON (--lib; 877 at cea4e2ee, EXECUTED `--lib -- --list`; floor >= 877): no production change - both SQLite paths serialize the storage rows as stored and TEST-EDGE-SCOPE-1B's `partition_import_rows` (import_partition_view.rs:329-372) only drops the inferred rows a default view excludes, never a key (dispatch.rs:1792-1810; livegraph_feed.rs:1773-1777, which a C/C++ file always takes: the LiveGraph import view serves TS only, :1704-1718; `--include-inferred` routes `auto` to the SQLite path, dispatch.rs:1642-1646); livegraph_feed.rs changes by exactly one added `reason: None,` line in the `imports_auto_body_serves_livegraph_or_falls_back` literal; every other test of the three files unchanged by body."
+      },
+      "expected": "exit 0: the reason the index records on an inferred include reaches the agent-facing `imports <file>` row in human text and JSON; a reason is shown as evidence only when it agrees with its own row (a unique basis, exactly one candidate that is the row's own target FILE, the basis matching the resolution); a malformed or contradictory carrier is stated as unreadable with what failed, never dropped, never defaulted and never rendered as a reason; a C/C++ inferred row that lost its reason carrier or its basis is stated as reason missing with the re-index remedy, never bare `inferred`; a row for which this slice requires no reason (static, or another producer's) renders and serializes exactly as before - no behavior change for it, the default and compare listings print one row form",
+      "candidateSha256": "sha256:d6d8521d7e32d4cdff625e021ade58b12ca24d6d193ab9f544c8b486bb812a5f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "CIB-C08 ok: every existing storage/rgr/livegraph_feed test unchanged by body; daemon-runtime --lib 876 passed; 0 failed",
+        "supportingEvidence": [
+          "/tmp/cib-C08-run.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CIB-C04",
+      "obligationIds": [
+        "P-CIB-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo fmt --check -p repo-graph-indexer -p repo-graph-classification -p repo-graph-repo-index -p repo-graph-trust -p repo-graph-storage -p repo-graph-rgr -p repo-graph-daemon-runtime && cargo clippy -p repo-graph-indexer -p repo-graph-classification -p repo-graph-repo-index -p repo-graph-trust -p repo-graph-storage -p repo-graph-rgr -p repo-graph-daemon-runtime --all-targets -- -D warnings && git -C .. diff HEAD --check",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "formatter and clippy (warnings denied, all targets) over the seven touched crates; whitespace over the whole diff."
+      },
+      "expected": "exit 0: hygiene clean",
+      "candidateSha256": "sha256:d6d8521d7e32d4cdff625e021ade58b12ca24d6d193ab9f544c8b486bb812a5f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Run 1 exited 1 because new code was not rustfmt-formatted; after cargo fmt to seven crates, run 2 exited 0. C01, C02, C03, C07 and C08 were rerun on the formatted tree and exited 0.",
+        "supportingEvidence": [
+          "/tmp/cib-C04-run.txt",
+          "/tmp/cib-C0x-rerun.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CIB-C05",
+      "obligationIds": [
+        "RG-REQ-006-L11",
+        "RG-REQ-002-L11",
+        "RG-REQ-006-L03",
+        "RG-REQ-006-L05",
+        "RG-REQ-004-L02",
+        "RG-REQ-002-L01",
+        "RG-REQ-011-L06",
+        "RG-REQ-011-L07",
+        "P-CIB-01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "S=CPP-INCLUDE-BASENAME-1; T=/private/tmp/$S; L='/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases'; BP=.agent-manager/slices/$S/build-progress.md; RB=\"$PWD/rust/target/release\"; RSD='/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager/scripts/rg-store-diff.py'; SRCRE=' captured=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z producer=rmap [0-9]+\\.[0-9]+\\.[0-9]+'; roots_same() { test \"$(grep -E '^roots-before [0-9a-f]{64}$' \"$BP\" | tail -1 | cut -d' ' -f2)\" = \"$(find $T-nginx-before $T-leveldb-before $T-poco-before -type f | sort | xargs shasum -a 256 | shasum -a 256 | cut -d' ' -f1)\"; }; copy() { local src=$T-$1-before dst=$T-$1-basecopy w; test \"$(ls \"$src\"/databases/*.db | wc -l | tr -d ' ')\" = 1 || return 1; for w in \"$src\"/databases/*.db-wal; do test ! -s \"$w\" || { echo \"REFUSED: $w holds uncheckpointed bytes - the copy would omit them\"; return 1; }; done; test ! -e \"$dst\" && mkdir -p \"$dst/databases\" && cp \"$src\"/databases/*.db \"$dst/databases/\" && python3 -c 'import json,os,sys; r=json.load(open(sys.argv[1])); d=sys.argv[2]; [e.__setitem__(\"db_path\", os.path.join(d, \"databases\", os.path.basename(e[\"db_path\"]))) for e in r[\"repos\"]]; json.dump(r, open(os.path.join(d, \"registry.json\"), \"w\"), indent=2)' \"$src/registry.json\" \"$dst\" && python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); assert len(r[\"repos\"]) == 1 and r[\"repos\"][0][\"db_path\"].startswith(sys.argv[2] + \"/databases/\"), r' \"$dst/registry.json\" \"$dst\"; }; idx() { mkdir \"$T-$1-after\" && ( cd \"$L/$1\" && env RMAP_STATE_ROOT=\"$T-$1-after\" RMAP_SOCKET_PATH=\"$T-$1-after/d.sock\" RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off PATH=\"$RB:$PATH\" \"$RB/rmap\" index > \"/tmp/cib-$1-after-index.txt\" 2>&1 ); }; git cat-file -e HEAD:docs/assurance/TOOLCHAIN-STALENESS-1/implementation-review.json && git show HEAD:docs/assurance/TOOLCHAIN-STALENESS-1/implementation-review.json | python3 -c \"import json,sys; d=json.load(sys.stdin); sys.exit(0 if (d.get('workItemId'), d.get('result')) == ('TOOLCHAIN-STALENESS-1', 'accepted') else 1)\" && git cat-file -e HEAD:docs/assurance/TEST-EDGE-SCOPE-1B/implementation-review.json && git show HEAD:docs/assurance/TEST-EDGE-SCOPE-1B/implementation-review.json | python3 -c \"import json,sys; d=json.load(sys.stdin); sys.exit(0 if (d.get('workItemId'), d.get('result')) == ('TEST-EDGE-SCOPE-1B', 'accepted') else 1)\" && test ! -e $T-nginx-basecopy && test ! -e $T-nginx-after && test ! -e $T-leveldb-basecopy && test ! -e $T-leveldb-after && test ! -e $T-poco-basecopy && test ! -e $T-poco-after && test -d $T-nginx-before && test -d $T-leveldb-before && test -d $T-poco-before && grep -Eq \"^nginx b0a4d0fb823b dirty=3($SRCRE)?\\$\" $T-nginx-before/source.txt && grep -Eq \"^leveldb 7ee830d02b62 dirty=0($SRCRE)?\\$\" $T-leveldb-before/source.txt && grep -Eq \"^poco 49af4000f99f dirty=0($SRCRE)?\\$\" $T-poco-before/source.txt && roots_same && test \"$(git -C \"$L/nginx\" rev-parse --short=12 HEAD)\" = b0a4d0fb823b && test \"$(git -C \"$L/leveldb\" rev-parse --short=12 HEAD)\" = 7ee830d02b62 && test -z \"$(git -C \"$L/leveldb\" status --porcelain)\" && test \"$(git -C \"$L/poco\" rev-parse --short=12 HEAD)\" = 49af4000f99f && test -z \"$(git -C \"$L/poco\" status --porcelain)\" && git diff --quiet cea4e2ee HEAD -- rust && (cd rust && cargo build --release --bin rmap --bin rmapd > /tmp/cib-build.txt 2>&1) && copy nginx && copy leveldb && copy poco && idx nginx && idx leveldb && idx poco && ( set -o pipefail; python3 \"$RSD\" $T-nginx-basecopy $T-nginx-after --expect edges:791 --expect unresolved:804 | tee /tmp/cib-rsd-nginx.txt ) && ( set -o pipefail; python3 \"$RSD\" $T-leveldb-basecopy $T-leveldb-after | tee /tmp/cib-rsd-leveldb.txt ) && ( set -o pipefail; python3 \"$RSD\" $T-poco-basecopy $T-poco-after --expect edges:149 --expect unresolved:133 | tee /tmp/cib-rsd-poco.txt ) && python3 - <<'PY' && roots_same && echo 'CIB-C05 manager roots unchanged'\nimport sqlite3, glob, json, os, re, collections, subprocess\nC_FAMILY = (\"c-core:\", \"cpp-core:\")\nKEY = re.compile(r\"^repo_[a-z0-9]+:(.+):FILE$\")\ndef db(root):\n    p = glob.glob(root + \"/databases/*.db\"); assert len(p) == 1, (root, p)\n    w = p[0] + \"-wal\"; assert not (os.path.exists(w) and os.path.getsize(w) > 0), (\"uncheckpointed WAL\", w)\n    return sqlite3.connect(\"file:\" + p[0] + \"?immutable=1\", uri=True)\ndef facts(root):\n    c = db(root); s = c.execute(\"select snapshot_uid from snapshots where status='ready' order by created_at desc limit 1\").fetchone()[0]\n    files = sorted(p for (p,) in c.execute(\"select f.path from files f join file_versions v on v.file_uid=f.file_uid where v.snapshot_uid=?\", (s,)))\n    E, U = {}, {}\n    for sp, tp, tk, ln, co, res, ex, md in c.execute(\"select sf.path, tf.path, tn.stable_key, e.line_start, e.col_start, e.resolution, e.extractor, e.metadata_json from edges e join nodes sn on sn.node_uid=e.source_node_uid join nodes tn on tn.node_uid=e.target_node_uid join files sf on sf.file_uid=sn.file_uid join files tf on tf.file_uid=tn.file_uid where e.snapshot_uid=? and e.type='IMPORTS'\", (s,)):\n        if ex.startswith(C_FAMILY):\n            assert (sp, ln, co) not in E, (\"two C/C++ include edges share a source anchor\", sp, ln, co); E[(sp, ln, co)] = (tp, res, json.loads(md) if md else {})\n    for sp, tk, ln, co, cat, cls, bc, ex, md in c.execute(\"select sf.path, u.target_key, u.line_start, u.col_start, u.category, u.classification, u.basis_code, u.extractor, u.metadata_json from unresolved_edges u join nodes sn on sn.node_uid=u.source_node_uid join files sf on sf.file_uid=sn.file_uid where u.snapshot_uid=? and u.type='IMPORTS'\", (s,)):\n        if ex.startswith(C_FAMILY):\n            assert (sp, ln, co) not in U, (\"two C/C++ unresolved includes share a source anchor\", sp, ln, co); U[(sp, ln, co)] = (tk, cat, cls, bc, json.loads(md) if md else {})\n    bad = c.execute(\"select count(*) from edges e join nodes a on a.node_uid=e.source_node_uid join nodes b on b.node_uid=e.target_node_uid where e.snapshot_uid=? and e.type='IMPORTS' and e.resolution='inferred' and (a.kind<>'FILE' or b.kind<>'FILE')\", (s,)).fetchone()[0]\n    return files, E, U, bad\ndef rule(files, spec):\n    # RG-REQ-006-L11 as ratified, recomputed here from the base root's own file list (independent of the implementation)\n    segs = [x for x in spec.split(\"/\") if x not in (\"\", \".\")]\n    if \":\" in spec or \"..\" in segs or not segs: return None\n    if len(segs) >= 2:\n        suf = \"/\".join(segs); m = sorted(p for p in files if p == suf or p.endswith(\"/\" + suf))\n        return None if not m else ((\"unique_suffix\", \"static\") if len(m) == 1 else (\"ambiguous_suffix\", None), m)\n    m = sorted(p for p in files if p.rsplit(\"/\", 1)[-1] == segs[0])\n    return None if not m else ((\"unique_basename\", \"inferred\") if len(m) == 1 else (\"ambiguous_basename\", None), m)\ndef paths(md):\n    out = []\n    for k in md.get(\"candidates\", []):\n        g = KEY.match(k); assert g, (\"candidate is not a FILE stable key\", k); out.append(g.group(1))\n    return out\nHEAD_IDX = re.findall(r'^pub const INDEXER_VERSION: &str = \"(indexer:[0-9]+\\.[0-9]+\\.[0-9]+)\";$', subprocess.run([\"git\", \"show\", \"HEAD:rust/crates/indexer/src/orchestrator.rs\"], capture_output=True, text=True, check=True).stdout, re.M)\nassert len(HEAD_IDX) == 1, (\"HEAD's INDEXER_VERSION\", HEAD_IDX)\ndef stamp(root):\n    return json.loads(db(root).execute(\"select toolchain_json from snapshots where status='ready' order by created_at desc limit 1\").fetchone()[0])\ndef check(name, want):\n    base = \"/private/tmp/CPP-INCLUDE-BASENAME-1-%s-basecopy\" % name\n    assert stamp(base)[\"indexer\"] == HEAD_IDX[0], (name, \"the base copy was produced by HEAD's indexer\", stamp(base), HEAD_IDX)\n    fb, Eb, Ub, _ = facts(base)\n    fa, Ea, Ua, bad = facts(\"/private/tmp/CPP-INCLUDE-BASENAME-1-%s-after\" % name)\n    assert fb == fa, (name, \"file universe differs between the two indexes\")\n    assert bad == 0, (name, \"an inferred IMPORTS edge between non-FILE nodes (the persisted module graph)\")\n    added = set(Ea) - set(Eb); assert set(Eb) <= set(Ea), (name, \"an include edge of the base disappeared\")\n    assert added == set(Ub) - set(Ua), (name, \"every new include edge is exactly a formerly unresolved include\")\n    got = collections.Counter()\n    for k in added:\n        tk, cat, cls, bc, umd = Ub[k]; tp, res, emd = Ea[k]\n        (basis, want_res), cands = rule(fb, tk)\n        assert cat == \"imports_file_not_found\" and want_res == res and emd.get(\"basis\") == basis, (name, \"bound include\", k, tk, res, emd)\n        assert paths(emd) == cands == [tp], (name, \"candidates are the one indexed match and the target\", k, emd, cands, tp)\n        rest = {x: v for x, v in emd.items() if x not in (\"basis\", \"candidates\")}; assert rest == umd, (name, \"carrier keys of the moved row\", k, rest, umd)\n        got[basis] += 1\n    for k in set(Ua) & set(Ub):\n        if Ua[k] == Ub[k]: continue\n        tk, cat, cls, bc, md = Ua[k]; tk0, cat0, cls0, bc0, md0 = Ub[k]\n        (basis, _), cands = rule(fb, tk)\n        assert (tk, cls, bc) == (tk0, cls0, bc0) and cat0 == \"imports_file_not_found\" and cat == \"imports_ambiguous_match\", (name, \"ambiguous row\", k, Ub[k], Ua[k])\n        assert md.get(\"basis\") == basis and sorted(paths(md)) == cands and len(cands) >= 2, (name, \"ambiguous basis/candidates\", k, md, cands)\n        assert {x: v for x, v in md.items() if x not in (\"basis\", \"candidates\")} == md0, (name, \"carrier keys of the ambiguous row\", k)\n        got[basis] += 1\n    for k in set(Ub) - set(Ua) - added: raise AssertionError((name, \"an unresolved include vanished without an edge\", k))\n    assert dict(got) == want, (name, \"moved rows by basis\", dict(got), want)\n    print(name, \"moved rows by basis\", dict(got), \"C/C++ unresolved IMPORTS\", len(Ub), \"->\", len(Ua))\n    return Ea, Ua, Ub\ncheck(\"leveldb\", {})\n_, Pa, Pb = check(\"poco\", {\"unique_suffix\": 69, \"unique_basename\": 64})\nfor f, ln, spec in ((\"dependencies/utf8proc/src/utf8proc.c\", 53, \"utf8proc_data.c\"), (\"dependencies/pcre2/src/pcre2_jit_compile.c\", 81, \"../deps/sljit/sljit_src/sljitLir.c\")):\n    ks = [k for k in Pb if k[:2] == (f, ln)]\n    assert len(ks) == 1 and Pb[ks[0]][:2] == (spec, \"imports_file_not_found\") and Pa.get(ks[0]) == Pb[ks[0]], (\"poco residual unchanged (a unique basename whose one file has no FILE node; a dot-dot specifier)\", f, ln, ks, [Pb.get(k) for k in ks], [Pa.get(k) for k in ks])\nEa, Ua, _ = check(\"nginx\", {\"unique_basename\": 791, \"ambiguous_basename\": 13})\ncfg = {k[1]: v for k, v in Ea.items() if k[0] == \"src/core/ngx_config.h\"}\nassert {ln: (v[0], v[1], v[2][\"basis\"]) for ln, v in cfg.items()} == {22: (\"src/os/unix/ngx_freebsd_config.h\", \"inferred\", \"unique_basename\"), 26: (\"src/os/unix/ngx_linux_config.h\", \"inferred\", \"unique_basename\"), 30: (\"src/os/unix/ngx_solaris_config.h\", \"inferred\", \"unique_basename\"), 34: (\"src/os/unix/ngx_darwin_config.h\", \"inferred\", \"unique_basename\"), 38: (\"src/os/win32/ngx_win32_config.h\", \"inferred\", \"unique_basename\"), 42: (\"src/os/unix/ngx_posix_config.h\", \"inferred\", \"unique_basename\")}, (\"witness src/core/ngx_config.h\", cfg)\nassert [v[:2] for k, v in Ua.items() if k[0] == \"src/core/ngx_config.h\"] == [(\"ngx_auto_headers.h\", \"imports_file_not_found\")], \"ngx_config.h:12 (generated, not indexed) stays unresolved\"\namb = [v for k, v in Ua.items() if k[0] == \"src/core/ngx_core.h\" and k[1] == 52]\nassert len(amb) == 1 and amb[0][:2] == (\"ngx_time.h\", \"imports_ambiguous_match\") and sorted(paths(amb[0][4])) == [\"src/os/unix/ngx_time.h\", \"src/os/win32/ngx_time.h\"], amb\nev = {k[1]: v[:2] for k, v in Ea.items() if k[0] == \"src/event/ngx_event.c\"}\nassert (ev[8], ev[9], ev[10]) == ((\"src/core/ngx_config.h\", \"inferred\"), (\"src/core/ngx_core.h\", \"inferred\"), (\"src/event/ngx_event.h\", \"static\")), ev\nprint(\"CIB-C05 OK\")\nPY",
+        "cwd": ".",
+        "environment": "fail-closed gate as CIB-C01; bash. BASE: builder-owned copies /private/tmp/CPP-INCLUDE-BASENAME-1-{nginx,leveldb,poco}-basecopy of the manager's before-roots /private/tmp/CPP-INCLUDE-BASENAME-1-{nginx,leveldb,poco}-before (each root must hold exactly one `.db` whose `-wal` is absent or empty — otherwise `copy()` refuses before copying, because a copy of the `.db` alone would omit the WAL's committed transactions (OC-9); the `.db` copied, the one-entry registry's `db_path` redirected to the copy and asserted; the manager's roots are only copied, never served or opened for write, and their digest equals the `roots-before` line of build-progress.md before the copies and after the proof). The roots were captured by HEAD's release binary (cea4e2ee, `indexer:1.4.0`); the check asserts their source.txt states (nginx b0a4d0fb823b dirty=3, leveldb 7ee830d02b62 dirty=0, poco 49af4000f99f dirty=0, with the documented `captured=… producer=…` suffix), that the checkouts are at those commits (leveldb and poco clean), that HEAD's `rust/` tree equals cea4e2ee's (`git diff --quiet cea4e2ee HEAD -- rust`, else STOP: the operator re-captures), and that each base store's toolchain stamp names HEAD's INDEXER_VERSION. AFTER: the candidate's release binary indexes the three checkouts into NEW builder-owned roots /private/tmp/CPP-INCLUDE-BASENAME-1-{nginx,leveldb,poco}-after. Every rmap invocation runs with RMAP_STATE_ROOT, RMAP_SOCKET_PATH, RMAP_TRANSPORT=stdio, RMAP_AUTO_ENRICH=off, RMAP_AUTO_REINDEX=off, RMAP_AUTO_RETENTION=off (OC-1). The stores are read with `rg-store-diff.py` and python sqlite3 `immutable=1` only (refused if a -wal holds bytes). The copies and after-roots are created only if absent and deleted in CIB-C06.",
+        "inputs": "F-CIB-ORACLE: the before/after comparison is `agent-manager/scripts/rg-store-diff.py` ALONE over every normalized field of files, nodes, edges and unresolved rows: nginx `--expect edges:791 --expect unresolved:804` (791 new inferred edges; 791 unresolved rows removed + 13 changed to `imports_ambiguous_match`), leveldb identity, poco `--expect edges:149 --expect unresolved:133` (69 static + 64 inferred FILE edges + 16 new MODULE->MODULE pairs; 133 unresolved rows removed; no existing module edge's is_type_only moves - all 492 are 0 and every new contributor is a runtime include). The base is the manager's capture by HEAD's own binary (F-TESB-FIELD: an identity oracle compares against a baseline indexed by the SAME producer), so the only difference the diff can show is this slice's; each corpus is indexed once, by the candidate. The literals were re-measured on the manager's roots at cea4e2ee (python sqlite3 `immutable=1`, OC-5): nginx 1,090 C/C++ unresolved IMPORTS rows, all `imports_file_not_found` - 791 unique basename, 13 ambiguous basename, 286 no match; poco 3,433 `imports_file_not_found` + 368 `imports_ambiguous_match` - 69 unique suffix, 64 unique basename with a FILE node, 1 unique basename whose only file has no FILE node (`dependencies/utf8proc/src/utf8proc.c:53` `#include \"utf8proc_data.c\"`, unchanged), 1 dot-dot (`dependencies/pcre2/src/pcre2_jit_compile.c:81`, declined, unchanged), 3,298 no match; leveldb 280, all no match. PLUS ONE QUERY over the moved rows: every new C/C++ include edge is exactly a formerly unresolved include; its basis, resolution and candidates equal RG-REQ-006-L11 recomputed from the base root's own file list; its extractor keys (`isTypeOnly`, `rawPath`) are kept; every changed unresolved row keeps target, classification and basis code and gains basis and every candidate; no inferred IMPORTS edge touches a non-FILE node; per basis nginx unique_basename 791 / ambiguous_basename 13, poco unique_suffix 69 / unique_basename 64, leveldb none; the two poco residuals unchanged. Witnesses: `src/core/ngx_config.h:22,26,30,34` (freebsd, linux, solaris, darwin configs) and `:38`, `:42` -> inferred to their one file each; `:12` `ngx_auto_headers.h` unchanged; `src/core/ngx_core.h:52` `ngx_time.h` ambiguous with both candidates; `src/event/ngx_event.c:8-10` two inferred, one static."
+      },
+      "expected": "exit 0, `CIB-C05 OK` and `CIB-C05 manager roots unchanged`: the whole stores differ by exactly the predicted rows and nothing else - every include an earlier stage resolves, every include the rule cannot reach (including a unique basename whose file has no FILE node) and all of leveldb are preserved unchanged (no behavior change); nginx's module graph appears as inferred, investigable facts with their reason and candidate, never a guessed static edge; poco gains exactly the predicted static and inferred includes - all under full isolation, the manager's before-roots byte-identical (RG-REQ-011-L06/L07)",
+      "candidateSha256": "sha256:d6d8521d7e32d4cdff625e021ade58b12ca24d6d193ab9f544c8b486bb812a5f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "nginx, leveldb, and poco observed expected edge/unresolved counts; CIB-C05 OK and manager roots unchanged.",
+        "supportingEvidence": [
+          "/tmp/cib-C05-run.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CIB-C09",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-004-L12",
+        "RG-REQ-004-L02",
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L03",
+        "RG-REQ-011-L06",
+        "P-CIB-01",
+        "P-CIB-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "S=CPP-INCLUDE-BASENAME-1; T=/private/tmp/$S; N='/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/nginx'; BP=.agent-manager/slices/$S/build-progress.md; RB=\"$PWD/rust/target/release\"; A=$T-nginx-after; B=$T-nginx-basecopy; roots_same() { test \"$(grep -E '^roots-before [0-9a-f]{64}$' \"$BP\" | tail -1 | cut -d' ' -f2)\" = \"$(find $T-nginx-before $T-leveldb-before $T-poco-before -type f | sort | xargs shasum -a 256 | shasum -a 256 | cut -d' ' -f1)\"; }; q() { local root=\"$1\" out=\"$2\"; shift 2; ( cd \"$N\" && env RMAP_STATE_ROOT=\"$root\" RMAP_SOCKET_PATH=\"$root/d.sock\" RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off PATH=\"$RB:$PATH\" \"$RB/rmap\" \"$@\" > \"$out\" 2> \"$out.err\" ); }; test -d $A && test -d $B && q $A /tmp/cib-deps.txt modules deps && q $A /tmp/cib-deps.json modules deps --json && q $A /tmp/cib-deps-inc.json modules deps --include-inferred --json && q $A /tmp/cib-imp-cfg.txt imports src/core/ngx_config.h && q $A /tmp/cib-imp-cfg.json imports src/core/ngx_config.h --json && q $A /tmp/cib-imp-cfg-inc.txt imports src/core/ngx_config.h --include-inferred && q $A /tmp/cib-imp-cfg-inc.json imports src/core/ngx_config.h --include-inferred --json && q $A /tmp/cib-imp-ev.txt imports src/event/ngx_event.c && q $A /tmp/cib-imp-ev-inc.txt imports src/event/ngx_event.c --include-inferred && q $A /tmp/cib-imp-ev-inc.json imports src/event/ngx_event.c --include-inferred --json && q $A /tmp/cib-trust.json trust --json && q $A /tmp/cib-mlist.json modules list --json && q $B /tmp/cib-before-imp-cfg.txt imports src/core/ngx_config.h && q $B /tmp/cib-before-imp-cfg-inc.json imports src/core/ngx_config.h --include-inferred --json && python3 - <<'PY' && roots_same && echo 'CIB-C09 manager roots unchanged'\nimport json, re, glob, os, sqlite3\ndef val(p):\n    j = json.load(open(p)); return j.get(\"value\", j) if isinstance(j, dict) else j\ndef find(o, key):\n    if isinstance(o, dict):\n        for k, v in o.items():\n            if k == key: yield v\n            yield from find(v, key)\n    elif isinstance(o, list):\n        for v in o: yield from find(v, key)\nassert val(\"/tmp/cib-deps.json\")[\"results\"] == [], \"the default module view shows no inferred edge\"\nh = open(\"/tmp/cib-deps.txt\").read(); assert \"inferred\" in h and \"--include-inferred\" in h, (\"the default view states the inferred remainder with its flag\", h[-800:])\ngot = sorted((e[\"source\"], e[\"target\"], e[\"import_count\"]) for e in val(\"/tmp/cib-deps-inc.json\")[\"results\"])\nassert got == sorted([(\"src/http\", \"src/core\", 225), (\"src/os\", \"src/core\", 163), (\"src/event\", \"src/core\", 116), (\"src/stream\", \"src/core\", 65), (\"src/mail\", \"src/core\", 38), (\"src/os\", \"src/event\", 22), (\"src/mail\", \"src/event\", 16), (\"src/core\", \"src/event\", 9), (\"src/core\", \"src/os\", 6), (\"src/http\", \"src/event\", 4), (\"src/stream\", \"src/event\", 3)]), (\"nginx module graph under --include-inferred\", got)\nCFG = [\"src/os/unix/ngx_darwin_config.h\", \"src/os/unix/ngx_freebsd_config.h\", \"src/os/unix/ngx_linux_config.h\", \"src/os/unix/ngx_posix_config.h\", \"src/os/unix/ngx_solaris_config.h\", \"src/os/win32/ngx_win32_config.h\"]\ncfg = open(\"/tmp/cib-imp-cfg.txt\").read()\nassert cfg == \"Imports: src/core/ngx_config.h\\n\\n0 imports\\n+6 inferred imports, not shown — --include-inferred\\n\", (\"imports src/core/ngx_config.h (default view: certain rows only, the inferred remainder stated)\", cfg)\ndj = val(\"/tmp/cib-imp-cfg.json\"); assert dj[\"imports\"] == [] and dj[\"import_remainder\"][\"inferred\"][\"imports\"] == 6, (\"default JSON\", dj)\ncfg = open(\"/tmp/cib-imp-cfg-inc.txt\").read()\nassert cfg == \"Imports: src/core/ngx_config.h\\n\\n6 imports\\n\\n\" + \"\".join(\"  %s  depth=1  inferred: unique basename → %s\\n\" % (p, p) for p in CFG), (\"imports src/core/ngx_config.h --include-inferred\", cfg)\nrows = val(\"/tmp/cib-imp-cfg-inc.json\")[\"imports\"]\nassert sorted((r[\"symbol\"], r[\"resolution\"], json.dumps(r.get(\"reason\"), sort_keys=True)) for r in rows) == [(p, \"inferred\", json.dumps({\"basis\": \"unique_basename\", \"candidates\": [p]}, sort_keys=True)) for p in CFG], rows\nev = open(\"/tmp/cib-imp-ev.txt\").read()\nassert ev == \"Imports: src/event/ngx_event.c\\n\\n1 import\\n\\n  src/event/ngx_event.h  depth=1  static\\n+2 inferred imports, not shown — --include-inferred\\n\", (\"imports src/event/ngx_event.c (default view)\", ev)\nev = open(\"/tmp/cib-imp-ev-inc.txt\").read()\nassert ev == \"Imports: src/event/ngx_event.c\\n\\n3 imports\\n\\n  src/core/ngx_config.h  depth=1  inferred: unique basename → src/core/ngx_config.h\\n  src/core/ngx_core.h  depth=1  inferred: unique basename → src/core/ngx_core.h\\n  src/event/ngx_event.h  depth=1  static\\n\", (\"imports src/event/ngx_event.c --include-inferred\", ev)\nst = [r for r in val(\"/tmp/cib-imp-ev-inc.json\")[\"imports\"] if r[\"symbol\"] == \"src/event/ngx_event.h\"]\nassert len(st) == 1 and st[0][\"resolution\"] == \"static\" and \"reason\" not in st[0], (\"a row with no recorded reason serializes as before\", st)\nt = set(re.findall(r\"unresolved_imports=(\\d+)\", open(\"/tmp/cib-trust.json\").read()))\nm = set(v for v in find(val(\"/tmp/cib-mlist.json\"), \"unresolved_import_count\") if v is not None)\nassert t == {\"299\"} and m == {299}, (\"trust's unresolved-import figure equals the modules-list headline on one snapshot\", t, m)\nb = open(\"/tmp/cib-before-imp-cfg.txt\").read()\nassert b == \"Imports: src/core/ngx_config.h\\n\\n0 imports\\n\", (\"before (the base copy, served by the candidate): no import and no inferred remainder\", b)\nbj = val(\"/tmp/cib-before-imp-cfg-inc.json\"); assert bj[\"imports\"] == [] and bj[\"import_remainder\"][\"inferred\"][\"imports\"] == 0, (\"before JSON\", bj)\nB = \"/private/tmp/CPP-INCLUDE-BASENAME-1-nginx-basecopy\"\np = glob.glob(B + \"/databases/*.db\"); assert len(p) == 1, p\nw = p[0] + \"-wal\"; assert not (os.path.exists(w) and os.path.getsize(w) > 0), (\"uncheckpointed WAL\", w)\nsnaps = sqlite3.connect(\"file:\" + p[0] + \"?immutable=1\", uri=True).execute(\"select snapshot_uid, status from snapshots\").fetchall()\nwant = json.load(open(\"/private/tmp/CPP-INCLUDE-BASENAME-1-nginx-before/registry.json\"))[\"repos\"][0][\"last_snapshot_uid\"]\nassert snaps == [(want, \"ready\")], (\"the served base copy was not re-indexed (RMAP_AUTO_REINDEX=off, OC-1)\", snaps, want)\nprint(\"CIB-C09 OK\")\nPY",
+        "cwd": ".",
+        "environment": "bash; the candidate release binary on CIB-C05's nginx after-root /private/tmp/CPP-INCLUDE-BASENAME-1-nginx-after and on its nginx base copy /private/tmp/CPP-INCLUDE-BASENAME-1-nginx-basecopy (the before capture); every invocation with RMAP_STATE_ROOT, RMAP_SOCKET_PATH, RMAP_TRANSPORT=stdio, RMAP_AUTO_ENRICH=off, RMAP_AUTO_REINDEX=off, RMAP_AUTO_RETENTION=off (OC-1: the base copy is stamped `indexer:1.4.0` and the candidate's indexer is one minor higher, so its daemon would schedule a background full re-index of the copy - turning the before capture into an after - unless the re-index is disabled; at cea4e2ee a stdio daemon schedules none (daemon-runtime/src/auto_reindex.rs:248-262) and RMAP_AUTO_REINDEX=off disables it independently of the transport; the check asserts the outcome - the copy still holds its one captured snapshot); the manager's roots' digest asserted unchanged at the end; runs after CIB-C05, before CIB-C06",
+        "inputs": "TEST-EDGE-SCOPE-1B's partition (RG-REQ-002-L11; D-TESB-READERS-1 §1: every IMPORTS reader, `imports <file>` included, lists certain rows by default and states the inferred remainder with `--include-inferred`) and this slice's reader. `modules deps --json` results empty (the default view has no inferred edge); `modules deps` names the inferred remainder and `--include-inferred`; `modules deps --include-inferred --json` equals the eleven module pairs of section 1 (667 imports). `imports src/core/ngx_config.h` (default) prints exactly `0 imports` and `+6 inferred imports, not shown — --include-inferred` (imports.rs:74-127, `push_partition_lines` :115-126; import_partition.rs `remainder_lines` :228-240, `per_file_remainder` :262-267), its JSON has no row and `import_remainder.inferred.imports` 6; with `--include-inferred` it prints exactly six rows `  <path>  depth=1  inferred: unique basename → <path>` and its JSON carries `reason {basis: unique_basename, candidates: [<path>]}` on each; `imports src/event/ngx_event.c` prints `  src/event/ngx_event.h  depth=1  static` and `+2 inferred imports, not shown — --include-inferred` by default and, with `--include-inferred`, the two inferred rows with their reason above the static row, whose JSON row has no `reason` key; `trust --json`'s `unresolved_imports=` reason and `modules list --json`'s `unresolved_import_count` are both 299. BEFORE (the base copy served by the candidate): `imports src/core/ngx_config.h` prints exactly `0 imports` with no remainder line, and its `--include-inferred --json` has no row and an inferred remainder of 0; the copy still holds exactly its one ready snapshot (no re-index ran)."
+      },
+      "expected": "exit 0, `CIB-C09 OK` and `CIB-C09 manager roots unchanged`: the agent reads the inferred include as inferred with its reason and candidate under `--include-inferred`, the default views stay certain-only and state the remainder with its flag, a static row is preserved unchanged, the before store answers no import for the witness file, and trust and modules state one unresolved-import count for the snapshot",
+      "candidateSha256": "sha256:d6d8521d7e32d4cdff625e021ade58b12ca24d6d193ab9f544c8b486bb812a5f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "CIB-C09 OK; CIB-C09 manager roots unchanged",
+        "supportingEvidence": [
+          "/tmp/cib-C09-run.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "CIB-C06",
+      "obligationIds": [
+        "RG-REQ-011-L06",
+        "P-CIB-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "S=CPP-INCLUDE-BASENAME-1; T=/private/tmp/$S; BP=.agent-manager/slices/$S/build-progress.md; test \"$(grep -E '^registry-before [0-9a-f]{64}$' \"$BP\" | tail -1 | cut -d' ' -f2)\" = \"$(shasum -a 256 \"$HOME/Library/Application Support/repo-graph/registry.json\" | cut -d' ' -f1)\" && rm -rf $T-nginx-basecopy $T-nginx-after $T-leveldb-basecopy $T-leveldb-after $T-poco-basecopy $T-poco-after && test ! -e $T-nginx-basecopy && test ! -e $T-nginx-after && test ! -e $T-leveldb-basecopy && test ! -e $T-leveldb-after && test ! -e $T-poco-basecopy && test ! -e $T-poco-after && test -d $T-nginx-before && test -d $T-leveldb-before && test -d $T-poco-before && test \"$(grep -E '^roots-before [0-9a-f]{64}$' \"$BP\" | tail -1 | cut -d' ' -f2)\" = \"$(find $T-nginx-before $T-leveldb-before $T-poco-before -type f | sort | xargs shasum -a 256 | shasum -a 256 | cut -d' ' -f1)\" && python3 - <<'PY'\nimport subprocess\nst = subprocess.run([\"git\", \"status\", \"--porcelain\", \"--untracked-files=all\"], capture_output=True, text=True, check=True).stdout.splitlines()\ngot = sorted(l[3:] for l in st if not l[3:].startswith(\".agent-manager/\"))\nassert got == ['rust/crates/classification/src/types.rs', 'rust/crates/daemon-runtime/src/livegraph_feed.rs', 'rust/crates/indexer/src/include_resolver.rs', 'rust/crates/indexer/src/orchestrator.rs', 'rust/crates/indexer/src/resolver.rs', 'rust/crates/repo-index/tests/cpp_include_roots.rs', 'rust/crates/rgr/src/presentation/imports.rs', 'rust/crates/storage/src/queries.rs', 'rust/crates/trust/src/rules.rs', 'rust/crates/trust/src/service.rs'], (\"the tree holds exactly the ten candidate paths\", got)\nwt = subprocess.run([\"git\", \"worktree\", \"list\", \"--porcelain\"], capture_output=True, text=True, check=True).stdout\nassert \"CPP-INCLUDE-BASENAME-1\" not in wt, \"no worktree of this slice remains\"\nprint(\"CIB-C06 OK\")\nPY",
+        "cwd": ".",
+        "environment": "candidate tree, after every other check",
+        "inputs": "the operator's registry digest recorded as `registry-before <sha256>` in build-progress.md at step 0 equals the digest now; the builder's three base copies and three after-roots are removed; the manager's three before-roots /private/tmp/CPP-INCLUDE-BASENAME-1-{nginx,leveldb,poco}-before are left in place and their digest equals the `roots-before <sha256>` line recorded at step 0 (the TEST-EDGE-SCOPE-1B TESB-C14 form); no worktree of this slice exists; the tree holds exactly the ten candidate paths (untracked files included)."
+      },
+      "expected": "exit 0 and `CIB-C06 OK`: every proof was isolated - the operator's registry and the manager's before-roots are preserved byte-identical - nothing the builder created remains, and the tree holds only the allocated paths",
+      "candidateSha256": "sha256:d6d8521d7e32d4cdff625e021ade58b12ca24d6d193ab9f544c8b486bb812a5f",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "CIB-C06 OK; operator registry digest matched registry-before",
+        "supportingEvidence": [
+          "/tmp/cib-C06-run.txt"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "rust/crates/classification/src/types.rs",
+      "obligationIds": [
+        "RG-REQ-002-L02",
+        "RG-REQ-006-L05"
+      ],
+      "summary": "Documentation-only comments for 002-L02 and 006-L05."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/livegraph_feed.rs",
+      "obligationIds": [
+        "P-CIB-04"
+      ],
+      "summary": "Added reason: None to a test literal; obligation not stated by the builder, using the contextually plausible preservation obligation."
+    },
+    {
+      "path": "rust/crates/indexer/src/include_resolver.rs",
+      "obligationIds": [
+        "RG-REQ-006-L11",
+        "RG-REQ-006-L03"
+      ],
+      "summary": "Added a pure basename index and suffix/basename lookup with nine tests; resolve is unchanged."
+    },
+    {
+      "path": "rust/crates/indexer/src/orchestrator.rs",
+      "obligationIds": [
+        "RG-REQ-006-L11"
+      ],
+      "summary": "Moved INDEXER_VERSION to indexer:1.5.0 on its four occurrences; existing stores show toolchain staleness."
+    },
+    {
+      "path": "rust/crates/indexer/src/resolver.rs",
+      "obligationIds": [
+        "RG-REQ-006-L11",
+        "RG-REQ-002-L11",
+        "RG-REQ-004-L02",
+        "P-CIB-01"
+      ],
+      "summary": "Added Stage 6 at the final import-ladder miss for C/C++ edges; merges basis and candidates into the carrier, and only static edges feed the module graph; includes six tests."
+    },
+    {
+      "path": "rust/crates/repo-index/tests/cpp_include_roots.rs",
+      "obligationIds": [
+        "RG-REQ-006-L11"
+      ],
+      "summary": "Added four end-to-end tests for binding shapes, refresh re-resolution, and trust/headline seam; obligation not stated by the builder, using the contextually plausible requirement."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/imports.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "P-CIB-04"
+      ],
+      "summary": "Decodes the reason and uses one row formatter for default and compare listings; includes nine tests."
+    },
+    {
+      "path": "rust/crates/storage/src/queries.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04",
+        "P-CIB-04"
+      ],
+      "summary": "Added ImportResult.reason and a validity rule in import_row_reason for absent, valid, unreadable, and missing states; includes seven tests."
+    },
+    {
+      "path": "rust/crates/trust/src/rules.rs",
+      "obligationIds": [
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L10",
+        "P-CIB-05"
+      ],
+      "summary": "Changed trust unresolved-import counting to sum the shared category set; renamed a test."
+    },
+    {
+      "path": "rust/crates/trust/src/service.rs",
+      "obligationIds": [
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L10",
+        "P-CIB-05"
+      ],
+      "summary": "Added a propagation test; production code is unchanged."
+    }
+  ],
+  "completedAt": "2026-10-02T20:02:37.017Z",
+  "limitations": [
+    "The four repo-index end-to-end tests were written after the indexer stage existed, so they have no failing-first run. The before behaviour is shown by unit tests that failed first and by C05's before-store. Three of the six resolver tests are preservation guards; they passed both before and after the change, by design.",
+    "Two fixtures were wrong on their first run: one omitted the C++ extractor's rawPath key; the other used JSON nulls that the existing ImportEntry decode already rejects.",
+    "cargo test --workspace and dogfood were not run; they are the operator's gate.",
+    "Existing stores need a re-index (refresh or rmap repo rebuild) to get the new bindings.",
+    "Follow-ups listed in §8 of the slice doc and the non-blocking RG-REQ-009-L04 trace note are left for the operator."
+  ],
+  "report": "All nine checks pass. CPP-INCLUDE-BASENAME-1 is implemented and uncommitted in the working tree.\n\nC/C++ includes that no existing stage resolves now bind in three ways:\n- **Unique path suffix (two or more segments):** a static edge.\n- **Unique basename (one segment):** an inferred edge that records its one candidate and the reason. Default views do not show it; `--include-inferred` does.\n- **Several matches:** the include stays unresolved as `imports_ambiguous_match`, with every candidate recorded.\n\nTrust's unresolved-import figure now reads the same shared category set as the `modules list` headline. Stop conditions hit: none. `DECISION_REQUIRED`: none.\n\n## Check results\nEach check was run verbatim from the slice doc's allocation block, from its own `cwd`, in the doc's order. Progress is in `.agent-manager/slices/CPP-INCLUDE-BASENAME-1/build-progress.md`. All are EXECUTED.\n\n| Check | Outcome | Log, proving line |\n|---|---|---|\n| CIB-C01 | passed | `/tmp/cib-C01-run.txt` (rerun `/tmp/cib-C01-rerun.txt`): `CIB-C01 source assertions ok: indexer:1.4.0 -> indexer:1.5.0`; `/tmp/cib-01.txt` lib `496 passed; 0 failed` |\n| CIB-C02 | passed | `/tmp/cib-C02-run.txt`: `CIB-C02 ok: classification diff is documentation only (26 lines)` |\n| CIB-C03 | passed | `/tmp/cib-C03-run.txt`: `CIB-C03 existing integration test bodies unchanged` |\n| CIB-C07 | passed | `/tmp/cib-C07-run.txt`: `CIB-C07 ok: trust sums the shared IMPORTS set; …` |\n| CIB-C08 | passed | `/tmp/cib-C08-run.txt`: `CIB-C08 ok: every existing storage/rgr/livegraph_feed test unchanged by body…`; daemon-runtime `--lib` `876 passed; 0 failed` |\n| CIB-C04 | **run 1 failed**, run 2 passed | Run 1 exited 1: my new code was not rustfmt-formatted. I applied `cargo fmt` to the seven crates; run 2 exited 0 (`/tmp/cib-C04-run.txt`). C01, C02, C03, C07 and C08 were then re-run on the formatted tree and all exited 0 (`/tmp/cib-C0x-rerun.txt`). |\n| CIB-C05 | passed | `/tmp/cib-C05-run.txt`, details below |\n| CIB-C09 | passed | `/tmp/cib-C09-run.txt`: `CIB-C09 OK`, `CIB-C09 manager roots unchanged` |\n| CIB-C06 | passed | `/tmp/cib-C06-run.txt`: `CIB-C06 OK` |\n\nCIB-C05 in detail:\n- **nginx:** `edges … added=791 … OK` and `unresolved … removed=791 … changed=13 … expected=804 OK`.\n- **leveldb:** identical stores.\n- **poco:** `edges … expected=149 OK`, `unresolved … expected=133 OK`.\n- Moved rows by basis: nginx `{'unique_basename': 791, 'ambiguous_basename': 13}` (1090 → 299 unresolved); poco `{'unique_suffix': 69, 'unique_basename': 64}` (3801 → 3668).\n- The run ends with `CIB-C05 OK` and `CIB-C05 manager roots unchanged`.\n\nIsolation: the operator's registry digest matched `registry-before` (C06). The manager's before-roots kept digest `ef3d2b96…093f59` after C05, C09 and C06. I deleted the six builder-owned copies and after-roots. No worktree was created.\n\n## What the product answers now (nginx b0a4d0f, poco 49af400)\n**nginx failure witness**, `src/core/ngx_config.h:22,26,30,34,38,42`:\n- The checkout lines are `#include <ngx_freebsd_config.h>`, `<ngx_linux_config.h>`, `<ngx_solaris_config.h>`, `<ngx_darwin_config.h>`, `<ngx_win32_config.h>`, `<ngx_posix_config.h>`.\n- **Before** (base copy, served by the candidate), `imports src/core/ngx_config.h` printed:\n  ```\n  Imports: src/core/ngx_config.h\n\n  0 imports\n  ```\n- **After**, the default view prints `0 imports` and then `+6 inferred imports, not shown — --include-inferred`.\n- **After**, with `--include-inferred`, it prints:\n  ```\n  6 imports\n\n    src/os/unix/ngx_darwin_config.h  depth=1  inferred: unique basename → src/os/unix/ngx_darwin_config.h\n    src/os/unix/ngx_freebsd_config.h  depth=1  inferred: unique basename → src/os/unix/ngx_freebsd_config.h\n    src/os/unix/ngx_linux_config.h  depth=1  inferred: unique basename → src/os/unix/ngx_linux_config.h\n    src/os/unix/ngx_posix_config.h  depth=1  inferred: unique basename → src/os/unix/ngx_posix_config.h\n    src/os/unix/ngx_solaris_config.h  depth=1  inferred: unique basename → src/os/unix/ngx_solaris_config.h\n    src/os/win32/ngx_win32_config.h  depth=1  inferred: unique basename → src/os/win32/ngx_win32_config.h\n  ```\n- Each JSON row carries `\"reason\": {\"basis\": \"unique_basename\", \"candidates\": [\"src/os/unix/ngx_darwin_config.h\"]}` (and likewise for the others).\n\n**Mixed file**, `src/event/ngx_event.c:8-10` (`#include <ngx_config.h>`, `<ngx_core.h>`, `<ngx_event.h>`):\n- The default view prints `1 import`, then `  src/event/ngx_event.h  depth=1  static`, then `+2 inferred imports, not shown — --include-inferred`.\n- With `--include-inferred`, the two inferred rows (`ngx_config.h`, `ngx_core.h`) print with their reason. The static row is unchanged, and its JSON has no `reason` key.\n\n**Module views:**\n- `modules deps` by default shows `No cross-module dependencies exist.` and `+667 inferred imports, not shown (11 cross-module dependencies only through them) — --include-inferred`.\n- With the flag, it lists the 11 pairs, for example `src/http -> src/core 225`, `src/os -> src/core 163`, `src/event -> src/core 116`.\n\n**Trust and headline:** `trust` says `unresolved_imports=299`, and `modules list` says `unresolved_import_count` 299. HEAD's trust function read only `.get(\"imports_file_not_found\")` (`trust/src/rules.rs:395-404`), which would give 286 here. It now sums `MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES`.\n\n**poco static suffix:** `dependencies/cpptrace/src/binary/elf.hpp:8`, `#include \"utils/utils.hpp\"`, is now a static edge to `dependencies/cpptrace/src/utils/utils.hpp` with `basis` `unique_suffix`.\n\nOne example per residual class, quoted from the after-stores:\n- **Ambiguous:** nginx `src/core/ngx_core.h:52`, `#include <ngx_time.h>`, is `imports_ambiguous_match` with `ambiguous_basename` and both candidates (`src/os/unix/…` and `src/os/win32/…`). It is never a pick.\n- **No indexed file:** nginx `src/core/ngx_config.h:12`, `#include <ngx_auto_headers.h>`, stays `imports_file_not_found`.\n- **Unique basename whose file has no FILE node:** poco `dependencies/utf8proc/src/utf8proc.c:53`, `#include \"utf8proc_data.c\"`, is unchanged.\n- **Dot-dot specifier:** poco `dependencies/pcre2/src/pcre2_jit_compile.c:81`, `#include \"../deps/sljit/sljit_src/sljitLir.c\"`, is declined and unchanged.\n\n## Changed files (the ten allocated paths)\n- **`indexer/src/include_resolver.rs`:** a pure basename index and the suffix/basename lookup, plus 9 tests. Serves RG-REQ-006-L11 and L03. `resolve` is unchanged.\n- **`indexer/src/resolver.rs`:** Stage 6, in the import ladder's final miss and for C/C++ edges only. It merges `basis` and `candidates` into the carrier; only a static edge feeds the module graph. Plus 6 tests. Serves 006-L11, 002-L11, 004-L02 and P-CIB-01.\n- **`indexer/src/orchestrator.rs`:** `INDEXER_VERSION` moves to `indexer:1.5.0` on all four lines that hold it. What existing stores then show is TOOLCHAIN-STALENESS-1's (D-CIB-L06-1 = B).\n- **`classification/src/types.rs`:** doc comments only, for 002-L02 and 006-L05.\n- **`trust/src/rules.rs` and `trust/src/service.rs`:** the shared-set sum, the renamed test, and the propagation test. `service.rs` production code is unchanged. Serves 002-L02, 002-L10 and P-CIB-05.\n- **`storage/src/queries.rs`:** `ImportResult.reason`, using one validity rule in `import_row_reason` (states: absent, valid, unreadable, missing), plus 7 tests. Serves 002-L11, 006-L12, 002-L04 and P-CIB-04.\n- **`rgr/src/presentation/imports.rs`:** decodes the reason, and one row formatter now serves both the default and compare listings. Plus 9 tests. Serves 002-L11 and P-CIB-04.\n- **`daemon-runtime/src/livegraph_feed.rs`:** exactly one added line, `reason: None,`, in a test literal.\n- **`repo-index/tests/cpp_include_roots.rs`:** 4 end-to-end tests: both binding shapes, refresh re-resolution, and the trust/headline seam.\n\n## Limitations\n- **Not failing-first:** the four repo-index end-to-end tests were written after the indexer stage existed, so they have no failing-first run. The before behaviour is shown by the unit tests that failed first and by C05's before-store. Three of the six resolver tests are preservation guards; they passed both before and after the change, by design.\n- **Fixture corrections:** two of my fixtures were wrong on their first run and the product was right. One omitted the C++ extractor's `rawPath` key; the other used JSON nulls that the existing `ImportEntry` decode already rejects.\n- **Not run:** `cargo test --workspace` and the dogfood are the operator's gate.\n- **Existing stores:** they need a re-index (refresh or `rmap repo rebuild`) to get the new bindings.\n- **Left for the operator:** the follow-ups the slice doc already lists in §8, plus the non-blocking RG-REQ-009-L04 trace note."
+}

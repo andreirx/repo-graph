@@ -5119,6 +5119,7 @@ mod tests {
             resolution: Some(resolution.to_string()),
             evidence: vec![],
             depth: 1,
+            reason: None,
         };
         let edge = |dst: &str, basis: &str| ImportEdgeView {
             src_file: "a.ts".to_string(),

@@ -265,8 +265,14 @@ pub struct ClassifierEdgeInput {
 #[serde(rename_all = "snake_case")]
 pub enum UnresolvedEdgeCategory {
     ImportsFileNotFound,
-    /// Multiple indexed headers match the include specifier exactly.
-    /// C/C++ v1.1: ambiguity from conventional/configured root overlap.
+    /// A C/C++ include that matches more than one indexed file, so it is
+    /// never bound to one. Three shapes share this category: an include-root
+    /// overlap (C/C++ v1.1 — the specifier exists under two configured or
+    /// derived roots); a non-unique path suffix; a non-unique basename
+    /// (CPP-INCLUDE-BASENAME-1). The last two carry `basis`
+    /// (`ambiguous_suffix` / `ambiguous_basename`) and every `candidates`
+    /// stable key in the row's `metadata_json`; a root overlap carries no
+    /// `basis`.
     ImportsAmbiguousMatch,
     /// A Java `import pkg.*` wildcard (IMPORT-RESOLUTION-JAVA-1). A wildcard
     /// names a package, not a single type, so it has no single target file —
@@ -325,9 +331,11 @@ impl UnresolvedEdgeCategory {
 /// The unresolved-edge categories the `modules list` headline counts as "M imports
 /// unresolved" (IMPORT-RESOLUTION-RUST-1 §2.5, extended by IMPORT-RESOLUTION-JAVA-1 for the
 /// two Java bases and by CPP-INCLUDE-ROOTS-1 for the C/C++ include-root-overlap basis).
-/// Single source of truth so the dispatch count and its regression test can never disagree —
-/// the sole current production caller is `handle_modules_list`
-/// (`daemon-runtime/src/dispatch.rs`), and `count_unresolved_by_modules_list_categories`
+/// Single source of truth so the dispatch count and its regression test can never disagree.
+/// Two production readers: `handle_modules_list` (`daemon-runtime/src/dispatch.rs`, the
+/// headline) and trust's `sum_unresolved_imports` (`trust/src/rules.rs`, the import-graph
+/// reliability figure — CPP-INCLUDE-BASENAME-1, D-CIB-COUNT-1), so both surfaces state one
+/// unresolved-import count for a snapshot; `count_unresolved_by_modules_list_categories`
 /// pins the semantics.
 ///
 /// This set is EXACTLY the IMPORTS family — it equals [`UnresolvedEdgeCategory::is_imports_category`]
@@ -340,10 +348,10 @@ impl UnresolvedEdgeCategory {
 /// so the headline stays byte-stable there.
 ///
 /// Abstraction one-liner — what: a shared category set; users: the modules-list count in
-/// dispatch + its storage regression test; axis: the exact set of "unresolved import"
-/// categories, which grew this slice to the full four; rejected simpler alternative: two
-/// independent inline lists (dispatch + test) that could silently drift, defeating the
-/// regression's purpose.
+/// dispatch, trust's IMPORTS-family sum, and the storage regression test; axis: the exact set
+/// of "unresolved import" categories, which grew this slice to the full four; rejected simpler
+/// alternative: independent inline lists (dispatch, trust, test) that could silently drift,
+/// defeating the regression's purpose.
 pub const MODULES_LIST_UNRESOLVED_IMPORT_CATEGORIES: [UnresolvedEdgeCategory; 4] = [
     UnresolvedEdgeCategory::ImportsFileNotFound,
     UnresolvedEdgeCategory::ImportsAmbiguousMatch,

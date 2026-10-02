@@ -149,6 +149,149 @@ pub struct ImportResult {
     /// Extractor evidence (e.g. `["ts-core:0.2.0"]`).
     pub evidence: Vec<String>,
     pub depth: i64,
+    /// CPP-INCLUDE-BASENAME-1 (RG-REQ-002-L11; D-CIB-REASON-1): why the row is bound, read from
+    /// the edge's `metadata_json` and judged against the row's own edge by
+    /// [`import_row_reason`]. Absent (key skipped, the row serializes as before) on a row for
+    /// which no reason is required and none of this slice's bases is recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<ImportReason>,
+}
+
+/// CPP-INCLUDE-BASENAME-1 (RG-REQ-002-L11): the reason on an `imports <file>` row. Serialized
+/// untagged, so each state is told apart by its one key: `{basis, candidates}`,
+/// `{unreadable}`, `{missing}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ImportReason {
+    /// A reason that agrees with its row: a unique basis, exactly one candidate that is the
+    /// edge's own FILE target (carried as its repo-relative path), the basis matching the
+    /// resolution (`unique_basename` ⇔ inferred, `unique_suffix` ⇔ static).
+    Recorded {
+        basis: String,
+        candidates: Vec<String>,
+    },
+    /// A carrier that is present but malformed or contradicts its edge — what failed. Never
+    /// evidence, never dropped.
+    Unreadable { unreadable: String },
+    /// A C/C++ inferred include (a row only CPP-INCLUDE-BASENAME-1 produces, so it must carry a
+    /// reason) whose carrier is NULL or has no `basis`.
+    Missing { missing: String },
+}
+
+/// The four `basis` values the C/C++ include suffix/basename stage writes
+/// (`indexer::resolver::INCLUDE_*_BASIS`; storage takes no dependency on the indexer — the
+/// strings are the stored contract).
+const INCLUDE_BASES: [&str; 4] = [
+    "unique_suffix",
+    "unique_basename",
+    "ambiguous_suffix",
+    "ambiguous_basename",
+];
+
+/// Was this edge written by the C or C++ extractor (`c-core:<v>` / `cpp-core:<v>`, the
+/// provenance string the resolver gates its include stage on)?
+fn is_c_family_extractor(extractor: Option<&str>) -> bool {
+    extractor.is_some_and(|e| e.starts_with("c-core:") || e.starts_with("cpp-core:"))
+}
+
+/// CPP-INCLUDE-BASENAME-1 (RG-REQ-002-L11, RG-REQ-002-L04; F-CIB-REASON-VALIDITY,
+/// F-CIB-MISSING-REASON): the ONE rule that turns an IMPORTS edge's carrier into the row's reason,
+/// judged against the row's own edge — a reason is evidence only when it agrees with the fact it
+/// explains.
+///
+/// - A C/C++ `inferred` edge (only CPP-INCLUDE-BASENAME-1 writes one) must carry a valid reason:
+///   a NULL carrier or one without `basis` is `Missing`, never absent.
+/// - Every other row (every `static` row, every other producer's row) carries no reason when its
+///   carrier is NULL, has no `basis`, or names a string basis outside [`INCLUDE_BASES`].
+/// - Otherwise the reason is `Recorded` only when every clause holds (see [`ImportReason`]), and
+///   `Unreadable` with what failed in every other case.
+fn import_row_reason(
+    resolution: Option<&str>,
+    extractor: Option<&str>,
+    carrier: Option<&str>,
+    target_stable_key: &str,
+    target_kind: &str,
+) -> Option<ImportReason> {
+    let required = resolution == Some("inferred") && is_c_family_extractor(extractor);
+    let unreadable = |what: String| Some(ImportReason::Unreadable { unreadable: what });
+    let missing = |what: &str| {
+        required.then(|| ImportReason::Missing {
+            missing: what.to_string(),
+        })
+    };
+    let Some(raw) = carrier else {
+        return missing("no reason carrier");
+    };
+    let obj = match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(serde_json::Value::Object(obj)) => obj,
+        Ok(_) | Err(_) => return unreadable("reason carrier is not a JSON object".into()),
+    };
+    let basis = match obj.get("basis") {
+        None => return missing("reason carrier has no basis"),
+        Some(serde_json::Value::String(basis)) => basis.as_str(),
+        Some(_) => return unreadable("basis is not a string".into()),
+    };
+    if !INCLUDE_BASES.contains(&basis) {
+        return if required {
+            unreadable(format!(
+                "basis {basis} is not one an inferred include carries"
+            ))
+        } else {
+            None
+        };
+    }
+    if basis.starts_with("ambiguous_") {
+        return unreadable(format!("ambiguous basis {basis} on a bound edge"));
+    }
+    let candidates = match obj.get("candidates") {
+        None => return unreadable("candidates missing".into()),
+        Some(serde_json::Value::Array(items)) => items,
+        Some(_) => return unreadable("candidates is not an array".into()),
+    };
+    let Some(candidates) = candidates
+        .iter()
+        .map(|c| c.as_str())
+        .collect::<Option<Vec<&str>>>()
+    else {
+        return unreadable("candidates holds a non-string".into());
+    };
+    let candidate = match candidates.as_slice() {
+        [] => return unreadable("candidates is empty".into()),
+        [one] => *one,
+        many => {
+            return unreadable(format!(
+                "{} candidates under the unique basis {basis}",
+                many.len()
+            ))
+        }
+    };
+    let agrees = matches!(
+        (basis, resolution),
+        ("unique_basename", Some("inferred")) | ("unique_suffix", Some("static"))
+    );
+    if !agrees {
+        return unreadable(format!(
+            "basis {basis} on a {} edge",
+            resolution.unwrap_or("resolution-less")
+        ));
+    }
+    if candidate != target_stable_key {
+        return unreadable(format!("candidate {candidate} is not the edge's target"));
+    }
+    if target_kind != "FILE" {
+        return unreadable(format!("the target is a {target_kind}, not a FILE"));
+    }
+    let Some(path) = candidate
+        .strip_suffix(":FILE")
+        .and_then(|k| k.split_once(':'))
+        .map(|(_, path)| path)
+    else {
+        return unreadable(format!("candidate {candidate} is not a FILE stable key"));
+    };
+    Some(ImportReason::Recorded {
+        basis: basis.to_string(),
+        candidates: vec![path.to_string()],
+    })
 }
 
 impl ImportResult {
@@ -1782,7 +1925,8 @@ impl StorageConnection {
             "SELECT
 				n.node_uid, n.name, n.qualified_name, n.kind, n.subtype,
 				f.path AS file_path, n.line_start, n.col_start,
-				e.type AS edge_type, e.resolution, e.extractor
+				e.type AS edge_type, e.resolution, e.extractor,
+				e.metadata_json, n.stable_key
 			 FROM edges e
 			 JOIN nodes source_n ON e.source_node_uid = source_n.node_uid
 			 JOIN nodes n ON e.target_node_uid = n.node_uid
@@ -1799,20 +1943,33 @@ impl StorageConnection {
             |row| {
                 let name: String = row.get(1)?;
                 let qualified_name: Option<String> = row.get(2)?;
+                let kind: String = row.get(3)?;
                 let file_path: Option<String> = row.get(5)?;
+                let resolution: Option<String> = row.get(9)?;
                 let extractor: Option<String> = row.get(10)?;
+                let carrier: Option<String> = row.get(11)?;
+                let target_stable_key: String = row.get(12)?;
+                // CPP-INCLUDE-BASENAME-1: the reason, judged against this row's own edge.
+                let reason = import_row_reason(
+                    resolution.as_deref(),
+                    extractor.as_deref(),
+                    carrier.as_deref(),
+                    &target_stable_key,
+                    &kind,
+                );
                 Ok(ImportResult {
                     node_id: row.get(0)?,
                     symbol: qualified_name.unwrap_or(name),
-                    kind: row.get(3)?,
+                    kind,
                     subtype: row.get(4)?,
                     file: file_path.unwrap_or_default(),
                     line: row.get(6)?,
                     column: row.get(7)?,
                     edge_type: row.get(8)?,
-                    resolution: row.get(9)?,
+                    resolution,
                     evidence: extractor.into_iter().collect(),
                     depth: 1,
+                    reason,
                 })
             },
         )?;
@@ -6951,5 +7108,300 @@ mod tests {
         assert_eq!(row.baseline_snapshot_uid, Some("snap1".to_string()));
         assert_eq!(row.new_violations, Some(0));
         assert_eq!(row.worsened_violations, Some(0));
+    }
+
+    // ── CPP-INCLUDE-BASENAME-1: the reason on an `imports <file>` row (D-CIB-REASON-1) ──
+
+    /// One imported row: (target path, target node kind, resolution, extractor, carrier).
+    type ImportRowSeed<'a> = (&'a str, &'a str, &'a str, &'a str, Option<&'a str>);
+
+    /// Seed `src/main.c`'s IMPORTS edges, one per row (target node `r1:<path>:FILE` when the kind
+    /// is FILE, `r1:<path>#sym` otherwise), and read them back through `find_imports`. The rows are
+    /// returned in target-name order, which the seeds keep equal to their order.
+    fn imports_of_main(rows: &[ImportRowSeed]) -> Vec<ImportResult> {
+        let (storage, snap) = setup_db_with_snapshot();
+        let conn = storage.connection();
+        conn.execute_batch(&format!(
+            "INSERT INTO files (file_uid, repo_uid, path) VALUES ('r1:src/main.c', 'r1', 'src/main.c'); \
+             INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind, file_uid) \
+             VALUES ('n_main', '{snap}', 'r1', 'r1:src/main.c:FILE', 'main.c', 'FILE', 'r1:src/main.c');"
+        ))
+        .unwrap();
+        for (i, (path, kind, resolution, extractor, carrier)) in rows.iter().enumerate() {
+            let file_uid = format!("r1:{path}");
+            let key = if *kind == "FILE" {
+                format!("r1:{path}:FILE")
+            } else {
+                format!("r1:{path}#sym")
+            };
+            let name = format!("t{i:02}");
+            conn.execute(
+                "INSERT OR IGNORE INTO files (file_uid, repo_uid, path) VALUES (?, 'r1', ?)",
+                rusqlite::params![file_uid, path],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind, file_uid) \
+                 VALUES (?, ?, 'r1', ?, ?, ?, ?)",
+                rusqlite::params![format!("n{i}"), snap, key, name, kind, file_uid],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_node_uid, \
+                 type, resolution, extractor, metadata_json) \
+                 VALUES (?, ?, 'r1', 'n_main', ?, 'IMPORTS', ?, ?, ?)",
+                rusqlite::params![
+                    format!("e{i}"),
+                    snap,
+                    format!("n{i}"),
+                    resolution,
+                    extractor,
+                    carrier
+                ],
+            )
+            .unwrap();
+        }
+        let got = storage.find_imports(&snap, "r1:src/main.c:FILE").unwrap();
+        assert_eq!(got.len(), rows.len());
+        got
+    }
+
+    fn unreadable(reason: &Option<ImportReason>) -> bool {
+        matches!(reason, Some(ImportReason::Unreadable { .. }))
+    }
+
+    #[test]
+    fn find_imports_row_without_a_recorded_basis_carries_no_reason() {
+        let rows = imports_of_main(&[
+            // Every include edge at HEAD: static, the injected carrier, no basis.
+            (
+                "src/core/a.h",
+                "FILE",
+                "static",
+                "c-core:0.1.0",
+                Some(r#"{"isTypeOnly":false}"#),
+            ),
+            // Another producer's inferred row without a carrier.
+            ("pkg/b.py", "FILE", "inferred", "python-core:0.2.0", None),
+            // A static C/C++ row without a carrier.
+            ("src/core/c.h", "FILE", "static", "cpp-core:0.2.0", None),
+        ]);
+        for r in &rows {
+            assert_eq!(r.reason, None, "{}", r.symbol);
+            let json = serde_json::to_value(r).unwrap();
+            assert!(
+                json.get("reason").is_none(),
+                "the row serializes exactly as before: {json}"
+            );
+        }
+    }
+
+    #[test]
+    fn find_imports_bound_include_carries_its_basis_and_candidate_paths() {
+        let rows = imports_of_main(&[
+            (
+                "src/core/ngx_core.h",
+                "FILE",
+                "inferred",
+                "c-core:0.1.0",
+                Some(
+                    r#"{"isTypeOnly":false,"basis":"unique_basename","candidates":["r1:src/core/ngx_core.h:FILE"]}"#,
+                ),
+            ),
+            (
+                "lib/src/util/foo.h",
+                "FILE",
+                "static",
+                "cpp-core:0.2.0",
+                Some(
+                    r#"{"rawPath":"./util/foo.h","isTypeOnly":false,"basis":"unique_suffix","candidates":["r1:lib/src/util/foo.h:FILE"]}"#,
+                ),
+            ),
+        ]);
+        assert_eq!(
+            rows[0].reason,
+            Some(ImportReason::Recorded {
+                basis: "unique_basename".into(),
+                candidates: vec!["src/core/ngx_core.h".into()],
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&rows[0]).unwrap()["reason"],
+            serde_json::json!({"basis": "unique_basename", "candidates": ["src/core/ngx_core.h"]})
+        );
+        assert_eq!(
+            rows[1].reason,
+            Some(ImportReason::Recorded {
+                basis: "unique_suffix".into(),
+                candidates: vec!["lib/src/util/foo.h".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn find_imports_malformed_reason_carrier_is_unreadable_never_dropped() {
+        let carriers = [
+            "not json",
+            "[1,2]",
+            r#"{"basis":7,"candidates":["r1:inc/x.h:FILE"]}"#,
+            r#"{"basis":"unique_basename"}"#,
+            r#"{"basis":"unique_basename","candidates":"r1:inc/x.h:FILE"}"#,
+            r#"{"basis":"unique_basename","candidates":[1]}"#,
+            r#"{"basis":"unique_basename","candidates":[]}"#,
+        ];
+        for carrier in carriers {
+            let rows =
+                imports_of_main(&[("inc/x.h", "FILE", "inferred", "c-core:0.1.0", Some(carrier))]);
+            assert!(
+                unreadable(&rows[0].reason),
+                "{carrier}: {:?}",
+                rows[0].reason
+            );
+            let json = serde_json::to_value(&rows[0]).unwrap();
+            assert!(
+                json["reason"]["unreadable"]
+                    .as_str()
+                    .is_some_and(|w| !w.is_empty()),
+                "{carrier}: the JSON names what failed: {json}"
+            );
+        }
+        // A static row's malformed carrier is unreadable too, never dropped.
+        let rows = imports_of_main(&[(
+            "inc/x.h",
+            "FILE",
+            "static",
+            "c-core:0.1.0",
+            Some("not json"),
+        )]);
+        assert!(unreadable(&rows[0].reason));
+    }
+
+    #[test]
+    fn find_imports_row_of_another_basis_carries_no_reason() {
+        let rows = imports_of_main(&[(
+            "pkg/sub.py",
+            "FILE",
+            "inferred",
+            "python-core:0.2.0",
+            Some(
+                r#"{"importedName":"sub","alternateTarget":"r1:pkg/__init__.py:FILE","basis":"python_submodule"}"#,
+            ),
+        )]);
+        assert_eq!(
+            rows[0].reason, None,
+            "another slice's basis stays as that slice ships it"
+        );
+        assert!(serde_json::to_value(&rows[0])
+            .unwrap()
+            .get("reason")
+            .is_none());
+    }
+
+    #[test]
+    fn find_imports_reason_that_contradicts_its_edge_is_unreadable_never_evidence() {
+        let key = r#""r1:inc/x.h:FILE""#;
+        let cases: Vec<(&str, &str, &str, String)> = vec![
+            // Several candidates under a unique basis.
+            (
+                "FILE",
+                "inferred",
+                "c-core:0.1.0",
+                format!(r#"{{"basis":"unique_basename","candidates":[{key},"r1:inc/y.h:FILE"]}}"#),
+            ),
+            // A candidate other than the edge's target.
+            (
+                "FILE",
+                "inferred",
+                "c-core:0.1.0",
+                r#"{"basis":"unique_basename","candidates":["r1:inc/other.h:FILE"]}"#.to_string(),
+            ),
+            // A target that is not a FILE (its key names the candidate's form).
+            (
+                "SYMBOL",
+                "inferred",
+                "c-core:0.1.0",
+                r#"{"basis":"unique_basename","candidates":["r1:inc/x.h#sym"]}"#.to_string(),
+            ),
+            // A basis that disagrees with the edge's resolution.
+            (
+                "FILE",
+                "static",
+                "c-core:0.1.0",
+                format!(r#"{{"basis":"unique_basename","candidates":[{key}]}}"#),
+            ),
+            (
+                "FILE",
+                "inferred",
+                "cpp-core:0.2.0",
+                format!(r#"{{"basis":"unique_suffix","candidates":[{key}]}}"#),
+            ),
+            // An ambiguous include is never an edge.
+            (
+                "FILE",
+                "inferred",
+                "c-core:0.1.0",
+                format!(
+                    r#"{{"basis":"ambiguous_basename","candidates":[{key},"r1:inc/y.h:FILE"]}}"#
+                ),
+            ),
+            (
+                "FILE",
+                "static",
+                "cpp-core:0.2.0",
+                format!(r#"{{"basis":"ambiguous_suffix","candidates":[{key}]}}"#),
+            ),
+            // A basis this slice does not write, on an edge only this slice produces.
+            (
+                "FILE",
+                "inferred",
+                "c-core:0.1.0",
+                format!(r#"{{"basis":"python_submodule","candidates":[{key}]}}"#),
+            ),
+        ];
+        for (kind, resolution, extractor, carrier) in &cases {
+            let rows = imports_of_main(&[("inc/x.h", kind, resolution, extractor, Some(carrier))]);
+            assert!(
+                unreadable(&rows[0].reason),
+                "{kind} {resolution} {carrier}: {:?}",
+                rows[0].reason
+            );
+        }
+    }
+
+    #[test]
+    fn find_imports_c_family_inferred_row_with_a_null_carrier_reports_its_reason_missing() {
+        let rows = imports_of_main(&[
+            ("inc/a.h", "FILE", "inferred", "c-core:0.1.0", None),
+            ("inc/b.h", "FILE", "inferred", "cpp-core:0.2.0", None),
+        ]);
+        for r in &rows {
+            assert_eq!(
+                r.reason,
+                Some(ImportReason::Missing {
+                    missing: "no reason carrier".into()
+                })
+            );
+            assert_eq!(
+                serde_json::to_value(r).unwrap()["reason"],
+                serde_json::json!({"missing": "no reason carrier"})
+            );
+        }
+    }
+
+    #[test]
+    fn find_imports_c_family_inferred_row_whose_carrier_lacks_a_basis_reports_its_reason_missing() {
+        let rows = imports_of_main(&[(
+            "inc/a.h",
+            "FILE",
+            "inferred",
+            "c-core:0.1.0",
+            Some(r#"{"isTypeOnly":false,"candidates":["r1:inc/a.h:FILE"]}"#),
+        )]);
+        assert_eq!(
+            rows[0].reason,
+            Some(ImportReason::Missing {
+                missing: "reason carrier has no basis".into()
+            })
+        );
     }
 }
