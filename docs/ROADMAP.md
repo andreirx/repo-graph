@@ -1406,6 +1406,8 @@ not say so) and should be root-caused as one family before any packet is cut. Al
 `core`'s 58 unindexed Scala files unsaid, vscode's 313 KB generated decision tree ranked complexity #1 unmarked, no `CHANGELOG.md`.
 NEXT: the human orders the queue; the first packet root-causes items 1–3 together.
 
+**Queue RATIFIED by the human 2026-10-03 ("Ok for the proposal"), after D-TSA-RESOLVER-EDGE-1 ("Ok a"):** IMPORTS-UNRESOLVED-REMAINDER-1 (RC-1 + the RC-11 universe line) → TS-ALIAS-RESOLUTION-1 (RC-2 under D-TSA-RESOLVER-EDGE-1: `indexer → repo-graph-import-resolver`, `references` reader, full reindex) → TS-WORKSPACE-SUBPATH-EXPORTS-1 (RC-12; packeted only after the human revisits D-TWR-REVIEW-1's indexed-`exports`-as-veto rule) → the adjudicator's 4–16 in order → latent/unprobed last.
+
 
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a
