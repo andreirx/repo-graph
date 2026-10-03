@@ -1,0 +1,178 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-manifest",
+  "baselineId": "TS-ALIAS-RESOLUTION-1-INPUT-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "requirements": [
+    {
+      "path": "docs/requirements/rg-req-006-import-resolution-and-dependencies.md",
+      "sha256": "sha256:76f433e0cde328378b0c15e50e83678531e3e573c09b62d0b877786e28b416b9"
+    },
+    {
+      "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+      "sha256": "sha256:8f2da793ee99d9f756ec48b66c133b49716db1d079686e2b90d5fce2cc88c68b"
+    },
+    {
+      "path": "docs/requirements/rg-req-001-deterministic-extraction-and-identity.md",
+      "sha256": "sha256:ffed1773d34fee9d22329d932711828715f28e47693e3ae42b9a424da27da342"
+    }
+  ],
+  "dependencies": [
+    {
+      "role": "source",
+      "path": "docs/VISION.md",
+      "sha256": "sha256:84a7d22ba3684b06d5914b3c46ae3cce9f1b3bb274f207f5128704e0261dad37"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/import-resolution-rust-1.md",
+      "sha256": "sha256:0e4e22bd8d833396c337443d02e44439a1670809937d5fb1956d64c726a26731"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/import-resolution-java-1.md",
+      "sha256": "sha256:64643bf118f5cc89db6bdcd23abcc89c8933a38f6b088f4dca85637b3eebaff0"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/deps-classifier-1.md",
+      "sha256": "sha256:27b4fa517231cd6bec8063bbc0e463f8cdc5d3998e1c8511a1d54ea1bbad4082"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/honesty-gate-1.md",
+      "sha256": "sha256:99605ec1f96c75b88a16bda7db349b029cf0048211118e28eeb7776d5d8642d8"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/honesty-gate-2.md",
+      "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/coherence-3.md",
+      "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/headline-truth-1.md",
+      "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/find-facts-1.md",
+      "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3"
+    },
+    {
+      "role": "source",
+      "path": "docs/architecture/artifact-contract-model.md",
+      "sha256": "sha256:acde7231a15e30f99eb5eca5f0a1765c9aa979bb980bcc6c2f459051544dd332"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/symbol-identity-1.md",
+      "sha256": "sha256:0c5960434f1e4f9689069fd1a2b2abdcd997b519841a3bb6d0114434d0f1f647"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/cpp-declarators-1.md",
+      "sha256": "sha256:e882b256aab71af8d5dc7c0961b5dc5774503a563b8f68fdab3064192be8a408"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+      "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+    },
+    {
+      "role": "governance",
+      "path": "docs/slices/rg-requirements-bootstrap-1.md",
+      "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b"
+    },
+    {
+      "role": "governance",
+      "path": "docs/requirements/README.md",
+      "sha256": "sha256:6bafbfb4a000ae346b79ae396adbd7564f268437a511fd556e89cde2ecda1c47"
+    },
+    {
+      "role": "governance",
+      "path": "CLAUDE.md",
+      "sha256": "sha256:30a113d5cc92684d246cf7b4e004866c9839688ee5aca878403a0c860d5c068a"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+      "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TS-WORKSPACE-1.md",
+      "sha256": "sha256:ae5be8b869a7cd221f51a5c55d42125eafac401c7a00d6e93b55ab00020225f4"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TWR-REVIEW-1.md",
+      "sha256": "sha256:44956b9295f6c01e5ce7ea7a70f4cb2fd40b0115916e9d625477f424e252710e"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-RESOLVER-EDGE-1.md",
+      "sha256": "sha256:a2bef4b68b6b583d910e00f9c6dc53c996f642d0d2533c49d90bd59bce725846"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+      "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-CERTAINTY-1.md",
+      "sha256": "sha256:f851cf77155af943a3abe34d6e32adc4d92d8279eb9d05c918d4bfeb7f325ce8"
+    },
+    {
+      "role": "allocation",
+      "path": "docs/slices/ts-alias-resolution-1.md",
+      "sha256": "sha256:06e4339fa84032f1311a71ff5000f9fd8da279dc925c6a5ad9dcca9eda925586"
+    }
+  ],
+  "reviewObligationIds": [
+    "RG-REQ-006",
+    "RG-REQ-006-L01",
+    "RG-REQ-006-L02",
+    "RG-REQ-006-L03",
+    "RG-REQ-006-L04",
+    "RG-REQ-006-L05",
+    "RG-REQ-006-L06",
+    "RG-REQ-006-L07",
+    "RG-REQ-006-L08",
+    "RG-REQ-006-L09",
+    "RG-REQ-006-L10",
+    "RG-REQ-006-L11",
+    "RG-REQ-006-L12",
+    "RG-REQ-006-L13",
+    "RG-REQ-002",
+    "RG-REQ-002-L01",
+    "RG-REQ-002-L02",
+    "RG-REQ-002-L03",
+    "RG-REQ-002-L04",
+    "RG-REQ-002-L05",
+    "RG-REQ-002-L06",
+    "RG-REQ-002-L07",
+    "RG-REQ-002-L08",
+    "RG-REQ-002-L09",
+    "RG-REQ-002-L10",
+    "RG-REQ-002-L11",
+    "RG-REQ-001",
+    "RG-REQ-001-L09"
+  ],
+  "requiredDecisionIds": [
+    "D-CERTAINTY-MARK-1",
+    "D-TS-WORKSPACE-1",
+    "D-TWR-REVIEW-1",
+    "D-TSA-RESOLVER-EDGE-1",
+    "D-AGENT-USEFULNESS-FRAME-1",
+    "D-TSA-CERTAINTY-1"
+  ]
+}

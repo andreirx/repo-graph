@@ -1,0 +1,14 @@
+# D-TSA-CERTAINTY-1 — a TypeScript `paths` alias binding is a STATIC import edge, like a relative import
+
+Raised: 2026-10-03 by the manager while writing TS-ALIAS-RESOLUTION-1 (RG-REQ-002-L11 marks only what the index cannot determine; the slice had to say which certainty class a `paths` binding carries).
+
+**The problem in plain words.** A tsconfig `paths` alias (`"@/*": ["./src/*"]`) is the language's own resolution rule: the TypeScript compiler binds `@/components/ui/button` to `src/components/ui/button.tsx` deterministically from the config and the file set. Today's two inferred import families are different in kind: a unique-basename include (CPP-INCLUDE-BASENAME-1) and a workspace source entry whose declared entry is not indexed (TS-WORKSPACE-RESOLUTION-1) bind where the build system might choose otherwise. RG-REQ-006-L04 reads "TS: tsconfig `paths` (with `extends`), relative (extensionless, `index.ts`), then package" — the alias is listed beside relative resolution, which is static today.
+
+**Options (reward / risk, measured by usefulness to an agent net of misdirection — D-AGENT-USEFULNESS-FRAME-1).**
+- A — STATIC when exactly one indexed file matches the substituted target through the import-resolver's candidate set; ambiguous → unresolved with every candidate (category `imports_ambiguous_match`, basis `ambiguous_tsconfig_paths`); none → unresolved project alias. Reward: the agent sees the file the compiler would open, counted in the default module graph, cycles and trust like any relative import — the 511 edges on amodx/hexmanos become structure, not a remainder. Risk: a `paths` target outside the indexed tree (e.g. `node_modules`) is never a match, so nothing false can bind; the only misdirection would be a wrong candidate set, which `candidate_paths` (the LiveGraph path's reviewed matcher) already bounds.
+- B — INFERRED, with the default views excluding it behind `--include-inferred`. Reward: the most conservative marking. Risk: the agent's default module graph on its own TS products stays empty for a binding the compiler makes without doubt; "inferred" would mislabel a determinate rule as a guess (RG-REQ-002-L11 reserves INFERRED for what the index cannot determine).
+
+Resolved: 2026-10-03 by the OPERATOR (in-place manager) as **A**, overridable by the human: the ratified text of RG-REQ-006-L04 places `paths` with relative resolution, and the matcher reused is the one already serving the LiveGraph route. Recorded for TS-ALIAS-RESOLUTION-1 INPUT-1's `requiredDecisionIds`.
+
+## Confirmed and qualified (appended 2026-10-03) — by the human's D-TSA-RECORD-CONFLICT-1
+The human ruled A: static where TypeScript's selection yields one indexed file. "Static" asserts the language's resolution (what the compiler binds), the assertion every other static import edge makes — not a runtime proof. The row states its basis (`static (resolved through tsconfig paths)`), and the basis recorded on the edge is `tsconfig_paths`.
