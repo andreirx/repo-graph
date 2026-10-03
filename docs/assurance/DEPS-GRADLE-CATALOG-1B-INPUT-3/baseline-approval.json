@@ -1,0 +1,111 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DEPS-GRADLE-CATALOG-1B-BASELINE-APPROVAL-3",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DEPS-GRADLE-CATALOG-1B-INPUT-3.json",
+    "sha256": "sha256:a7c7898131a07678af8288b2aae77e9f0e125b9ec2c17317e7767b30bfe41123"
+  },
+  "review": {
+    "path": "docs/assurance/DEPS-GRADLE-CATALOG-1B-INPUT-3/requirements-review.json",
+    "sha256": "sha256:553a18f8e01bcc70d3f75c96263eeebe5b0e232ba878c258f42dc5f90f47cc53"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-GRADLE-DECLARED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+        "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-DGC-CONDITIONAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-CONDITIONAL-1.md",
+        "sha256": "sha256:240e67c53adcd3f4daf09233d8bdbd003d5acaa61a300230977af94da4bfa3f0"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-DGC-ATTRIBUTION-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-ATTRIBUTION-1.md",
+        "sha256": "sha256:c0dd3ff3220f38fc273398376dac6c52bcdb1b2645559ec7a2edda295d5c2d77"
+      }
+    },
+    {
+      "id": "D-DGC-BOUNDARY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-BOUNDARY-1.md",
+        "sha256": "sha256:42ae2be3c2feaaee11c6ce4416c28d8449007d61291a04546690bf9d5ab8012d"
+      }
+    },
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-DGC1B-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-SCOPE-1.md",
+        "sha256": "sha256:18ce35def897bdf6f435a954b68cc81758f2da6cbe9dbb669238c5da59951371"
+      }
+    },
+    {
+      "id": "D-DGC1B-TOML-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-TOML-1.md",
+        "sha256": "sha256:33806f2787b9006d32f14a122a7ba8521c217c630ef545ac5e4442ef07c46263"
+      }
+    },
+    {
+      "id": "D-DGC1B-ALIAS-MARKING-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-ALIAS-MARKING-1.md",
+        "sha256": "sha256:48799435457fd2498da5caa15209c9bd00e013c332d4e75b88310f2d608c3475"
+      }
+    },
+    {
+      "id": "D-DGC1B-ARTIFACT-INTERPOLATION-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-ARTIFACT-INTERPOLATION-1.md",
+        "sha256": "sha256:b0b11c2a53eaf7173a1538af545546fd533ec3f0df67c43bad2ebd6cbcf8a55a"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-03T22:29:51.919Z",
+  "rationale": "DEPS-GRADLE-CATALOG-1B INPUT-3 accepted at document cycle 2 (codex gpt-6-sol review-2 accepted; claude-opus-5-5 author). INPUT-3 re-baselines after implementation admission 1 (cycle 2 decision-required): D-DGC1B-ARTIFACT-INTERPOLATION-1 (operator A: a Groovy alias-map entry with a literal group binds to it whatever interpolation its artifact or version carries) and oracle corrections OC-1..OC-3 on DGC-B04 (indexed-files comparison; failing shell branch for an unexpected alias line; five named stored-row witnesses). Operator approval; the human may override every operator record."
+}
