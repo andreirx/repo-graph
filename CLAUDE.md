@@ -149,6 +149,20 @@ These bind any agent that builds or reviews this repository through Agent Manage
 - **Cleanup.** Name every isolated root, worktree and proof directory `/private/tmp/<SLICE_ID>-*`
   and delete the ones you created before finishing (an isolated index is 2–5 GB). Never delete a
   root you did not create. Retained audit roots live under `~/repo-graph-retained/`.
+- **Phrases restate predicates (D-AGENT-USEFULNESS-FRAME-1).** A reader-facing phrase the builder
+  renders for a stored code (category, classification, basis, reason, coverage) restates the test at
+  the code's assignment site, cited `file:line` in the slice document, never the conclusion that test
+  suggests; the inference travels as a question or as the recorded candidates; the raw codes stay in
+  `--json` (the one exception, a code the build has no phrase for, prints as stored and marked — VISION,
+  Honesty Rules). A field is named after what its value IS (`recorded_specifier`), never after what it is
+  meant to show. The reviewer checks each phrase mechanically — phrase ≡ predicate at the named
+  site; a phrase that states a conclusion is a finding, a preference between two predicate
+  restatements is not. A new phrase, field or test name outside the slice document's vocabulary is a
+  STOP, not an improvisation.
+- **Reviewed-boundary witnesses.** A slice that touches a daemon crate runs that crate's
+  reviewed-boundary witnesses by name (`daemon-runtime/tests/consolidation_witness.rs` and its
+  manifest `daemon-runtime/witness/livegraph_reader_set.txt`), not only its `--lib` suite; a witness
+  that fails is a STOP (its own text says so), never a manifest edit.
 - **Code-under-analysis examples.** This product's output is what it answers about OTHER
   repositories' source. For every problem a slice solves, the builder's report quotes the real
   source line from the analyzed repository the packet names (repo-relative `file:line` and the

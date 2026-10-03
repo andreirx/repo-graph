@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-12-2",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-12.json",
+    "sha256": "sha256:02b5508d78fa93f99d15f25768833f65de08931c6fe12a91b69d65edce05e0fa"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-12"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-12-2"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-03T12:01:18.000Z",
+  "report": "Standalone read-only review (codex exec --sandbox read-only, gpt-6-sol, high; session 01a101a2-5b43-7540-8dff-0b7cae4ebc22), pass 2, self-contained prompt with the three diffs and the governance record inlined (/private/tmp/rgbootstrap12/review.txt). Subject = INPUT-11 + the re-pin of docs/cli/rmap-contracts.md (changed by the shipped, implementation-reviewed, gate-green IMPORTS-UNRESOLVED-REMAINDER-1, 36cc1367), docs/VISION.md (two Honesty Rules bullets: D-AGENT-USEFULNESS-FRAME-1) and CLAUDE.md (two Relay Builder and Reviewer Rules bullets: the phrase rule and the reviewed-boundary witnesses), plus the governance record D-AGENT-USEFULNESS-FRAME-1.\n\nRESULT: accepted\n\nThe inlined changes are consistent with the catalog and with each other. DIFF A distinguishes the five SQLite-free defaults from `imports` and matches L12\u2019s corrected engine scope. DIFF B and C make the unknown-code fallback an explicit, marked exception rather than presenting a raw code as a known reader phrase. CC-21 records that scope as an operator text correction subject to human override. RECORD D\u2019s appended four-option comparison supplies the missing rewards, risks, and ranking. No further CC-n is indicated by the inlined evidence.\n\nHighest-priority recommendation: keep the marked unknown-code fallback in the CLI contract so an unfamiliar stored fact remains visible without a false claim of certainty.\n"
+}

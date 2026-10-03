@@ -139,7 +139,7 @@ Where no include root resolves a ≥2-segment specifier, a UNIQUE path-suffix ma
 
 ### RG-REQ-006-L12 — `rmap imports <file>` shows the file's imports as resolved rows and classified unresolved rows
 
-`imports <file>` shall list each resolved import with its target file and each unresolved import with its classification and basis, state the resolved/unresolved counts, render a zero-state that names the file's language and the reader coverage, and carry the same facts under `--json`.
+`imports <file>` — the default (`auto`) and `sqlite` single-file answers — shall list each resolved import with its target file and each unresolved import with its classification and basis, state the resolved/unresolved counts, render a zero-state that names the file's language and the reader coverage, and carry the same facts under `--json`; the `--engine livegraph` and `--engine compare` per-file views are diagnostic read-model and readiness views that carry no such listing and say so in one line naming the command that does (CC-21; D-IUR-ENGINE-SCOPE).
 
 **Verification criterion:** `rgr/tests/cli_out_3_drilldown.rs` imports cases (human/JSON pairs); a test asserting unresolved rows carry their classification (to be added); the CLI contract `docs/cli/rmap-contracts.md` imports section.
 

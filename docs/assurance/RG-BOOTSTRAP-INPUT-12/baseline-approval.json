@@ -1,0 +1,100 @@
+{
+  "formatVersion": 1,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "RG-BOOTSTRAP-BASELINE-APPROVAL-12",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-12.json",
+    "sha256": "sha256:02b5508d78fa93f99d15f25768833f65de08931c6fe12a91b69d65edce05e0fa"
+  },
+  "review": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-12/requirements-review.json",
+    "sha256": "sha256:77c429357c200acc10ebeb5012ae504c67b8cd51f36da9b4f4fb3efc083633c1"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-TEST-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+        "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d"
+      }
+    },
+    {
+      "id": "D-GRADLE-DECLARED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+        "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+      }
+    },
+    {
+      "id": "D-DU-CC10",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DU-CC10.md",
+        "sha256": "sha256:88ff0bc17769d3101471ad66eccd7b90a66361eb87679f6728d1e774cd17b5b8"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-2",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-2.md",
+        "sha256": "sha256:bb86d039178aa51ca5871b160e92e9431d8dea5758f74575c89278954f0da982"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-TEST-UNDETERMINED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-UNDETERMINED-1.md",
+        "sha256": "sha256:61ffac89c67841ee628c73ed7f66bce1e910ed99925a6b4ae012c2dbce0622f0"
+      }
+    },
+    {
+      "id": "D-TS-WORKSPACE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TS-WORKSPACE-1.md",
+        "sha256": "sha256:ae5be8b869a7cd221f51a5c55d42125eafac401c7a00d6e93b55ab00020225f4"
+      }
+    },
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-03T12:01:18.000Z",
+  "rationale": "Independent standalone review accepted at pass 2 of 2 (codex gpt-6-sol, read-only; pass 1 decision-required on four text items, each resolved: the contract names the five SQLite-free defaults and imports as the exception; CC-21 scopes RG-REQ-006-L12 to the default and sqlite answers (operator text correction, the human may override); the VISION/CLAUDE.md phrase rule carries its one marked exception for a code the build cannot phrase; D-AGENT-USEFULNESS-FRAME-1 carries its reward/risk matrix as an appended section). INPUT-12 = INPUT-11 + the re-pin of docs/cli/rmap-contracts.md (changed by the shipped, implementation-reviewed, gate-green IMPORTS-UNRESOLVED-REMAINDER-1, 36cc1367), docs/VISION.md and CLAUDE.md (the human's framing rule written down, 2026-10-03) and rg-req-006 (CC-21), plus the governance record D-AGENT-USEFULNESS-FRAME-1 (human). Every requiredDecisionId carried from INPUT-11 is resolved as there; the approval is the manager's manual bootstrap acceptance."
+}

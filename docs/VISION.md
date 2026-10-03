@@ -203,6 +203,24 @@ model management) stays in `docs/FUTURE-ITERATIONS.md` unless separately ratifie
   says so and says what would improve it — as a concrete next action the
   reader can run.
 
+- **A phrase states what was observed, never what it suggests.** A reader-facing
+  word for a stored fact restates the test that produced the fact (the predicate
+  at its assignment site: "specifier matches a tsconfig paths alias"), never the
+  conclusion that test suggests ("the target is inside this repository"). The
+  inference the reader should draw travels as a question ("this repository?")
+  or as the recorded candidates — marked, never asserted. A phrase true for
+  most rows and false for some is a misdirection the reader cannot detect,
+  because the numbers around it are right; it costs more than a missing hint.
+  The predicate is restated in the reader's words; the stored code stays in
+  `--json`. One exception: a code this build has no phrase for (a newer daemon's
+  vocabulary) prints as stored and marked "(no phrase for this … in this build)",
+  so the fact is never dropped and never dressed as a known one.
+- **Decisions are framed by usefulness to an agent, net of misdirection.** Every
+  option about an output surface is measured by what the agent learns, what it
+  can act on next, and how it can be misled — in that order; "cheaper",
+  "render-only" and "no reindex" are not rewards. (Ratified 2026-10-03,
+  `docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md`.)
+
 ### Labels speak the reader's language, not ours
 
 Every external label describes the reader's subject — *their* code,

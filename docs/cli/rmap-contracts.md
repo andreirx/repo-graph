@@ -114,13 +114,14 @@ in-memory LiveGraph beside the SQLite snapshot).
 | `compare` | Run both; the SQLite answer stays PRIMARY. `callers`/`callees`/`path`/`cycles`/`stats` write the LiveGraph-vs-SQLite report to a classified `.rgr/livegraph-compare/…` **file sidecar** (its path is returned in the `--json`); `imports` rides the comparison **inline** in the `--json` (no file sidecar). |
 
 Source: `rust/crates/rgr/src/commands/graph.rs` (`extract_engine_flag`, default `"auto"`);
-daemon routing in `rust/crates/daemon-runtime/src/dispatch.rs`. These six are the
-"SQLite-free migrated default paths" — on a GREEN cert the default serves no `nodes`/`edges`
-SQLite read for the migrated answer. Amended for `imports` (IMPORTS-UNRESOLVED-REMAINDER-1,
-D-IUR-FASTPATH): `imports`' default answer reads SQLite for the rows without a confirmed target
-on every route, including a GREEN-certified LiveGraph serve, and a failed read fails the request;
-`backend_used` names the source of `imports`/`count` only, and `unresolved_source: "sqlite"` names
-the source of `unresolved`/`unresolved_count`. The other five migrated defaults are unchanged.
+daemon routing in `rust/crates/daemon-runtime/src/dispatch.rs`. Five of these six — `callers`,
+`callees`, `path`, `cycles`, `stats` — are the "SQLite-free migrated default paths": on a GREEN cert
+the default serves no `nodes`/`edges` SQLite read for the migrated answer. `imports` is the
+exception (IMPORTS-UNRESOLVED-REMAINDER-1, D-IUR-FASTPATH): its default answer serves the resolved
+rows from the LiveGraph on a GREEN cert but reads SQLite for the rows without a confirmed target on
+every route, and a failed read fails the request; `backend_used` names the source of
+`imports`/`count` only, and `unresolved_source: "sqlite"` names the source of
+`unresolved`/`unresolved_count`.
 
 **`--json` routing metadata.** Under `--engine auto`, the JSON envelope carries
 `backend_used` and (on fallback) `fallback_reason`; the human renderer strips them so the
@@ -243,6 +244,10 @@ source of `unresolved`/`unresolved_count`. The human render shows neither routin
   `metadata carries a specifier and no rawPath, and the specifier's first segment before :: starts with a lowercase letter and holds only lowercase letters, digits or underscores`;
   `no_supporting_signal` → `no classifier signal`; any other →
   `{verbatim} (no phrase for this basis in this build)`.
+- Unknown codes: the four `{verbatim} (no phrase for this … in this build)` forms above are the one
+  case a stored code reaches the human line — a code this build has no phrase for (a newer daemon's
+  vocabulary) prints as stored and marked, so the fact is never dropped and never dressed as a known
+  one (RG-REQ-002-L11; VISION Honesty Rules). Every known code prints only its reader phrase.
 - Coverage line (exactly one, after the block, outside the zero-state): a non-empty
   `omitted_forms` → `listing limit: this listing omits {items} — open the file for those` (items
   joined by `, ` and the last by ` or `); `null` → `listing coverage: not recorded for {lang} — open the file to confirm`

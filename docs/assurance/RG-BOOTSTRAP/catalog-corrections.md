@@ -59,3 +59,11 @@ A catalog edit invalidates the bootstrap baseline and every not-yet-approved sli
 - **Correction:** a caller list (`callers`, `explain`'s Callers) states the naming count; a callee list (`callees`, `explain`'s Callees) states the count of unresolved calls the symbol makes. The example and the rest of L09 are unchanged.
 - **Approver:** in-place-manager (operator); the human may override.
 - **File digests:** before/after sha256:c21d46b71b86b5fcaa28af4696a661000ffba1dd067b63714dc95427fc1121e9 sha256:38bad9918eef743b889c9887a359bd12d468315ca04909ee1dcd11ed63589d9e.
+
+## CC-21 (2026-10-03) — RG-REQ-006-L12's "`imports <file>`" names the default (`auto`) and `sqlite` single-file answers; the `--engine livegraph|compare` per-file views are diagnostic and say so (operator, text-only; INPUT-12)
+
+`docs/requirements/rg-req-006-import-resolution-and-dependencies.md` L12 read: "`imports <file>` shall list each resolved import … and each unresolved import with its classification and basis …". Found by the standalone review of RG-BOOTSTRAP-INPUT-12, pass 1 (codex gpt-6-sol): the shipped contract (IMPORTS-UNRESOLVED-REMAINDER-1) scopes the listing to the canonical answers under the decision record D-IUR-ENGINE-SCOPE, and a decision record alone must not narrow a requirement's reach.
+- **Why the text was incomplete:** `--engine livegraph` has no resolution class and no unresolved table (it already refuses `--include-inferred`), and `--engine compare` is the LiveGraph-vs-SQLite readiness report; neither is the answer an agent gets without naming an engine.
+- **Correction:** L12 names the default (`auto`) and `sqlite` single-file answers as its subject and states that the two diagnostic per-file views carry no such listing and say so in one line naming the command that does. Verification criterion and evidence lines unchanged.
+- **Approver:** in-place-manager (operator); the human may override.
+- **File digests:** before/after sha256:ad39149c9f6874c79da19b79d9084eb3edebbf57ee05893650fef96f65774525 sha256:76f433e0cde328378b0c15e50e83678531e3e573c09b62d0b877786e28b416b9.
