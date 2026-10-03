@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-14-2",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-14.json",
+    "sha256": "sha256:0f2c18baf1dd4ac146b34976c724f1d5cb8216d3a837c493f88c8c401f379109"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-14"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-14-2"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-03T20:52:23.000Z",
+  "report": "Standalone read-only review (codex exec --sandbox read-only, gpt-6-sol, high; session 01a10388-edbf-7f92-854e-87a46b914700), pass 2, self-contained prompt with the one diff and the catalog-correction record inlined (/private/tmp/rgbootstrap14/review-2.txt). Subject = INPUT-13 + the re-pin of docs/requirements/rg-req-006-import-resolution-and-dependencies.md (CC-22: RG-REQ-006-L13 field (1B) expectation corrected \u2014 at.yawk.lz4 declared with no static import found; the rule unchanged), raised by the DEPS-GRADLE-CATALOG-1B document review (D-DGC1B-FIELD, option A).\n\nRESULT: accepted\n\nThe changes are consistent on the evidence provided. DIFF A corrects the field expectation without changing the ratified `.`-segment matching rule. It limits the negative import claim to the measured Kafka `clients` Java files and identifies the group-to-package mismatch as a limit of that rule, not a general impossibility. RECORD A records the reason, scope, approval, and before/after digests. This is a text-only correction; it does not claim new resolution behavior.\n\nHighest-priority recommendation: validate INPUT-14\u2019s single changed digest against the corrected requirement file before pinning the baseline. That check was **NOT RUN** in this pure-reasoning review.\n"
+}
