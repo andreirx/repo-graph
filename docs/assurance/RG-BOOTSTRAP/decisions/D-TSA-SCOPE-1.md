@@ -13,3 +13,6 @@ Resolved: 2026-10-03 by the OPERATOR (in-place manager) as **A**, overridable by
 
 ## Correction 2026-10-03 (operator; references the resolution above and D-TSA-RECORD-CONFLICT-1)
 The allocation is SIXTEEN candidate paths: the fifteen above plus `rust/crates/storage/src/queries.rs`. The human's D-TSA-RECORD-CONFLICT-1 ("output wording to clarify if needed") makes the `paths`-bound static edge carry `basis: tsconfig_paths`, and the one table of recorded bases a bound IMPORTS edge may carry is storage's `RECORDED_BASES` (`queries.rs:225`, read by `import_row_reason`); without that row the renderer would state the reason unreadable. Same placement reasoning as above: an edit inside an existing crate, no new boundary, no new crate edge. The sixteen paths are the allocation of INPUT-3.
+
+## Correction 2026-10-03 (operator; references the sixteen-path correction above and D-TSA-REFRESH-SCOPE-1)
+The allocation is EIGHTEEN candidate paths: the sixteen above plus `rust/crates/indexer/src/routing.rs` and `rust/crates/indexer/src/invalidation.rs` (D-TSA-REFRESH-SCOPE-1: the two literal config tables learn the `tsconfig*.json` / `jsconfig*.json` family). Edits inside the existing indexer crate; no new boundary, no new crate edge. The eighteen paths are the allocation of INPUT-8.

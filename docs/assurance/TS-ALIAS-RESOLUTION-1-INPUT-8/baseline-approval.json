@@ -1,0 +1,139 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "TS-ALIAS-RESOLUTION-1-BASELINE-APPROVAL-8",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/TS-ALIAS-RESOLUTION-1-INPUT-8.json",
+    "sha256": "sha256:8690657f2f72f56a26dbc8542158542a0d7e7a03b8e740048dd1ca574b380881"
+  },
+  "review": {
+    "path": "docs/assurance/TS-ALIAS-RESOLUTION-1-INPUT-8/requirements-review.json",
+    "sha256": "sha256:5d44d4df9304c7c125644372f2a848cf5233eaff1d522bf81e4187c222c8a7ae"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-TS-WORKSPACE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TS-WORKSPACE-1.md",
+        "sha256": "sha256:ae5be8b869a7cd221f51a5c55d42125eafac401c7a00d6e93b55ab00020225f4"
+      }
+    },
+    {
+      "id": "D-TWR-REVIEW-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TWR-REVIEW-1.md",
+        "sha256": "sha256:44956b9295f6c01e5ce7ea7a70f4cb2fd40b0115916e9d625477f424e252710e"
+      }
+    },
+    {
+      "id": "D-TSA-RESOLVER-EDGE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-RESOLVER-EDGE-1.md",
+        "sha256": "sha256:24e3e6d0db6f89c2a5b1b9c6af64b4820b7742ff70378dc30a3b03d99ab37a8c"
+      }
+    },
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-TSA-CERTAINTY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-CERTAINTY-1.md",
+        "sha256": "sha256:08db3f5504e96ebac21061ad52176aa8dd4233f6d7eb6e38d41eaa8632b6635c"
+      }
+    },
+    {
+      "id": "D-TSA-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-SCOPE-1.md",
+        "sha256": "sha256:02038c3448625730df3c829f947576912497aed7d7592fb6e61deac17e8ace67"
+      }
+    },
+    {
+      "id": "D-TSA-REUSE-SHAPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-REUSE-SHAPE-1.md",
+        "sha256": "sha256:39cd850d6001fa608db69f91b5d8b0c8cce6cbae5430c16b1aa36fe730814381"
+      }
+    },
+    {
+      "id": "D-TSA-RECORD-CONFLICT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-RECORD-CONFLICT-1.md",
+        "sha256": "sha256:72ee20c1664d9e5436d8f2ad3d6ea9ee73a1357eb62fc735cb9d469fe429f7a4"
+      }
+    },
+    {
+      "id": "D-TSA-EXACT-CANDIDATE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-EXACT-CANDIDATE-1.md",
+        "sha256": "sha256:5351cd1d750d7a0a0fc006b675711735ee71a743c39c0def4bea6151cd71a47a"
+      }
+    },
+    {
+      "id": "D-TSA-CONFIG-APPLICABILITY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-CONFIG-APPLICABILITY-1.md",
+        "sha256": "sha256:6047727e422767e9fe894bd6c3293cb7aade200148e44075655473c78a214b02"
+      }
+    },
+    {
+      "id": "D-TSA-CONFLICT-EVIDENCE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-CONFLICT-EVIDENCE-1.md",
+        "sha256": "sha256:3f8b1eb89352f55fbb6d9a665727a1cca5809f0a567dcf0b55242c831b75bbb7"
+      }
+    },
+    {
+      "id": "D-TSA-MIXED-PROJECT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-MIXED-PROJECT-1.md",
+        "sha256": "sha256:ea0702ed4d67ae88d46e1f836866214bdb79f7255e57c968e2de0b0170d6c698"
+      }
+    },
+    {
+      "id": "D-TSA-BOUNDED-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-BOUNDED-SCOPE-1.md",
+        "sha256": "sha256:74be47199a835059854a0494bd7dbd322277326c64a8ae577d67137e3be82f2f"
+      }
+    },
+    {
+      "id": "D-TSA-REFRESH-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TSA-REFRESH-SCOPE-1.md",
+        "sha256": "sha256:cb8bc7bc4eaf9de50c355d8eff5f54477ca6ec5e6bb1c74d45a62f06b1e8b13d"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-03T17:39:40.033Z",
+  "rationale": "TS-ALIAS-RESOLUTION-1 INPUT-8 accepted at document cycle 9 (codex gpt-6-sol review-9 accepted, zero findings; claude-opus-5-5 author). INPUT-8 re-baselines after implementation admission 1: D-TSA-REFRESH-SCOPE-1 (operator A, eighteen paths), oracle-corrections OC-1..OC-4, cycle-8 corrections (persisted field named for the sole INSPECTED covering project; TSA-C04 compares complete normalized unresolved rows and pre-existing import edges and asserts the orient/check/stats file totals +2/+4/+27). Operator approval; the human may override every operator record."
+}
