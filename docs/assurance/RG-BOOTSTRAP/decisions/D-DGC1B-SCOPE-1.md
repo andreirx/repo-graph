@@ -1,0 +1,12 @@
+# D-DGC1B-SCOPE-1 — DEPS-GRADLE-CATALOG-1B delivers both clauses RG-REQ-006-L13 ratified for "1B": alias resolution AND `.`-segment matching; queue item 5 (DEPS-PACKAGE-PREFIX-1, RC-8) is absorbed
+
+Raised: 2026-10-03 by the manager while packeting round-eight queue item 4 (RC-7) against RG-REQ-006-L13.
+
+**The problem in plain words.** The round-eight adjudicator split two symptoms into two queue items: (4) catalog aliases unparsed (RC-7) and (5) declared-group matching exact-package (RC-8). RG-REQ-006-L13, ratified by the human 2026-09-23 (D-GRADLE-DECLARED-1, "two slices: 1A block scoping, then 1B aliases and matching"), names both as 1B. MEASURED on the retained v0.20.0 kafka store (`34f0d9bb9083641e.db`) and the checkout: resolving the 19 `libs.` aliases of `project(':clients')` to their groups and keeping exact matching would move `clients` from `used 0` to `used 2`; with `.`-segment matching to `used 9` (of 23 observed external packages). Aliases alone are not a visible outcome; matching alone has nothing to match (`clients`' declared set is empty today).
+
+**Options (reward / risk, by usefulness to an agent net of misdirection).**
+- A — one slice, both clauses, as L13 ratifies: aliases resolve to groups; a declared group owns an observed package when equal or when the package starts with the group and a `.` (`com.github.luben` owns `com.github.luben.zstd`; `com.foo` does not own `com.foobar.Type`). Reward: the agent reading `deps list` on kafka sees the declared set and the used set move together (one re-index, one row change to read); the queue order is kept (item 5 becomes a no-op, recorded). Risk: a larger allocation (two crates' logic in one admission); a Maven group that is not a Java package prefix (`at.yawk.lz4` vs `net.jpountz.lz4`, `com.google.guava` vs `com.google.common`) stays `undeclared` — honest, stated in the contract, not solvable statically.
+- B — two slices as the adjudicator cut them. Reward: smaller admissions. Risk: 1B alone ships an invisible change (declared set grows, `used` stays 0 or 2), a second full re-index for the matching slice, and a `deps list` row that for one release says `no static import found 18` for groups the code plainly uses.
+- C — matching first. Risk: nothing to match on kafka; grpc-java `core` moves 1 → 1.
+
+Resolved: 2026-10-03 by the OPERATOR (in-place manager) as **A** — the reading the ratified L13 text already states; overridable by the human. Queue item 5 is closed by this slice.

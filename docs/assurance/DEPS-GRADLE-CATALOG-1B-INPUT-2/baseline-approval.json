@@ -1,0 +1,104 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DEPS-GRADLE-CATALOG-1B-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DEPS-GRADLE-CATALOG-1B-INPUT-2.json",
+    "sha256": "sha256:982ebb2601b6f00c285bb233ac285fa39e3a6acaaaac8c0edbaf0edeff57fea9"
+  },
+  "review": {
+    "path": "docs/assurance/DEPS-GRADLE-CATALOG-1B-INPUT-2/requirements-review.json",
+    "sha256": "sha256:68f505ed2f6304f262bb1b5d6fecaa169ddf275076401151bd4946815e1b0754"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-GRADLE-DECLARED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+        "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-DGC-CONDITIONAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-CONDITIONAL-1.md",
+        "sha256": "sha256:240e67c53adcd3f4daf09233d8bdbd003d5acaa61a300230977af94da4bfa3f0"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-DGC-ATTRIBUTION-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-ATTRIBUTION-1.md",
+        "sha256": "sha256:c0dd3ff3220f38fc273398376dac6c52bcdb1b2645559ec7a2edda295d5c2d77"
+      }
+    },
+    {
+      "id": "D-DGC-BOUNDARY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-BOUNDARY-1.md",
+        "sha256": "sha256:42ae2be3c2feaaee11c6ce4416c28d8449007d61291a04546690bf9d5ab8012d"
+      }
+    },
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-DGC1B-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-SCOPE-1.md",
+        "sha256": "sha256:18ce35def897bdf6f435a954b68cc81758f2da6cbe9dbb669238c5da59951371"
+      }
+    },
+    {
+      "id": "D-DGC1B-TOML-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-TOML-1.md",
+        "sha256": "sha256:33806f2787b9006d32f14a122a7ba8521c217c630ef545ac5e4442ef07c46263"
+      }
+    },
+    {
+      "id": "D-DGC1B-ALIAS-MARKING-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-ALIAS-MARKING-1.md",
+        "sha256": "sha256:48799435457fd2498da5caa15209c9bd00e013c332d4e75b88310f2d608c3475"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-03T21:09:39.633Z",
+  "rationale": "DEPS-GRADLE-CATALOG-1B INPUT-2 accepted at document cycle 1 (codex gpt-6-sol review-1 accepted, zero findings; claude-opus-5-5 author). Cycle 0 decision-required: D-DGC1B-FIELD \u2192 catalog correction CC-22 on RG-REQ-006-L13 (bootstrap INPUT-14, standalone review accepted pass 2); D-DGC1B-PHRASE \u2192 D-DGC1B-ALIAS-MARKING-1 corrected (the line states the first site's reason: no catalog entry, or the catalog could not be read). The author's engine-rule simulation replaced the operator's estimate (kafka clients after: used 26 \u00b7 no static import found 9 \u00b7 undeclared 2 (declared set incomplete) \u00b7 builtins 42); 18 paths incl. the new repo-index/src/gradle_catalog.rs. Operator approval; the human may override every operator record (D-DGC1B-SCOPE-1, -TOML-1, -ALIAS-MARKING-1)."
+}
