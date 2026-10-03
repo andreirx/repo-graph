@@ -1368,6 +1368,45 @@ NEXT: DOCS-UNREADABLE-DECODE-1 (RC-1), then the queue above in order; CPP-INCLUD
 **v0.20.0 RELEASED 2026-10-03** — release commit `e1f46be7`, tag `v0.20.0` pushed (the push also carried TEST-EDGE-SCOPE-1A/1B, CPP-INCLUDE-BASENAME-1 and TS-WORKSPACE-RESOLUTION-1 to origin; remote main had been at 8b88f205). GitHub Release run 37086502090 success (8m42s): assets `rmap-0.20.0-darwin-aarch64.tar.gz`, `rmap-0.20.0-linux-x86_64.tar.gz`, both `.sha256`, `install.sh` + `.sha256`; CI run 37086501201 success (18m08s). Local install 0.20.0 (`rmap`, `rmapd`, `rgistr`); launchd daemon restarted, `doctor` reports rmapd 0.20.0 on the socket; debug cache warmed (target 15 GB). Step 1's release gate was met by TEST-EDGE-SCOPE-1B's accepted implementation review at HEAD. Known gap carried into the release, pre-existing: no `CHANGELOG.md` exists in the repository, so the tarball ships without one (RG-REQ-014-L08; v0.19.0 shipped the same way) — a candidate for the follow-up queue. Operator tooling fixed at this cut: release-cut step 1 also accepts a committed human waiver record; step 4 restarts the daemon idempotently (`launchctl kickstart -k`) with a real read-back.
 NEXT: audit round eight on the retained `audit-v0.20.0` root (incl. the README-vs-product probe; known pre-existing gap: no `CHANGELOG.md` exists, RG-REQ-014-L08) → follow-up queue for the human's ordering: TESB-GATE-UNMEASURED-1, PARTITION-DECODE-HARDENING-1, CYCLE-WALK-DETERMINISM-1, EXPLAIN-CALLSITE-ANCHOR-1, DGC-ATTRIBUTION-PRECISE-1, DEPS-GRADLE-CATALOG-1B, DOCTOR-FALLBACK-STATE-ROOT-1, TRUST-CATEGORIES-NAME-1, TS-TEST-RACE-1, LOCK-TEST-FLAKE-1, FOREGROUND-PATIENCE-FLAKE-1.
 
+## AUDIT ROUND EIGHT — rmap v0.20.0 per-command usefulness (2026-10-03)
+
+Artifact (house grade-matrix format): https://claude.ai/artifact/MhUFSe3weVHHy83KdV6CeZ · local `~/Downloads/audit-v0200.html` · durable
+`docs/audits/2026-10-03-per-command-usefulness-v0.20.0.md` + `docs/audits/2026-10-03-root-causes-v0.20.0.md` (RC-1 … RC-10; RC-1 … RC-6
+seam-read from source with file:line). Method: smoke `smoke-runs/2026-10-03T01-38-34Z` (30 repositories × 26 commands; 26 passed / 3 transient
+`Busy`, all retested to exit 0 / linux skipped; retained root `~/repo-graph-retained/audit-v0.20.0`, grader reports and captures under its
+`reports/`), 44 supplemental probes (`agent-manager/scripts/audit20-supplemental.sh`, 50 captures), matrix grader + judge (31 helped / 7 neutral /
+12 would-mislead from six causes) + Codex gpt-6-sol adjudication (read-only, both reports inlined).
+DIMENSIONS (adjudicated): HIT B+ → B+ · EVIDENCE A- → A- · HONESTY B → B+ · ECONOMY B- → B-. SHIPPED: 9 FIXED, 1 PARTIAL (CPP-INCLUDE-BASENAME-1 —
+the 13 ambiguous nginx includes are classified in `unresolved_edges` but invisible on every per-file surface; RG-REQ-006-L12 stays NOT MET), 1 DORMANT
+(PORTABLE-TMP-1 on macOS), 0 REGRESSED; no crash, no documented-verdict failure. ROUND-SEVEN CLASS: scope misattribution is dead at every named site
+(poco `Foundation → CppUnit (415)` only under `--include-tests`; leveldb's test-only ring excluded and named; kafka's buildscript classpath gone) and
+alive on two it was not — `modules deps <module>` prints the REPO-WIDE Summary under `Module: X` (RC-3: `facts.diagnostics` computed once in
+`classification/src/module_edges.rs:220-262`, copied unfiltered at `dispatch.rs:8517`) and grpc-java's `deps list` root row folds 20 example manifests
+that sit under their own `examples/settings.gradle` (RC-9). NEW DOMINANT CLASS: SILENT PER-FILE REMAINDER — the aggregate surfaces state every
+remainder, the per-target ones do not: `imports admin/src/components/editor/Toolbar.tsx --include-inferred` → `0 imports` for a file with 7 import
+statements (RC-1: `handle_imports` reads only the `edges` table — `storage/src/queries.rs:2003`; `ImportsResponse` `rgr/src/presentation/imports.rs:189`
+has no unresolved field; the rows exist in `unresolved_edges` with `category` and `candidates`); nginx `ngx_core.h` 34 of 47 includes shown as the
+whole; `deps list` `declared 0` with the catalog unnamed; `docs list` `+1 unreadable` without the path. Beneath it a symbol-identity layer (Java
+`explain KafkaProducer` ambiguous against its own six constructors; `callers KafkaProducer.send` told to "use qualified name"; C++ `Mutex::Lock`
+unfindable behind its attribute macro). ALIAS READER (RC-2/RC-6): `repo-index/src/config.rs:185` reads only a file named `tsconfig.json`, never
+`references` or `tsconfig.app.json`, so hexmanos `frontend` (84 `@/` imports, `frontend/tsconfig.app.json:12`) is zero-connectivity with no alias
+reason while amodx/FRAKTAG/glamCRM are flagged (333+83 / 55 / 231) but never bound. README GRADE C: `README.md:248` names `scip-clang` while every
+C/C++ capture says `no resolver exists`; `:182/:184/:185/:200` call populated surfaces "not populated / not ported"; `:295-301` absolute author-machine
+paths; the one wrong invocation (`declare quality-policy <policy_id> …`) lives in `--help` (`rgr/src/cli/usage.rs:135`, RC-5), not the README.
+D-TESB-SHIP-1: neither knowingly-shipped defect reached a user in any capture (no armed gate; contradictory carriers indistinguishable by construction).
+FIX QUEUE (adjudicator's order; the human may reorder): (1) IMPORTS-UNRESOLVED-REMAINDER-1 (RC-1) → (2) TS-ALIAS-RESOLUTION-1 + the `references`
+alias reader (RC-2) → (3) TS-WORKSPACE-SUBPATH-EXPORTS-1 → (4) DEPS-GRADLE-CATALOG-1B (RC-7) → (5) DEPS-PACKAGE-PREFIX-1 (RC-8) →
+(6) MODULES-DEPS-SUMMARY-SCOPE-1 (RC-3) → (7) DGC-ATTRIBUTION-PRECISE-1 (RC-9) → (8) CPP-ATTRIBUTE-MACRO-1B (RC-10) → (9) HELP-SURFACE-PARITY-1 (RC-5,
+with a `main.rs`-arm parity test) → (10) DOCTOR-FALLBACK-STATE-ROOT-1 (RC-4) → (11) JAVA-SYMBOL-AMBIGUITY-HINT-1 → (12) EXPLAIN-CALLSITE-ANCHOR-1 →
+(13) DOCS-UNREADABLE-PATH-1 → (14) RISK-CURSOR-1 → (15) CYCLE-WALK-DETERMINISM-1 → (16) STATS-TEST-TOTAL-1 → latent/unprobed last:
+TESB-GATE-UNMEASURED-1, PARTITION-DECODE-HARDENING-1, CPP-CTOR-INITIALIZER-NAME-1, INCLUDE-ROOTS-PERSIST-1, TRUST-CATEGORIES-NAME-1 (RC-6's 43 %/42 %
+double rounding folds in). Items 1–3 are one product fact (the import graph inside each first-party TS package is empty and the per-file answer does
+not say so) and should be root-caused as one family before any packet is cut. Also recorded: DRIFT-NAMES-PATH (nginx `INDEX_DRIFT` names a count, not
+`compile_commands.json`; the human's ruling on the untracked file is pending), TRUST-CEILING-WORDING-1 (nginx 43 % non-FAIL vs sqlite 45 % FAIL), kafka
+`core`'s 58 unindexed Scala files unsaid, vscode's 313 KB generated decision tree ranked complexity #1 unmarked, no `CHANGELOG.md`.
+NEXT: the human orders the queue; the first packet root-causes items 1–3 together.
+
+
 REQUIREMENTS CATALOG (2026-09-12, manager paradigm — agent-manager docs/MANAGER.md): `docs/requirements/` — 15 high-level
 requirements RG-REQ-001…015 with 152 identified low-level requirements (requirements-assurance-v1 grammar), each L with a
 verification criterion and a v0.18.0 evidence reading; independently reviewed (Codex gpt-5.6-terra, REFINE, findings applied;
