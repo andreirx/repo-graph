@@ -1542,6 +1542,17 @@ impl AgentStorageRead for StorageConnection {
         .map_err(map_err("find_inferred_file_imports"))
     }
 
+    fn find_unresolved_file_imports(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<repo_graph_agent::AgentUnresolvedImportEntry>, AgentStorageError> {
+        // IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12): the one reader; a failed read is the
+        // caller's error, never an empty list.
+        StorageConnection::find_unresolved_file_imports(self, snapshot_uid, file_path)
+            .map_err(map_err("find_unresolved_file_imports"))
+    }
+
     // ── EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): type-focus member + referenced-by reads ──
 
     fn list_members_of_type(

@@ -79,6 +79,7 @@ pub(super) fn imports_signal() -> Signal {
         }],
         items_truncated: None,
         items_omitted_count: None,
+        unresolved_count: None,
     })
 }
 

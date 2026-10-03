@@ -902,6 +902,7 @@ mod tests {
             evidence: Some(serde_json::json!({
                 "count": 1,
                 "items": [{"target_file": "src/core/session.ts"}],
+                "unresolved_count": 0,
                 "import_remainder": {
                     "tests": {"imports": 0, "edges": 0},
                     "inferred": {"imports": 2, "edges": 0},
@@ -919,7 +920,7 @@ mod tests {
             code: "EXPLAIN_IMPORTS".to_string(),
             summary: "1 import.".to_string(),
             evidence: Some(serde_json::json!({
-                "count": 1, "items": [{"target_file": "src/core/session.ts"}]
+                "count": 1, "items": [{"target_file": "src/core/session.ts"}], "unresolved_count": 0
             })),
         })];
         let out = r.render_human(false);
@@ -928,6 +929,92 @@ mod tests {
             "{out}"
         );
         assert!(!out.contains("not shown"), "{out}");
+    }
+
+    /// An `explain <file>` response whose one signal is EXPLAIN_IMPORTS with `evidence`.
+    fn imports_explain(evidence: serde_json::Value) -> String {
+        let mut r = minimal_response();
+        r.signals = vec![leaf(ExplainSignal {
+            code: "EXPLAIN_IMPORTS".to_string(),
+            summary: "imports.".to_string(),
+            evidence: Some(evidence),
+        })];
+        r.render_human(false)
+    }
+
+    #[test]
+    fn explain_imports_section_states_the_unresolved_remainder() {
+        // IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12): K > 0 imports without a confirmed target
+        // are a bullet with the command that lists them; a measured zero adds no bullet.
+        let out = imports_explain(serde_json::json!({
+            "count": 0, "items": [], "unresolved_count": 8
+        }));
+        assert!(
+            out.contains("Imports (0)\n  - +8 imports without a confirmed target — rmap imports src/core/auth.ts"),
+            "{out}"
+        );
+        let out = imports_explain(serde_json::json!({
+            "count": 1, "items": [{"target_file": "src/core/session.ts"}], "unresolved_count": 1
+        }));
+        assert!(
+            out.contains("  - src/core/session.ts\n  - +1 import without a confirmed target — rmap imports src/core/auth.ts"),
+            "{out}"
+        );
+        // After the inferred-remainder bullet.
+        let out = imports_explain(serde_json::json!({
+            "count": 0, "items": [], "unresolved_count": 3,
+            "import_remainder": {
+                "tests": {"imports": 0, "edges": 0},
+                "inferred": {"imports": 2, "edges": 0},
+                "tests_and_inferred": {"imports": 0, "edges": 0}
+            }
+        }));
+        assert!(
+            out.contains("--include-inferred\n  - +3 imports without a confirmed target — rmap imports src/core/auth.ts"),
+            "{out}"
+        );
+        let out = imports_explain(serde_json::json!({
+            "count": 1, "items": [{"target_file": "src/core/session.ts"}], "unresolved_count": 0
+        }));
+        assert!(!out.contains("without a confirmed target"), "{out}");
+        // A non-number is unreadable, never 0.
+        for bad in [
+            serde_json::json!("8"),
+            serde_json::json!(-1),
+            serde_json::json!(null),
+        ] {
+            let out = imports_explain(serde_json::json!({
+                "count": 0, "items": [], "unresolved_count": bad
+            }));
+            assert!(
+                out.contains("  - imports without a confirmed target: unreadable — rmap imports src/core/auth.ts"),
+                "{bad}: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn explain_imports_section_absent_unresolved_count_renders_unavailable_never_nothing() {
+        // F-IUR-04: an older daemon's evidence has no `unresolved_count` — stated unavailable with
+        // the command that lists the rows, never read as zero.
+        let out = imports_explain(serde_json::json!({
+            "count": 1, "items": [{"target_file": "src/core/session.ts"}]
+        }));
+        assert!(
+            out.contains("  - src/core/session.ts\n  - imports without a confirmed target: unavailable from this daemon — rmap imports src/core/auth.ts"),
+            "{out}"
+        );
+        let out = imports_explain(serde_json::json!({
+            "count": 1, "items": [{"target_file": "src/core/session.ts"}], "unresolved_count": 0
+        }));
+        assert!(!out.contains("without a confirmed target"), "{out}");
+        let out = imports_explain(serde_json::json!({
+            "count": 1, "items": [], "unresolved_count": 5
+        }));
+        assert!(
+            out.contains("+5 imports without a confirmed target — rmap imports src/core/auth.ts"),
+            "{out}"
+        );
     }
 
     #[test]

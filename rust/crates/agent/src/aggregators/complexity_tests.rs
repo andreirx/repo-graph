@@ -353,6 +353,15 @@ impl AgentStorageRead for FakeStorage {
         Ok(Vec::new())
     }
 
+    // IMPORTS-UNRESOLVED-REMAINDER-1: this double drives the complexity aggregator only.
+    fn find_unresolved_file_imports(
+        &self,
+        _snapshot_uid: &str,
+        _file_path: &str,
+    ) -> Result<Vec<crate::AgentUnresolvedImportEntry>, AgentStorageError> {
+        Ok(vec![])
+    }
+
     // EXPLAIN-TYPE-SECTIONS-1: the complexity fake carries no type members / importers — this
     // double drives the complexity aggregator only, never a type-focus explain. Empty is honest
     // here (an unused fixture), NOT a defaulted read on a serving path.

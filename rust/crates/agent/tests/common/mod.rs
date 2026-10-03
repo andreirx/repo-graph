@@ -178,6 +178,10 @@ pub struct FakeAgentStorage {
     pub inferred_imports_between_paths: HashMap<(String, String, String), Vec<AgentImportEdge>>,
     /// TEST-EDGE-SCOPE-1B: a file's inferred imports, keyed like `file_imports`.
     pub inferred_file_imports: HashMap<(String, String), Vec<AgentImportEntry>>,
+    /// IMPORTS-UNRESOLVED-REMAINDER-1: a file's unresolved import rows, keyed like `file_imports`
+    /// (snapshot_uid, file_path). Unseeded ⇒ no row.
+    pub unresolved_file_imports:
+        HashMap<(String, String), Vec<repo_graph_agent::AgentUnresolvedImportEntry>>,
     /// TEST-EDGE-SCOPE-1B: the gate's inferred boundary imports, keyed like `gate_boundary_imports`.
     pub gate_inferred_boundary_imports: HashMap<(String, String, String), Vec<GateImportEdge>>,
 
@@ -695,6 +699,19 @@ impl AgentStorageRead for FakeAgentStorage {
         self.fail_if_forced("find_inferred_file_imports")?;
         Ok(self
             .inferred_file_imports
+            .get(&(snapshot_uid.to_string(), file_path.to_string()))
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    fn find_unresolved_file_imports(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<repo_graph_agent::AgentUnresolvedImportEntry>, AgentStorageError> {
+        self.fail_if_forced("find_unresolved_file_imports")?;
+        Ok(self
+            .unresolved_file_imports
             .get(&(snapshot_uid.to_string(), file_path.to_string()))
             .cloned()
             .unwrap_or_default())

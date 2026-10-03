@@ -265,6 +265,99 @@ fn file_key_path(key: &str) -> Option<&str> {
         .map(|(_, path)| path)
 }
 
+/// IMPORTS-UNRESOLVED-REMAINDER-1: the `<path>` of a FILE stable key of exactly the form
+/// `<repo_uid>:<path>:FILE` with the given `repo_uid` and a non-empty path; `None` otherwise.
+fn own_file_key_path<'k>(key: &'k str, repo_uid: &str) -> Option<&'k str> {
+    key.strip_prefix(repo_uid)
+        .and_then(|k| k.strip_prefix(':'))
+        .and_then(|k| k.strip_suffix(":FILE"))
+        .filter(|p| !p.is_empty())
+}
+
+/// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12, RG-REQ-002-L11, RG-REQ-002-L04): one stored
+/// unresolved IMPORTS row as the port carries it. The metadata decode keeps the row in every case:
+/// `recorded_specifier` is `rawPath` only when it is a string; `basis` is the metadata `basis`
+/// (a non-string value as its JSON text); `candidates` is `NotRecorded` when the metadata is null or
+/// has no `candidates` key, `Paths` when it is a non-empty array of this repo's FILE keys, and
+/// `Unreadable` quoting the offending text otherwise (metadata not a JSON object, `candidates` not a
+/// non-empty array of strings, a key of another shape).
+fn unresolved_import_entry(
+    repo_uid: &str,
+    target_key: String,
+    line: Option<u32>,
+    category: String,
+    classification: String,
+    basis_code: String,
+    metadata: Option<&str>,
+) -> repo_graph_agent::AgentUnresolvedImportEntry {
+    use repo_graph_agent::UnresolvedCandidates;
+    let decoded_target_path = own_file_key_path(&target_key, repo_uid).map(str::to_string);
+    let (recorded_specifier, basis, candidates) = match metadata {
+        None => (None, None, UnresolvedCandidates::NotRecorded),
+        Some(raw) => match serde_json::from_str::<serde_json::Value>(raw) {
+            Ok(serde_json::Value::Object(obj)) => {
+                let recorded_specifier = obj
+                    .get("rawPath")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let basis = obj.get("basis").map(|b| match b {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                });
+                let candidates = match obj.get("candidates") {
+                    None => UnresolvedCandidates::NotRecorded,
+                    Some(value) => unresolved_candidate_paths(value, repo_uid),
+                };
+                (recorded_specifier, basis, candidates)
+            }
+            Ok(_) | Err(_) => (
+                None,
+                None,
+                UnresolvedCandidates::Unreadable(raw.to_string()),
+            ),
+        },
+    };
+    repo_graph_agent::AgentUnresolvedImportEntry {
+        target_key,
+        recorded_specifier,
+        decoded_target_path,
+        line,
+        category,
+        classification,
+        basis_code,
+        basis,
+        candidates,
+    }
+}
+
+/// IMPORTS-UNRESOLVED-REMAINDER-1: the recorded `candidates` value decoded to paths, or
+/// `Unreadable` quoting the value (not a non-empty array of strings) or the offending key (not of
+/// the form `<repo_uid>:<path>:FILE` with the row's own `repo_uid`).
+fn unresolved_candidate_paths(
+    value: &serde_json::Value,
+    repo_uid: &str,
+) -> repo_graph_agent::UnresolvedCandidates {
+    use repo_graph_agent::UnresolvedCandidates;
+    let keys = match value {
+        serde_json::Value::Array(items) if !items.is_empty() => items
+            .iter()
+            .map(serde_json::Value::as_str)
+            .collect::<Option<Vec<&str>>>(),
+        _ => None,
+    };
+    let Some(keys) = keys else {
+        return UnresolvedCandidates::Unreadable(value.to_string());
+    };
+    let mut paths = Vec::with_capacity(keys.len());
+    for key in keys {
+        match own_file_key_path(key, repo_uid) {
+            Some(path) => paths.push(path.to_string()),
+            None => return UnresolvedCandidates::Unreadable(key.to_string()),
+        }
+    }
+    UnresolvedCandidates::Paths(paths)
+}
+
 /// CPP-INCLUDE-BASENAME-1 / TS-WORKSPACE-RESOLUTION-1 (RG-REQ-002-L11, RG-REQ-002-L04): the ONE
 /// rule that turns an IMPORTS edge's carrier into the row's reason, judged against the row's own
 /// edge — a reason is evidence only when it agrees with the fact it explains.
@@ -3397,6 +3490,54 @@ impl StorageConnection {
             .map_err(StorageError::from)
     }
 
+    /// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12, RG-REQ-002-L11): every `unresolved_edges`
+    /// row of type IMPORTS of the snapshot whose source node's file is `file_path` — the file's
+    /// imports that never bound to an indexed file — ordered by `line_start` (NULL last) then
+    /// `target_key`. Never filtered by category. Each row is carried as stored; the metadata is
+    /// decoded by [`unresolved_import_entry`] (the candidate carrier in three states, never an
+    /// empty list). A line outside `u32` is a read error, never a coerced value.
+    pub fn find_unresolved_file_imports(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<repo_graph_agent::AgentUnresolvedImportEntry>, StorageError> {
+        let mut stmt = self.connection().prepare(
+            "SELECT ue.repo_uid, ue.target_key, ue.line_start, ue.category, ue.classification, \
+                    ue.basis_code, ue.metadata_json \
+             FROM unresolved_edges ue \
+             JOIN nodes src_n ON ue.source_node_uid = src_n.node_uid \
+             JOIN files src_f ON src_n.file_uid = src_f.file_uid \
+             WHERE ue.snapshot_uid = ?1 AND ue.type = 'IMPORTS' AND src_f.path = ?2 \
+             ORDER BY ue.line_start IS NULL, ue.line_start ASC, ue.target_key ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![snapshot_uid, file_path], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                // rusqlite range-checks `u32`: a negative or oversized line is a read error.
+                row.get::<_, Option<u32>>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (repo_uid, target_key, line, category, classification, basis_code, metadata) = row?;
+            out.push(unresolved_import_entry(
+                &repo_uid,
+                target_key,
+                line,
+                category,
+                classification,
+                basis_code,
+                metadata.as_deref(),
+            ));
+        }
+        Ok(out)
+    }
+
     /// Per-language function/method counts and how many carry a
     /// `cyclomatic_complexity` measurement — the raw input for the language
     /// measurement-coverage caveat (METRIC-LANG-COVERAGE-1 part A).
@@ -4052,6 +4193,371 @@ mod tests {
         assert_eq!(
             specs,
             vec![("src/a.rs", "react"), ("src/a.rs", "std::collections")]
+        );
+    }
+
+    // ── IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12): the per-file unresolved reader ──
+
+    /// One unresolved row: (edge_uid, source node, target_key, type, line, category,
+    /// classification, basis_code, metadata).
+    type UnresolvedSeed<'a> = (
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        Option<i64>,
+        &'a str,
+        &'a str,
+        &'a str,
+        Option<&'a str>,
+    );
+
+    /// A store with `src/a.ts` (node a1) and `src/b.ts` (node b1) and the given unresolved rows.
+    fn unresolved_store(rows: &[UnresolvedSeed]) -> (StorageConnection, String) {
+        let (storage, snap) = setup_db_with_snapshot();
+        let conn = storage.connection();
+        conn.execute_batch(&format!(
+            "INSERT INTO files (file_uid, repo_uid, path, language) VALUES \
+               ('r1:src/a.ts', 'r1', 'src/a.ts', 'typescript'), \
+               ('r1:src/b.ts', 'r1', 'src/b.ts', 'typescript'); \
+             INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind, file_uid) VALUES \
+               ('a1', '{snap}', 'r1', 'r1:src/a.ts:FILE', 'a.ts', 'FILE', 'r1:src/a.ts'), \
+               ('b1', '{snap}', 'r1', 'r1:src/b.ts:FILE', 'b.ts', 'FILE', 'r1:src/b.ts');"
+        ))
+        .unwrap();
+        for (uid, src, key, ty, line, category, classification, basis_code, meta) in rows {
+            conn.execute(
+                "INSERT INTO unresolved_edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, \
+                 target_key, type, resolution, extractor, line_start, metadata_json, category, \
+                 classification, classifier_version, basis_code, observed_at) \
+                 VALUES (?, ?, 'r1', ?, ?, ?, 'static', 'ts-core:0.2.0', ?, ?, ?, ?, 1, ?, \
+                 '2026-10-03T00:00:00Z')",
+                rusqlite::params![
+                    uid,
+                    snap,
+                    src,
+                    key,
+                    ty,
+                    line,
+                    meta,
+                    category,
+                    classification,
+                    basis_code
+                ],
+            )
+            .unwrap();
+        }
+        (storage, snap)
+    }
+
+    fn unresolved_of(
+        rows: &[UnresolvedSeed],
+        file: &str,
+    ) -> Vec<repo_graph_agent::AgentUnresolvedImportEntry> {
+        let (storage, snap) = unresolved_store(rows);
+        storage.find_unresolved_file_imports(&snap, file).unwrap()
+    }
+
+    #[test]
+    fn file_unresolved_imports_rows_carry_target_key_decoded_target_path_line_category_classification_and_basis(
+    ) {
+        use repo_graph_agent::UnresolvedCandidates;
+        let rows = unresolved_of(
+            &[
+                (
+                    "u1",
+                    "a1",
+                    "r1:code/addons/a11y/dist/manager:FILE",
+                    "IMPORTS",
+                    Some(1),
+                    "imports_file_not_found",
+                    "internal_candidate",
+                    "relative_import_target_unresolved",
+                    Some(r#"{"rawPath":"./dist/manager.js","isTypeOnly":false}"#),
+                ),
+                (
+                    "u2",
+                    "a1",
+                    "react",
+                    "IMPORTS",
+                    Some(2),
+                    "imports_file_not_found",
+                    "external_library_candidate",
+                    "specifier_matches_package_dependency",
+                    Some(r#"{"rawPath":"react","basis":7}"#),
+                ),
+                // A FILE key of another repo, and a key without the `:FILE` suffix.
+                (
+                    "u3",
+                    "a1",
+                    "r2:lib/x:FILE",
+                    "IMPORTS",
+                    None,
+                    "imports_file_not_found",
+                    "unknown",
+                    "no_supporting_signal",
+                    None,
+                ),
+                (
+                    "u4",
+                    "a1",
+                    "r1:lib/y",
+                    "IMPORTS",
+                    Some(4),
+                    "imports_file_not_found",
+                    "unknown",
+                    "no_supporting_signal",
+                    Some(r#"{"specifier":"r1:lib/y"}"#),
+                ),
+            ],
+            "src/a.ts",
+        );
+        assert_eq!(rows.len(), 4);
+        let r = &rows[0];
+        assert_eq!(r.target_key, "r1:code/addons/a11y/dist/manager:FILE");
+        assert_eq!(r.recorded_specifier.as_deref(), Some("./dist/manager.js"));
+        assert_eq!(
+            r.decoded_target_path.as_deref(),
+            Some("code/addons/a11y/dist/manager")
+        );
+        assert_eq!(r.line, Some(1));
+        assert_eq!(r.category, "imports_file_not_found");
+        assert_eq!(r.classification, "internal_candidate");
+        assert_eq!(r.basis_code, "relative_import_target_unresolved");
+        assert_eq!(r.basis, None);
+        assert_eq!(r.candidates, UnresolvedCandidates::NotRecorded);
+        let r = &rows[1];
+        assert_eq!(r.target_key, "react");
+        assert_eq!(r.decoded_target_path, None);
+        assert_eq!(r.classification, "external_library_candidate");
+        assert_eq!(r.basis_code, "specifier_matches_package_dependency");
+        assert_eq!(
+            r.basis.as_deref(),
+            Some("7"),
+            "a non-string basis is carried as its JSON text"
+        );
+        // Ordered by line, NULL line last.
+        assert_eq!(rows[2].target_key, "r1:lib/y");
+        assert_eq!(rows[2].decoded_target_path, None, "no `:FILE` suffix");
+        assert_eq!(rows[2].recorded_specifier, None, "metadata without rawPath");
+        assert_eq!(rows[3].target_key, "r2:lib/x:FILE");
+        assert_eq!(rows[3].decoded_target_path, None, "another repo's key");
+        assert_eq!(rows[3].line, None);
+        assert_eq!(rows[3].candidates, UnresolvedCandidates::NotRecorded);
+    }
+
+    #[test]
+    fn file_unresolved_imports_ambiguous_row_decodes_its_candidate_keys_to_paths() {
+        use repo_graph_agent::UnresolvedCandidates;
+        let rows = unresolved_of(
+            &[(
+                "u1",
+                "a1",
+                "ngx_time.h",
+                "IMPORTS",
+                Some(52),
+                "imports_ambiguous_match",
+                "unknown",
+                "no_supporting_signal",
+                Some(
+                    r#"{"isTypeOnly":false,"basis":"ambiguous_basename","candidates":["r1:src/os/unix/ngx_time.h:FILE","r1:src/os/win32/ngx_time.h:FILE"]}"#,
+                ),
+            )],
+            "src/a.ts",
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].basis.as_deref(), Some("ambiguous_basename"));
+        assert_eq!(
+            rows[0].candidates,
+            UnresolvedCandidates::Paths(vec![
+                "src/os/unix/ngx_time.h".into(),
+                "src/os/win32/ngx_time.h".into()
+            ]),
+            "every candidate, in stored order — never one picked"
+        );
+        assert_eq!(rows[0].recorded_specifier, None);
+    }
+
+    #[test]
+    fn file_unresolved_imports_row_without_candidates_is_not_recorded_never_empty() {
+        use repo_graph_agent::UnresolvedCandidates;
+        // An include-root overlap (category ambiguous, no carrier keys), a Java ambiguous suffix
+        // with a carrier lacking `candidates`, and a row with a NULL carrier.
+        let rows = unresolved_of(
+            &[
+                (
+                    "u1",
+                    "a1",
+                    "x.h",
+                    "IMPORTS",
+                    Some(1),
+                    "imports_ambiguous_match",
+                    "unknown",
+                    "no_supporting_signal",
+                    Some(r#"{"rawPath":"./x.h","isTypeOnly":false}"#),
+                ),
+                (
+                    "u2",
+                    "a1",
+                    "com.foo.Bar",
+                    "IMPORTS",
+                    Some(2),
+                    "imports_ambiguous_suffix",
+                    "unknown",
+                    "no_supporting_signal",
+                    Some(r#"{"basis":"ambiguous_suffix"}"#),
+                ),
+                (
+                    "u3",
+                    "a1",
+                    "lodash",
+                    "IMPORTS",
+                    Some(3),
+                    "imports_file_not_found",
+                    "external_library_candidate",
+                    "specifier_matches_package_dependency",
+                    None,
+                ),
+            ],
+            "src/a.ts",
+        );
+        assert_eq!(rows.len(), 3);
+        for r in &rows {
+            assert_eq!(
+                r.candidates,
+                UnresolvedCandidates::NotRecorded,
+                "{}",
+                r.target_key
+            );
+            assert_ne!(r.candidates, UnresolvedCandidates::Paths(vec![]));
+        }
+        assert_eq!(rows[1].basis.as_deref(), Some("ambiguous_suffix"));
+    }
+
+    #[test]
+    fn file_unresolved_imports_malformed_candidate_key_is_unreadable_never_dropped() {
+        use repo_graph_agent::UnresolvedCandidates;
+        let cases: [(&str, &str); 7] = [
+            ("not json", "not json"),
+            ("[1,2]", "[1,2]"),
+            (r#"{"candidates":"r1:a.h:FILE"}"#, r#""r1:a.h:FILE""#),
+            (r#"{"candidates":[]}"#, "[]"),
+            (r#"{"candidates":[1]}"#, "[1]"),
+            (
+                r#"{"candidates":["r1:a.h:FILE","r2:b.h:FILE"]}"#,
+                "r2:b.h:FILE",
+            ),
+            (r#"{"candidates":["r1:a.h"]}"#, "r1:a.h"),
+        ];
+        for (meta, quoted) in cases {
+            let rows = unresolved_of(
+                &[(
+                    "u1",
+                    "a1",
+                    "a.h",
+                    "IMPORTS",
+                    Some(1),
+                    "imports_ambiguous_match",
+                    "unknown",
+                    "no_supporting_signal",
+                    Some(meta),
+                )],
+                "src/a.ts",
+            );
+            assert_eq!(rows.len(), 1, "{meta}: the row is kept");
+            assert_eq!(
+                rows[0].candidates,
+                UnresolvedCandidates::Unreadable(quoted.to_string()),
+                "{meta}"
+            );
+            assert_eq!(rows[0].category, "imports_ambiguous_match");
+        }
+    }
+
+    #[test]
+    fn file_unresolved_imports_of_another_file_or_edge_type_never_join() {
+        let seeds: [UnresolvedSeed; 3] = [
+            (
+                "u1",
+                "a1",
+                "react",
+                "IMPORTS",
+                Some(1),
+                "imports_file_not_found",
+                "external_library_candidate",
+                "specifier_matches_package_dependency",
+                None,
+            ),
+            (
+                "u2",
+                "b1",
+                "vue",
+                "IMPORTS",
+                Some(1),
+                "imports_file_not_found",
+                "external_library_candidate",
+                "specifier_matches_package_dependency",
+                None,
+            ),
+            (
+                "u3",
+                "a1",
+                "someCall",
+                "CALLS",
+                Some(2),
+                "calls_function_ambiguous_or_missing",
+                "unknown",
+                "no_supporting_signal",
+                None,
+            ),
+        ];
+        let rows = unresolved_of(&seeds, "src/a.ts");
+        let keys: Vec<&str> = rows.iter().map(|r| r.target_key.as_str()).collect();
+        assert_eq!(keys, vec!["react"]);
+        let rows = unresolved_of(&seeds, "src/b.ts");
+        let keys: Vec<&str> = rows.iter().map(|r| r.target_key.as_str()).collect();
+        assert_eq!(keys, vec!["vue"]);
+        assert!(unresolved_of(&seeds, "src/none.ts").is_empty());
+    }
+
+    #[test]
+    fn file_unresolved_imports_are_ordered_by_line_then_target_key() {
+        let row = |uid, key, line| -> UnresolvedSeed {
+            (
+                uid,
+                "a1",
+                key,
+                "IMPORTS",
+                line,
+                "imports_file_not_found",
+                "unknown",
+                "no_supporting_signal",
+                None,
+            )
+        };
+        let rows = unresolved_of(
+            &[
+                row("u1", "zeta", Some(3)),
+                row("u2", "beta", Some(1)),
+                row("u3", "alpha", Some(3)),
+                row("u4", "omega", None),
+                row("u5", "aaa", Some(2)),
+            ],
+            "src/a.ts",
+        );
+        let got: Vec<(Option<u32>, &str)> = rows
+            .iter()
+            .map(|r| (r.line, r.target_key.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (Some(1), "beta"),
+                (Some(2), "aaa"),
+                (Some(3), "alpha"),
+                (Some(3), "zeta"),
+                (None, "omega"),
+            ]
         );
     }
 

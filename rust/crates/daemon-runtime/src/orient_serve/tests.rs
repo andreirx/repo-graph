@@ -587,6 +587,14 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for PartialSpy<'_, S> {
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
         self.0.find_inferred_file_imports(s, p)
     }
+    // IMPORTS-UNRESOLVED-REMAINDER-1: delegates to the inner port.
+    fn find_unresolved_file_imports(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<Vec<repo_graph_agent::AgentUnresolvedImportEntry>, AgentStorageError> {
+        self.0.find_unresolved_file_imports(s, p)
+    }
     // EXPLAIN-TYPE-SECTIONS-1: the two type-focus reads delegate to the inner port (unchanged).
     fn list_members_of_type(
         &self,
@@ -1224,6 +1232,14 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for M2Spy<'_, S> {
         p: &str,
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
         self.0.find_inferred_file_imports(s, p)
+    }
+    // IMPORTS-UNRESOLVED-REMAINDER-1: delegates to the inner port.
+    fn find_unresolved_file_imports(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<Vec<repo_graph_agent::AgentUnresolvedImportEntry>, AgentStorageError> {
+        self.0.find_unresolved_file_imports(s, p)
     }
     // EXPLAIN-TYPE-SECTIONS-1: the two type-focus reads delegate to the inner port (unchanged).
     fn list_members_of_type(

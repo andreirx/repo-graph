@@ -176,6 +176,6 @@ pub use storage_port::{
     AgentInferredCallRow, AgentMemberEntry, AgentModuleSize, AgentModuleSummary,
     AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
     AgentSnapshot, AgentStaleFile, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
-    AgentSymbolResolution, AgentTrustSummary, AgentUnresolvedCallSite, EnrichmentState,
-    TrackedFileTestFlag,
+    AgentSymbolResolution, AgentTrustSummary, AgentUnresolvedCallSite, AgentUnresolvedImportEntry,
+    EnrichmentState, TrackedFileTestFlag, UnresolvedCandidates,
 };

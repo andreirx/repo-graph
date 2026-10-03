@@ -1761,7 +1761,10 @@ impl ServiceDispatcher {
             }
         }
 
-        if engine == "auto" {
+        // IMPORTS-UNRESOLVED-REMAINDER-1 (D-IUR-FASTPATH): both single-file arms bind `value` and fall
+        // through to ONE partition and ONE unresolved attach; `livegraph`/`compare` returned above.
+        let snapshot_uid = snapshot.snapshot_uid.clone();
+        let mut value = if engine == "auto" {
             // IMPORTS-LIVEGRAPH-DEFAULT-1 (D2=B): LiveGraph-first with the per-call no-loss compare + a labelled
             // SQLite fallback (backend_used / fallback_reason are JSON-only; the human render strips them).
             // W-B-EPOCH-IMPL-2A (SC-B): capture the request epoch ONCE — the pinned snapshot + the BUILD-THEN-PEEK
@@ -1777,35 +1780,33 @@ impl ServiceDispatcher {
                 snapshot,
                 fingerprint,
             };
-            let mut value = crate::livegraph_feed::imports_auto_response(
-                &repo_state,
-                &repo_uid,
-                &epoch,
-                file_path,
-            );
-            if let Err(e) = crate::import_partition_view::partition_import_rows(&mut value, view) {
-                return DispatchResult::error(&request.id, e);
-            }
-            return DispatchResult::success(&request.id, value);
-        }
-
-        // ---- engine = sqlite (EXPLICIT escape hatch): the existing listing, UNCHANGED (no backend metadata). --
-        let imports = match storage.find_imports(&snapshot.snapshot_uid, &file_stable_key) {
-            Ok(i) => i,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
+            crate::livegraph_feed::imports_auto_response(&repo_state, &repo_uid, &epoch, file_path)
+        } else {
+            // ---- engine = sqlite (EXPLICIT escape hatch): the existing listing (no backend metadata). --
+            let imports = match storage.find_imports(&snapshot_uid, &file_stable_key) {
+                Ok(i) => i,
+                Err(e) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    );
+                }
+            };
+            serde_json::json!({
+                "file": file_path,
+                "imports": imports,
+                "count": imports.len(),
+            })
         };
-
-        let mut value = serde_json::json!({
-            "file": file_path,
-            "imports": imports,
-            "count": imports.len(),
-        });
         if let Err(e) = crate::import_partition_view::partition_import_rows(&mut value, view) {
+            return DispatchResult::error(&request.id, e);
+        }
+        if let Err(e) = crate::import_partition_view::attach_unresolved_imports(
+            &mut value,
+            &storage,
+            &snapshot_uid,
+            file_path,
+        ) {
             return DispatchResult::error(&request.id, e);
         }
         DispatchResult::success(&request.id, value)

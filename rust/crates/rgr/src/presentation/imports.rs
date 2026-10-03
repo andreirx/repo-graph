@@ -198,6 +198,30 @@ pub struct ImportsResponse {
     /// The imports the view left out (the inferred ones unless `--include-inferred`).
     #[serde(default)]
     pub import_remainder: Option<serde_json::Value>,
+    /// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12): the file's imports without a confirmed
+    /// target. `None` = the key is ABSENT (a daemon that predates this read — the unavailable
+    /// line, never a zero); a present value of any shape, `null` included, is decoded at render so
+    /// a malformed one is a named unreadable line, never a parse failure of the whole listing.
+    #[serde(default, deserialize_with = "present_value")]
+    pub unresolved: Option<serde_json::Value>,
+    /// The number of `unresolved` rows (checked against them at render).
+    #[serde(default, deserialize_with = "present_value")]
+    pub unresolved_count: Option<serde_json::Value>,
+    /// The file's language (a non-empty string, else rendered `unknown`).
+    #[serde(default, deserialize_with = "present_value")]
+    pub language: Option<serde_json::Value>,
+    /// `{"omitted_forms": [..] | null}`: the import forms this listing omits for the language.
+    #[serde(default, deserialize_with = "present_value")]
+    pub listing_coverage: Option<serde_json::Value>,
+}
+
+/// A present key is `Some(value)` — `null` included — so an explicit `null` is never read as an
+/// absent key (with `#[serde(default)]`, an absent key is `None`).
+fn present_value<'de, D>(d: D) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <serde_json::Value as Deserialize>::deserialize(d).map(Some)
 }
 
 // ── Human Rendering ──────────────────────────────────────────────────────────
@@ -212,6 +236,17 @@ impl ImportsResponse {
 
         // ── Count ──────────────────────────────────────────────────
         let count = self.imports.len();
+        let unresolved =
+            unresolved::decode(self.unresolved.as_ref(), self.unresolved_count.as_ref());
+        if self.is_zero_state(&unresolved) {
+            // IMPORTS-UNRESOLVED-REMAINDER-1: no row of either table and nothing left out — the count
+            // line names the language and the listing coverage instead of a bare zero.
+            out.push_str(&unresolved::zero_state_line(
+                self.language.as_ref(),
+                self.listing_coverage.as_ref(),
+            ));
+            return out;
+        }
         if count == 1 {
             out.push_str("1 import\n");
         } else {
@@ -220,6 +255,7 @@ impl ImportsResponse {
 
         if self.imports.is_empty() {
             self.push_partition_lines(&mut out);
+            self.push_unresolved_lines(&mut out, &unresolved);
             return out;
         }
 
@@ -232,7 +268,32 @@ impl ImportsResponse {
         }
 
         self.push_partition_lines(&mut out);
+        self.push_unresolved_lines(&mut out, &unresolved);
         out
+    }
+
+    /// IMPORTS-UNRESOLVED-REMAINDER-1: the zero-state — no listed row, a stated partition with no
+    /// inferred remainder, and a readable zero of rows without a confirmed target.
+    fn is_zero_state(&self, unresolved: &unresolved::Decoded) -> bool {
+        use crate::presentation::import_partition as ip;
+        let nothing_left_out = matches!(
+            ip::partition_from(self.import_view.as_ref(), self.import_remainder.as_ref()),
+            ip::Partition::Stated(r) if ip::per_file_remainder(&r).inferred.imports == 0
+        );
+        self.imports.is_empty()
+            && nothing_left_out
+            && matches!(unresolved, unresolved::Decoded::Rows(rows) if rows.is_empty())
+    }
+
+    /// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12, RG-REQ-002-L04): outside the zero-state, the
+    /// block of rows without a confirmed target (or its measured zero, or its unavailable /
+    /// unreadable line), then the one coverage line.
+    fn push_unresolved_lines(&self, out: &mut String, unresolved: &unresolved::Decoded) {
+        out.push_str(&unresolved::block(unresolved));
+        out.push_str(&unresolved::coverage_line(
+            self.language.as_ref(),
+            self.listing_coverage.as_ref(),
+        ));
     }
 
     /// TEST-EDGE-SCOPE-1B: the inferred imports not listed, with the flag that lists them (worded
@@ -248,6 +309,427 @@ impl ImportsResponse {
             out.push_str(&line);
             out.push('\n');
         }
+    }
+}
+
+// ── IMPORTS-UNRESOLVED-REMAINDER-1: the rows without a confirmed target (SLICE_DOC §2.2) ────────
+
+/// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12, RG-REQ-002-L04, RG-REQ-002-L11,
+/// D-AGENT-USEFULNESS-FRAME-1): decode and word the `unresolved` rows of an `imports <file>` answer.
+///
+/// Every reader phrase restates the PREDICATE the stored code's assignment site tests (the site is
+/// named beside each phrase); the inference is carried only as the classification QUESTION and the
+/// candidates. A stored string this build has no phrase for is printed verbatim and marked — never
+/// mapped to a known phrase. Absent evidence renders unavailable, malformed evidence unreadable —
+/// never zero, never dropped.
+mod unresolved {
+    use serde_json::Value;
+
+    /// One readable row.
+    pub(super) struct Row {
+        target_key: String,
+        recorded_specifier: Option<String>,
+        decoded_target_path: Option<String>,
+        line: Option<u64>,
+        category: String,
+        classification: String,
+        basis_code: String,
+        /// The metadata `basis` (the candidate-set reason), `None` when not recorded.
+        basis: Option<String>,
+        candidates: Candidates,
+    }
+
+    /// The candidate carrier, as the daemon serialized it.
+    enum Candidates {
+        NotRecorded,
+        Paths(Vec<String>),
+        Unreadable(String),
+    }
+
+    /// What the answer says about its rows without a confirmed target.
+    pub(super) enum Decoded {
+        /// No `unresolved` key: a daemon that predates this read.
+        Unavailable,
+        /// The rows (or a row) are malformed.
+        Unreadable(String),
+        /// `unresolved_count` is missing, not a non-negative integer, or disagrees with the rows.
+        CountDisagrees { count: String, rows: usize },
+        /// The rows, with an agreeing count.
+        Rows(Vec<Row>),
+    }
+
+    /// The one decode rule of the block (SLICE_DOC §2.2 field states).
+    pub(super) fn decode(unresolved: Option<&Value>, count: Option<&Value>) -> Decoded {
+        let Some(unresolved) = unresolved else {
+            return Decoded::Unavailable;
+        };
+        let rows = match decode_rows(unresolved) {
+            Ok(rows) => rows,
+            Err(why) => return Decoded::Unreadable(why),
+        };
+        match count {
+            Some(c) if c.as_u64() == Some(rows.len() as u64) => Decoded::Rows(rows),
+            Some(c) => Decoded::CountDisagrees {
+                count: c.to_string(),
+                rows: rows.len(),
+            },
+            None => Decoded::CountDisagrees {
+                count: "missing".to_string(),
+                rows: rows.len(),
+            },
+        }
+    }
+
+    fn decode_rows(v: &Value) -> Result<Vec<Row>, String> {
+        let items = v
+            .as_array()
+            .ok_or_else(|| "the rows are not an array".to_string())?;
+        items
+            .iter()
+            .enumerate()
+            .map(|(i, item)| decode_row(item).map_err(|why| format!("row {}: {why}", i + 1)))
+            .collect()
+    }
+
+    fn decode_row(v: &Value) -> Result<Row, String> {
+        let obj = v.as_object().ok_or_else(|| "not an object".to_string())?;
+        let string = |key: &str| -> Result<String, String> {
+            obj.get(key)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .ok_or_else(|| format!("{key} is not a string"))
+        };
+        let string_or_null = |key: &str| -> Result<Option<String>, String> {
+            match obj.get(key) {
+                Some(Value::String(s)) => Ok(Some(s.clone())),
+                Some(Value::Null) => Ok(None),
+                _ => Err(format!("{key} is neither a string nor null")),
+            }
+        };
+        let line = match obj.get("line") {
+            Some(Value::Null) => None,
+            Some(n) => Some(
+                n.as_u64()
+                    .ok_or_else(|| "line is neither an integer nor null".to_string())?,
+            ),
+            None => return Err("line is neither an integer nor null".to_string()),
+        };
+        let candidates = match obj.get("candidates") {
+            Some(Value::Null) => Candidates::NotRecorded,
+            // F-001: the same rule as the storage reader (`unresolved_candidate_paths`) — a path
+            // list is a NON-EMPTY array of strings; an empty list is malformed, never a measured
+            // zero-candidate result.
+            Some(Value::Array(items)) if items.is_empty() => {
+                return Err("candidates is an empty array".to_string())
+            }
+            Some(Value::Array(items)) => Candidates::Paths(
+                items
+                    .iter()
+                    .map(|p| p.as_str().map(str::to_string))
+                    .collect::<Option<Vec<String>>>()
+                    .ok_or_else(|| "candidates holds a non-string".to_string())?,
+            ),
+            Some(Value::Object(o)) if o.len() == 1 && o.contains_key("unreadable") => {
+                match o.get("unreadable") {
+                    Some(Value::String(text)) => Candidates::Unreadable(text.clone()),
+                    _ => return Err("candidates.unreadable is not a string".to_string()),
+                }
+            }
+            _ => {
+                return Err(
+                    "candidates is none of null, an array of strings, {\"unreadable\": string}"
+                        .to_string(),
+                )
+            }
+        };
+        Ok(Row {
+            target_key: string("target_key")?,
+            recorded_specifier: string_or_null("recorded_specifier")?,
+            decoded_target_path: string_or_null("decoded_target_path")?,
+            line,
+            category: string("category")?,
+            classification: string("classification")?,
+            basis_code: string("basis_code")?,
+            // The metadata `basis` reaches the wire as a string (storage carries a non-string value
+            // as its JSON text); any other value is printed verbatim and marked, never dropped.
+            basis: match obj.get("basis") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(b)) => Some(b.clone()),
+                Some(other) => Some(other.to_string()),
+            },
+            candidates,
+        })
+    }
+
+    /// The block outside the zero-state: the rows (header + one line each), the measured zero,
+    /// or the unavailable / unreadable line.
+    pub(super) fn block(decoded: &Decoded) -> String {
+        match decoded {
+            Decoded::Unavailable => {
+                "imports without a confirmed target: unavailable from this daemon — upgrade rmapd\n"
+                    .to_string()
+            }
+            Decoded::Unreadable(why) => {
+                format!("imports without a confirmed target: unreadable ({why})\n")
+            }
+            Decoded::CountDisagrees { count, rows } => format!(
+                "imports without a confirmed target: unreadable (count {count} disagrees with {rows} rows)\n"
+            ),
+            Decoded::Rows(rows) if rows.is_empty() => {
+                "0 imports without a confirmed target\n".to_string()
+            }
+            Decoded::Rows(rows) => {
+                let mut out = if rows.len() == 1 {
+                    "1 import without a confirmed target:\n".to_string()
+                } else {
+                    format!("{} imports without a confirmed target:\n", rows.len())
+                };
+                for row in rows {
+                    out.push_str(&row_line(row));
+                }
+                out
+            }
+        }
+    }
+
+    /// `  {target}  line {n}  {first part} · {classification phrase} ({basis phrase})`, the
+    /// ` · ` dropped when the first part is empty.
+    fn row_line(row: &Row) -> String {
+        let target = match (&row.recorded_specifier, &row.decoded_target_path) {
+            (Some(spec), _) => spec.clone(),
+            (None, Some(path)) => {
+                format!("{path} (decoded from the stored key — not a confirmed target)")
+            }
+            (None, None) => row.target_key.clone(),
+        };
+        let line = row
+            .line
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "?".to_string());
+        let first = first_part(row);
+        let tail = format!(
+            "{} ({})",
+            classification_phrase(&row.classification),
+            basis_phrase(&row.basis_code)
+        );
+        if first.is_empty() {
+            format!("  {target}  line {line}  {tail}\n")
+        } else {
+            format!("  {target}  line {line}  {first} · {tail}\n")
+        }
+    }
+
+    /// The two categories whose rows always carry the candidate clause.
+    fn is_ambiguity_category(category: &str) -> bool {
+        matches!(
+            category,
+            "imports_ambiguous_match" | "imports_ambiguous_suffix"
+        )
+    }
+
+    /// The category phrase — the predicate at its assignment site — or `None` when the category has
+    /// no phrase of its own (`imports_file_not_found`: the block header is its predicate,
+    /// `indexer/src/resolver.rs:2574`, the TS workspace ambiguity included, `:690-704`).
+    fn category_phrase(category: &str) -> Option<String> {
+        match category {
+            "imports_file_not_found" => None,
+            // indexer/src/resolver.rs:552 (include-root `Ambiguous`) and :667 (the suffix/basename
+            // stage's `AmbiguousSuffix`/`AmbiguousBasename`): more than one indexed file matched.
+            "imports_ambiguous_match" => Some("several indexed files matched".to_string()),
+            // indexer/src/resolver.rs:577 from :1479 (`resolve_java_suffix`, :1492-1522).
+            "imports_ambiguous_suffix" => Some(
+                "several indexed .java files end with the specifier's path (or a prefix of it)"
+                    .to_string(),
+            ),
+            // indexer/src/resolver.rs:566 from :1465: the specifier ends with `.*`.
+            "imports_wildcard" => Some("wildcard import".to_string()),
+            other => Some(format!(
+                "{other} (no phrase for this category in this build)"
+            )),
+        }
+    }
+
+    /// The reason text (without its parentheses) from the metadata `basis`; `{m}` only from
+    /// recorded paths.
+    fn reason_text(basis: &str, candidates: &Candidates) -> String {
+        let recorded = match candidates {
+            Candidates::Paths(paths) if !paths.is_empty() => Some(paths.len()),
+            _ => None,
+        };
+        match (basis, recorded) {
+            ("ambiguous_basename", Some(m)) => format!("same file name in {m} places"),
+            ("ambiguous_basename", None) => "same file name in several places".to_string(),
+            ("ambiguous_suffix", Some(m)) => format!("same path suffix in {m} places"),
+            ("ambiguous_suffix", None) => "same path suffix in several places".to_string(),
+            ("ambiguous_workspace_source_entry", _) => {
+                "several workspace source entries".to_string()
+            }
+            (other, _) => format!("{other} (no phrase for this reason in this build)"),
+        }
+    }
+
+    /// The candidate clause (without its ` — ` prefix).
+    fn candidate_clause(candidates: &Candidates) -> String {
+        match candidates {
+            Candidates::Paths(paths) => format!("{} candidates: {}", paths.len(), paths.join(", ")),
+            Candidates::NotRecorded => "candidate paths not recorded with this import".to_string(),
+            Candidates::Unreadable(text) => format!("candidates unreadable (\"{text}\")"),
+        }
+    }
+
+    /// `{category phrase}{reason clause}{candidate clause}` (SLICE_DOC §2.2).
+    fn first_part(row: &Row) -> String {
+        let phrase = category_phrase(&row.category);
+        let mut out = String::new();
+        match (&phrase, &row.basis) {
+            (Some(p), Some(basis)) => {
+                out.push_str(p);
+                out.push_str(&format!(" ({})", reason_text(basis, &row.candidates)));
+            }
+            (Some(p), None) => {
+                out.push_str(p);
+                if row.category == "imports_ambiguous_match" {
+                    out.push_str(" (reason not recorded)");
+                }
+            }
+            // A category without a phrase prints a present reason bare, as the first part.
+            (None, Some(basis)) => out.push_str(&reason_text(basis, &row.candidates)),
+            (None, None) => {}
+        }
+        let with_candidates = is_ambiguity_category(&row.category)
+            || !matches!(row.candidates, Candidates::NotRecorded);
+        if with_candidates {
+            if !out.is_empty() {
+                out.push_str(" — ");
+            }
+            out.push_str(&candidate_clause(&row.candidates));
+        }
+        out
+    }
+
+    /// The classification, carried as a QUESTION (never asserted).
+    fn classification_phrase(classification: &str) -> String {
+        match classification {
+            "external_library_candidate" => "external library?".to_string(),
+            "internal_candidate" => "this repository?".to_string(),
+            "framework_boundary_candidate" => "framework boundary?".to_string(),
+            "unknown" => "unknown".to_string(),
+            other => format!("{other} (no phrase for this classification in this build)"),
+        }
+    }
+
+    /// The basis phrase — the test at its assignment site in
+    /// `classification/src/unresolved_classifier.rs`.
+    fn basis_phrase(basis_code: &str) -> String {
+        match basis_code {
+            // :185 `is_relative` (:499-522) and :214 (`:FILE` in the specifier or the target key).
+            "relative_import_target_unresolved" => "recorded specifier starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE".to_string(),
+            // :193 `resolve_declared_dependency`.
+            "specifier_matches_package_dependency" => {
+                "specifier matches a dependency declared in the manifest".to_string()
+            }
+            // :204 `has_runtime_builtin_module` (signals.rs:33).
+            "specifier_matches_runtime_module" => {
+                "specifier or its part before :: is on the runtime-module list of this build"
+                    .to_string()
+            }
+            // :209 `matches_any_alias`.
+            "specifier_matches_project_alias" => {
+                "specifier matches a tsconfig paths alias".to_string()
+            }
+            // :219 `is_rust_crate_internal_import` (:230-258, `is_rust_module_name` :263-270).
+            "rust_crate_internal_module_heuristic" => "metadata carries a specifier and no rawPath, and the specifier's first segment before :: starts with a lowercase letter and holds only lowercase letters, digits or underscores".to_string(),
+            // `unknown()` :433, reached from :223 and :116.
+            "no_supporting_signal" => "no classifier signal".to_string(),
+            other => format!("{other} (no phrase for this basis in this build)"),
+        }
+    }
+
+    /// `a, b, c or d`.
+    fn join_items(items: &[&str]) -> String {
+        match items {
+            [] => String::new(),
+            [one] => one.to_string(),
+            [init @ .., last] => format!("{} or {last}", init.join(", ")),
+        }
+    }
+
+    /// The language when a non-empty string.
+    fn language_of(language: Option<&Value>) -> Option<&str> {
+        language.and_then(Value::as_str).filter(|l| !l.is_empty())
+    }
+
+    /// What `listing_coverage` says.
+    enum Coverage<'a> {
+        Absent,
+        Omits(Vec<&'a str>),
+        NotRecorded,
+        Unreadable,
+    }
+
+    fn coverage_of(listing_coverage: Option<&Value>) -> Coverage<'_> {
+        let Some(v) = listing_coverage else {
+            return Coverage::Absent;
+        };
+        match v.as_object().and_then(|o| o.get("omitted_forms")) {
+            Some(Value::Null) => Coverage::NotRecorded,
+            Some(Value::Array(items)) if !items.is_empty() => items
+                .iter()
+                .map(Value::as_str)
+                .collect::<Option<Vec<&str>>>()
+                .map_or(Coverage::Unreadable, Coverage::Omits),
+            _ => Coverage::Unreadable,
+        }
+    }
+
+    /// The zero-state count line: `0 imports (language: {lang}; this index lists no imports for
+    /// this file{coverage})` — the coverage clause is never empty.
+    pub(super) fn zero_state_line(
+        language: Option<&Value>,
+        listing_coverage: Option<&Value>,
+    ) -> String {
+        let lang = language_of(language);
+        let coverage = match coverage_of(listing_coverage) {
+            Coverage::Omits(items) => format!(" — this listing omits {}", join_items(&items)),
+            Coverage::NotRecorded => match lang {
+                Some(l) => format!(" — listing coverage not recorded for {l}"),
+                None => " — listing coverage not recorded (language not recorded)".to_string(),
+            },
+            Coverage::Absent => " — listing coverage unavailable from this daemon".to_string(),
+            Coverage::Unreadable => " — listing coverage unreadable".to_string(),
+        };
+        format!(
+            "0 imports (language: {}; this index lists no imports for this file{coverage})\n",
+            lang.unwrap_or("unknown")
+        )
+    }
+
+    /// The one coverage line of every listing outside the zero-state.
+    pub(super) fn coverage_line(
+        language: Option<&Value>,
+        listing_coverage: Option<&Value>,
+    ) -> String {
+        match coverage_of(listing_coverage) {
+            Coverage::Omits(items) => format!(
+                "listing limit: this listing omits {} — open the file for those\n",
+                join_items(&items)
+            ),
+            Coverage::NotRecorded => match language_of(language) {
+                Some(l) => format!("listing coverage: not recorded for {l} — open the file to confirm\n"),
+                None => "listing coverage: not recorded (language not recorded) — open the file to confirm\n".to_string(),
+            },
+            Coverage::Absent => "listing coverage: unavailable from this daemon\n".to_string(),
+            Coverage::Unreadable => "listing limit: unreadable\n".to_string(),
+        }
+    }
+
+    /// D-IUR-ENGINE-SCOPE: the line a per-file `--engine livegraph|compare` render prints after
+    /// its first line — that view does not list these imports, and the command that does.
+    pub(super) fn view_limit_line(file: &str) -> String {
+        format!(
+            "view limit: this view does not list imports without a confirmed target — rmap imports {} does\n",
+            crate::presentation::import_partition::shell_quote(file)
+        )
     }
 }
 
@@ -324,6 +806,11 @@ impl LivegraphImportsResponse {
             "Imports (livegraph): {}  [{}]\n",
             self.display_name, scope
         ));
+        // IMPORTS-UNRESOLVED-REMAINDER-1 (D-IUR-ENGINE-SCOPE): a per-file read-model view says it
+        // does not list the imports without a confirmed target, and names the command that does.
+        if let Some(f) = &self.file_filter {
+            out.push_str(&unresolved::view_limit_line(f));
+        }
         // Module-cycle trust, named after its SOURCE (never a generic import-completeness claim).
         out.push_str(&format!(
             "module-cycle: completeness={}  answer_class={}  freshness={}\n",
@@ -474,7 +961,11 @@ impl ImportsCompareResponse {
     /// Render the SQLite listing (primary, default-compatible) then the directional-compare summary.
     pub fn render_human(&self) -> String {
         let mut out = String::new();
-        out.push_str(&format!("Imports: {}\n\n", self.file));
+        out.push_str(&format!("Imports: {}\n", self.file));
+        // IMPORTS-UNRESOLVED-REMAINDER-1 (D-IUR-ENGINE-SCOPE): the readiness view does not list the
+        // imports without a confirmed target; say so after the first line.
+        out.push_str(&unresolved::view_limit_line(&self.file));
+        out.push('\n');
         let count = self.imports.len();
         out.push_str(&format!(
             "{} import{}\n",
@@ -754,6 +1245,10 @@ mod tests {
             ],
             import_view: Some(default_view()),
             import_remainder: Some(zero_remainder()),
+            unresolved: Some(serde_json::json!([])),
+            unresolved_count: Some(serde_json::json!(0)),
+            language: None,
+            listing_coverage: None,
         }
     }
 
@@ -777,6 +1272,10 @@ mod tests {
             imports: vec![],
             import_view: Some(default_view()),
             import_remainder: Some(zero_remainder()),
+            unresolved: Some(serde_json::json!([])),
+            unresolved_count: Some(serde_json::json!(0)),
+            language: None,
+            listing_coverage: None,
         }
     }
 
@@ -793,7 +1292,9 @@ mod tests {
                 "tests": {"imports": 0, "edges": 0},
                 "inferred": {"imports": 2, "edges": 0},
                 "tests_and_inferred": {"imports": 0, "edges": 0}
-            }
+            },
+            "unresolved": [],
+            "unresolved_count": 0
         }))
         .unwrap();
         let out = resp.render_human();
@@ -819,7 +1320,9 @@ mod tests {
                 "tests": {"imports": 0, "edges": 0},
                 "inferred": {"imports": 0, "edges": 0},
                 "tests_and_inferred": {"imports": 0, "edges": 0}
-            }
+            },
+            "unresolved": [],
+            "unresolved_count": 0
         }))
         .unwrap();
         let out = with.render_human();
@@ -859,7 +1362,10 @@ mod tests {
         resp.imports.truncate(1);
         let output = resp.render_human();
         assert!(output.contains("1 import"));
-        assert!(!output.contains("imports")); // no plural
+        // The count line (the third line) is singular; the measured zero below it is correctly
+        // plural (`0 imports without a confirmed target`).
+        let count_line = output.lines().nth(2).unwrap();
+        assert!(!count_line.contains("imports"), "{output}"); // no plural
     }
 
     #[test]
@@ -1145,6 +1651,8 @@ mod tests {
             "imports": rows,
             "import_view": {"include_tests": false, "include_inferred": true},
             "import_remainder": zero_remainder(),
+            "unresolved": [],
+            "unresolved_count": 0,
         }))
         .unwrap()
     }
@@ -1170,7 +1678,7 @@ mod tests {
         assert_eq!(
             resp.render_human(),
             format!(
-                "Imports: src/core/ngx_config.h\n\n1 import\n\n  {LINUX}  depth=1  inferred: unique basename → {LINUX}\n"
+                "Imports: src/core/ngx_config.h\n\n1 import\n\n  {LINUX}  depth=1  inferred: unique basename → {LINUX}\n0 imports without a confirmed target\nlisting coverage: unavailable from this daemon\n"
             )
         );
     }
@@ -1244,7 +1752,9 @@ mod tests {
              lib/src/util/foo.h  depth=1  static\n  \
              pkg/sub.py  depth=1  inferred\n  \
              src/x.h  depth=1  inferred\n  \
-             src/y.h  depth=1  static\n"
+             src/y.h  depth=1  static\n\
+             0 imports without a confirmed target\n\
+             listing coverage: unavailable from this daemon\n"
         );
     }
 
@@ -1371,13 +1881,16 @@ mod tests {
             )],
             "import_view": {"include_tests": false, "include_inferred": true},
             "import_remainder": zero_remainder(),
+            "unresolved": [],
+            "unresolved_count": 0,
         }))
         .unwrap();
         assert_eq!(
             resp.render_human(),
             format!(
                 "Imports: packages/api/src/server.ts\n\n1 import\n\n  {ENGINE_SRC}  depth=1  \
-                 inferred: workspace source entry → {ENGINE_SRC} (declared entry {ENGINE_DIST} not indexed)\n"
+                 inferred: workspace source entry → {ENGINE_SRC} (declared entry {ENGINE_DIST} not indexed)\n\
+                 0 imports without a confirmed target\nlisting coverage: unavailable from this daemon\n"
             )
         );
         // Several declared entries: every one listed, none chosen.
@@ -1740,5 +2253,823 @@ mod tests {
             "WorkspaceLocalUnedgeable=1",
             "rmap modules deps --include-inferred",
         );
+    }
+
+    // ── IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12; SLICE_DOC §2.2 is binding) ──────────────
+
+    /// One unresolved row as the daemon serializes it.
+    #[allow(clippy::too_many_arguments)]
+    fn urow(
+        target_key: &str,
+        recorded_specifier: Option<&str>,
+        decoded_target_path: Option<&str>,
+        line: Option<u64>,
+        category: &str,
+        classification: &str,
+        basis_code: &str,
+        basis: Option<&str>,
+        candidates: serde_json::Value,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "target_key": target_key,
+            "recorded_specifier": recorded_specifier,
+            "decoded_target_path": decoded_target_path,
+            "line": line,
+            "category": category,
+            "classification": classification,
+            "basis_code": basis_code,
+            "basis": basis,
+            "candidates": candidates,
+        })
+    }
+
+    /// A file-not-found row whose recorded specifier is its key, with no reason and no candidates.
+    fn not_found(
+        spec: &str,
+        line: u64,
+        classification: &str,
+        basis_code: &str,
+    ) -> serde_json::Value {
+        urow(
+            spec,
+            Some(spec),
+            None,
+            Some(line),
+            "imports_file_not_found",
+            classification,
+            basis_code,
+            None,
+            serde_json::Value::Null,
+        )
+    }
+
+    /// A default-view listing of `file` with `imports` rows and the given new fields (each `None`
+    /// is an ABSENT key).
+    fn listing(
+        file: &str,
+        imports: Vec<serde_json::Value>,
+        unresolved: Option<serde_json::Value>,
+        unresolved_count: Option<serde_json::Value>,
+        language: Option<serde_json::Value>,
+        listing_coverage: Option<serde_json::Value>,
+    ) -> ImportsResponse {
+        let mut v = serde_json::json!({
+            "file": file,
+            "imports": imports,
+            "import_view": default_view(),
+            "import_remainder": zero_remainder(),
+        });
+        for (key, value) in [
+            ("unresolved", unresolved),
+            ("unresolved_count", unresolved_count),
+            ("language", language),
+            ("listing_coverage", listing_coverage),
+        ] {
+            if let Some(value) = value {
+                v[key] = value;
+            }
+        }
+        serde_json::from_value(v).expect("the listing always decodes")
+    }
+
+    /// A listing whose unresolved rows are `rows` (count agreeing).
+    fn listing_with_rows(
+        file: &str,
+        imports: Vec<serde_json::Value>,
+        rows: Vec<serde_json::Value>,
+        language: &str,
+        omitted_forms: serde_json::Value,
+    ) -> ImportsResponse {
+        let n = rows.len();
+        listing(
+            file,
+            imports,
+            Some(serde_json::Value::Array(rows)),
+            Some(serde_json::json!(n)),
+            Some(serde_json::json!(language)),
+            Some(serde_json::json!({ "omitted_forms": omitted_forms })),
+        )
+    }
+
+    fn ts_forms() -> serde_json::Value {
+        serde_json::json!([
+            "type-only imports and re-exports from a specifier without a leading dot",
+            "dynamic import() and require() calls",
+            "import … = require(…) statements",
+            "import statements below the top level"
+        ])
+    }
+
+    fn js_forms() -> serde_json::Value {
+        serde_json::json!([
+            "re-exports from a specifier without a leading dot",
+            "dynamic import() and require() calls"
+        ])
+    }
+
+    const TS_LIMIT: &str = "listing limit: this listing omits type-only imports and re-exports from a specifier without a leading dot, dynamic import() and require() calls, import … = require(…) statements or import statements below the top level — open the file for those";
+    const JS_LIMIT: &str = "listing limit: this listing omits re-exports from a specifier without a leading dot or dynamic import() and require() calls — open the file for those";
+    const RELATIVE: &str = "recorded specifier starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE";
+
+    fn lines_starting(out: &str, prefix: &str) -> usize {
+        out.lines().filter(|l| l.starts_with(prefix)).count()
+    }
+
+    #[test]
+    fn imports_renders_unresolved_rows_with_their_category_classification_and_basis() {
+        let rows = vec![
+            not_found(
+                "@tiptap/react",
+                1,
+                "external_library_candidate",
+                "specifier_matches_package_dependency",
+            ),
+            not_found(
+                "react",
+                2,
+                "external_library_candidate",
+                "specifier_matches_package_dependency",
+            ),
+            not_found(
+                "@/components/ui/button",
+                3,
+                "internal_candidate",
+                "specifier_matches_project_alias",
+            ),
+            // A `./` TS specifier, stored under a `:FILE` key, recorded as written.
+            urow(
+                "r1:code/addons/a11y/dist/manager:FILE",
+                Some("./dist/manager.js"),
+                Some("code/addons/a11y/dist/manager"),
+                Some(4),
+                "imports_file_not_found",
+                "internal_candidate",
+                "relative_import_target_unresolved",
+                None,
+                serde_json::Value::Null,
+            ),
+            // A C/C++ quoted include, recorded `./…` by the extractor.
+            not_found(
+                "./gtest/gtest.h",
+                10,
+                "internal_candidate",
+                "relative_import_target_unresolved",
+            ),
+            // A Rust `crate::` path (no rawPath: the stored key prints).
+            urow(
+                "crate::graph::node",
+                None,
+                None,
+                Some(11),
+                "imports_file_not_found",
+                "internal_candidate",
+                "relative_import_target_unresolved",
+                None,
+                serde_json::Value::Null,
+            ),
+            // A `:FILE` key with no recorded specifier: the decoded path, marked not confirmed.
+            urow(
+                "r1:src/missing:FILE",
+                None,
+                Some("src/missing"),
+                Some(12),
+                "imports_file_not_found",
+                "internal_candidate",
+                "relative_import_target_unresolved",
+                None,
+                serde_json::Value::Null,
+            ),
+            urow(
+                "map",
+                None,
+                None,
+                Some(13),
+                "imports_file_not_found",
+                "external_library_candidate",
+                "specifier_matches_runtime_module",
+                None,
+                serde_json::Value::Null,
+            ),
+            urow(
+                "helpers::util",
+                None,
+                None,
+                None,
+                "imports_file_not_found",
+                "internal_candidate",
+                "rust_crate_internal_module_heuristic",
+                None,
+                serde_json::Value::Null,
+            ),
+            not_found("aws-lambda", 14, "unknown", "no_supporting_signal"),
+            urow(
+                "ngx_time.h",
+                None,
+                None,
+                Some(52),
+                "imports_ambiguous_match",
+                "unknown",
+                "no_supporting_signal",
+                Some("ambiguous_basename"),
+                serde_json::json!(["src/os/unix/ngx_time.h", "src/os/win32/ngx_time.h"]),
+            ),
+        ];
+        let resp = listing_with_rows(
+            "admin/src/components/editor/Toolbar.tsx",
+            vec![row_json("src/x.ts", "static", "ts-core:0.2.0", None)],
+            rows,
+            "tsx",
+            ts_forms(),
+        );
+        let out = resp.render_human();
+        // After the resolved rows and the partition lines.
+        assert!(
+            out.contains("  src/x.ts  depth=1  static\n11 imports without a confirmed target:\n"),
+            "{out}"
+        );
+        for line in [
+            "  @tiptap/react  line 1  external library? (specifier matches a dependency declared in the manifest)",
+            "  react  line 2  external library? (specifier matches a dependency declared in the manifest)",
+            "  @/components/ui/button  line 3  this repository? (specifier matches a tsconfig paths alias)",
+            &format!("  ./dist/manager.js  line 4  this repository? ({RELATIVE})"),
+            &format!("  ./gtest/gtest.h  line 10  this repository? ({RELATIVE})"),
+            &format!("  crate::graph::node  line 11  this repository? ({RELATIVE})"),
+            &format!("  src/missing (decoded from the stored key — not a confirmed target)  line 12  this repository? ({RELATIVE})"),
+            "  map  line 13  external library? (specifier or its part before :: is on the runtime-module list of this build)",
+            "  helpers::util  line ?  this repository? (metadata carries a specifier and no rawPath, and the specifier's first segment before :: starts with a lowercase letter and holds only lowercase letters, digits or underscores)",
+            "  aws-lambda  line 14  unknown (no classifier signal)",
+            "  ngx_time.h  line 52  several indexed files matched (same file name in 2 places) — 2 candidates: src/os/unix/ngx_time.h, src/os/win32/ngx_time.h · unknown (no classifier signal)",
+        ] {
+            assert!(out.lines().any(|l| l == line), "missing [{line}]:\n{out}");
+        }
+        // A decoded path is never printed bare, as if it were a confirmed target.
+        assert!(
+            !out.lines().any(|l| l.starts_with("  src/missing  ")),
+            "{out}"
+        );
+        // A file-not-found row with no reason and no carrier has no category phrase and no ` · `.
+        let react = out.lines().find(|l| l.starts_with("  react  ")).unwrap();
+        assert!(!react.contains(" · "), "{react}");
+        assert!(out.contains(&format!("{TS_LIMIT}\n")), "{out}");
+        assert!(
+            out.ends_with(&format!("{TS_LIMIT}\n")),
+            "the limit follows the block: {out}"
+        );
+    }
+
+    #[test]
+    fn imports_ambiguous_unresolved_row_lists_its_candidates_never_picks_one() {
+        let rows = vec![
+            urow(
+                "ngx_time.h",
+                None,
+                None,
+                Some(52),
+                "imports_ambiguous_match",
+                "unknown",
+                "no_supporting_signal",
+                Some("ambiguous_basename"),
+                serde_json::json!(["src/os/unix/ngx_time.h", "src/os/win32/ngx_time.h"]),
+            ),
+            // An include-root overlap: neither reason nor candidates recorded.
+            urow(
+                "port.h",
+                Some("./port.h"),
+                None,
+                Some(3),
+                "imports_ambiguous_match",
+                "unknown",
+                "no_supporting_signal",
+                None,
+                serde_json::Value::Null,
+            ),
+            // A Java ambiguous suffix: no candidates recorded.
+            urow(
+                "com.foo.Bar",
+                None,
+                None,
+                Some(4),
+                "imports_ambiguous_suffix",
+                "unknown",
+                "no_supporting_signal",
+                None,
+                serde_json::Value::Null,
+            ),
+            // An unreadable carrier: no count derived from candidates that are not there.
+            urow(
+                "env.h",
+                None,
+                None,
+                Some(5),
+                "imports_ambiguous_match",
+                "unknown",
+                "no_supporting_signal",
+                Some("ambiguous_basename"),
+                serde_json::json!({"unreadable": "r2:env.h:FILE"}),
+            ),
+            // The TS workspace ambiguity keeps its own category; its reason prints bare.
+            urow(
+                "@fx/engine",
+                Some("@fx/engine"),
+                None,
+                Some(6),
+                "imports_file_not_found",
+                "external_library_candidate",
+                "specifier_matches_package_dependency",
+                Some("ambiguous_workspace_source_entry"),
+                serde_json::json!([
+                    "packages/a/src/index.ts",
+                    "packages/b/src/index.ts",
+                    "packages/a/dist/index.js"
+                ]),
+            ),
+        ];
+        let out = listing_with_rows(
+            "src/core/ngx_core.h",
+            vec![],
+            rows,
+            "c",
+            serde_json::Value::Null,
+        )
+        .render_human();
+        for line in [
+            "  ngx_time.h  line 52  several indexed files matched (same file name in 2 places) — 2 candidates: src/os/unix/ngx_time.h, src/os/win32/ngx_time.h · unknown (no classifier signal)",
+            "  ./port.h  line 3  several indexed files matched (reason not recorded) — candidate paths not recorded with this import · unknown (no classifier signal)",
+            "  com.foo.Bar  line 4  several indexed .java files end with the specifier's path (or a prefix of it) — candidate paths not recorded with this import · unknown (no classifier signal)",
+            "  env.h  line 5  several indexed files matched (same file name in several places) — candidates unreadable (\"r2:env.h:FILE\") · unknown (no classifier signal)",
+            "  @fx/engine  line 6  several workspace source entries — 3 candidates: packages/a/src/index.ts, packages/b/src/index.ts, packages/a/dist/index.js · external library? (specifier matches a dependency declared in the manifest)",
+        ] {
+            assert!(out.lines().any(|l| l == line), "missing [{line}]:\n{out}");
+        }
+        // Never a count for candidates that were not recorded, never one candidate picked.
+        assert!(!out.contains("0 candidates"), "{out}");
+        assert!(!out.contains("→"), "{out}");
+    }
+
+    #[test]
+    fn imports_zero_state_names_the_language_and_the_listing_coverage() {
+        let out = listing_with_rows(
+            "renderer/next.config.ts",
+            vec![],
+            vec![],
+            "typescript",
+            ts_forms(),
+        )
+        .render_human();
+        assert_eq!(
+            out,
+            "Imports: renderer/next.config.ts\n\n0 imports (language: typescript; this index lists no imports for this file — this listing omits type-only imports and re-exports from a specifier without a leading dot, dynamic import() and require() calls, import … = require(…) statements or import statements below the top level)\n"
+        );
+        let out =
+            listing_with_rows("a.js", vec![], vec![], "javascript", js_forms()).render_human();
+        assert!(
+            out.contains("0 imports (language: javascript; this index lists no imports for this file — this listing omits re-exports from a specifier without a leading dot or dynamic import() and require() calls)\n"),
+            "{out}"
+        );
+        assert_eq!(lines_starting(&out, "listing limit:"), 0, "{out}");
+        assert!(!out.contains("without a confirmed target"), "{out}");
+    }
+
+    #[test]
+    fn imports_zero_state_without_recorded_omitted_forms_says_not_recorded_never_complete() {
+        let zero = |language: Option<serde_json::Value>, coverage: Option<serde_json::Value>| {
+            listing(
+                "table/merger.h",
+                vec![],
+                Some(serde_json::json!([])),
+                Some(serde_json::json!(0)),
+                language,
+                coverage,
+            )
+            .render_human()
+        };
+        assert!(zero(Some(serde_json::json!("cpp")), Some(serde_json::json!({"omitted_forms": null})))
+            .contains("0 imports (language: cpp; this index lists no imports for this file — listing coverage not recorded for cpp)\n"));
+        for lang in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(serde_json::json!("")),
+        ] {
+            let out = zero(
+                lang.clone(),
+                Some(serde_json::json!({"omitted_forms": null})),
+            );
+            assert!(
+                out.contains("0 imports (language: unknown; this index lists no imports for this file — listing coverage not recorded (language not recorded))\n"),
+                "{lang:?}: {out}"
+            );
+        }
+        assert!(zero(Some(serde_json::json!("cpp")), None)
+            .contains("0 imports (language: cpp; this index lists no imports for this file — listing coverage unavailable from this daemon)\n"));
+        for bad in [
+            serde_json::json!({"omitted_forms": []}),
+            serde_json::json!({"omitted_forms": [1]}),
+            serde_json::json!({}),
+            serde_json::json!([]),
+            serde_json::Value::Null,
+        ] {
+            let out = zero(Some(serde_json::json!("cpp")), Some(bad.clone()));
+            assert!(
+                out.contains("0 imports (language: cpp; this index lists no imports for this file — listing coverage unreadable)\n"),
+                "{bad}: an empty list is never complete coverage: {out}"
+            );
+        }
+        // Never a bare zero-state line.
+        assert!(!zero(
+            Some(serde_json::json!("cpp")),
+            Some(serde_json::json!({"omitted_forms": []}))
+        )
+        .contains("this file)\n"));
+    }
+
+    #[test]
+    fn imports_unresolved_absent_renders_unavailable_never_zero() {
+        let out = listing("a.ts", vec![], None, None, None, None).render_human();
+        assert!(out.contains("\n0 imports\n"), "not the zero-state: {out}");
+        assert!(
+            out.contains("imports without a confirmed target: unavailable from this daemon — upgrade rmapd\n"),
+            "{out}"
+        );
+        assert!(
+            !out.contains("0 imports without a confirmed target"),
+            "{out}"
+        );
+        assert!(!out.contains("this index lists no imports"), "{out}");
+        let out = listing(
+            "a.ts",
+            vec![row_json("b.ts", "static", "", None)],
+            None,
+            None,
+            None,
+            None,
+        )
+        .render_human();
+        assert!(out.contains("imports without a confirmed target: unavailable from this daemon — upgrade rmapd\nlisting coverage: unavailable from this daemon\n"), "{out}");
+    }
+
+    #[test]
+    fn imports_unresolved_count_disagreeing_with_its_rows_renders_unreadable() {
+        let rows = serde_json::json!([
+            not_found(
+                "react",
+                1,
+                "external_library_candidate",
+                "specifier_matches_package_dependency"
+            ),
+            not_found(
+                "vue",
+                2,
+                "external_library_candidate",
+                "specifier_matches_package_dependency"
+            ),
+        ]);
+        for (count, text) in [
+            (Some(serde_json::json!(3)), "3"),
+            (Some(serde_json::json!(0)), "0"),
+            (Some(serde_json::json!("2")), "\"2\""),
+            (Some(serde_json::json!(-2)), "-2"),
+            (Some(serde_json::Value::Null), "null"),
+            (None, "missing"),
+        ] {
+            let out = listing("a.ts", vec![], Some(rows.clone()), count, None, None).render_human();
+            assert!(
+                out.contains(&format!("imports without a confirmed target: unreadable (count {text} disagrees with 2 rows)\n")),
+                "{text}: {out}"
+            );
+            assert!(
+                !out.contains("  react  "),
+                "rows are not printed under a disagreeing count: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn imports_unknown_category_classification_or_basis_renders_verbatim_without_a_phrase() {
+        let rows = vec![
+            urow(
+                "x",
+                Some("x"),
+                None,
+                Some(1),
+                "imports_mystery",
+                "maybe_candidate",
+                "new_basis_code",
+                None,
+                serde_json::Value::Null,
+            ),
+            urow(
+                "y",
+                Some("y"),
+                None,
+                Some(2),
+                "imports_ambiguous_match",
+                "unknown",
+                "no_supporting_signal",
+                Some("ambiguous_other"),
+                serde_json::json!(["a/y", "b/y"]),
+            ),
+            // A non-string reason arrives as its JSON text: verbatim and marked.
+            urow(
+                "z",
+                Some("z"),
+                None,
+                Some(3),
+                "imports_wildcard",
+                "unknown",
+                "no_supporting_signal",
+                Some("7"),
+                serde_json::Value::Null,
+            ),
+        ];
+        let out =
+            listing_with_rows("a.ts", vec![], rows, "cpp", serde_json::Value::Null).render_human();
+        for line in [
+            "  x  line 1  imports_mystery (no phrase for this category in this build) · maybe_candidate (no phrase for this classification in this build) (new_basis_code (no phrase for this basis in this build))",
+            "  y  line 2  several indexed files matched (ambiguous_other (no phrase for this reason in this build)) — 2 candidates: a/y, b/y · unknown (no classifier signal)",
+            "  z  line 3  wildcard import (7 (no phrase for this reason in this build)) · unknown (no classifier signal)",
+        ] {
+            assert!(out.lines().any(|l| l == line), "missing [{line}]:\n{out}");
+        }
+        // An unknown string is never mapped to a known phrase.
+        let x = out.lines().find(|l| l.starts_with("  x  ")).unwrap();
+        for known in [
+            "external library?",
+            "this repository?",
+            "several indexed",
+            "no classifier signal",
+            "wildcard import",
+        ] {
+            assert!(!x.contains(known), "{known}: {x}");
+        }
+    }
+
+    #[test]
+    fn imports_malformed_unresolved_payload_renders_unreadable_never_a_parse_failure() {
+        let good = not_found(
+            "react",
+            1,
+            "external_library_candidate",
+            "specifier_matches_package_dependency",
+        );
+        let with = |field: &str, value: serde_json::Value| {
+            let mut row = good.clone();
+            row[field] = value;
+            serde_json::json!([row])
+        };
+        let mut no_key = good.clone();
+        no_key.as_object_mut().unwrap().remove("recorded_specifier");
+        let cases = vec![
+            serde_json::json!({"rows": []}),
+            serde_json::json!("react"),
+            serde_json::json!([1]),
+            with("target_key", serde_json::json!(7)),
+            with("category", serde_json::Value::Null),
+            with("classification", serde_json::json!(["x"])),
+            with("basis_code", serde_json::json!(true)),
+            with("recorded_specifier", serde_json::json!(3)),
+            with("decoded_target_path", serde_json::json!({})),
+            with("line", serde_json::json!("1")),
+            with("line", serde_json::json!(-1)),
+            with("candidates", serde_json::json!(5)),
+            with("candidates", serde_json::json!([1])),
+            // F-001: an empty candidate list is never a measured zero (storage refuses it too).
+            with("candidates", serde_json::json!([])),
+            with("candidates", serde_json::json!({"unreadable": 5})),
+            with("candidates", serde_json::json!({"other": "x"})),
+            serde_json::json!([no_key]),
+        ];
+        for bad in cases {
+            let resp = listing(
+                "a.ts",
+                vec![row_json("b.ts", "static", "", None)],
+                Some(bad.clone()),
+                Some(serde_json::json!(1)),
+                None,
+                None,
+            );
+            let out = resp.render_human();
+            assert!(
+                out.contains("  b.ts  depth=1  static\n"),
+                "the listing still renders: {out}"
+            );
+            assert!(
+                out.contains("imports without a confirmed target: unreadable ("),
+                "{bad}: {out}"
+            );
+            assert!(!out.contains("  react  "), "{bad}: {out}");
+            assert!(
+                !out.contains("0 candidates"),
+                "{bad}: never a zero count: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn imports_ts_and_js_listings_state_their_listing_limit_exactly_once() {
+        let rows = vec![not_found(
+            "react",
+            2,
+            "external_library_candidate",
+            "specifier_matches_package_dependency",
+        )];
+        let out =
+            listing_with_rows("a.tsx", vec![], rows.clone(), "tsx", ts_forms()).render_human();
+        assert_eq!(lines_starting(&out, "listing limit:"), 1, "{out}");
+        assert!(out.ends_with(&format!("{TS_LIMIT}\n")), "{out}");
+        let out = listing_with_rows(
+            "a.ts",
+            vec![row_json("b.ts", "static", "", None)],
+            vec![],
+            "typescript",
+            ts_forms(),
+        )
+        .render_human();
+        assert_eq!(lines_starting(&out, "listing limit:"), 1, "{out}");
+        assert!(
+            out.ends_with(&format!(
+                "0 imports without a confirmed target\n{TS_LIMIT}\n"
+            )),
+            "{out}"
+        );
+        let out = listing_with_rows("Button.stories.js", vec![], rows, "javascript", js_forms())
+            .render_human();
+        assert_eq!(lines_starting(&out, "listing limit:"), 1, "{out}");
+        assert!(out.contains(&format!("{JS_LIMIT}\n")), "{out}");
+        // In the zero-state the count line carries it — never a second statement.
+        let out = listing_with_rows("next.config.ts", vec![], vec![], "typescript", ts_forms())
+            .render_human();
+        assert_eq!(lines_starting(&out, "listing limit:"), 0, "{out}");
+        assert_eq!(out.matches("this listing omits").count(), 1, "{out}");
+        // A malformed coverage outside the zero-state.
+        let out = listing(
+            "a.ts",
+            vec![row_json("b.ts", "static", "", None)],
+            Some(serde_json::json!([])),
+            Some(serde_json::json!(0)),
+            Some(serde_json::json!("typescript")),
+            Some(serde_json::json!({"omitted_forms": []})),
+        )
+        .render_human();
+        assert!(out.ends_with("listing limit: unreadable\n"), "{out}");
+        // A C/C++ listing (null) never prints it.
+        let out = listing_with_rows(
+            "a.cc",
+            vec![row_json("b.h", "static", "", None)],
+            vec![],
+            "cpp",
+            serde_json::Value::Null,
+        )
+        .render_human();
+        assert_eq!(lines_starting(&out, "listing limit:"), 0, "{out}");
+    }
+
+    #[test]
+    fn imports_non_ts_listing_states_listing_coverage_not_recorded() {
+        let rows = vec![urow(
+            "ngx_time.h",
+            None,
+            None,
+            Some(52),
+            "imports_ambiguous_match",
+            "unknown",
+            "no_supporting_signal",
+            Some("ambiguous_basename"),
+            serde_json::json!(["a/ngx_time.h", "b/ngx_time.h"]),
+        )];
+        let out = listing_with_rows(
+            "src/core/ngx_core.h",
+            vec![row_json(
+                "src/core/ngx_config.h",
+                "static",
+                "c-core:0.1.0",
+                None,
+            )],
+            rows,
+            "c",
+            serde_json::Value::Null,
+        )
+        .render_human();
+        assert_eq!(lines_starting(&out, "listing coverage:"), 1, "{out}");
+        assert!(
+            out.ends_with("listing coverage: not recorded for c — open the file to confirm\n"),
+            "{out}"
+        );
+        assert_eq!(lines_starting(&out, "listing limit:"), 0, "{out}");
+        for lang in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(serde_json::json!("")),
+        ] {
+            let out = listing(
+                "a.x",
+                vec![row_json("b.x", "static", "", None)],
+                Some(serde_json::json!([])),
+                Some(serde_json::json!(0)),
+                lang.clone(),
+                Some(serde_json::json!({"omitted_forms": null})),
+            )
+            .render_human();
+            assert!(out.ends_with("listing coverage: not recorded (language not recorded) — open the file to confirm\n"), "{lang:?}: {out}");
+            assert_eq!(lines_starting(&out, "listing limit:"), 0, "{out}");
+        }
+    }
+
+    #[test]
+    fn imports_livegraph_and_compare_renders_name_the_listing_they_do_not_carry() {
+        const VLIM: &str = "view limit: this view does not list imports without a confirmed target — rmap imports ";
+        let mut lg = sample_lg();
+        lg.file_filter = Some("admin/src/components/editor/Toolbar.tsx".to_string());
+        let out = lg.render_human();
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(
+            lines[1],
+            format!("{VLIM}admin/src/components/editor/Toolbar.tsx does"),
+            "{out}"
+        );
+        assert_eq!(out.matches("view limit:").count(), 1, "{out}");
+        // Shell-quoted as a printed command runs.
+        lg.file_filter = Some("a/my file.ts".to_string());
+        assert_eq!(
+            lg.render_human().lines().nth(1).unwrap(),
+            format!("{VLIM}'a/my file.ts' does")
+        );
+        // The repo-wide view and the readiness report never print it.
+        assert!(!sample_lg().render_human().contains("view limit:"));
+        let report: ImportsReadinessReport = serde_json::from_value(serde_json::json!({
+            "display_name": "x", "verdict": "GREEN", "coverage_complete": true,
+            "metrics": {}, "regressions": [], "unknowns": []
+        }))
+        .unwrap();
+        assert!(!report.render_human().contains("view limit:"));
+        let compare: ImportsCompareResponse = serde_json::from_value(serde_json::json!({
+            "file": "admin/src/components/editor/Toolbar.tsx",
+            "imports": [],
+            "comparison": {"status": "SqliteFallback"},
+        }))
+        .unwrap();
+        let out = compare.render_human();
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "Imports: admin/src/components/editor/Toolbar.tsx");
+        assert_eq!(
+            lines[1],
+            format!("{VLIM}admin/src/components/editor/Toolbar.tsx does"),
+            "{out}"
+        );
+        assert_eq!(out.matches("view limit:").count(), 1, "{out}");
+        // Neither render lists the rows; the added line is no `note:` line, so the workspace note
+        // stays the one `note:` line and the last line.
+        assert!(!VLIM.contains("note:"));
+        assert!(!out.contains(" without a confirmed target:"), "{out}");
+        assert!(!out.contains("note:"), "{out}");
+        let lg_out = lg.render_human();
+        assert!(!lg_out.contains(" without a confirmed target:"), "{lg_out}");
+        assert_eq!(lg_out.matches("note:").count(), 1, "{lg_out}");
+        assert!(lg_out.lines().last().unwrap().contains("note:"), "{lg_out}");
+    }
+
+    #[test]
+    fn imports_known_zero_unresolved_count_prints_explicitly_on_a_non_empty_listing() {
+        let out = listing_with_rows(
+            "packages/plugins/src/admin.ts",
+            vec![row_json("a.ts", "static", "", None)],
+            vec![],
+            "typescript",
+            ts_forms(),
+        )
+        .render_human();
+        assert!(
+            out.contains(
+                "1 import\n\n  a.ts  depth=1  static\n0 imports without a confirmed target\n"
+            ),
+            "{out}"
+        );
+        // An empty listing that states an inferred remainder is not the zero-state: the measured
+        // zero is stated too.
+        let mut v = serde_json::json!({
+            "file": "a.py", "imports": [],
+            "import_view": default_view(),
+            "import_remainder": {
+                "tests": {"imports": 0, "edges": 0},
+                "inferred": {"imports": 2, "edges": 0},
+                "tests_and_inferred": {"imports": 0, "edges": 0}
+            },
+            "unresolved": [], "unresolved_count": 0, "language": "python",
+            "listing_coverage": {"omitted_forms": null}
+        });
+        let out = serde_json::from_value::<ImportsResponse>(v.clone())
+            .unwrap()
+            .render_human();
+        assert!(out.contains("\n0 imports\n"), "{out}");
+        assert!(out.contains("+2 inferred imports, not shown — --include-inferred\n0 imports without a confirmed target\nlisting coverage: not recorded for python — open the file to confirm\n"), "{out}");
+        // A partition the daemon did not state is not the zero-state either.
+        v.as_object_mut().unwrap().remove("import_view");
+        let out = serde_json::from_value::<ImportsResponse>(v)
+            .unwrap()
+            .render_human();
+        assert!(
+            out.contains("0 imports without a confirmed target\n"),
+            "{out}"
+        );
+        assert!(!out.contains("this index lists no imports"), "{out}");
     }
 }

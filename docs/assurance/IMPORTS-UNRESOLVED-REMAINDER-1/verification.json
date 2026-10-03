@@ -1,0 +1,817 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-IMPORTS-UNRESOLVED-REMAINDER-1-1",
+  "workItemId": "IMPORTS-UNRESOLVED-REMAINDER-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/IMPORTS-UNRESOLVED-REMAINDER-1-INPUT-2.json",
+    "sha256": "sha256:36185515bbba3760ad8bb9f4efdf6055a00fd38cb2c209b07fb9570e25721b8c"
+  },
+  "allocation": {
+    "path": "docs/slices/imports-unresolved-remainder-1.md",
+    "sha256": "sha256:99dbb6ee9221eb84e4fd79ad793a72331e473595b8d400cebd20347ae2679c60"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "c379813a9d65973b6cf1a644cdc4852a640e3062",
+    "entries": [
+      {
+        "path": "docs/cli/rmap-contracts.md",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:84839d3bd81e717c3cc7d3ce1a3436196ce2117ed7ceee40ae62a16e94bf90a6",
+          "byteLength": 45680
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2d98cc26cc4341080c76a6e816707fc9dd8b9ae0dc7f891e60c0b9aff2c9fa1b",
+          "byteLength": 54440
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/aggregators/complexity_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:a61fd4f1472d0f4ba84b0bc69f793b0fb6af2a2a1eed04c8790680735d6bbd7e",
+          "byteLength": 26355
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:c4938fe0876b378e1b75d871a50904d333345ef800ba7050ce79c3cbfff9d241",
+          "byteLength": 26655
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/dto/signal.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:919062775df5c4dbd188b06ac944d76a9158801c86355d23a3763d470e14f575",
+          "byteLength": 115364
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f05745a9aeb01788dcb1438ea827e8855136897bb3580e73ab9a31f945067bcf",
+          "byteLength": 116297
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/explain/coherent_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:cd250e4103f80cd514a7c493abb695e959f05aeda7fea6d413c986056a7c1546",
+          "byteLength": 14216
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:0e825f8d8132c713a896fa1ad2eb14ec0e20489f9b2843eefbf55b2cca22741e",
+          "byteLength": 14248
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/explain/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:7a454691c3195d0c50d79abf014b6e20c6a96e97cc576f4a48bb6343482ef314",
+          "byteLength": 65630
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:83c380039f9b9ac101d7c339638f5769f17eb8188f1a1a8f1c8bf5aed1d63eea",
+          "byteLength": 66123
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:bff23f92e9f842dc14ebc41cffc5daa8a1131d7185cb399f0fef7d9b8dc7c737",
+          "byteLength": 7205
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:a91bf1a508b7b3a9b645b08745e361e873aff833376072ed5a8e72ce5d663f48",
+          "byteLength": 7255
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/storage_port.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:1c831e7eb7c97c2aeef273a4ec5da059fa6eaa5a2b1fe5de38281fb8481cb4de",
+          "byteLength": 75519
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:3d89cf01afecbb781aeabafcc65dafaf61ddaa510f66e64c896fd0810ccde079",
+          "byteLength": 78488
+        }
+      },
+      {
+        "path": "rust/crates/agent/tests/common/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d924f69c40c8528ce34fe8aed4d1ab2b23dea9f8a585f36bba13e9ff76886b47",
+          "byteLength": 40281
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f00d6aa71b64d88eb9f9948570988f3d56022f9659dbb1155e18aab0685abc7d",
+          "byteLength": 40995
+        }
+      },
+      {
+        "path": "rust/crates/agent/tests/explain_file.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:1f369a169b96b62a97f8d3c6999b69887f3e8982565b833505bd58a33f32b075",
+          "byteLength": 15489
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:9eb84ccf0ee18dbe4d9adb3152caf4874c583b68cf7563b4ccfd8c57396be2a2",
+          "byteLength": 19877
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:0720cf97c86d9010e705360b7443492f8666019bbdb8131fba8623f58213b002",
+          "byteLength": 499881
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:578bdeb324a477c8ac825583d319c737e26b9cc7cfe27d5094377642301fb4e8",
+          "byteLength": 500120
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_coherence_served_tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:f19877d89522157b39ba1b9abe45ae7238efe2e112d210cd1ac35f321aa1b2cf",
+          "byteLength": 19563
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:88329ddd00688ba01142b5a256489377c56ecad2ef58f666d30a2eced7f0b726",
+          "byteLength": 22113
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_lg_serve.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:e97a2361eaaa7241c006832636b3c88ed1c7bdd12c60c39102ab1c224aa0fa74",
+          "byteLength": 21799
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:019b012e7335277c16d8b9e79312765c5beca2df67c61cb05c3babb18cbb9733",
+          "byteLength": 22181
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/explain_serve_tests/spy.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:8e3679b569e038223475991fa73567efa8ea4a43091755c700e4b0cae38f3ab0",
+          "byteLength": 18370
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2dc89ad80ddc6dfbbfba25942cf4e6fee97178a8e2c3d00a50cd955049ca2041",
+          "byteLength": 18703
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/import_partition_view.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:0e1cdf052da9a8ab916907bb53f77f3450612e17efa759040fefa7ac63943097",
+          "byteLength": 75759
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:9397d6b5b87c32314d6f77dc36cd849cf7d34bc03a21bf381aa84ebe2b9f5a9e",
+          "byteLength": 93770
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:328d2951e5f2b23b052fa7d460bc47aab7d9e990d1400630aae6612884ccf83f",
+          "byteLength": 32452
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:12ef246243c3d7d960f56c17df80874c710fe1b486696aa33a6750a07f90d741",
+          "byteLength": 32824
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/orient_serve/tests.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:97ddd93df7c26bf925019278a455295da9ed303e69c3396472035b3092b2960c",
+          "byteLength": 84509
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:a10c4fd48bb7046e663e9760e61199093f3fbb4ef193c1220a9619de17c6145e",
+          "byteLength": 85105
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/explain.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:26809ba1c951b4f0a9263d03a5300889cca4dbcbb457a47bcf0a02c1fb1d15af",
+          "byteLength": 117031
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:3ed103e17e542d5540451cc2fdd47ee77b8c62a1f3a49f79729fb7d59ef59447",
+          "byteLength": 120888
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/explain_sections.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:98b6f7da8a4d1d388b21e266e2fb792f39c9f556d0312aeb4226e2cc87fd6ebf",
+          "byteLength": 49453
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:720ee831b686dfac799315b8aae9eeddc22a2dc7d91b84db7973e2a6c418243d",
+          "byteLength": 50828
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/imports.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:8cc6a0aad885b204fe6029673d6fe9e59beb13c6edaee5d4248ce7bef1fba4b0",
+          "byteLength": 69159
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:6be404a15c7c5c904bfbdb46c770f65c61dacbf39daa5d1354caa57f5880f862",
+          "byteLength": 126440
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/agent_impl.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:67b2d90546832a9eee38aa9c6654d176e67c016947337505bdc8fcb5a9dfb27f",
+          "byteLength": 103759
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:50a28c4ad759c9c5fc91944a03df18ad7f91acd5fd2417152d9ee55109a9d15f",
+          "byteLength": 104253
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/queries.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:8af361d86d292695765bdb9fc2d97c15e815f56cbe483d6082c96d5b7d6e4f8f",
+          "byteLength": 306817
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:63a2a6b03c460c04164977b4210968d6312d75f6f2dce20a184a6c25276e22ec",
+          "byteLength": 326092
+        }
+      },
+      {
+        "path": "rust/crates/storage/tests/import_reader_inventory.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:566ea1661d517b5b5d998448e2249a5fd45454d55b7fc10fe1b1d78c01c7a492",
+          "byteLength": 9539
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7adfaa0e7ffd825028ee090fce8a9b99e20a88957e0f72813545d02bfa2f55f0",
+          "byteLength": 9801
+        }
+      }
+    ],
+    "sha256": "sha256:e084438ac926882bc5f22702021faa05153235c6db835c3286d70a325bfe2dd2"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-IMPORTS-UNRESOLVED-REMAINDER-1-1"
+  },
+  "checks": [
+    {
+      "checkId": "IUR-C01",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L11",
+        "RG-REQ-006-L05",
+        "RG-REQ-006-L06",
+        "RG-REQ-006-L07",
+        "RG-REQ-006-L08",
+        "RG-REQ-006-L09",
+        "RG-REQ-006-L10",
+        "P-IUR-03",
+        "P-IUR-04",
+        "P-IUR-06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "git cat-file -e HEAD:docs/assurance/TS-WORKSPACE-RESOLUTION-1/implementation-review.json && git show HEAD:docs/assurance/TS-WORKSPACE-RESOLUTION-1/implementation-review.json | python3 -c \"import json,sys; d=json.load(sys.stdin); sys.exit(0 if (d.get('workItemId'), d.get('result')) == ('TS-WORKSPACE-RESOLUTION-1', 'accepted') else 1)\" && ( set -o pipefail; cargo test -p repo-graph-storage 2>&1 | tee /tmp/iur-01.txt ) && grep -qE '^test result: ok\\.' /tmp/iur-01.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/iur-01.txt && for t in file_unresolved_imports_rows_carry_target_key_decoded_target_path_line_category_classification_and_basis file_unresolved_imports_ambiguous_row_decodes_its_candidate_keys_to_paths file_unresolved_imports_row_without_candidates_is_not_recorded_never_empty file_unresolved_imports_malformed_candidate_key_is_unreadable_never_dropped file_unresolved_imports_of_another_file_or_edge_type_never_join file_unresolved_imports_are_ordered_by_line_then_target_key every_storage_imports_sql_reader_is_in_the_inventory_with_a_disposition find_imports_rows_carry_a_checked_resolution_class find_imports_bound_include_carries_its_basis_and_candidate_paths find_imports_workspace_inferred_row_carries_every_candidate_path; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/iur-01.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/iur-01.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-storage -- --list 2>/dev/null | grep -c ': test$')\" -ge 825 && grep -q 'indexer:1.6.0' crates/indexer/src/orchestrator.rs && python3 -c \"s=open('crates/agent/src/storage_port.rs').read(); i=s.index('fn find_unresolved_file_imports'); j=min(k for k in (s.find(';', i), s.find('{', i)) if k >= 0); raise SystemExit(0 if s[j] == ';' else 1)\"",
+        "cwd": "rust",
+        "environment": "candidate tree; fail-closed gate: TS-WORKSPACE-RESOLUTION-1's implementation-review record exists at HEAD with result accepted (its `reason` read and `ImportEntryReason` are the shapes this slice sits beside)",
+        "inputs": "The WHOLE storage test run (819 listed at HEAD e5beabba, EXECUTED `cargo test -p repo-graph-storage -- --list`; floor >= 825 = 819 + 6), in a subshell with pipefail. NEW (6), in queries.rs beside `map_unresolved_imports_in_path`: file_unresolved_imports_rows_carry_target_key_decoded_target_path_line_category_classification_and_basis (a relative TypeScript row stored under `<repo_uid>:code/addons/a11y/dist/manager:FILE` carries decoded_target_path `code/addons/a11y/dist/manager`; a key of another repo_uid or without the `:FILE` suffix carries None), file_unresolved_imports_ambiguous_row_decodes_its_candidate_keys_to_paths, file_unresolved_imports_row_without_candidates_is_not_recorded_never_empty, file_unresolved_imports_malformed_candidate_key_is_unreadable_never_dropped, file_unresolved_imports_of_another_file_or_edge_type_never_join, file_unresolved_imports_are_ordered_by_line_then_target_key. EXISTING by name: the inventory guard every_storage_imports_sql_reader_is_in_the_inventory_with_a_disposition (its INVENTORY gains ONE row: (\"queries.rs\", \"find_unresolved_file_imports\", \"R18: imports <file> / explain <file> unresolved rows — unresolved_edges only, every IMPORTS row of the file, category/classification/basis/candidates carried, never filtered\")) and find_imports_rows_carry_a_checked_resolution_class (import_partition_reads.rs), find_imports_bound_include_carries_its_basis_and_candidate_paths and find_imports_workspace_inferred_row_carries_every_candidate_path (queries.rs), bodies unchanged. `INDEXER_VERSION` stays `indexer:1.6.0` (no index-time change). The port method `find_unresolved_file_imports` on `AgentStorageRead` has NO default body: the python guard reads from its `fn` to the first `;` or `{` (a multi-line signature included) and requires `;`."
+      },
+      "expected": "exit 0: `find_unresolved_file_imports(snapshot_uid, file_path)` returns every `unresolved_edges` row of type IMPORTS whose source node's file is `file_path`, ordered by line_start then target_key, each carrying target_key (verbatim), recorded_specifier (metadata rawPath when a string, None otherwise), decoded_target_path (the `<path>` of a target key of the form `<repo_uid>:<path>:FILE` with the row's own repo_uid, None otherwise), line (`line_start`, None when null), category, classification, basis_code (verbatim), `basis` (the metadata `basis` when present, a non-string value carried as its JSON text) and `candidates` in three states: NotRecorded when the metadata has no `candidates` key (an include-root overlap, every Java suffix/wildcard row, every file-not-found row — never an empty list), Paths decoded from FILE stable keys `<repo_uid>:<path>:FILE`, or Unreadable(text) quoting the offending text when the metadata is not a JSON object, `candidates` is not a non-empty array of strings, or a key's prefix is not the row's repo_uid or its suffix is not `:FILE` — the row is kept, never dropped; rows of another file or another edge type never join; every existing storage test is preserved by name and body; the reader inventory passes with exactly one new row",
+      "candidateSha256": "sha256:e084438ac926882bc5f22702021faa05153235c6db835c3286d70a325bfe2dd2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "825 tests listed (floor 825); reader and inventory tests passed.",
+        "supportingEvidence": [
+          ".agent-manager/slices/IMPORTS-UNRESOLVED-REMAINDER-1/iur-01-admission-2.txt line 555 and line 844"
+        ]
+      }
+    },
+    {
+      "checkId": "IUR-C02",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L02",
+        "P-IUR-05",
+        "P-IUR-06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( set -o pipefail; cargo test -p repo-graph-agent 2>&1 | tee /tmp/iur-02.txt ) && grep -qE '^test result: ok\\.' /tmp/iur-02.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/iur-02.txt && for t in explain_file_imports_section_counts_the_unresolved_imports explain_file_imports_section_is_emitted_when_only_unresolved_imports_exist explain_file_imports_list_certain_rows_and_count_inferred_ones; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/iur-02.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/iur-02.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-agent -- --list 2>/dev/null | grep -c ': test$')\" -ge 518",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "The WHOLE agent test run (516 listed at HEAD, EXECUTED `-- --list`; floor >= 518 = 516 + 2). NEW (2) in agent/tests/explain_file.rs, beside its TEST-EDGE-SCOPE-1B precedent (the explain builder is exercised through `FakeAgentStorage`, which code under agent/src cannot reach): explain_file_imports_section_counts_the_unresolved_imports, explain_file_imports_section_is_emitted_when_only_unresolved_imports_exist. EXISTING by name, assertions unchanged: explain_file_imports_list_certain_rows_and_count_inferred_ones (agent/tests/explain_file.rs; its Imports evidence gains `unresolved_count: 0` and keeps `count`, `items` and the inferred remainder). The two test doubles implement the new REQUIRED port method in their own bodies: `FakeAgentStorage` (agent/tests/common/mod.rs) gains an `unresolved_file_imports` map keyed by (snapshot_uid, file_path), read after its existing `fail_if_forced(\"find_unresolved_file_imports\")` call, so a forced failure exercises the read-failure path; complexity_tests.rs's `FakeStorage` returns `Ok(vec![])`. `ExplainImportsEvidence` gains `unresolved_count: Option<u64>` (serialized only when Some) — the agent builder always sets Some(K), K = the rows `find_unresolved_file_imports` returns; every other literal of the struct (agent/src/explain/coherent_tests.rs:75 here; daemon-runtime's two in IUR-C03) gains the field with no assertion changed. `Signal::explain_imports_evidence()` (dto/signal.rs, beside `explain_callers_evidence`) returns a clone of the evidence iff the signal is EXPLAIN_IMPORTS — the daemon's LiveGraph serve reads `unresolved_count` through it (IUR-C03). The agent builder emits the EXPLAIN_IMPORTS signal when imports, inferred imports OR unresolved rows are non-empty (today: only the first two)."
+      },
+      "expected": "exit 0: `explain <file>`'s Imports evidence carries `unresolved_count` = the number of rows `find_unresolved_file_imports` returns for the file; a file with zero resolved and zero inferred imports but unresolved rows now gets an Imports section (count 0, unresolved_count K); a file with none of the three still gets no Imports section; a read failure on the unresolved read is an error of the explain, never a zero; every other explain signal, its items, cap and inferred remainder are preserved unchanged (no behavior change)",
+      "candidateSha256": "sha256:e084438ac926882bc5f22702021faa05153235c6db835c3286d70a325bfe2dd2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "518 tests listed (floor 518); explain unresolved-import count test passed.",
+        "supportingEvidence": [
+          ".agent-manager/slices/IMPORTS-UNRESOLVED-REMAINDER-1/iur-02-admission-2.txt line 388"
+        ]
+      }
+    },
+    {
+      "checkId": "IUR-C03",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L02",
+        "P-IUR-01",
+        "P-IUR-02",
+        "P-IUR-04",
+        "P-IUR-05",
+        "P-IUR-06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( set -o pipefail; cargo test -p repo-graph-daemon-runtime --lib 2>&1 | tee /tmp/iur-03.txt ) && grep -qE '^test result: ok\\.' /tmp/iur-03.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/iur-03.txt && for t in imports_sqlite_route_carries_unresolved_rows_their_count_and_the_language imports_auto_route_carries_the_same_unresolved_rows_as_the_sqlite_route imports_unresolved_read_failure_is_an_error_never_an_empty_list imports_livegraph_and_compare_engines_carry_no_unresolved_key imports_auto_route_on_a_green_cert_reads_the_unresolved_rows_from_sqlite_and_names_the_source explain_imports_served_from_livegraph_keeps_the_unresolved_count every_daemon_import_read_call_site_is_in_the_inventory imports_default_lists_certain_rows_and_counts_inferred_ones imports_include_inferred_lists_inferred_rows_on_the_sqlite_route imports_row_with_a_resolution_outside_the_vocabulary_is_refused_never_kept_as_certain explain_imports_serves_live_view_from_livegraph; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/iur-03.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/iur-03.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-daemon-runtime --lib -- --list 2>/dev/null | grep -c ': test$')\" -ge 883",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "The WHOLE daemon-runtime --lib run (877 listed at HEAD, EXECUTED `--lib -- --list`; floor >= 883 = 877 + 6). NEW (6): four in import_partition_view.rs's test module on the `mini_leveldb()` fixture (extend the fixture with unresolved_edges rows: one external package, one project alias, one ambiguous-basename row with two FILE candidates) — imports_sqlite_route_carries_unresolved_rows_their_count_and_the_language (on the cpp fixture it also asserts `listing_coverage` = {\"omitted_forms\": null}, never []), imports_auto_route_carries_the_same_unresolved_rows_as_the_sqlite_route, imports_unresolved_read_failure_is_an_error_never_an_empty_list, imports_livegraph_and_compare_engines_carry_no_unresolved_key — and explain_imports_served_from_livegraph_keeps_the_unresolved_count in explain_coherence_served_tests.rs (the `explain_imports_serves_live_view_from_livegraph` fixture with `unresolved_count: Some(8)` on the SQLite primary: the LiveGraph-served leaf keeps `unresolved_count` 8, so the bullet does not depend on the route — RG-REQ-002-L02). EXISTING by name: the call-site guard every_daemon_import_read_call_site_is_in_the_inventory (IMPORT_READ_APIS gains \"find_unresolved_file_imports\"; DAEMON_CALL_SITES gains ONE row (\"import_partition_view.rs\", \"attach_unresolved_imports\", \"find_unresolved_file_imports\", \"R18: the one per-file unresolved attach, after partition_import_rows, on the auto and sqlite answers only\"); the orient serve decorator's verbatim delegation is exempt by `is_port_delegation`), the three imports partition tests, and explain_imports_serves_live_view_from_livegraph (its `ExplainImportsEvidence` literal gains `unresolved_count: None`, assertions unchanged). Every other `AgentStorageRead` implementor in this crate implements the REQUIRED method by delegating to its inner port: the orient serve decorator (orient_serve/storage_port_impl.rs:155) and the three test spies (explain_serve_tests/spy.rs:94; orient_serve/tests.rs:394 and :1024). ONE attach site: in `handle_imports` (dispatch.rs:1613) the `auto` arm stops returning early; the `auto` and `sqlite` arms each bind `value` and fall through to one `partition_import_rows` call followed by one `attach_unresolved_imports(&mut value, &storage, &snapshot_uid, file_path)` call; the `livegraph`/`compare` engines return before it. The attach adds `unresolved` (array of {target_key, recorded_specifier, decoded_target_path, line, category, classification, basis_code, basis, candidates}; `line`/`basis` null when not stored; `candidates` null when not recorded, an array of paths, or {\"unreadable\": \"<text>\"}), `unresolved_count` (= its length), `language` (from `compute_file_summary(..).languages.first()`, null when none) and `listing_coverage` ({\"omitted_forms\": LISTING_OMITTED_FORMS(language)} from one named table beside the attach citing ts-extractor/src/extractor.rs:1525-1527: typescript|tsx → [\"type-only imports and re-exports from a specifier without a leading dot\", \"dynamic import() and require() calls\", \"import … = require(…) statements\", \"import statements below the top level\"]; javascript|jsx → [\"re-exports from a specifier without a leading dot\", \"dynamic import() and require() calls\"]; any other language or null → null — no list of omitted forms is recorded for it, and an empty list, which would read as complete coverage, is never emitted) and `unresolved_source` (`\"sqlite\"`, D-IUR-FASTPATH). explain_lg_serve.rs `serve_imports` builds its LiveGraph value with the original signal's `unresolved_count` (read through `Signal::explain_imports_evidence()`). A read error is the request's error (ErrorCode::InternalError), never an empty array. D-IUR-FASTPATH (human, option A; INPUT-2): `imports_auto_route_on_a_green_cert_reads_the_unresolved_rows_from_sqlite_and_names_the_source`, in import_partition_view.rs's test module on `crate::callgraph_cert::test_fixture::build_fixture(false)` (a resident TypeScript LiveGraph; the dispatcher fixtures such as `mini_leveldb()` never preload one, so their `auto` route always falls back) with `state.import_cert` set GREEN at the resident fingerprint and the `RequestEpoch` built as `handle_imports` builds it (the precedent is livegraph_feed.rs's `ev_a_imports_serves_cert_fastpath_on_green_then_pinned_sqlite_after_swap`), one unresolved IMPORTS row inserted on the fixture store for `test_fixture::CALLER_PATH`, and the `auto` arm's three calls made in order — `imports_auto_response`, `partition_import_rows`, `attach_unresolved_imports` (that `handle_imports` reaches the same single attach on this route is IUR-C07 criterion 2) — the answer keeps `backend_used: \"livegraph\"` for the resolved rows, carries the same `unresolved` rows and `unresolved_count` as the `sqlite` route, and adds `unresolved_source: \"sqlite\"`; the fallback and the explicit `sqlite` route carry `unresolved_source: \"sqlite\"` too; `livegraph`/`compare` carry neither key; a storage error on the unresolved read fails the request by name on every route."
+      },
+      "expected": "exit 0: both single-file routes — including the `auto` route served from the LiveGraph under a GREEN import certificate, which keeps `backend_used: \"livegraph\"` — answer the same `unresolved` rows and count for one store, with `unresolved_source: \"sqlite\"`; the keys the listing had (`file`, `imports`, `count`, `import_view`, `import_remainder`, and on auto `backend_used`/`fallback_reason`/`comparison`) are unchanged; livegraph and compare answers carry no `unresolved` key; a failing unresolved read fails the request by name; explain's Imports leaf keeps `unresolved_count` when the LiveGraph serves it; every existing daemon-runtime --lib test is preserved by name; the call-site inventory passes with exactly one new row",
+      "candidateSha256": "sha256:e084438ac926882bc5f22702021faa05153235c6db835c3286d70a325bfe2dd2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "882 passed; 0 failed; 1 ignored; 883 tests listed; GREEN-route test passed.",
+        "supportingEvidence": [
+          ".agent-manager/slices/IMPORTS-UNRESOLVED-REMAINDER-1/iur-03-admission-2.txt line 370"
+        ]
+      }
+    },
+    {
+      "checkId": "IUR-C04",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L08",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L02",
+        "P-IUR-01",
+        "P-IUR-02",
+        "P-IUR-05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "( set -o pipefail; cargo test -p repo-graph-rgr --lib 2>&1 | tee /tmp/iur-04.txt ) && grep -qE '^test result: ok\\.' /tmp/iur-04.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/iur-04.txt && for t in imports_renders_unresolved_rows_with_their_category_classification_and_basis imports_ambiguous_unresolved_row_lists_its_candidates_never_picks_one imports_zero_state_names_the_language_and_the_listing_coverage imports_zero_state_without_recorded_omitted_forms_says_not_recorded_never_complete imports_unresolved_absent_renders_unavailable_never_zero imports_unresolved_count_disagreeing_with_its_rows_renders_unreadable imports_unknown_category_classification_or_basis_renders_verbatim_without_a_phrase imports_malformed_unresolved_payload_renders_unreadable_never_a_parse_failure explain_imports_section_states_the_unresolved_remainder imports_ts_and_js_listings_state_their_listing_limit_exactly_once imports_non_ts_listing_states_listing_coverage_not_recorded imports_livegraph_and_compare_renders_name_the_listing_they_do_not_carry imports_known_zero_unresolved_count_prints_explicitly_on_a_non_empty_listing explain_imports_section_absent_unresolved_count_renders_unavailable_never_nothing imports_renders_certain_rows_and_the_inferred_remainder render_imports_shows_header render_imports_shows_count render_imports_singular_count render_imports_shows_entries render_imports_shows_depth render_imports_shows_resolution render_empty_imports imports_partial_partition_payload_renders_unreadable_never_nothing_excluded imports_wrong_typed_remainder_renders_unreadable_never_zero row_without_a_rendered_reason_prints_exactly_as_before explain_imports_section_states_the_inferred_remainder workspace_note_never_claims_an_inferred_edge_for_a_subpath_import_on_every_render workspace_note_never_claims_an_inferred_edge_for_a_root_import_whose_declared_entry_is_indexed_on_every_render workspace_local_unedgeable_label_is_kept_and_explained_once_on_every_render renders_without_the_workspace_label_print_no_note compare_listing_prints_the_same_rows_as_the_default_listing lg_render_file_filtered_lists_benign_too compare_render_shows_sqlite_listing_and_summary inferred_unique_basename_row_renders_its_reason_and_candidate inferred_workspace_row_renders_its_source_entry_and_every_declared_entry; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/iur-04.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/iur-04.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-rgr --lib -- --list 2>/dev/null | grep -c ': test$')\" -ge 1461",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "The WHOLE rgr --lib run (1447 listed at HEAD, EXECUTED `--lib -- --list`; floor >= 1461 = 1447 + 14). NEW (14): twelve in presentation/imports.rs (the first seven names below, `imports_zero_state_without_recorded_omitted_forms_says_not_recorded_never_complete` (F-IUR-08), the two INPUT-2 tests, `imports_known_zero_unresolved_count_prints_explicitly_on_a_non_empty_listing` and `imports_non_ts_listing_states_listing_coverage_not_recorded` (F-IUR-10) at the end of this entry) and two in presentation/explain.rs (`explain_imports_section_states_the_unresolved_remainder` below and `explain_imports_section_absent_unresolved_count_renders_unavailable_never_nothing` at the end of this entry) — imports_renders_unresolved_rows_with_their_category_classification_and_basis, imports_ambiguous_unresolved_row_lists_its_candidates_never_picks_one, imports_zero_state_names_the_language_and_the_listing_coverage, imports_unresolved_absent_renders_unavailable_never_zero, imports_unresolved_count_disagreeing_with_its_rows_renders_unreadable, imports_unknown_category_classification_or_basis_renders_verbatim_without_a_phrase, imports_malformed_unresolved_payload_renders_unreadable_never_a_parse_failure, explain_imports_section_states_the_unresolved_remainder. `ImportsResponse` gains `unresolved`, `unresolved_count`, `language`, `listing_coverage`, each `Option<serde_json::Value>` with `#[serde(default)]` (the `import_view`/`import_remainder` precedent), decoded at render so a malformed value is a named unreadable line, never a parse failure of the whole listing (graph.rs:1074 deserializes the human answer into this struct). EXISTING by name, assertions unchanged except the four EXPECTATION CHANGES below. FIXTURE RULE (one rule for the class \"a pre-existing test builds an `ImportsResponse` without the new fields and asserts its render\"): every `ImportsResponse` a pre-existing test builds — the struct literals `sample_imports`/`sample_empty_imports`, the helper `listing_with_inferred`, and the inline JSON fixtures `resp`/`with` of `imports_renders_certain_rows_and_the_inferred_remainder` and the one of `inferred_workspace_row_renders_its_source_entry_and_every_declared_entry` — gains an answer with zero rows (`unresolved: []`, `unresolved_count: 0`; `language`/`listing_coverage` absent), which outside the zero-state renders exactly two added lines directly after the last line the render prints today: the measured zero `0 imports without a confirmed target`, then — `listing_coverage` being absent — `listing coverage: unavailable from this daemon` (§2.2 states an absent coverage wherever the listing renders, F-IUR-10) (no blank line inserted; F-IUR-04); the one exception is the `old` fixture of `imports_renders_certain_rows_and_the_inferred_remainder`, which models a daemon that predates the partition and therefore this listing too, keeps no new field, and whose only assertion (`contains(PARTITION_UNAVAILABLE)`) holds beside the two added unavailable lines. EXPECTATION CHANGES (the only assertion edits; RG-REQ-006-L12 asks for both counts and F-IUR-04 for the measured zero, so a whole-output oracle of a non-zero-state listing gains those two lines and nothing else): the whole-output `assert_eq!` of `inferred_unique_basename_row_renders_its_reason_and_candidate`, of `row_without_a_rendered_reason_prints_exactly_as_before` and the first one of `inferred_workspace_row_renders_its_source_entry_and_every_declared_entry` each gain the two trailing lines `0 imports without a confirmed target\\nlisting coverage: unavailable from this daemon\\n` (their fixtures carry no `listing_coverage`); `render_imports_singular_count`'s `!output.contains(\"imports\")` reads the count line (the output's third line) instead of the whole output, because the whole output now carries the correctly plural `0 imports without a confirmed target` — the assertion still proves the singular count line. Every `only_row` assertion is unchanged (neither added line starts with two spaces), every `contains`/`!contains` assertion of the other bound tests holds beside the added lines, `render_empty_imports` keeps its three lines because the zero-state replaces the count line in place, and the two EXPLAIN_IMPORTS fixtures of `explain_imports_section_states_the_inferred_remainder` gain `\"unresolved_count\": 0` (a measured zero adds no explain bullet), so its section renders as before. The LiveGraph/compare render tests (`workspace_local_unedgeable_label_is_kept_and_explained_once_on_every_render`, `renders_without_the_workspace_label_print_no_note`, the two `workspace_note_never_claims_*`, `lg_render_file_filtered_lists_benign_too`, `compare_render_shows_sqlite_listing_and_summary`, `compare_listing_prints_the_same_rows_as_the_default_listing`) pass unchanged because no line this slice adds contains `note:` (those tests count every line containing `note:` as the workspace note) and the view-limit line is printed directly after the render's first line, so the workspace note stays the last line (their `ends_with` assertions): imports_renders_certain_rows_and_the_inferred_remainder, render_imports_shows_header, render_imports_shows_count, render_imports_singular_count, render_imports_shows_entries, render_imports_shows_depth, render_imports_shows_resolution, render_empty_imports, imports_partial_partition_payload_renders_unreadable_never_nothing_excluded, imports_wrong_typed_remainder_renders_unreadable_never_zero, explain_imports_section_states_the_inferred_remainder, workspace_note_never_claims_an_inferred_edge_for_a_subpath_import_on_every_render, workspace_note_never_claims_an_inferred_edge_for_a_root_import_whose_declared_entry_is_indexed_on_every_render. WORDING (section 2.2 is binding): block header `{K} imports without a confirmed target:` (`1 import without a confirmed target:`); row `  {target}  line {n}  {category phrase} · {classification phrase} ({basis phrase})` with `{target}` = `recorded_specifier` when it is a string, else `decoded_target_path` + `(decoded from the stored key — not a confirmed target)` when it is a string, else `target_key` verbatim, and `line ?` when null; category phrases: `imports_file_not_found` none (the header is its predicate) | `several indexed files matched` | `several indexed .java files end with the specifier's path (or a prefix of it)` | `wildcard import` | `{verbatim} (no phrase for this category in this build)`, each followed by the reason clause, then the candidate clause; reason clause (from the metadata `basis`, on ANY category — the TS workspace ambiguity row keeps its own category, resolver.rs:690-704): `ambiguous_basename` → ` (same file name in {m} places)`, `ambiguous_suffix` → ` (same path suffix in {m} places)` with `{m}` the number of recorded candidate paths, ` (same file name in several places)` / ` (same path suffix in several places)` when the carrier holds no paths, `ambiguous_workspace_source_entry` → ` (several workspace source entries)`, any other string → ` ({verbatim} (no phrase for this reason in this build))`, absent → ` (reason not recorded)` after `several indexed files matched` and nothing on any other category; the candidate clause, prefixed ` — `, always follows the two ambiguity categories (`several indexed files matched`, `several indexed .java files end with the specifier's path (or a prefix of it)`) and follows any other category only for a Paths or unreadable carrier; candidate clause `{m} candidates: {p1}, {p2}, …` (every path, stored order) | `candidate paths not recorded with this import` (null) | `candidates unreadable (\"{text}\")`; classification phrases `external library?` | `this repository?` | `framework boundary?` | `unknown` | `{verbatim} (no phrase for this classification in this build)`; basis phrases `specifier matches a dependency declared in the manifest` | `specifier matches a tsconfig paths alias` | `specifier or its part before :: is on the runtime-module list of this build` | `recorded specifier starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE` | `metadata carries a specifier and no rawPath, and the specifier's first segment before :: starts with a lowercase letter and holds only lowercase letters, digits or underscores` | `no classifier signal` | `{verbatim} (no phrase for this basis in this build)`; absent `unresolved` → `imports without a confirmed target: unavailable from this daemon — upgrade rmapd`; a malformed `unresolved` (not an array; a row not an object; `target_key`/`category`/`classification`/`basis_code` not a string; `recorded_specifier`/`decoded_target_path` neither a string nor null; `line` neither an integer nor null; `candidates` none of null, an array of strings, {\"unreadable\": string}) → `imports without a confirmed target: unreadable ({why})`; `unresolved_count` missing, not a non-negative integer, or ≠ rows → `imports without a confirmed target: unreadable (count {c} disagrees with {n} rows)` (`{c}` the JSON text or `missing`); a valid zero (`unresolved: []`, `unresolved_count: 0`) on every listing not in the zero-state → the line `0 imports without a confirmed target`; zero-state (no listed row, partition stated with no inferred remainder, `unresolved` present with zero rows and count 0) → the count line becomes `0 imports (language: {lang}; this index lists no imports for this file{coverage})`, `{lang}` = the language when a non-empty string else `unknown`, `{coverage}` = ` — this listing omits {items}` with the `listing_coverage.omitted_forms` strings joined by `, ` and the last by ` or ` when it is a non-empty array of strings; ` — listing coverage not recorded for {lang}` when it is null and the language is known, ` — listing coverage not recorded (language not recorded)` when it is null and the language is not; ` — listing coverage unavailable from this daemon` when `listing_coverage` is absent; ` — listing coverage unreadable` for any other shape (an empty array included — an empty list is never read as complete coverage); `imports_zero_state_without_recorded_omitted_forms_says_not_recorded_never_complete` asserts the two null forms, the absent form and that an empty array renders unreadable, never a bare line; explain bullet `+{K} imports without a confirmed target — rmap imports {file}` (`+1 import without a confirmed target — rmap imports {file}`) when K > 0, none when K = 0 (a measured zero; `imports <file>` states it), the bullet `imports without a confirmed target: unavailable from this daemon — rmap imports {file}` when the field is absent (absent evidence is never read as zero — F-IUR-04), `imports without a confirmed target: unreadable — rmap imports {file}` when present but not a non-negative integer. F-IUR-01/F-IUR-02/D-IUR-ENGINE-SCOPE (INPUT-2): `imports_ts_and_js_listings_state_their_listing_limit_exactly_once` — every listing whose `listing_coverage.omitted_forms` is non-empty states that limit exactly once: in the zero-state count line when the listing is in the zero-state, otherwise as one line after the block, `listing limit: this listing omits {items} — open the file for those` (`{items}` joined as in the zero-state: a TypeScript/TSX listing reads `type-only imports and re-exports from a specifier without a leading dot, dynamic import() and require() calls, import … = require(…) statements or import statements below the top level`, a JavaScript/JSX listing `re-exports from a specifier without a leading dot or dynamic import() and require() calls`); a null `omitted_forms` prints no such line (outside the zero-state it prints the one `listing coverage: not recorded for {lang} — open the file to confirm` line instead) and an absent `listing_coverage` prints `listing coverage: unavailable from this daemon` outside the zero-state, a malformed one (an empty array included) prints `listing limit: unreadable` outside the zero-state; a C/C++/Python/Rust/Java listing (null) never prints it; `imports_livegraph_and_compare_renders_name_the_listing_they_do_not_carry` — the `--engine livegraph` render with a file filter and the `--engine compare` per-file render print, directly after their first line, `view limit: this view does not list imports without a confirmed target — rmap imports {file} does` exactly once, the repo-wide livegraph render and the readiness report never print it, and their JSON carries no `unresolved` key. `{file}` in every printed command is shell-quoted as `import_partition::imports_command_clause` quotes it (RG-REQ-012-L03). F-IUR-04/F-IUR-05 (cycle 2): `imports_known_zero_unresolved_count_prints_explicitly_on_a_non_empty_listing` — rows present, `unresolved: []`, `unresolved_count: 0` → the line `0 imports without a confirmed target` is printed (never silence), and so it is on an empty listing that states an inferred remainder (not the zero-state); `explain_imports_section_absent_unresolved_count_renders_unavailable_never_nothing` — an EXPLAIN_IMPORTS evidence without `unresolved_count` renders `imports without a confirmed target: unavailable from this daemon — rmap imports {file}`, with `unresolved_count: 0` renders no bullet, with K > 0 the `+{K}` bullet; the ambiguous-row test (`imports_ambiguous_unresolved_row_lists_its_candidates_never_picks_one`) asserts the ambiguity phrase from the metadata basis beside the classification phrase from `basis_code` (`several indexed files matched (same file name in 2 places) — 2 candidates: … · unknown (no classifier signal)`), `several indexed files matched (reason not recorded) — candidate paths not recorded with this import` when neither is recorded (an include-root overlap), `several indexed .java files end with the specifier's path (or a prefix of it) — candidate paths not recorded with this import` (a Java ambiguous suffix), `several indexed files matched (same file name in several places) — candidates unreadable (\"…\")` when the carrier holds no paths, and `several workspace source entries — 3 candidates: …` (a row whose category has no phrase prints its reason clause bare, without the parentheses) for the TS workspace ambiguity on its own category. Cycle 5 (D-AGENT-USEFULNESS-FRAME-1, F-IUR-09, F-IUR-10): `imports_non_ts_listing_states_listing_coverage_not_recorded` — a listing with rows and `listing_coverage.omitted_forms: null` prints exactly one `listing coverage: not recorded for {lang} — open the file to confirm` (language-unknown variant when `language` is not a non-empty string) and no `listing limit:` line; `imports_renders_unresolved_rows_with_their_category_classification_and_basis` asserts the predicate phrases of section 2.2 beside the codes (`recorded specifier starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE` for a `./`, a `crate::`, a `:FILE` and a C/C++ quoted-include (rawPath `./gtest/gtest.h`) specifier alike; `specifier matches a dependency declared in the manifest`; `specifier or its part before :: is on the runtime-module list of this build`; `specifier matches a tsconfig paths alias`; `no classifier signal` for a file-not-found row whose import tests all declined and for an `imports_ambiguous_match` row, which the import tests never examine, alike; `metadata carries a specifier and no rawPath, and the specifier's first segment before :: starts with a lowercase letter and holds only lowercase letters, digits or underscores`) that a row with a string `recorded_specifier` prints it, that a row with only a string `decoded_target_path` prints that path followed by `(decoded from the stored key — not a confirmed target)` and never the bare path as if confirmed, and that a row with neither prints the stored key, and that an `imports_file_not_found` row with no reason and a null carrier carries no category phrase and no ` · ` (`  react  line 2  external library? (specifier matches a dependency declared in the manifest)`)."
+      },
+      "expected": "exit 0: the human listing prints every unresolved row after the resolved rows and the partition lines, with every phrase restating the predicate at its named assignment site (D-AGENT-USEFULNESS-FRAME-1), the classification carried as a question and every recorded candidate listed — never one picked, and `candidate paths not recorded with this import` where none was stored; the zero-state names the language and the listing coverage; an absent field renders unavailable, a malformed field or a disagreeing count unreadable, an unknown vocabulary verbatim and marked — never zero, never dropped, never a parse failure; a measured zero is stated on every listing outside the zero-state; `explain <file>` states the unresolved count as a bullet with the command that lists them and an absent count as unavailable; every existing render is preserved apart from the two added lines (the measured zero and the absent-coverage line) (fixtures extended; only the four enumerated expectation changes)",
+      "candidateSha256": "sha256:e084438ac926882bc5f22702021faa05153235c6db835c3286d70a325bfe2dd2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "1461 passed; 0 failed; 1461 tests listed.",
+        "supportingEvidence": [
+          ".agent-manager/slices/IMPORTS-UNRESOLVED-REMAINDER-1/iur-04-admission-2.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "IUR-C05",
+      "obligationIds": [
+        "RG-REQ-006-L01",
+        "RG-REQ-006-L02",
+        "RG-REQ-006-L03",
+        "RG-REQ-006-L04",
+        "RG-REQ-006-L11",
+        "RG-REQ-006-L13",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L05",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L07",
+        "RG-REQ-002-L09",
+        "RG-REQ-002-L10",
+        "P-IUR-03",
+        "P-IUR-06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "cargo fmt --all -- --check && ( set -o pipefail; cargo clippy -p repo-graph-storage -p repo-graph-agent -p repo-graph-daemon-runtime -p repo-graph-rgr --all-targets -- -D warnings 2>&1 | tail -3 ) && git -C .. diff --check && test -z \"$(git -C .. status --porcelain -- . ':!.agent-manager' ':!rust/target' | awk '{print $2}' | grep -vxF -e rust/crates/agent/src/storage_port.rs -e rust/crates/agent/src/lib.rs -e rust/crates/agent/src/explain/mod.rs -e rust/crates/agent/src/explain/coherent_tests.rs -e rust/crates/agent/src/dto/signal.rs -e rust/crates/agent/tests/common/mod.rs -e rust/crates/agent/tests/explain_file.rs -e rust/crates/agent/src/aggregators/complexity_tests.rs -e rust/crates/storage/src/queries.rs -e rust/crates/storage/src/agent_impl.rs -e rust/crates/storage/tests/import_reader_inventory.rs -e rust/crates/daemon-runtime/src/dispatch.rs -e rust/crates/daemon-runtime/src/import_partition_view.rs -e rust/crates/daemon-runtime/src/explain_lg_serve.rs -e rust/crates/daemon-runtime/src/explain_coherence_served_tests.rs -e rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs -e rust/crates/daemon-runtime/src/orient_serve/tests.rs -e rust/crates/daemon-runtime/src/explain_serve_tests/spy.rs -e rust/crates/rgr/src/presentation/imports.rs -e rust/crates/rgr/src/presentation/explain_sections.rs -e rust/crates/rgr/src/presentation/explain.rs -e docs/cli/rmap-contracts.md)\" && grep -q 'indexer:1.6.0' crates/indexer/src/orchestrator.rs && grep -c 'IMPORTS-UNRESOLVED-REMAINDER-1' ../docs/cli/rmap-contracts.md | grep -qvx 0",
+        "cwd": "rust",
+        "environment": "candidate tree",
+        "inputs": "fmt over the workspace; clippy -D warnings over the four touched crates, in a pipefail subshell so a clippy failure fails the check; whitespace; the porcelain restricted to the twenty-two candidate paths (a path outside them is a violation; patterns passed with -e, no process substitution); INDEXER_VERSION unchanged; the CLI contract gained the `imports <file>` unresolved-rows section naming this slice (section 2.4 gives its text: the keys, the wording, the unavailable/unreadable forms, and that livegraph/compare carry no such key)."
+      },
+      "expected": "exit 0: byte-identity of every file outside the twenty-two candidate paths; no index-time change; the resolver stages, the import classifier, the deps readers and every certainty axis are preserved (no behavior change beyond the additive per-file unresolved block); the contract documents the new keys and wording",
+      "candidateSha256": "sha256:e084438ac926882bc5f22702021faa05153235c6db835c3286d70a325bfe2dd2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Exit 0 for fmt, clippy (-D warnings on 4 crates), diff --check; porcelain showed the 22 paths; indexer:1.6.0.",
+        "supportingEvidence": [
+          ".agent-manager/slices/IMPORTS-UNRESOLVED-REMAINDER-1/iur-c05-run.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "IUR-C06",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L08",
+        "P-IUR-01",
+        "P-IUR-02",
+        "P-IUR-03",
+        "P-IUR-05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "command": "bash -eu -o pipefail -c 'export RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off RMAP_SEED_VECTORS=off; cargo build --release -p repo-graph-rgr -p rmapd 2>&1 | tail -1; RM=\"$PWD/target/release/rmap\"; test -x \"$PWD/target/release/rmapd\"; W=\"$(mktemp -d /private/tmp/IMPORTS-UNRESOLVED-REMAINDER-1-c06.XXXX)\"; dg(){ (cd \"$1\" && find . -type f \\( -name \"*.db\" -o -name registry.json \\) | sort | xargs shasum -a 256); }; dgall(){ (cd \"$1\" && find . -type f \\( -name \"*.db\" -o -name \"*.db-wal\" -o -name \"*.db-shm\" -o -name registry.json \\) | sort | xargs shasum -a 256); }; walempty(){ test -z \"$(cd \"$1\" && find . -type f -name \"*.db-wal\" -size +0c)\"; }; absent(){ if grep -qF -- \"$1\" \"$2\"; then echo \"UNEXPECTED [$1] in $2\"; exit 1; fi; }; for r in amodx leveldb nginx storybook hexmanos; do B=\"/private/tmp/IMPORTS-UNRESOLVED-REMAINDER-1-$r-before\"; test -d \"$B\"; walempty \"$B\"; dgall \"$B\" > \"$W/$r.orig.sha\"; cp -R \"$B\" \"$W/$r\"; sed -i.orig \"s#$B/#$W/$r/#\" \"$W/$r/registry.json\"; grep -qF \"$W/$r/databases/\" \"$W/$r/registry.json\"; absent \"$B/\" \"$W/$r/registry.json\"; dg \"$W/$r\" > \"$W/$r.before.sha\"; done; L=\"/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases\"; A=\"/Users/apple/Documents/APLICATII BIJUTERIE/amodx\"; H=\"/Users/apple/Documents/APLICATII BIJUTERIE/hexmanos\"; S=\"$L/storybook\"; run(){ local root=\"$1\" dir=\"$2\"; shift 2; (cd \"$dir\" && RMAP_STATE_ROOT=\"$W/$root\" RMAP_SOCKET_PATH=\"$W/$root/d.sock\" \"$RM\" \"$@\" 2>/dev/null); }; TSLIM=\"listing limit: this listing omits type-only imports and re-exports from a specifier without a leading dot, dynamic import() and require() calls, import … = require(…) statements or import statements below the top level — open the file for those\"; run amodx \"$A\" imports admin/src/components/editor/Toolbar.tsx > \"$W/toolbar.txt\"; grep -qxF \"0 imports\" \"$W/toolbar.txt\"; grep -qxF \"8 imports without a confirmed target:\" \"$W/toolbar.txt\"; grep -qF \"  @/components/ui/button  line 3  this repository? (specifier matches a tsconfig paths alias)\" \"$W/toolbar.txt\"; grep -qF \"  react  line 2  external library? (specifier matches a dependency declared in the manifest)\" \"$W/toolbar.txt\"; grep -qxF \"$TSLIM\" \"$W/toolbar.txt\"; test \"$(grep -c \"^listing limit:\" \"$W/toolbar.txt\")\" -eq 1; run amodx \"$A\" imports admin/src/components/editor/Toolbar.tsx --json > \"$W/toolbar.json\"; python3 -c \"import json,sys; d=json.load(open(sys.argv[1])); assert d[\\\"unresolved_count\\\"]==8 and len(d[\\\"unresolved\\\"])==8 and d[\\\"count\\\"]==0; r=[x for x in d[\\\"unresolved\\\"] if x[\\\"target_key\\\"]==\\\"@/lib/utils\\\"][0]; assert (r[\\\"line\\\"],r[\\\"category\\\"],r[\\\"classification\\\"],r[\\\"basis_code\\\"],r[\\\"candidates\\\"])==(9,\\\"imports_file_not_found\\\",\\\"internal_candidate\\\",\\\"specifier_matches_project_alias\\\",None), r; assert d[\\\"unresolved_source\\\"]==\\\"sqlite\\\"; assert d[\\\"language\\\"]==\\\"tsx\\\" and d[\\\"listing_coverage\\\"][\\\"omitted_forms\\\"]==[\\\"type-only imports and re-exports from a specifier without a leading dot\\\",\\\"dynamic import() and require() calls\\\",\\\"import … = require(…) statements\\\",\\\"import statements below the top level\\\"], d[\\\"language\\\"]\" \"$W/toolbar.json\"; run amodx \"$A\" imports renderer/next.config.ts > \"$W/nextcfg.txt\"; grep -qxF \"0 imports (language: typescript; this index lists no imports for this file — this listing omits type-only imports and re-exports from a specifier without a leading dot, dynamic import() and require() calls, import … = require(…) statements or import statements below the top level)\" \"$W/nextcfg.txt\"; absent \"without a confirmed target\" \"$W/nextcfg.txt\"; absent \"listing limit:\" \"$W/nextcfg.txt\"; run amodx \"$A\" imports backend/src/import/woocommerce.ts > \"$W/woo.txt\"; grep -qxF \"7 imports\" \"$W/woo.txt\"; grep -qxF \"2 imports without a confirmed target:\" \"$W/woo.txt\"; grep -qF \"  aws-lambda  line 1  unknown (no classifier signal)\" \"$W/woo.txt\"; grep -qF \"  @aws-sdk/lib-dynamodb  line 3  external library? (specifier matches a dependency declared in the manifest)\" \"$W/woo.txt\"; grep -qxF \"$TSLIM\" \"$W/woo.txt\"; test \"$(grep -c \"^listing limit:\" \"$W/woo.txt\")\" -eq 1; run nginx \"$L/nginx\" imports src/core/ngx_core.h > \"$W/core.txt\"; grep -qxF \"32 imports\" \"$W/core.txt\"; grep -qF \"+2 inferred imports, not shown\" \"$W/core.txt\"; grep -qxF \"13 imports without a confirmed target:\" \"$W/core.txt\"; grep -qF \"  ngx_time.h  line 52  several indexed files matched (same file name in 2 places) — 2 candidates: src/os/unix/ngx_time.h, src/os/win32/ngx_time.h · unknown (no classifier signal)\" \"$W/core.txt\"; grep -qxF \"listing coverage: not recorded for c — open the file to confirm\" \"$W/core.txt\"; test \"$(grep -c \"^listing coverage:\" \"$W/core.txt\")\" -eq 1; absent \"listing limit:\" \"$W/core.txt\"; run nginx \"$L/nginx\" imports src/core/ngx_core.h --include-inferred --json > \"$W/core.json\"; python3 -c \"import json,sys; d=json.load(open(sys.argv[1])); assert d[\\\"count\\\"]==34 and d[\\\"unresolved_count\\\"]==13; r=[x for x in d[\\\"unresolved\\\"] if x[\\\"target_key\\\"]==\\\"ngx_time.h\\\"][0]; assert r[\\\"category\\\"]==\\\"imports_ambiguous_match\\\" and r[\\\"basis\\\"]==\\\"ambiguous_basename\\\" and r[\\\"candidates\\\"]==[\\\"src/os/unix/ngx_time.h\\\",\\\"src/os/win32/ngx_time.h\\\"], r; assert d[\\\"language\\\"]==\\\"c\\\" and d[\\\"listing_coverage\\\"][\\\"omitted_forms\\\"] is None, d[\\\"listing_coverage\\\"]\" \"$W/core.json\"; run storybook \"$S\" imports code/frameworks/ember/template/cli/Button.stories.js > \"$W/button.txt\"; grep -qxF \"0 imports\" \"$W/button.txt\"; grep -qxF \"4 imports without a confirmed target:\" \"$W/button.txt\"; grep -qF \"  @storybook/addon-links  line 1  unknown (no classifier signal)\" \"$W/button.txt\"; grep -qxF \"listing limit: this listing omits re-exports from a specifier without a leading dot or dynamic import() and require() calls — open the file for those\" \"$W/button.txt\"; run leveldb \"$L/leveldb\" imports table/table_test.cc > \"$W/tt.txt\"; grep -qxF \"14 imports\" \"$W/tt.txt\"; grep -qxF \"3 imports without a confirmed target:\" \"$W/tt.txt\"; grep -qF \"  ./gtest/gtest.h  line 10  this repository? (recorded specifier starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE)\" \"$W/tt.txt\"; grep -qF \"  map  line 7  external library? (specifier or its part before :: is on the runtime-module list of this build)\" \"$W/tt.txt\"; grep -qxF \"listing coverage: not recorded for cpp — open the file to confirm\" \"$W/tt.txt\"; test \"$(grep -c \"^listing coverage:\" \"$W/tt.txt\")\" -eq 1; absent \"listing limit:\" \"$W/tt.txt\"; run leveldb \"$L/leveldb\" imports table/merger.h > \"$W/merger.txt\"; grep -qxF \"0 imports (language: cpp; this index lists no imports for this file — listing coverage not recorded for cpp)\" \"$W/merger.txt\"; absent \"listing limit:\" \"$W/merger.txt\"; absent \"listing coverage:\" \"$W/merger.txt\"; run hexmanos \"$H\" imports frontend/src/App.tsx > \"$W/app.txt\"; grep -qxF \"0 imports\" \"$W/app.txt\"; grep -qxF \"8 imports without a confirmed target:\" \"$W/app.txt\"; grep -qF \"  @/features/editor  line 2  unknown (no classifier signal)\" \"$W/app.txt\"; VLIM=\"view limit: this view does not list imports without a confirmed target — rmap imports admin/src/components/editor/Toolbar.tsx does\"; run amodx \"$A\" imports admin/src/components/editor/Toolbar.tsx --engine livegraph > \"$W/toolbar-lg.txt\" || true; grep -qxF \"$VLIM\" \"$W/toolbar-lg.txt\"; absent \" without a confirmed target:\" \"$W/toolbar-lg.txt\"; run amodx \"$A\" imports admin/src/components/editor/Toolbar.tsx --engine compare > \"$W/toolbar-cmp.txt\" || true; grep -qxF \"$VLIM\" \"$W/toolbar-cmp.txt\"; absent \" without a confirmed target:\" \"$W/toolbar-cmp.txt\"; run amodx \"$A\" imports admin/src/components/editor/Toolbar.tsx --engine livegraph --json > \"$W/toolbar-lg.json\" || true; python3 -c \"import json,sys; d=json.load(open(sys.argv[1])); assert \\\"unresolved\\\" not in d and \\\"unresolved_source\\\" not in d, sorted(d)\" \"$W/toolbar-lg.json\"; run amodx \"$A\" imports packages/plugins/src/admin.ts > \"$W/plugins-admin.txt\"; grep -qxF \"21 imports\" \"$W/plugins-admin.txt\"; grep -qxF \"0 imports without a confirmed target\" \"$W/plugins-admin.txt\"; run amodx \"$A\" explain admin/src/components/editor/Toolbar.tsx > \"$W/explain.txt\"; grep -qF \"Imports (0)\" \"$W/explain.txt\"; grep -qF \"+8 imports without a confirmed target — rmap imports admin/src/components/editor/Toolbar.tsx\" \"$W/explain.txt\"; run leveldb \"$L/leveldb\" explain table/table_test.cc > \"$W/explain-tt.txt\"; grep -qF \"+3 imports without a confirmed target — rmap imports table/table_test.cc\" \"$W/explain-tt.txt\"; run nginx \"$L/nginx\" modules list > \"$W/nginx-modules.txt\"; grep -qF \"299 imports did not resolve\" \"$W/nginx-modules.txt\"; for r in amodx leveldb nginx storybook hexmanos; do dg \"$W/$r\" | diff -q - \"$W/$r.before.sha\"; walempty \"$W/$r\"; dgall \"/private/tmp/IMPORTS-UNRESOLVED-REMAINDER-1-$r-before\" | diff -q - \"$W/$r.orig.sha\"; done; echo IUR-C06-OK; echo \"$W\"'",
+        "cwd": "rust",
+        "environment": "candidate tree; builder-owned COPIES of the manager's five before-roots /private/tmp/IMPORTS-UNRESOLVED-REMAINDER-1-{amodx,leveldb,nginx,storybook,hexmanos}-before (captured 2026-10-03 by HEAD's release binary rmap 0.20.0 / indexer:1.6.0 — amodx 1085995a30c5 clean, leveldb 7ee830d02b62 clean, nginx b0a4d0fb823b dirty=3 (compile_commands.json + two .DS_Store), hexmanos b213960890e3 dirty=36 (the owner's uncommitted work; the same checkout before and after), storybook 7b2b2880ebaa clean; each root's source.txt records this). Each copy's registry.json `db_path` is ABSOLUTE and names the manager's root (registry.rs:466-487 loads it verbatim), so the check rewrites it into the copy and asserts no reference to the original remains before serving. Store-identity oracle (F-IUR-03, bounded): every captured store is in WAL journal mode with its WAL empty or absent (OBSERVED 2026-10-03: storybook and hexmanos `-wal` 0 bytes, the other three absent; checked again by `walempty` before copying); on each served copy the check digests every `*.db` and `registry.json` and requires every `*.db-wal` to be empty or absent after serving — a committed write either sits in the WAL (non-empty) or was checkpointed into the database (digest change), so the pair detects any write; the copy's `*.db-shm` is NOT digested because SQLite rewrites or removes that shared-memory index on every open and close and it holds no stored fact (digesting it would fail the check on a read-only serve); the manager's original roots, which nothing opens, are digested in full (`*.db`, `*.db-wal`, `*.db-shm`, `registry.json`) before and after as the isolation proof. Every negative assertion uses the `absent` function (a bare `! grep` never trips `set -e`), and the script contains no single quote (it is itself single-quoted). Served over stdio by the candidate release `rmap` and its sibling `rmapd` (both built in the check — stdio_transport.rs:232-254 spawns the sibling `rmapd`, else PATH) with enrich/reindex/retention/seed off; the operator's real state root and registry are never touched; the work dir is /private/tmp/IMPORTS-UNRESOLVED-REMAINDER-1-c06.*, its captures copied into .agent-manager/slices/IMPORTS-UNRESOLVED-REMAINDER-1/ and the dir deleted at cleanup",
+        "inputs": "No reindex: the slice changes no store, so the candidate serves the BEFORE stores as they are. Expected literals come from the retained audit stores' unresolved_edges rows (read by the manager 2026-10-03 and re-read read-only by the document author the same day): amodx Toolbar.tsx: 8 rows — @tiptap/react:1, react:2, @/components/ui/button:3, @/components/ui/input:4, lucide-react:5, @/lib/utils:9, @amodx/plugins/admin:10, @/context/TenantContext:11, none with `candidates`; amodx renderer/next.config.ts (language typescript): its one statement `import type { NextConfig } from \"next\";` is in neither table (RC-11) — the zero-state witness with the coverage clause; nginx ngx_core.h: 32 static + 2 inferred resolved, 13 imports_ambiguous_match with basis ambiguous_basename and two FILE candidates each; storybook Button.stories.js: 4 rows — @storybook/addon-links:1 unknown/no_supporting_signal, ember-cli-htmlbars:3, storybook/actions:4, storybook/test:5; leveldb table_test.cc: 14 resolved + map:7, string:8 (runtime module), gtest/gtest.h:10 (relative, rawPath ./gtest/gtest.h — the C++ extractor records the quoted include `gtest/gtest.h` as `./gtest/gtest.h`, cpp-extractor/src/extractor.rs:625, so the row prints `./gtest/gtest.h`); leveldb table/merger.h (language cpp): no #include, no row in either table — the zero-state witness whose coverage is not recorded (F-IUR-08: `listing_coverage.omitted_forms` is null in JSON, the count line says `listing coverage not recorded for cpp`); hexmanos App.tsx: 8 rows, the seven @/ ones unknown/no_supporting_signal. nginx `modules list` is the regression witness (unchanged from HEAD: 299 unresolved). The copies' and the originals' store digests are asserted unchanged after serving. INPUT-2 (F-IUR-01, F-IUR-03, D-IUR-ENGINE-SCOPE): the non-zero TypeScript witness amodx `backend/src/import/woocommerce.ts` (7 resolved static rows — ../lib/db.js, ../auth/context.js, ../auth/policy.js, ../lib/catprod.js, ../lib/events.js, ../lib/media-map.js, ../lib/invalidate-cdn.js — and 2 rows without a confirmed target: `aws-lambda` line 1 unknown/no_supporting_signal, `@aws-sdk/lib-dynamodb` line 3 external/package dependency), the `listing limit:` line exactly once on it and on Toolbar.tsx, the JavaScript form on storybook `Button.stories.js` (language `javascript`), never on the zero-state witness next.config.ts (whose count line carries the limit) nor on a C/C++ listing (nginx `ngx_core.h` is language `c`, leveldb `table/merger.h` and `table_test.cc` are `cpp`); the `--engine livegraph` and `--engine compare` per-file renders of Toolbar.tsx carry the `view limit:` line and no listing of their own, and the livegraph JSON carries neither `unresolved` nor `unresolved_source`; the store-identity oracle of the environment above. D-IUR-FASTPATH: the Toolbar JSON carries `unresolved_source: \"sqlite\"` (under stdio no LiveGraph is resident, so this exercises the fallback route; the GREEN route is IUR-C03's unit test). F-IUR-04 (cycle 2): the known-zero witness amodx `packages/plugins/src/admin.ts` — 21 static rows, 0 rows without a confirmed target on the before-root — prints `21 imports` and the explicit `0 imports without a confirmed target`. D-AGENT-USEFULNESS-FRAME-1 / F-IUR-09 / F-IUR-10 (cycle 5): every row phrase is the predicate at its named site; nginx `ngx_core.h` (language `c`) and leveldb `table_test.cc` (`cpp`) print exactly one `listing coverage: not recorded for {lang} — open the file to confirm` line and no `listing limit:` line; the zero-state `table/merger.h` carries ` — listing coverage not recorded for cpp` in its count line and no separate coverage line."
+      },
+      "expected": "exit 0 and IUR-C06-OK: every per-file answer states its unresolved remainder in text and JSON with the recorded category, classification, basis and (for nginx) both candidates — never a pick, and `candidates` null where none was recorded; a C/C++ answer's `listing_coverage.omitted_forms` is null, never an empty list; `0 imports` never stands alone when unresolved rows exist and a measured zero is stated explicitly on a non-empty listing; the two files with no import row in either table render the zero-state naming their language and their listing coverage (for TypeScript the forms this listing omits; for C++ that listing coverage is not recorded); every TypeScript/JavaScript listing states its listing limit exactly once; the livegraph and compare per-file renders state that they do not list these imports and name the command that does; explain's Imports section carries the unresolved bullet (and exists for Toolbar.tsx, which had no Imports section at HEAD); `modules list` and the resolved listings are unchanged; the five served copies' database and registry files are byte-identical before and after with every WAL empty or absent, and the five original roots' database, WAL, shared-memory and registry files are byte-identical before and after",
+      "candidateSha256": "sha256:e084438ac926882bc5f22702021faa05153235c6db835c3286d70a325bfe2dd2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "All 17 captures were byte-identical to admission 1; run ended IUR-C06-OK.",
+        "supportingEvidence": [
+          ".agent-manager/slices/IMPORTS-UNRESOLVED-REMAINDER-1/c06-captures-admission-2/iur-c06-run.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "IUR-C07",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L11",
+        "P-IUR-01",
+        "P-IUR-02"
+      ],
+      "owner": "reviewer",
+      "method": {
+        "kind": "inspection",
+        "subject": "git diff HEAD -- rust/crates/rgr/src/presentation/imports.rs rust/crates/rgr/src/presentation/explain_sections.rs rust/crates/daemon-runtime/src/dispatch.rs rust/crates/daemon-runtime/src/import_partition_view.rs rust/crates/daemon-runtime/src/explain_lg_serve.rs rust/crates/storage/src/queries.rs rust/crates/agent/src/storage_port.rs docs/cli/rmap-contracts.md (the eight files that carry the contract), read on the candidate tree",
+        "criterion": "(1) no swallowing form on any new path (`unwrap_or(0)`, `.ok()`, `unwrap_or_default`, `.ok().flatten()` — RG-REQ-002-L04); (2) the unresolved read is attached at ONE site — one `attach_unresolved_imports` call after the one `partition_import_rows` call that both the auto and the sqlite arms reach — and the livegraph/compare engines return before it; (3) the port method has no default body; (4) the renderer never selects a candidate, never prints a count for candidates that were not recorded (no `{m}` from a carrier without paths), and never maps an unknown vocabulary string — category, classification, basis code or ambiguity reason — to a known phrase; (5) the contract text equals the renderer's literals of section 2.2; (6) the `{N} imports` count line is byte-identical for every file that has no unresolved rows and is not in the zero-state; (7) the LiveGraph explain serve carries the original `unresolved_count` (no route-dependent bullet); (8) no human line this slice adds contains `note:`, the view-limit line follows the livegraph/compare render's first line, and the human render shows neither `backend_used` nor `unresolved_source`",
+        "inputs": "The candidate's diff of the eight contract-carrying files; SLICE_DOC section 2.1 (the one attach site, the port without a default body, the LiveGraph explain carry) and section 2.2 (the binding wording); the storage reader's candidate-key decode; the contract section added to docs/cli/rmap-contracts.md. The reviewer reads, runs nothing."
+      },
+      "expected": "the reviewer records agreement on all eight, or a finding naming the line",
+      "candidateSha256": "sha256:e084438ac926882bc5f22702021faa05153235c6db835c3286d70a325bfe2dd2",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Reviewer inspection; review-0 recorded it as passed.",
+        "supportingEvidence": [
+          "review-0"
+        ]
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "docs/cli/rmap-contracts.md",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "P-IUR-02"
+      ],
+      "summary": "Contract section for imports rows without a confirmed target and amended SQLite-free migrated default paths sentence."
+    },
+    {
+      "path": "rust/crates/agent/src/aggregators/complexity_tests.rs",
+      "obligationIds": [
+        "P-IUR-06"
+      ],
+      "summary": "Test double implements required method with Ok(vec![])."
+    },
+    {
+      "path": "rust/crates/agent/src/dto/signal.rs",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L02",
+        "P-IUR-05"
+      ],
+      "summary": "Adds unresolved_count to ExplainImportsEvidence and the Signal accessor."
+    },
+    {
+      "path": "rust/crates/agent/src/explain/coherent_tests.rs",
+      "obligationIds": [
+        "P-IUR-05"
+      ],
+      "summary": "Struct literal gains the new field; no assertion changed."
+    },
+    {
+      "path": "rust/crates/agent/src/explain/mod.rs",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L11",
+        "P-IUR-05"
+      ],
+      "summary": "Explain reads unresolved rows, sets unresolved_count, and emits Imports section when only unresolved rows exist."
+    },
+    {
+      "path": "rust/crates/agent/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-006-L12"
+      ],
+      "summary": "Re-exports the new port types."
+    },
+    {
+      "path": "rust/crates/agent/src/storage_port.rs",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L11",
+        "P-IUR-06"
+      ],
+      "summary": "Adds AgentUnresolvedImportEntry, three-state UnresolvedCandidates, and required find_unresolved_file_imports port method with no default body."
+    },
+    {
+      "path": "rust/crates/agent/tests/common/mod.rs",
+      "obligationIds": [
+        "P-IUR-06",
+        "RG-REQ-002-L04"
+      ],
+      "summary": "FakeAgentStorage gets an unresolved-row map and forced-failure path."
+    },
+    {
+      "path": "rust/crates/agent/tests/explain_file.rs",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "P-IUR-05"
+      ],
+      "summary": "Adds two explain tests; existing test assertions remain."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "P-IUR-01",
+        "P-IUR-02"
+      ],
+      "summary": "Auto and sqlite reach one partition and attach step; livegraph and compare return before attach."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_coherence_served_tests.rs",
+      "obligationIds": [
+        "RG-REQ-002-L02",
+        "P-IUR-05"
+      ],
+      "summary": "Adds LiveGraph served explain unresolved-count test; existing literal gains None."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_lg_serve.rs",
+      "obligationIds": [
+        "RG-REQ-002-L02",
+        "P-IUR-05"
+      ],
+      "summary": "LiveGraph-served explain keeps the original unresolved_count."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/explain_serve_tests/spy.rs",
+      "obligationIds": [
+        "P-IUR-06"
+      ],
+      "summary": "Test spy delegates the new method."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/import_partition_view.rs",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L06",
+        "P-IUR-02",
+        "P-IUR-04"
+      ],
+      "summary": "Adds attach_unresolved_imports, LISTING_OMITTED_FORMS, call-site inventory row and six tests; admission F-M-001 change is test-only, with GREEN cert through import_cert_eligibility."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs",
+      "obligationIds": [
+        "P-IUR-06"
+      ],
+      "summary": "Orient decorator delegates the new method unchanged."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/tests.rs",
+      "obligationIds": [
+        "P-IUR-06"
+      ],
+      "summary": "Two test spies delegate the new method."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain.rs",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04",
+        "P-IUR-05"
+      ],
+      "summary": "Adds two explain render tests; existing fixtures gain unresolved_count: 0."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain_sections.rs",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04"
+      ],
+      "summary": "Adds explain bullet for imports without confirmed target: +K, unavailable, or unreadable."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/imports.rs",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L08",
+        "RG-REQ-002-L11",
+        "P-IUR-01",
+        "P-IUR-02"
+      ],
+      "summary": "Updates §2.2 wording, field states, zero-state and listing/view limit and coverage lines, fixture rule, four expectation changes and twelve new tests."
+    },
+    {
+      "path": "rust/crates/storage/src/agent_impl.rs",
+      "obligationIds": [
+        "RG-REQ-006-L12"
+      ],
+      "summary": "Port implementation delegates to the reader."
+    },
+    {
+      "path": "rust/crates/storage/src/queries.rs",
+      "obligationIds": [
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L11",
+        "P-IUR-03"
+      ],
+      "summary": "Adds find_unresolved_file_imports reader with candidate-key decode, three-state candidates, unreadable-row retention, and six tests."
+    },
+    {
+      "path": "rust/crates/storage/tests/import_reader_inventory.rs",
+      "obligationIds": [
+        "P-IUR-04"
+      ],
+      "summary": "Adds inventory row R18."
+    }
+  ],
+  "completedAt": "2026-10-03T10:41:59.846Z",
+  "limitations": [
+    "The workspace test run and dogfood are the operator's gates; the builder did not run them.",
+    "C06 serves over stdio, so the GREEN LiveGraph route is shown only by the IUR-C03 unit test."
+  ],
+  "report": "# IMPORTS-UNRESOLVED-REMAINDER-1, admission 2, revision 1: per-path obligation table for F-IUR-TRACE-1\n\nThe finding is about the verification record, not the code, so the candidate is unchanged. The working-tree diff still has the digest `da0de339fb02efde4cf0c86e0c881b27d0813533c76f0f6f3088f4119ae077fd` it had when the checks last ran (EXECUTED: `git diff HEAD | shasum -a 256` and the saved diff `/tmp/iur-cur.patch` give the same value). All earlier check evidence still applies to this exact candidate.\n\n## F-IUR-TRACE-1\n**Cause.** My previous report did not state the obligations for each changed path. It also pointed at the wrong file: `admission-1/build-1.md`, when the table is in `admission-1/build-0.md` under \"Changed files\". With no IDs stated, the record generator put the first `IMPLEMENT_OBLIGATION_ID`, RG-REQ-006-L01, on 21 paths. L01 is Rust crate-import resolution, and this slice does not touch it.\n\n**Rule I applied.** Every changed path is listed below with full obligation IDs taken from the build-0.md table. No row uses shorthand or refers the reader to another record. None of the 22 paths serves RG-REQ-006-L01.\n\n**For the operator (runtime defect, outside my allocation).** When a report gives no obligation for a path, the record generator falls back to the first `IMPLEMENT_OBLIGATION_ID`. That makes an unknown look like a real claim. It should record \"unstated\" and fail validation instead. I did not edit `verification-draft-0.json`, because the relay owns it.\n\n## Changed paths and the obligations they serve (all 22)\n\n| # | Path | Purpose | Obligation IDs |\n|---|---|---|---|\n| 1 | `docs/cli/rmap-contracts.md` | Contract section for the `imports <file>` rows without a confirmed target, and the amended \"SQLite-free migrated default paths\" sentence (D-IUR-FASTPATH, D-IUR-ENGINE-SCOPE) | RG-REQ-006-L12, P-IUR-02 (checks IUR-C05, IUR-C07) |\n| 2 | `rust/crates/agent/src/storage_port.rs` | `AgentUnresolvedImportEntry`, `UnresolvedCandidates` (NotRecorded / Paths / Unreadable), and the required port method `find_unresolved_file_imports` with no default body | RG-REQ-006-L12, RG-REQ-002-L11, P-IUR-06 |\n| 3 | `rust/crates/agent/src/lib.rs` | Re-exports the new port types | RG-REQ-006-L12 |\n| 4 | `rust/crates/agent/src/explain/mod.rs` | `explain` reads the unresolved rows and sets `unresolved_count`. The Imports section is now also emitted when the file has only unresolved rows | RG-REQ-006-L12, RG-REQ-002-L11, P-IUR-05 |\n| 5 | `rust/crates/agent/src/dto/signal.rs` | `ExplainImportsEvidence.unresolved_count` and the `Signal::explain_imports_evidence()` accessor | RG-REQ-006-L12, RG-REQ-002-L02, P-IUR-05 |\n| 6 | `rust/crates/agent/src/explain/coherent_tests.rs` | The struct literal gains the new field; no assertion changed | P-IUR-05 |\n| 7 | `rust/crates/agent/src/aggregators/complexity_tests.rs` | The test double implements the required method (`Ok(vec![])`) | P-IUR-06 |\n| 8 | `rust/crates/agent/tests/common/mod.rs` | `FakeAgentStorage` gets an unresolved-row map and a forced-failure path | P-IUR-06, RG-REQ-002-L04 |\n| 9 | `rust/crates/agent/tests/explain_file.rs` | 2 new explain tests; the existing test keeps its assertions | RG-REQ-006-L12, P-IUR-05 |\n| 10 | `rust/crates/storage/src/queries.rs` | The `find_unresolved_file_imports` reader (candidate-key decode, three-state candidates, row kept when unreadable) and 6 new tests | RG-REQ-006-L12, RG-REQ-002-L04, RG-REQ-002-L11, P-IUR-03 |\n| 11 | `rust/crates/storage/src/agent_impl.rs` | Port implementation that delegates to the reader | RG-REQ-006-L12 |\n| 12 | `rust/crates/storage/tests/import_reader_inventory.rs` | Inventory row R18 | P-IUR-04 |\n| 13 | `rust/crates/daemon-runtime/src/import_partition_view.rs` | `attach_unresolved_imports`, `LISTING_OMITTED_FORMS`, the call-site inventory row and 6 new tests. This admission's F-M-001 change is test-only: the GREEN cert now comes through `import_cert_eligibility` | RG-REQ-006-L12, RG-REQ-002-L04, RG-REQ-002-L06, P-IUR-02, P-IUR-04 |\n| 14 | `rust/crates/daemon-runtime/src/dispatch.rs` | `auto` and `sqlite` reach one partition step and one attach step; `livegraph` and `compare` return before the attach | RG-REQ-006-L12, P-IUR-01, P-IUR-02 |\n| 15 | `rust/crates/daemon-runtime/src/explain_lg_serve.rs` | The LiveGraph-served explain keeps the original `unresolved_count` | RG-REQ-002-L02, P-IUR-05 |\n| 16 | `rust/crates/daemon-runtime/src/explain_coherence_served_tests.rs` | New test `explain_imports_served_from_livegraph_keeps_the_unresolved_count`; the existing literal gains `None` | RG-REQ-002-L02, P-IUR-05 |\n| 17 | `rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs` | The orient decorator delegates the new method unchanged | P-IUR-06 |\n| 18 | `rust/crates/daemon-runtime/src/orient_serve/tests.rs` | Two test spies delegate the new method | P-IUR-06 |\n| 19 | `rust/crates/daemon-runtime/src/explain_serve_tests/spy.rs` | The test spy delegates the new method | P-IUR-06 |\n| 20 | `rust/crates/rgr/src/presentation/imports.rs` | The §2.2 wording, field states, zero-state, `listing limit:` / `listing coverage:` / `view limit:` lines, the fixture rule, the 4 listed expectation changes and 12 new tests | RG-REQ-006-L12, RG-REQ-002-L04, RG-REQ-002-L08, RG-REQ-002-L11, P-IUR-01, P-IUR-02 |\n| 21 | `rust/crates/rgr/src/presentation/explain_sections.rs` | The explain bullet for imports without a confirmed target: `+K`, unavailable, or unreadable | RG-REQ-006-L12, RG-REQ-002-L04 |\n| 22 | `rust/crates/rgr/src/presentation/explain.rs` | 2 new explain render tests; the existing fixtures gain `unresolved_count: 0` | RG-REQ-006-L12, RG-REQ-002-L04, P-IUR-05 |\n\nThe other allocated preserves (RG-REQ-006-L01 to L11 and L13; RG-REQ-002-L01, L03, L05, L07, L09 and L10) are not served by any changed path. They are held by the checks named in the allocation: IUR-C05 shows no index-time or resolver change and byte-identity outside the 22 paths, and IUR-C06 covers the field witnesses.\n\n## Checks (the candidate is the same as when these ran; logs in `.agent-manager/slices/IMPORTS-UNRESOLVED-REMAINDER-1/`)\n\n| Check | Result | Proving line |\n|---|---|---|\n| consolidation_witness | passed (EXECUTED) | `iur-witness.txt`: `test reader_set_matches_sanctioned_list_on_head ... ok`, `test result: ok. 15 passed; 0 failed` |\n| IUR-C01 | passed (EXECUTED) | `iur-01-admission-2.txt` line 555 `file_unresolved_imports_rows_carry_… ... ok` and line 844 inventory `... ok`; 825 tests listed (floor 825) |\n| IUR-C02 | passed (EXECUTED) | `iur-02-admission-2.txt` line 388 `explain_file_imports_section_counts_the_unresolved_imports ... ok`; 518 tests listed (floor 518) |\n| IUR-C03 | passed (EXECUTED) | `iur-03-admission-2.txt`: `882 passed; 0 failed; 1 ignored`; line 370 is the GREEN-route test `... ok`; 883 tests listed (floor 883) |\n| IUR-C04 | passed (EXECUTED) | `iur-04-admission-2.txt`: `1461 passed; 0 failed`; 1461 tests listed (floor 1461) |\n| IUR-C05 | passed (EXECUTED) | `iur-c05-run.txt`: exit 0 (fmt, clippy `-D warnings` on 4 crates, `diff --check`, porcelain = the 22 paths, `indexer:1.6.0`) |\n| IUR-C06 | passed (EXECUTED) | `c06-captures-admission-2/iur-c06-run.txt` ends `IUR-C06-OK`; all 17 captures are byte-identical to admission 1 |\n| IUR-C07 | not run by me | Reviewer inspection; review-0 recorded it as passed |\n\n## Witnesses from the analysed repositories\n- **amodx `admin/src/components/editor/Toolbar.tsx:3`** is `import { Button } from \"@/components/ui/button\";`. The candidate now prints `  @/components/ui/button  line 3  this repository? (specifier matches a tsconfig paths alias)`, one of the 8 rows under `8 imports without a confirmed target:`. Before, the answer was only `0 imports`.\n- **nginx `src/core/ngx_core.h:52`** is `#include <ngx_time.h>`. The candidate prints `… — 2 candidates: src/os/unix/ngx_time.h, src/os/win32/ngx_time.h · unknown (no classifier signal)` and does not pick either one.\n- **Residual, leveldb `table/table_test.cc:10`.** The source is `#include \"gtest/gtest.h\"`. The candidate prints `./gtest/gtest.h`, the specifier as the extractor recorded it.\n\n## Limitations\n- The workspace test run and the dogfood are the operator's gates; I did not run them.\n- C06 serves over stdio, so the GREEN LiveGraph route is shown only by the IUR-C03 unit test."
+}

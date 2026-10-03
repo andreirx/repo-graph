@@ -126,6 +126,11 @@ const INVENTORY: &[(&str, &str, &str)] = &[
         "unresolved_edges only — reads no edge",
     ),
     (
+        "queries.rs",
+        "find_unresolved_file_imports",
+        "R18: imports <file> / explain <file> unresolved rows — unresolved_edges only, every IMPORTS row of the file, category/classification/basis/candidates carried, never filtered",
+    ),
+    (
         "crud/module_edges_support.rs",
         "get_external_imports_for_snapshot",
         "deps list: unresolved_edges rows classified external_library_candidate (its own SQL reads no edge), plus the checked workspace import sites of checked_workspace_import_sites",

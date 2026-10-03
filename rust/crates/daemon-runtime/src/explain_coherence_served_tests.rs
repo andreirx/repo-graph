@@ -304,6 +304,7 @@ fn explain_imports_serves_live_view_from_livegraph() {
             }],
             items_truncated: None,
             items_omitted_count: None,
+            unresolved_count: None,
         })],
     );
     let env = build_explain_envelope(&state, REPO, result, false, false);
@@ -332,6 +333,74 @@ fn explain_imports_serves_live_view_from_livegraph() {
         "imports served from the field-exact import cert is single-source {{livegraph}}"
     );
     assert!(imports.provenance.fallback_reason.is_none());
+}
+
+/// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-002-L02): the rows without a confirmed target live in
+/// SQLite only; the LiveGraph-served Imports leaf keeps the SQLite primary's `unresolved_count`, so
+/// `explain <file>`'s bullet never depends on the serving route.
+#[test]
+fn explain_imports_served_from_livegraph_keeps_the_unresolved_count() {
+    let dir = tempdir().unwrap();
+    let (db_path, snapshot_uid) = build_db_with_calls(dir.path(), REPO, &[]);
+    let state = RepoState::open(&db_path, REPO).expect("open repo state");
+    *state.livegraph.write() = Some(cyclic_lg());
+    let importing_file = {
+        let guard = state.livegraph.read();
+        let lg = guard.as_ref().unwrap();
+        lg.live_import_view(None)
+            .edges
+            .first()
+            .map(|e| e.src_file.clone())
+            .expect("the cyclic fixture has an import edge")
+    };
+    seed_import_cert_green(&state, &snapshot_uid);
+
+    let result = explain_file_result(
+        &snapshot_uid,
+        &importing_file,
+        vec![Signal::explain_imports(ExplainImportsEvidence {
+            count: 1,
+            items: vec![ExplainImportItem {
+                target_file: "BOGUS_SQLITE_ONLY.ts".to_string(),
+            }],
+            items_truncated: None,
+            items_omitted_count: None,
+            unresolved_count: Some(8),
+        })],
+    );
+    let env = build_explain_envelope(&state, REPO, result, false, false);
+    let imports = env
+        .value
+        .signals
+        .iter()
+        .find(|l| l.value.code() == SignalCode::ExplainImports)
+        .expect("imports leaf present");
+    assert_eq!(
+        imports.provenance.source,
+        BTreeSet::from([Source::Livegraph]),
+        "the leaf is the LiveGraph-served value"
+    );
+    let items = served_items(&env, "EXPLAIN_IMPORTS");
+    assert!(
+        !items
+            .as_array()
+            .expect("items array")
+            .iter()
+            .any(|i| i["target_file"] == "BOGUS_SQLITE_ONLY.ts"),
+        "the value was rebuilt from the LiveGraph"
+    );
+    let json = serde_json::to_value(&env).expect("serialize envelope");
+    let evidence = json["value"]["signals"]
+        .as_array()
+        .expect("signals array")
+        .iter()
+        .find(|l| l["value"]["code"] == "EXPLAIN_IMPORTS")
+        .expect("EXPLAIN_IMPORTS leaf")["value"]["evidence"]
+        .clone();
+    assert_eq!(
+        evidence["unresolved_count"], 8,
+        "the LiveGraph-served leaf keeps the SQLite primary's unresolved count"
+    );
 }
 
 // ── Cycles: the walk-bearing SQLite primary is served and the leaf is labelled LiveGraphRenderUnsupported

@@ -594,6 +594,16 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
             .find_inferred_file_imports(snapshot_uid, file_path)
     }
 
+    // IMPORTS-UNRESOLVED-REMAINDER-1: verbatim delegation, like `find_file_imports`.
+    fn find_unresolved_file_imports(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<repo_graph_agent::AgentUnresolvedImportEntry>, AgentStorageError> {
+        self.inner
+            .find_unresolved_file_imports(snapshot_uid, file_path)
+    }
+
     // EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): the two type-focus reads are SQLite-served, a plain
     // delegation like `count_symbol_definitions_by_name` / `resolve_symbol` (ruling-B shape). There
     // is no LiveGraph answer class for a type's member set or its reverse-import fan-in, so they

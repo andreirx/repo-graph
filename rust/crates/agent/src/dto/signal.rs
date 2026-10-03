@@ -1137,6 +1137,12 @@ pub struct ExplainImportsEvidence {
     pub items_truncated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items_omitted_count: Option<u64>,
+    /// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12, RG-REQ-002-L04): the number of the file's
+    /// imports without a confirmed target (`find_unresolved_file_imports`). The agent builder always
+    /// sets `Some(K)`; `None` is serialized as an ABSENT key, which the renderer states as
+    /// unavailable — never read as zero.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unresolved_count: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1718,6 +1724,16 @@ impl Signal {
     pub fn explain_callers_evidence(&self) -> Option<ExplainCallersEvidence> {
         match &self.evidence {
             SignalEvidence::ExplainCallers(ev) => Some(ev.clone()),
+            _ => None,
+        }
+    }
+
+    /// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-002-L02): a clone of this signal's
+    /// `ExplainImportsEvidence` iff it is an `EXPLAIN_IMPORTS` signal (else `None`) — the LiveGraph
+    /// explain serve reads `unresolved_count` through it, so the bullet never depends on the route.
+    pub fn explain_imports_evidence(&self) -> Option<ExplainImportsEvidence> {
+        match &self.evidence {
+            SignalEvidence::ExplainImports(ev) => Some(ev.clone()),
             _ => None,
         }
     }

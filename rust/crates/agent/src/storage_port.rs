@@ -1219,6 +1219,20 @@ pub trait AgentStorageRead {
         file_path: &str,
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError>;
 
+    /// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12, RG-REQ-002-L11): every `unresolved_edges`
+    /// row of type IMPORTS whose source node's file is `file_path` — the file's imports that never
+    /// bound to an indexed file — ordered by line then target key, each with its stored category,
+    /// classification, basis code, ambiguity reason and candidate carrier. Never filtered by
+    /// category: a row this build has no phrase for is still a row.
+    ///
+    /// REQUIRED (no default body): a defaulted `Ok(Vec::new())` would render a silent zero on
+    /// `imports <file>` and `explain <file>` (RG-REQ-002-L04). A failed read is an error.
+    fn find_unresolved_file_imports(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<AgentUnresolvedImportEntry>, AgentStorageError>;
+
     /// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): list the DIRECT members of the type named by
     /// `qualified_name` — SYMBOL nodes whose `qualified_name` is `<qualified_name><sep><name>`
     /// (`sep` ∈ {`::`, `.`}) with no further `::`/`.` in `<name>`. Ordered so that members declared
@@ -1478,6 +1492,46 @@ pub struct AgentFileEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentImportEntry {
     pub target_file: String,
+}
+
+/// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12): one import of a file that did not bind to an
+/// indexed file — one `unresolved_edges` row of type IMPORTS, carried as stored.
+///
+/// - `target_key`: the stored key, verbatim.
+/// - `recorded_specifier`: `metadata_json.rawPath` when it is a string — the specifier as the
+///   extractor RECORDED it (a C/C++ quoted include `"x"` is recorded `./x`), not the source spelling.
+/// - `decoded_target_path`: the `<path>` of a `target_key` of the form `<repo_uid>:<path>:FILE` with
+///   the row's own `repo_uid`; `None` otherwise. Never a confirmed target: the row bound nothing.
+/// - `line`: the stored `line_start`, `None` when null.
+/// - `category` / `classification` / `basis_code`: the stored strings, verbatim (never remapped).
+/// - `basis`: `metadata_json.basis` (the candidate-set reason) when present; a non-string value is
+///   carried as its JSON text.
+/// - `candidates`: see [`UnresolvedCandidates`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentUnresolvedImportEntry {
+    pub target_key: String,
+    pub recorded_specifier: Option<String>,
+    pub decoded_target_path: Option<String>,
+    pub line: Option<u32>,
+    pub category: String,
+    pub classification: String,
+    pub basis_code: String,
+    pub basis: Option<String>,
+    pub candidates: UnresolvedCandidates,
+}
+
+/// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-002-L11): the candidate files an unresolved import row
+/// records, in three states — never collapsed into an empty list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnresolvedCandidates {
+    /// The row's metadata is null or has no `candidates` key (an include-root overlap, every Java
+    /// suffix/wildcard row, every file-not-found row). Not "zero candidates".
+    NotRecorded,
+    /// The recorded FILE stable keys `<repo_uid>:<path>:FILE`, decoded to paths in stored order.
+    Paths(Vec<String>),
+    /// The metadata is not a JSON object, `candidates` is not a non-empty array of strings, or a key
+    /// has another shape. The text quotes the offending value; the row is kept, never dropped.
+    Unreadable(String),
 }
 
 /// EXPLAIN-TYPE-SECTIONS-1 (RG-REQ-005-L04): one DIRECT member of a type — a SYMBOL node whose

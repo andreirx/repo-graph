@@ -455,3 +455,113 @@ fn explain_file_imports_list_certain_rows_and_count_inferred_ones() {
     );
     assert_eq!(ev["import_remainder"]["inferred"]["imports"], 2);
 }
+
+/// IMPORTS-UNRESOLVED-REMAINDER-1: one stored unresolved import row of `src/service.ts`.
+fn unresolved_row(target_key: &str, line: u32) -> repo_graph_agent::AgentUnresolvedImportEntry {
+    repo_graph_agent::AgentUnresolvedImportEntry {
+        target_key: target_key.into(),
+        recorded_specifier: Some(target_key.into()),
+        decoded_target_path: None,
+        line: Some(line),
+        category: "imports_file_not_found".into(),
+        classification: "external_library_candidate".into(),
+        basis_code: "specifier_matches_package_dependency".into(),
+        basis: None,
+        candidates: repo_graph_agent::UnresolvedCandidates::NotRecorded,
+    }
+}
+
+/// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12, RG-REQ-002-L04): explain <file>'s Imports
+/// evidence counts the file's imports without a confirmed target beside its certain rows; a failed
+/// unresolved read is an error of the explain, never a zero.
+#[test]
+fn explain_file_imports_section_counts_the_unresolved_imports() {
+    let mut fake = FakeAgentStorage::new();
+    seed_file_repo(&mut fake);
+    fake.file_imports.insert(
+        ("snap1".into(), "src/service.ts".into()),
+        vec![AgentImportEntry {
+            target_file: "src/model.ts".into(),
+        }],
+    );
+    fake.unresolved_file_imports.insert(
+        ("snap1".into(), "src/service.ts".into()),
+        vec![unresolved_row("react", 1), unresolved_row("lodash", 2)],
+    );
+    let result = run_explain(&fake, "r1", "src/service.ts", Budget::Medium, TEST_NOW).unwrap();
+    let sig = result
+        .signals
+        .iter()
+        .find(|s| s.code() == SignalCode::ExplainImports)
+        .expect("EXPLAIN_IMPORTS");
+    let ev = serde_json::to_value(sig).unwrap()["evidence"].clone();
+    assert_eq!(ev["count"], 1);
+    assert_eq!(
+        ev["items"],
+        serde_json::json!([{"target_file": "src/model.ts"}])
+    );
+    assert_eq!(ev["unresolved_count"], 2);
+    assert!(
+        ev.get("import_remainder").is_none(),
+        "no inferred remainder"
+    );
+
+    // A file with certain imports and no unresolved row carries a measured zero.
+    fake.unresolved_file_imports.clear();
+    let result = run_explain(&fake, "r1", "src/service.ts", Budget::Medium, TEST_NOW).unwrap();
+    let sig = result
+        .signals
+        .iter()
+        .find(|s| s.code() == SignalCode::ExplainImports)
+        .expect("EXPLAIN_IMPORTS");
+    assert_eq!(
+        serde_json::to_value(sig).unwrap()["evidence"]["unresolved_count"],
+        0
+    );
+
+    // A failed unresolved read fails the explain by name.
+    *fake.force_error_on.borrow_mut() = Some("find_unresolved_file_imports");
+    let err = run_explain(&fake, "r1", "src/service.ts", Budget::Medium, TEST_NOW)
+        .expect_err("a failed unresolved read is an error, never a zero");
+    assert!(
+        format!("{err:?}").contains("find_unresolved_file_imports"),
+        "{err:?}"
+    );
+}
+
+/// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-002-L11): a file whose only imports have no confirmed
+/// target gets an Imports section (count 0, unresolved_count K) — it was omitted before; a file
+/// with none of the three still gets no Imports section.
+#[test]
+fn explain_file_imports_section_is_emitted_when_only_unresolved_imports_exist() {
+    let mut fake = FakeAgentStorage::new();
+    seed_file_repo(&mut fake);
+    let codes = |fake: &FakeAgentStorage| -> Vec<SignalCode> {
+        run_explain(fake, "r1", "src/service.ts", Budget::Medium, TEST_NOW)
+            .unwrap()
+            .signals
+            .iter()
+            .map(|s| s.code())
+            .collect()
+    };
+    assert!(
+        !codes(&fake).contains(&SignalCode::ExplainImports),
+        "no import of any kind: no section"
+    );
+    fake.unresolved_file_imports.insert(
+        ("snap1".into(), "src/service.ts".into()),
+        (1..=8)
+            .map(|i| unresolved_row(&format!("pkg{i}"), i))
+            .collect(),
+    );
+    let result = run_explain(&fake, "r1", "src/service.ts", Budget::Medium, TEST_NOW).unwrap();
+    let sig = result
+        .signals
+        .iter()
+        .find(|s| s.code() == SignalCode::ExplainImports)
+        .expect("EXPLAIN_IMPORTS emitted for unresolved-only imports");
+    let ev = serde_json::to_value(sig).unwrap()["evidence"].clone();
+    assert_eq!(ev["count"], 0);
+    assert_eq!(ev["items"], serde_json::json!([]));
+    assert_eq!(ev["unresolved_count"], 8);
+}

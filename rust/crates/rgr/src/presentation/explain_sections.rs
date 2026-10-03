@@ -719,6 +719,37 @@ impl ExplainResponse {
             }
         }
 
+        // IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12, RG-REQ-002-L04): the file's imports
+        // without a confirmed target, with the command that lists them; a measured zero adds
+        // nothing (`imports <file>` states it); an ABSENT count is unavailable, never zero.
+        let file = self
+            .focus
+            .resolved_path
+            .as_deref()
+            .or(self.focus.input.as_deref())
+            .unwrap_or("<file>");
+        let command = format!(
+            "rmap imports {}",
+            crate::presentation::import_partition::shell_quote(file)
+        );
+        match evidence.get("unresolved_count") {
+            None => out.push_str(&bullet(&format!(
+                "imports without a confirmed target: unavailable from this daemon — {command}"
+            ))),
+            Some(v) => match v.as_u64() {
+                Some(0) => {}
+                Some(1) => out.push_str(&bullet(&format!(
+                    "+1 import without a confirmed target — {command}"
+                ))),
+                Some(k) => out.push_str(&bullet(&format!(
+                    "+{k} imports without a confirmed target — {command}"
+                ))),
+                None => out.push_str(&bullet(&format!(
+                    "imports without a confirmed target: unreadable — {command}"
+                ))),
+            },
+        }
+
         out
     }
 

@@ -326,6 +326,14 @@ impl<S: AgentStorageRead + ?Sized> AgentStorageRead for ServeSpy<'_, S> {
     ) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
         self.inner.find_inferred_file_imports(s, p)
     }
+    // IMPORTS-UNRESOLVED-REMAINDER-1: delegates to the inner port (SQLite-served on every route).
+    fn find_unresolved_file_imports(
+        &self,
+        s: &str,
+        p: &str,
+    ) -> Result<Vec<repo_graph_agent::AgentUnresolvedImportEntry>, AgentStorageError> {
+        self.inner.find_unresolved_file_imports(s, p)
+    }
     // EXPLAIN-TYPE-SECTIONS-1 (ETS-C04): explicit delegating overrides — SQLite-served (recorded as
     // allowed reads), NEVER panicking like the six (b) methods.
     fn list_members_of_type(

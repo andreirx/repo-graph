@@ -864,9 +864,14 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
     // TEST-EDGE-SCOPE-1B (RG-REQ-002-L11): certain imports listed; the inferred ones are counted
     // (`import_remainder.inferred.imports`) with `rmap imports <file> --include-inferred` to show
     // them. The file is the subject, so its imports stay whatever its test status.
+    //
+    // IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12, RG-REQ-002-L11): the file's imports without a
+    // confirmed target are counted too (`unresolved_count`), and a file whose only imports are those
+    // still gets the section. A failed read is the explain's error, never a zero.
     let mut imports = storage.find_file_imports(snapshot_uid, file_path)?;
     let inferred_imports = storage.find_inferred_file_imports(snapshot_uid, file_path)?;
-    if !imports.is_empty() || !inferred_imports.is_empty() {
+    let unresolved_imports = storage.find_unresolved_file_imports(snapshot_uid, file_path)?;
+    if !imports.is_empty() || !inferred_imports.is_empty() || !unresolved_imports.is_empty() {
         // TRUNCATION-AUDIT-1: order by target_file ASC BEFORE the cut (deterministic,
         // source-independent). Previously truncated in storage order.
         ordering::sort_explain_imports(&mut imports);
@@ -893,6 +898,7 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
                 items,
                 items_truncated: trunc,
                 items_omitted_count: omitted,
+                unresolved_count: Some(unresolved_imports.len() as u64),
             })
             .with_evidence_additions(additions),
         );

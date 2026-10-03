@@ -119,11 +119,18 @@ pub(crate) fn serve_imports(
         .map(|target_file| ExplainImportItem { target_file })
         .collect();
     let (items_truncated, items_omitted_count) = truncate(&mut items, cap);
+    // IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-002-L02): the rows without a confirmed target live in
+    // SQLite only; the LiveGraph-built leaf carries the original signal's count, so the bullet never
+    // depends on the serving route.
+    let unresolved_count = original
+        .explain_imports_evidence()
+        .and_then(|ev| ev.unresolved_count);
     let served = Signal::explain_imports(ExplainImportsEvidence {
         count,
         items,
         items_truncated,
         items_omitted_count,
+        unresolved_count,
     });
     (
         Some(original.adopt_rank_and_scope(served)),

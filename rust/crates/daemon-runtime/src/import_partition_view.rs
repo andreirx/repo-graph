@@ -368,6 +368,120 @@ pub(crate) fn partition_import_rows(
     Ok(())
 }
 
+/// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12, RG-REQ-002-L06): the import forms the
+/// TypeScript/JavaScript extractor READS but gives no IMPORTS edge, so `imports <file>` omits them
+/// — one table, per language. Each item restates a site of `ts-extractor/src/extractor.rs`:
+/// - `:191-225`: only top-level `import` statements and `export … from` statements reach
+///   `extract_import`, and only through an `import_statement`/`export_statement` `source` field
+///   (`import x = require("y")` keeps its source on `import_require_clause`);
+/// - `:1513-1527`: a type-only import or a re-export whose specifier has no leading dot returns
+///   before an edge is made (JavaScript has no type-only import);
+/// - `:1565-1592`: a dynamic `import()` is recorded as an observation only;
+/// - `:1612-1640`: `require()` produces bindings only.
+///
+/// Any other language — or an unknown one — has NO recorded list (`None` → JSON `null`); an empty
+/// list, which would read as complete coverage, is never emitted (F-IUR-08).
+const LISTING_OMITTED_FORMS: &[(&[&str], &[&str])] = &[
+    (
+        &["typescript", "tsx"],
+        &[
+            "type-only imports and re-exports from a specifier without a leading dot",
+            "dynamic import() and require() calls",
+            "import … = require(…) statements",
+            "import statements below the top level",
+        ],
+    ),
+    (
+        &["javascript", "jsx"],
+        &[
+            "re-exports from a specifier without a leading dot",
+            "dynamic import() and require() calls",
+        ],
+    ),
+];
+
+/// The recorded omitted forms of `language` ([`LISTING_OMITTED_FORMS`]), `None` when none is
+/// recorded for it.
+fn listing_omitted_forms(language: Option<&str>) -> Option<&'static [&'static str]> {
+    let language = language?;
+    LISTING_OMITTED_FORMS
+        .iter()
+        .find(|(languages, _)| languages.contains(&language))
+        .map(|(_, forms)| *forms)
+}
+
+/// IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12, RG-REQ-002-L04, RG-REQ-002-L11; D-IUR-FASTPATH):
+/// the ONE attach of a single-file `imports` answer's rows without a confirmed target, run after
+/// [`partition_import_rows`] on the `auto` and `sqlite` answers only (the `livegraph`/`compare`
+/// engines return before it — D-IUR-ENGINE-SCOPE). Adds:
+/// - `unresolved`: the file's `unresolved_edges` IMPORTS rows as stored (`target_key`,
+///   `recorded_specifier`, `decoded_target_path`, `line`, `category`, `classification`,
+///   `basis_code`, `basis`, `candidates` — every key present; `candidates` is `null` when not
+///   recorded, an array of paths, or `{"unreadable": text}`);
+/// - `unresolved_count`: its length;
+/// - `language`: the file's first language, `null` when none;
+/// - `listing_coverage`: `{"omitted_forms": [..] | null}` from [`LISTING_OMITTED_FORMS`];
+/// - `unresolved_source`: `"sqlite"` — the rows are read from SQLite on every route, so no answer
+///   claims a LiveGraph-only origin for them (`backend_used` names the resolved rows' source only).
+///
+/// A failed read is the request's `InternalError` naming the read — never an empty array.
+pub(crate) fn attach_unresolved_imports(
+    value: &mut Value,
+    storage: &dyn repo_graph_agent::AgentStorageRead,
+    snapshot_uid: &str,
+    file_path: &str,
+) -> Result<(), ErrorDetail> {
+    use repo_graph_agent::UnresolvedCandidates;
+    let internal = |e: repo_graph_agent::AgentStorageError| {
+        ErrorDetail::new(ErrorCode::InternalError, e.to_string())
+    };
+    let rows = storage
+        .find_unresolved_file_imports(snapshot_uid, file_path)
+        .map_err(internal)?;
+    let summary = storage
+        .compute_file_summary(snapshot_uid, file_path)
+        .map_err(internal)?;
+    let language = summary.languages.first().cloned();
+    let omitted_forms = listing_omitted_forms(language.as_deref());
+    let unresolved: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            let candidates = match &r.candidates {
+                UnresolvedCandidates::NotRecorded => Value::Null,
+                UnresolvedCandidates::Paths(paths) => json!(paths),
+                UnresolvedCandidates::Unreadable(text) => json!({ "unreadable": text }),
+            };
+            json!({
+                "target_key": r.target_key,
+                "recorded_specifier": r.recorded_specifier,
+                "decoded_target_path": r.decoded_target_path,
+                "line": r.line,
+                "category": r.category,
+                "classification": r.classification,
+                "basis_code": r.basis_code,
+                "basis": r.basis,
+                "candidates": candidates,
+            })
+        })
+        .collect();
+    let Some(obj) = value.as_object_mut() else {
+        return Err(ErrorDetail::new(
+            ErrorCode::InternalError,
+            "imports: the answer is not a JSON object; the rows without a confirmed target cannot \
+             be attached",
+        ));
+    };
+    obj.insert("unresolved_count".into(), json!(unresolved.len()));
+    obj.insert("unresolved".into(), Value::Array(unresolved));
+    obj.insert("language".into(), json!(language));
+    obj.insert(
+        "listing_coverage".into(),
+        json!({ "omitted_forms": omitted_forms }),
+    );
+    obj.insert("unresolved_source".into(), json!("sqlite"));
+    Ok(())
+}
+
 /// A named error for an `imports` row whose resolution cannot be classified.
 fn unreadable_import_row_error(row: &Value, why: &str) -> ErrorDetail {
     ErrorDetail::new(
@@ -1173,6 +1287,311 @@ mod tests {
         assert_eq!(err.code, "InvalidRequest");
     }
 
+    // ── IMPORTS-UNRESOLVED-REMAINDER-1 (RG-REQ-006-L12, D-IUR-FASTPATH, D-IUR-ENGINE-SCOPE) ────────
+
+    /// Insert one unresolved IMPORTS row of `source` (a FILE path of the store) into `conn`.
+    #[allow(clippy::too_many_arguments)]
+    fn insert_unresolved(
+        conn: &StorageConnection,
+        repo_uid: &str,
+        snap: &str,
+        uid: &str,
+        source_node_uid: &str,
+        target_key: &str,
+        line: u32,
+        category: &str,
+        classification: &str,
+        basis_code: &str,
+        metadata: Option<&str>,
+    ) {
+        let meta = metadata
+            .map(|m| format!("'{}'", m.replace('\'', "''")))
+            .unwrap_or_else(|| "NULL".into());
+        conn.execute_raw(&format!(
+            "INSERT INTO unresolved_edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, \
+             target_key, type, resolution, extractor, line_start, metadata_json, category, \
+             classification, classifier_version, basis_code, observed_at) VALUES ('{uid}', '{snap}', \
+             '{repo_uid}', '{source_node_uid}', '{target_key}', 'IMPORTS', 'static', 'test:1', {line}, \
+             {meta}, '{category}', '{classification}', 1, '{basis_code}', '2026-10-03T00:00:00Z')"
+        ))
+        .unwrap();
+    }
+
+    /// `mini_leveldb()` with three unresolved IMPORTS rows of `db/db.cc`: an external package, a
+    /// project alias, and an ambiguous basename with two recorded FILE candidates.
+    fn mini_leveldb_with_unresolved() -> Fx {
+        let fx = mini_leveldb();
+        let conn = fx.storage();
+        let (r, snap) = (fx.repo_uid.as_str(), fx.snap.as_str());
+        insert_unresolved(
+            &conn,
+            r,
+            snap,
+            "u1",
+            "f:db/db.cc",
+            "snappy",
+            3,
+            "imports_file_not_found",
+            "external_library_candidate",
+            "specifier_matches_package_dependency",
+            Some(r#"{"rawPath":"snappy"}"#),
+        );
+        insert_unresolved(
+            &conn,
+            r,
+            snap,
+            "u2",
+            "f:db/db.cc",
+            "@/port/port.h",
+            5,
+            "imports_file_not_found",
+            "internal_candidate",
+            "specifier_matches_project_alias",
+            None,
+        );
+        let candidates = format!(
+            r#"{{"basis":"ambiguous_basename","candidates":["{r}:util/util.cc:FILE","{r}:table/table.cc:FILE"]}}"#
+        );
+        insert_unresolved(
+            &conn,
+            r,
+            snap,
+            "u3",
+            "f:db/db.cc",
+            "env.h",
+            9,
+            "imports_ambiguous_match",
+            "unknown",
+            "no_supporting_signal",
+            Some(&candidates),
+        );
+        drop(conn);
+        fx
+    }
+
+    const UNRESOLVED_KEYS: [&str; 5] = [
+        "unresolved",
+        "unresolved_count",
+        "language",
+        "listing_coverage",
+        "unresolved_source",
+    ];
+
+    #[test]
+    fn imports_sqlite_route_carries_unresolved_rows_their_count_and_the_language() {
+        let fx = mini_leveldb_with_unresolved();
+        let v = fx.ok("imports", json!({"file": "db/db.cc", "engine": "sqlite"}));
+        // The listing's own keys are unchanged.
+        assert_eq!(v["file"], "db/db.cc");
+        assert_eq!(v["count"], 1);
+        assert_eq!(v["import_remainder"]["inferred"]["imports"], 1);
+        assert!(v.get("import_view").is_some());
+        assert_eq!(v["unresolved_count"], 3);
+        assert_eq!(v["language"], "cpp");
+        assert_eq!(
+            v["listing_coverage"],
+            json!({"omitted_forms": null}),
+            "no recorded list for cpp — null, never []"
+        );
+        assert_eq!(v["unresolved_source"], "sqlite");
+        assert_eq!(
+            v["unresolved"],
+            json!([
+                {
+                    "target_key": "snappy",
+                    "recorded_specifier": "snappy",
+                    "decoded_target_path": null,
+                    "line": 3,
+                    "category": "imports_file_not_found",
+                    "classification": "external_library_candidate",
+                    "basis_code": "specifier_matches_package_dependency",
+                    "basis": null,
+                    "candidates": null,
+                },
+                {
+                    "target_key": "@/port/port.h",
+                    "recorded_specifier": null,
+                    "decoded_target_path": null,
+                    "line": 5,
+                    "category": "imports_file_not_found",
+                    "classification": "internal_candidate",
+                    "basis_code": "specifier_matches_project_alias",
+                    "basis": null,
+                    "candidates": null,
+                },
+                {
+                    "target_key": "env.h",
+                    "recorded_specifier": null,
+                    "decoded_target_path": null,
+                    "line": 9,
+                    "category": "imports_ambiguous_match",
+                    "classification": "unknown",
+                    "basis_code": "no_supporting_signal",
+                    "basis": "ambiguous_basename",
+                    "candidates": ["util/util.cc", "table/table.cc"],
+                },
+            ])
+        );
+        // A file with no unresolved row carries a measured zero, never an absent key.
+        let t = fx.ok(
+            "imports",
+            json!({"file": "table/table.cc", "engine": "sqlite"}),
+        );
+        assert_eq!(t["unresolved"], json!([]));
+        assert_eq!(t["unresolved_count"], 0);
+    }
+
+    #[test]
+    fn imports_auto_route_carries_the_same_unresolved_rows_as_the_sqlite_route() {
+        let fx = mini_leveldb_with_unresolved();
+        let sqlite = fx.ok("imports", json!({"file": "db/db.cc", "engine": "sqlite"}));
+        let auto = fx.ok("imports", json!({"file": "db/db.cc"}));
+        assert!(
+            auto.get("backend_used").is_some(),
+            "the auto answer keeps its backend label"
+        );
+        for key in UNRESOLVED_KEYS {
+            assert_eq!(auto[key], sqlite[key], "{key}");
+        }
+        assert_eq!(auto["count"], sqlite["count"]);
+    }
+
+    #[test]
+    fn imports_unresolved_read_failure_is_an_error_never_an_empty_list() {
+        let fx = mini_leveldb_with_unresolved();
+        fx.storage()
+            .execute_raw("DROP TABLE unresolved_edges")
+            .unwrap();
+        for extra in [
+            json!({"file": "db/db.cc", "engine": "sqlite"}),
+            json!({"file": "db/db.cc"}),
+            json!({"file": "db/db.cc", "include_inferred": true}),
+        ] {
+            let err = fx
+                .call("imports", extra.clone())
+                .expect_err("a failed unresolved read fails the request");
+            assert_eq!(err.code, ErrorCode::InternalError.as_str(), "{extra}");
+            assert!(
+                err.message.contains("find_unresolved_file_imports"),
+                "{extra}: the error names the read: {}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn imports_livegraph_and_compare_engines_carry_no_unresolved_key() {
+        let fx = mini_leveldb_with_unresolved();
+        for engine in ["livegraph", "compare"] {
+            for extra in [
+                json!({"file": "db/db.cc", "engine": engine}),
+                json!({"engine": engine}),
+            ] {
+                let v = fx.ok("imports", extra.clone());
+                for key in UNRESOLVED_KEYS {
+                    assert!(v.get(key).is_none(), "{extra}: {key} present: {v}");
+                }
+            }
+        }
+    }
+
+    /// D-IUR-FASTPATH (human, option A): on a GREEN import certificate the `auto` answer is served
+    /// from the resident LiveGraph (`backend_used: "livegraph"`), and its rows without a confirmed
+    /// target are still read from SQLite and named as such. The three calls are `handle_imports`'s
+    /// `auto` arm in order (IUR-C07 criterion 2 covers that the dispatcher reaches this one attach).
+    #[test]
+    fn imports_auto_route_on_a_green_cert_reads_the_unresolved_rows_from_sqlite_and_names_the_source(
+    ) {
+        use crate::callgraph_cert::test_fixture;
+        use crate::livegraph_feed::{import_cert_eligibility, imports_auto_response, RequestEpoch};
+        use repo_graph_agent::AgentStorageRead;
+        let f = test_fixture::build_fixture(false);
+        let file = test_fixture::CALLER_PATH;
+        {
+            let conn = f.state.storage().unwrap();
+            // `nf0` is the fixture's FILE node of CALLER_PATH (test_fixture::build_sqlite_mirror).
+            insert_unresolved(
+                &conn,
+                test_fixture::REPO,
+                &f.snapshot_uid,
+                "u_green",
+                "nf0",
+                "react",
+                2,
+                "imports_file_not_found",
+                "external_library_candidate",
+                "specifier_matches_package_dependency",
+                Some(r#"{"rawPath":"react"}"#),
+            );
+        }
+        // F-M-001: the GREEN certificate is obtained through the sanctioned build-then-peek path
+        // (`import_cert_eligibility` builds and stores the import cert at the resident fingerprint);
+        // this module reads no LiveGraph field (the consolidation witness's reader manifest).
+        let storage = f.state.storage().unwrap();
+        let serve = |route: &str| -> Value {
+            let snapshot = AgentStorageRead::get_latest_snapshot(&storage, test_fixture::REPO)
+                .unwrap()
+                .unwrap();
+            let mut value = if route == "auto" {
+                let fingerprint =
+                    import_cert_eligibility(&f.state, test_fixture::REPO, &snapshot.snapshot_uid);
+                assert!(fingerprint.is_some(), "GREEN import cert -> eligible");
+                let epoch = RequestEpoch {
+                    snapshot,
+                    fingerprint,
+                };
+                imports_auto_response(&f.state, test_fixture::REPO, &epoch, file)
+            } else {
+                let rows = storage
+                    .find_imports(
+                        &f.snapshot_uid,
+                        &format!("{}:{file}:FILE", test_fixture::REPO),
+                    )
+                    .unwrap();
+                json!({"file": file, "imports": rows, "count": rows.len()})
+            };
+            partition_import_rows(&mut value, ImportView::DEFAULT).unwrap();
+            attach_unresolved_imports(&mut value, &storage, &f.snapshot_uid, file).unwrap();
+            value
+        };
+        let green = serve("auto");
+        assert_eq!(
+            green["backend_used"], "livegraph",
+            "the resolved rows are served from the LiveGraph"
+        );
+        assert_eq!(green["comparison"]["source"], "repo_no_loss_certificate");
+        assert_eq!(green["unresolved_source"], "sqlite");
+        assert_eq!(green["unresolved_count"], 1);
+        assert_eq!(green["unresolved"][0]["target_key"], "react");
+        let sqlite = serve("sqlite");
+        assert_eq!(sqlite["unresolved_source"], "sqlite");
+        for key in UNRESOLVED_KEYS {
+            assert_eq!(green[key], sqlite[key], "{key}");
+        }
+        // A storage error on the unresolved read fails the GREEN route by name, too.
+        storage.execute_raw("DROP TABLE unresolved_edges").unwrap();
+        let snapshot = AgentStorageRead::get_latest_snapshot(&storage, test_fixture::REPO)
+            .unwrap()
+            .unwrap();
+        let fingerprint =
+            import_cert_eligibility(&f.state, test_fixture::REPO, &snapshot.snapshot_uid);
+        let epoch = RequestEpoch {
+            snapshot,
+            fingerprint,
+        };
+        let mut value = imports_auto_response(&f.state, test_fixture::REPO, &epoch, file);
+        assert_eq!(value["backend_used"], "livegraph");
+        partition_import_rows(&mut value, ImportView::DEFAULT).unwrap();
+        let err = attach_unresolved_imports(&mut value, &storage, &f.snapshot_uid, file)
+            .expect_err("a failed read is an error, never an empty array");
+        assert_eq!(err.code, ErrorCode::InternalError.as_str());
+        assert!(
+            err.message.contains("find_unresolved_file_imports"),
+            "{}",
+            err.message
+        );
+    }
+
     // ── D-TESB-17: unknown is never zero (rows U6, U8, U9, U10, W7–W9) ─────────────────────
 
     fn cycle_item(nodes: Value) -> Value {
@@ -1518,6 +1937,7 @@ mod tests {
         "find_file_importers",
         "find_file_imports",
         "find_inferred_file_imports",
+        "find_unresolved_file_imports",
         "import_cycle_partition",
         "load_module_graph_facts",
         "find_boundary_imports",
@@ -1627,6 +2047,12 @@ mod tests {
             "sqlite_cycles_body",
             "find_cycles",
             "R3b: the view's directory graph",
+        ),
+        (
+            "import_partition_view.rs",
+            "attach_unresolved_imports",
+            "find_unresolved_file_imports",
+            "R18: the one per-file unresolved attach, after partition_import_rows, on the auto and sqlite answers only",
         ),
         (
             "livegraph_feed.rs",

@@ -116,7 +116,11 @@ in-memory LiveGraph beside the SQLite snapshot).
 Source: `rust/crates/rgr/src/commands/graph.rs` (`extract_engine_flag`, default `"auto"`);
 daemon routing in `rust/crates/daemon-runtime/src/dispatch.rs`. These six are the
 "SQLite-free migrated default paths" — on a GREEN cert the default serves no `nodes`/`edges`
-SQLite read for the migrated answer.
+SQLite read for the migrated answer. Amended for `imports` (IMPORTS-UNRESOLVED-REMAINDER-1,
+D-IUR-FASTPATH): `imports`' default answer reads SQLite for the rows without a confirmed target
+on every route, including a GREEN-certified LiveGraph serve, and a failed read fails the request;
+`backend_used` names the source of `imports`/`count` only, and `unresolved_source: "sqlite"` names
+the source of `unresolved`/`unresolved_count`. The other five migrated defaults are unchanged.
 
 **`--json` routing metadata.** Under `--engine auto`, the JSON envelope carries
 `backend_used` and (on fallback) `fallback_reason`; the human renderer strips them so the
@@ -158,6 +162,116 @@ rmap imports [<file>] [--engine auto|sqlite|livegraph|compare] [--json]
 - `livegraph`: `<file>` is **OPTIONAL** — omit it for a repo-wide import view.
 - `compare`: with `<file>` → per-file readiness; without `<file>` → a repo-wide readiness
   aggregate.
+
+### `imports <file>` — unresolved rows (IMPORTS-UNRESOLVED-REMAINDER-1)
+
+RG-REQ-006-L12: the single-file `auto` (default) and `sqlite` answers list the file's imports that
+never bound to an indexed file (`unresolved_edges` rows of type IMPORTS) beside the resolved rows.
+Source: `storage/src/queries.rs` `find_unresolved_file_imports`; the one attach
+`daemon-runtime/src/import_partition_view.rs` `attach_unresolved_imports`; the render
+`rgr/src/presentation/imports.rs`.
+
+**Engine scope (D-IUR-ENGINE-SCOPE).** With `<file>`, `--engine livegraph` (the in-memory import
+read model) and `--engine compare` (the LiveGraph-vs-SQLite readiness view) answer that one file but
+are diagnostic views: they carry no `unresolved` key and their human render says
+`view limit: this view does not list imports without a confirmed target — rmap imports <file> does`
+(directly after the render's first line; `<file>` shell-quoted). The rows without a confirmed target
+are listed by the `auto` (default) and `sqlite` answers. The repo-wide livegraph view and the
+readiness report print no such line.
+
+**Source (D-IUR-FASTPATH).** `imports`' default answer reads SQLite for the rows without a confirmed
+target on every route, including a GREEN-certified LiveGraph serve, and a failed read fails the
+request (`InternalError`, naming `find_unresolved_file_imports`) — never an empty array.
+`backend_used` names the source of `imports`/`count` only; `unresolved_source: "sqlite"` names the
+source of `unresolved`/`unresolved_count`. The human render shows neither routing field.
+
+**JSON keys (additive):**
+
+| Key | Value |
+|-----|-------|
+| `unresolved` | array of `{target_key, recorded_specifier, decoded_target_path, line, category, classification, basis_code, basis, candidates}` ordered by line then target key; every key present |
+| `unresolved[].target_key` | the stored key, verbatim |
+| `unresolved[].recorded_specifier` | the extractor's recorded `rawPath` (a C/C++ quoted include `"x"` is recorded `./x`; a TS/JS import as spelled), `null` when none is stored |
+| `unresolved[].decoded_target_path` | the `<path>` of a key `<repo_uid>:<path>:FILE` of this repo, else `null` — never a confirmed target |
+| `unresolved[].line` | the stored line, `null` when not stored |
+| `unresolved[].category` / `classification` / `basis_code` | the stored codes, verbatim |
+| `unresolved[].basis` | the candidate-set reason (metadata `basis`), `null` when not recorded |
+| `unresolved[].candidates` | `null` (not recorded), an array of paths (every candidate, stored order), or `{"unreadable": "<text>"}` |
+| `unresolved_count` | the number of `unresolved` rows |
+| `language` | the file's language, `null` when none |
+| `listing_coverage` | `{"omitted_forms": [..] | null}` — the import forms the TypeScript/JavaScript extractor reads but gives no IMPORTS edge (`typescript`/`tsx`: four forms; `javascript`/`jsx`: two); `null` for every other language — no list is recorded for it (never `[]`) |
+| `unresolved_source` | `"sqlite"` |
+
+**Human wording** (after the resolved rows and the partition lines, no blank line inserted):
+
+```
+{K} imports without a confirmed target:            # `1 import without a confirmed target:`
+  {target}  line {n}  {category phrase}{reason clause}{candidate clause} · {classification phrase} ({basis phrase})
+```
+
+- `{target}`: `recorded_specifier`; else `decoded_target_path` followed by
+  `(decoded from the stored key — not a confirmed target)`; else `target_key` verbatim.
+  `line ?` when the line is null. The ` · ` is dropped when the first part is empty; a candidate
+  clause that would open the first part drops its ` — ` prefix.
+- Category phrases (each the predicate at its assignment site, D-AGENT-USEFULNESS-FRAME-1):
+  `imports_file_not_found` → none (the header is its predicate); `imports_ambiguous_match` →
+  `several indexed files matched`; `imports_ambiguous_suffix` →
+  `several indexed .java files end with the specifier's path (or a prefix of it)`;
+  `imports_wildcard` → `wildcard import`; any other →
+  `{verbatim} (no phrase for this category in this build)`.
+- Reason clause (from `basis`, on any category): `ambiguous_basename` →
+  ` (same file name in {m} places)`; `ambiguous_suffix` → ` (same path suffix in {m} places)` —
+  `{m}` the number of recorded candidate paths, ` (same file name in several places)` /
+  ` (same path suffix in several places)` when none are recorded; `ambiguous_workspace_source_entry`
+  → ` (several workspace source entries)`; any other →
+  ` ({verbatim} (no phrase for this reason in this build))`; absent → ` (reason not recorded)` after
+  `several indexed files matched`, nothing elsewhere. On a category without a phrase the reason
+  clause prints bare (no parentheses) as the first part.
+- Candidate clause (prefix ` — `; always after the two ambiguity categories, otherwise only for a
+  path list or an unreadable carrier): `{m} candidates: {p1}, {p2}, …` |
+  `candidate paths not recorded with this import` | `candidates unreadable ("{text}")`.
+- Classification phrases (a question, never an assertion): `external library?` |
+  `this repository?` | `framework boundary?` | `unknown` |
+  `{verbatim} (no phrase for this classification in this build)`.
+- Basis phrases: `relative_import_target_unresolved` →
+  `recorded specifier starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE`;
+  `specifier_matches_package_dependency` → `specifier matches a dependency declared in the manifest`;
+  `specifier_matches_runtime_module` →
+  `specifier or its part before :: is on the runtime-module list of this build`;
+  `specifier_matches_project_alias` → `specifier matches a tsconfig paths alias`;
+  `rust_crate_internal_module_heuristic` →
+  `metadata carries a specifier and no rawPath, and the specifier's first segment before :: starts with a lowercase letter and holds only lowercase letters, digits or underscores`;
+  `no_supporting_signal` → `no classifier signal`; any other →
+  `{verbatim} (no phrase for this basis in this build)`.
+- Coverage line (exactly one, after the block, outside the zero-state): a non-empty
+  `omitted_forms` → `listing limit: this listing omits {items} — open the file for those` (items
+  joined by `, ` and the last by ` or `); `null` → `listing coverage: not recorded for {lang} — open the file to confirm`
+  (`listing coverage: not recorded (language not recorded) — open the file to confirm` when the
+  language is not recorded); absent `listing_coverage` →
+  `listing coverage: unavailable from this daemon`; any other shape (an empty array included) →
+  `listing limit: unreadable`.
+
+**Field states (RG-REQ-002-L04):** `unresolved` absent →
+`imports without a confirmed target: unavailable from this daemon — upgrade rmapd`; malformed →
+`imports without a confirmed target: unreadable ({why})`; `unresolved_count` missing, not a
+non-negative integer, or ≠ rows → `imports without a confirmed target: unreadable (count {c} disagrees with {n} rows)`;
+zero rows outside the zero-state → `0 imports without a confirmed target` (a measured zero).
+
+**Zero-state** (no listed row, a stated partition with no inferred remainder, zero rows without a
+confirmed target): the count line becomes
+`0 imports (language: {lang}; this index lists no imports for this file{coverage})` with `{coverage}`
+one of ` — this listing omits {items}`, ` — listing coverage not recorded for {lang}`,
+` — listing coverage not recorded (language not recorded)`,
+` — listing coverage unavailable from this daemon`, ` — listing coverage unreadable`; no separate
+coverage line.
+
+**`explain <file>`:** the Imports evidence carries `unresolved_count` (the same storage read); the
+section is emitted when the file has resolved, inferred or unresolved imports. Bullet:
+`+{K} imports without a confirmed target — rmap imports {file}`
+(`+1 import without a confirmed target — rmap imports {file}`) when K > 0; nothing when K = 0;
+`imports without a confirmed target: unavailable from this daemon — rmap imports {file}` when the
+field is absent; `imports without a confirmed target: unreadable — rmap imports {file}` when it is
+not a non-negative integer. The LiveGraph-served Imports leaf carries the same count.
 
 ### `stats` — `--engine`
 
