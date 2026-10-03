@@ -75,6 +75,9 @@ pub fn is_contract_extension(ext: &str) -> bool {
 /// Mirror of `RECOGNIZED_CONFIGS` from `invalidation.rs`.
 pub fn is_config_file(path: &str) -> bool {
     let filename = path.rsplit('/').next().unwrap_or(path);
+    if is_tsconfig_or_jsconfig_json_name(filename) {
+        return true;
+    }
     matches!(
         filename,
         "package.json"
@@ -95,6 +98,17 @@ pub fn is_config_file(path: &str) -> bool {
             // ("N pom.xml present, not parsed") honestly instead of a transient "resolution downgraded".
             | "pom.xml"
     )
+}
+
+/// TS-ALIAS-RESOLUTION-1 (D-TSA-REFRESH-SCOPE-1): is `filename` (a last path segment) a TypeScript
+/// or JavaScript project config of the `tsconfig*.json` / `jsconfig*.json` family — it starts with
+/// `tsconfig` or `jsconfig` and ends with `.json`, case-sensitive (`tsconfig.app.json`,
+/// `tsconfig.base.json`, `jsconfig.json`; not `mytsconfig.json`, `tsconfig.jsonc`). The alias
+/// reader follows referenced and extended project configs under such names, so both config tables
+/// (this file's [`is_config_file`] and `invalidation.rs`'s planner table) recognise the family.
+pub(crate) fn is_tsconfig_or_jsconfig_json_name(filename: &str) -> bool {
+    (filename.starts_with("tsconfig") || filename.starts_with("jsconfig"))
+        && filename.ends_with(".json")
 }
 
 /// Detect the contract kind for a file path based on its extension.
@@ -870,6 +884,60 @@ mod tests {
         assert!(!is_source_extension(".json"));
         assert!(!is_source_extension(".toml"));
         assert!(!is_source_extension(".yaml"));
+    }
+
+    // ── TS-ALIAS-RESOLUTION-1 (D-TSA-REFRESH-SCOPE-1): the tsconfig*/jsconfig*.json family ──
+
+    /// The family's positive and negative names (`invalidation.rs`'s tests list the same).
+    const TS_JS_CONFIG_FAMILY_NAMES: &[&str] = &[
+        "tsconfig.app.json",
+        "frontend/tsconfig.node.json",
+        "tsconfig.base.json",
+        "tsconfig-build.json",
+        "jsconfig.paths.json",
+        "tsconfig.json",
+        "jsconfig.json",
+    ];
+    const NOT_TS_JS_CONFIG_FAMILY_NAMES: &[&str] = &[
+        "src/data.json",
+        "mytsconfig.json",
+        "tsconfig.jsonc",
+        "tsconfig.json.bak",
+        "tsconfig.ts",
+        "src/tsconfig/index.ts",
+        "TSConfig.app.json",
+    ];
+
+    #[test]
+    fn config_file_matches_the_tsconfig_and_jsconfig_json_family() {
+        for name in TS_JS_CONFIG_FAMILY_NAMES {
+            assert!(is_config_file(name), "{name} is a config file");
+        }
+        for name in NOT_TS_JS_CONFIG_FAMILY_NAMES {
+            assert!(!is_config_file(name), "{name} is not a config file");
+        }
+    }
+
+    #[test]
+    fn config_file_keeps_every_name_it_recognised_before_the_family() {
+        for name in [
+            "package.json",
+            "pnpm-workspace.yaml",
+            "tsconfig.json",
+            "jsconfig.json",
+            "Cargo.toml",
+            "build.gradle",
+            "build.gradle.kts",
+            "settings.gradle",
+            "settings.gradle.kts",
+            "pyproject.toml",
+            "requirements.txt",
+            "compile_commands.json",
+            "pom.xml",
+        ] {
+            assert!(is_config_file(name), "{name} at the root");
+            assert!(is_config_file(&format!("a/b/{name}")), "{name} nested");
+        }
     }
 
     #[test]

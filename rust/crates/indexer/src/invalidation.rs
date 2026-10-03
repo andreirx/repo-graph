@@ -100,10 +100,13 @@ const RECOGNIZED_CONFIGS: &[&str] = &[
     "compile_commands.json",
 ];
 
-/// Check if a filename (last path segment) is a recognized config.
+/// Check if a filename (last path segment) is a recognized config: a name of
+/// [`RECOGNIZED_CONFIGS`], or a `tsconfig*.json` / `jsconfig*.json` project config
+/// (TS-ALIAS-RESOLUTION-1, D-TSA-REFRESH-SCOPE-1).
 fn is_recognized_config(path: &str) -> bool {
     let filename = path.rsplit('/').next().unwrap_or(path);
     RECOGNIZED_CONFIGS.contains(&filename)
+        || crate::routing::is_tsconfig_or_jsconfig_json_name(filename)
 }
 
 /// Build the invalidation plan.
@@ -295,6 +298,94 @@ mod tests {
         let plan = build_invalidation_plan("snap1", &parent, &current, "r1");
         assert_eq!(plan.counts.deleted, 1);
         assert_eq!(plan.files_to_delete, vec!["src/old.ts"]);
+    }
+
+    // ── TS-ALIAS-RESOLUTION-1 (D-TSA-REFRESH-SCOPE-1): the tsconfig*/jsconfig*.json family ──
+
+    #[test]
+    fn recognized_config_matches_the_tsconfig_and_jsconfig_json_family() {
+        for name in [
+            "tsconfig.app.json",
+            "frontend/tsconfig.node.json",
+            "tsconfig.base.json",
+            "tsconfig-build.json",
+            "jsconfig.paths.json",
+            "tsconfig.json",
+            "jsconfig.json",
+        ] {
+            assert!(is_recognized_config(name), "{name} is recognised");
+        }
+        // Absent from RECOGNIZED_CONFIGS at HEAD; recognised through the family.
+        assert!(is_recognized_config("jsconfig.json"));
+        for name in [
+            "src/data.json",
+            "mytsconfig.json",
+            "tsconfig.jsonc",
+            "tsconfig.json.bak",
+            "tsconfig.ts",
+            "src/tsconfig/index.ts",
+            "TSConfig.app.json",
+        ] {
+            assert!(!is_recognized_config(name), "{name} is not recognised");
+        }
+    }
+
+    #[test]
+    fn recognized_config_keeps_every_name_it_listed_before_the_family() {
+        for name in [
+            "package.json",
+            "pnpm-workspace.yaml",
+            "tsconfig.json",
+            "Cargo.toml",
+            "build.gradle",
+            "build.gradle.kts",
+            "settings.gradle",
+            "settings.gradle.kts",
+            "pyproject.toml",
+            "compile_commands.json",
+        ] {
+            assert!(is_recognized_config(name), "{name} at the root");
+            assert!(
+                is_recognized_config(&format!("a/b/{name}")),
+                "{name} nested"
+            );
+        }
+        // Only routing lists these two; the HEAD asymmetry is kept.
+        assert!(!is_recognized_config("requirements.txt"));
+        assert!(!is_recognized_config("pom.xml"));
+    }
+
+    #[test]
+    fn changed_nested_tsconfig_app_json_widens_only_its_subdirectory() {
+        let parent = make_parent_hashes(
+            &[
+                ("frontend/tsconfig.app.json", "old"),
+                ("frontend/src/App.tsx", "h1"),
+                ("admin/src/main.tsx", "h2"),
+            ],
+            "r1",
+        );
+        let current = vec![
+            make_current("frontend/tsconfig.app.json", "new", "r1"),
+            make_current("frontend/src/App.tsx", "h1", "r1"),
+            make_current("admin/src/main.tsx", "h2", "r1"),
+        ];
+        let plan = build_invalidation_plan("snap1", &parent, &current, "r1");
+        let of = |path: &str| plan.files.iter().find(|f| f.path == path).unwrap();
+        assert_eq!(
+            of("frontend/tsconfig.app.json").disposition,
+            Disposition::Changed
+        );
+        assert_eq!(
+            of("frontend/src/App.tsx").disposition,
+            Disposition::ConfigWidened
+        );
+        assert_eq!(
+            of("frontend/src/App.tsx").reason,
+            "config changed: frontend/tsconfig.app.json"
+        );
+        assert_eq!(of("admin/src/main.tsx").disposition, Disposition::Unchanged);
+        assert_eq!(plan.counts.config_widened, 1);
     }
 
     #[test]

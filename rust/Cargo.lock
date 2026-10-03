@@ -2336,6 +2336,7 @@ dependencies = [
  "regex",
  "repo-graph-boundary-interaction",
  "repo-graph-classification",
+ "repo-graph-import-resolver",
  "repo-graph-proto-parser",
  "serde",
  "serde_json",

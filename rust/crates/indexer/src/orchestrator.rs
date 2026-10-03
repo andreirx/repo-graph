@@ -29,7 +29,7 @@ use artifact_contracts::{get_contract, ArtifactFamily, RefreshPolicy};
 use repo_graph_classification::classify_unresolved_edge;
 use repo_graph_classification::types::{
     FileSignals, PackageDependencySet, RuntimeBuiltinsSet, SnapshotSignals, SourceLocation,
-    TsconfigAliases,
+    StoredTsconfigAliases, TsconfigAliases,
 };
 
 use crate::extractor_port::{ExtractorError, ExtractorPort};
@@ -65,7 +65,12 @@ const COPIED_SIGNALS_READ_CHUNK: usize = 500;
 /// tracked-only (contract, config) writers take them, so stored `is_test` moves.
 /// 1.6.0 (TS-WORKSPACE-RESOLUTION-1): a bare TS import naming an npm workspace member can bind
 /// INFERRED to the member's source entry, so stored IMPORTS edges and unresolved rows move.
-pub const INDEXER_VERSION: &str = "indexer:1.6.0";
+/// 1.7.0 (TS-ALIAS-RESOLUTION-1): a TS import matched by the `paths` of the sole inspected tsconfig
+/// project covering its file (the nearest `tsconfig.json` and its one-level `references` are the
+/// inspected projects) binds STATIC to the one indexed file TypeScript's selection reaches, and the
+/// stored alias signal gains that inspected project's mapping, so IMPORTS edges, unresolved rows and
+/// `file_signals` move; every TS store re-indexes.
+pub const INDEXER_VERSION: &str = "indexer:1.7.0";
 
 // ── Error type ───────────────────────────────────────────────────
 
@@ -146,8 +151,10 @@ pub struct FileInput {
     /// raw JSON — the caller parses at the adapter boundary.
     pub package_dependencies: Option<PackageDependencySet>,
     /// Pre-computed tsconfig path aliases for this file's nearest
-    /// owning tsconfig.json. Typed, not raw JSON.
-    pub tsconfig_aliases: Option<TsconfigAliases>,
+    /// owning tsconfig.json. Typed, not raw JSON. TS-ALIAS-RESOLUTION-1: beside them, the
+    /// effective `paths` mapping of the one inspected tsconfig project covering the file, when
+    /// exactly one covers it (the `paths` stage's input).
+    pub tsconfig_aliases: Option<StoredTsconfigAliases>,
 }
 
 /// Config file state for invalidation planning.
@@ -937,6 +944,9 @@ fn run_pipeline<S: IndexerStoragePort>(
         rust_crate_roots,
         java_suffix_index,
         npm_workspace_packages,
+        // TS-ALIAS-RESOLUTION-1: built below, once every file's signal row (copied-forward rows
+        // included) is in `all_signals`.
+        tsconfig_paths: Default::default(),
     };
 
     for node in &resolver_nodes {
@@ -1038,6 +1048,19 @@ fn run_pipeline<S: IndexerStoragePort>(
 
     // Build import bindings by file for call resolution.
     let import_bindings_by_file = build_import_bindings_map(&all_signals);
+
+    // TS-ALIAS-RESOLUTION-1 (RG-REQ-006-L04): each file's `paths` mapping of its sole inspected
+    // covering project, from the same signal rows (fresh and copied-forward), and the FILE
+    // inventory the `paths` stage matches against. Empty (a no-op) when no row carries a mapping.
+    index.tsconfig_paths = crate::tsconfig_paths_import::TsconfigPathsIndex::build(
+        all_signals
+            .iter()
+            .map(|s| (s.file_uid.as_str(), s.tsconfig_aliases_json.as_deref())),
+        resolver_nodes
+            .iter()
+            .filter(|n| n.kind == "FILE")
+            .map(|n| n.stable_key.clone()),
+    );
 
     loop {
         let batch =
@@ -4389,15 +4412,15 @@ mod tests {
         };
         let (mut a, mut b, mut c) = (named("ts-core:0.2.0"), named("c-core:0.1.0"), named("z:9"));
         let ports: Vec<&mut dyn ExtractorPort> = vec![&mut c, &mut a, &mut b];
-        assert_eq!(INDEXER_VERSION, "indexer:1.6.0");
+        assert_eq!(INDEXER_VERSION, "indexer:1.7.0");
         assert_eq!(
             build_toolchain_json(&ports),
-            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.6.0"}"#
+            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.7.0"}"#
         );
         let none: Vec<&mut dyn ExtractorPort> = Vec::new();
         assert_eq!(
             build_toolchain_json(&none),
-            r#"{"extractors":[],"indexer":"indexer:1.6.0"}"#
+            r#"{"extractors":[],"indexer":"indexer:1.7.0"}"#
         );
     }
 

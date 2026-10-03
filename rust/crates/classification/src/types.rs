@@ -728,6 +728,35 @@ pub struct TsconfigAliases {
     pub entries: Vec<TsconfigAliasEntry>,
 }
 
+/// TS-ALIAS-RESOLUTION-1 (RG-REQ-006-L04; D-TSA-BOUNDED-SCOPE-1): the alias signal repo-index
+/// writes to `file_signals.tsconfig_aliases_json`. `entries` is HEAD's discovery result unchanged —
+/// the NEAREST `tsconfig.json`'s own `paths` through its relative extends chain — and is what the
+/// classifier reads (it decodes [`TsconfigAliases`] from the same JSON; the other key is ignored).
+/// `sole_inspected_covering_project_mapping` is read only by the indexer's `paths` stage: present only when
+/// EXACTLY ONE inspected tsconfig project (the nearest `tsconfig.json` and its one-level
+/// `references`) covers the file by membership and that project has effective `paths`. Never
+/// written when absent, so a row the stage does not act for is byte-identical to HEAD's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredTsconfigAliases {
+    pub entries: Vec<TsconfigAliasEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sole_inspected_covering_project_mapping: Option<TsconfigAliasMapping>,
+}
+
+/// TS-ALIAS-RESOLUTION-1: one tsconfig project's effective `paths` mapping, with what the `paths`
+/// stage needs to resolve a substitution and nothing else. `anchor_dir` is the repo-relative
+/// directory `base_url` resolves against (the directory of the tsconfig that supplies the
+/// effective `baseUrl`, else of the one that supplies the effective `paths`; `""` = the repository
+/// root); `base_url` is that `baseUrl`, else `"."`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TsconfigAliasMapping {
+    pub anchor_dir: String,
+    pub base_url: String,
+    pub entries: Vec<TsconfigAliasEntry>,
+}
+
 /// Snapshot-scoped classifier signals. Built once per indexing
 /// pass; shared across every file's classification in that
 /// snapshot.
@@ -1155,6 +1184,61 @@ mod tests {
         assert!(s.same_file_interface_symbols.is_empty());
         assert!(s.package_dependencies.names.is_empty());
         assert!(s.tsconfig_aliases.entries.is_empty());
+    }
+
+    // ── StoredTsconfigAliases (TS-ALIAS-RESOLUTION-1) ─────────
+
+    #[test]
+    fn stored_tsconfig_aliases_decode_a_head_row_without_a_sole_inspected_covering_project_mapping()
+    {
+        let head = r#"{"entries":[{"pattern":"@/*","substitutions":["./src/*"]}]}"#;
+        let decoded: StoredTsconfigAliases = serde_json::from_str(head).unwrap();
+        assert_eq!(decoded.sole_inspected_covering_project_mapping, None);
+        assert_eq!(decoded.entries.len(), 1);
+        // A row without a mapping serializes exactly as HEAD's.
+        assert_eq!(serde_json::to_string(&decoded).unwrap(), head);
+        let empty: StoredTsconfigAliases = serde_json::from_str(r#"{"entries":[]}"#).unwrap();
+        assert_eq!(empty.sole_inspected_covering_project_mapping, None);
+        // A mapping whose anchor or baseUrl is not a string fails the decode (the stage skips it).
+        for bad in [
+            r#"{"entries":[],"soleInspectedCoveringProjectMapping":{"anchorDir":7,"baseUrl":".","entries":[]}}"#,
+            r#"{"entries":[],"soleInspectedCoveringProjectMapping":{"anchorDir":"a","baseUrl":null,"entries":[]}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<StoredTsconfigAliases>(bad).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_row_with_a_sole_inspected_covering_project_mapping_still_decodes_as_tsconfig_aliases_for_the_classifier(
+    ) {
+        let stored = StoredTsconfigAliases {
+            entries: vec![TsconfigAliasEntry {
+                pattern: "@/*".into(),
+                substitutions: vec!["./src/*".into()],
+            }],
+            sole_inspected_covering_project_mapping: Some(TsconfigAliasMapping {
+                anchor_dir: "admin".into(),
+                base_url: ".".into(),
+                entries: vec![TsconfigAliasEntry {
+                    pattern: "@/*".into(),
+                    substitutions: vec!["./app/*".into()],
+                }],
+            }),
+        };
+        let json = serde_json::to_string(&stored).unwrap();
+        assert!(json.contains(
+            r#""soleInspectedCoveringProjectMapping":{"anchorDir":"admin","baseUrl":".""#
+        ));
+        let classifier_view: TsconfigAliases = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            classifier_view.entries, stored.entries,
+            "the classifier reads `entries` only"
+        );
+        let round: StoredTsconfigAliases = serde_json::from_str(&json).unwrap();
+        assert_eq!(round, stored);
     }
 
     #[test]

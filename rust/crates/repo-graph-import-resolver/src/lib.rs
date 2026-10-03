@@ -17,7 +17,11 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use repo_graph_ir::{EdgeBasis, TsconfigAliasConfig};
+use repo_graph_ir::EdgeBasis;
+/// TS-ALIAS-RESOLUTION-1 (D-TSA-REUSE-SHAPE-1 option A): re-exported so a caller of
+/// [`tsconfig_alias_hits`] (the indexer's `paths` stage) names the config type through this crate,
+/// without a dependency of its own on `repo-graph-ir`.
+pub use repo_graph_ir::TsconfigAliasConfig;
 
 /// IMPORTS-PACKAGE-RESOLUTION-1: the class of a NON-RELATIVE (bare) TS import for module-cycle completeness.
 /// Refines the single ingest `PackageExternal` bucket using POSITIVE package.json metadata. PURE.
@@ -456,6 +460,150 @@ pub fn resolve_tsconfig_alias(
     }
 }
 
+/// TS-ALIAS-RESOLUTION-1: the extensions a `paths` substitution may be written with and still name
+/// its file as written (D-TSA-EXACT-CANDIDATE-1). A substituted path ending in one of them is tried
+/// as itself, before the [`candidate_paths`] list; it adds a candidate and never ranks one.
+const EXACT_SUBSTITUTION_EXTENSIONS: &[&str] = &[
+    ".ts", ".tsx", ".d.ts", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".json",
+];
+
+/// TS-ALIAS-RESOLUTION-1 (RG-REQ-006-L04; D-TSA-REUSE-SHAPE-1 as corrected): the outcome of
+/// TypeScript's `paths` SELECTION for one specifier under one mapping. Each variant is named after
+/// its value; the variants are the fixed outcomes of the selection, so a consumer matches them
+/// exhaustively.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TsconfigAliasHits {
+    /// No `paths` pattern matches the specifier.
+    NoPatternMatches,
+    /// One pattern is selected (the exact pattern, else the one matching wildcard pattern with the
+    /// longest prefix); the set holds the FILE keys of the indexed hits of its DECIDING substitution
+    /// (the first, in order, with at least one indexed hit) — empty when no substitution has one.
+    SelectedPattern(BTreeSet<String>),
+    /// Two or more matching wildcard patterns share the longest prefix. TypeScript takes the first
+    /// declared, and [`TsconfigAliasConfig::paths`] (a `BTreeMap`) carries no declaration order, so
+    /// none is picked: the set is the union, over the tied patterns, of each one's
+    /// deciding-substitution hits — empty when no tied pattern reaches an indexed file.
+    TiedPatterns(BTreeSet<String>),
+}
+
+/// TS-ALIAS-RESOLUTION-1: TypeScript's `paths` selection of `specifier` under ONE mapping `config`,
+/// over the FILE inventory. PURE. Pattern selection: an exact pattern (no `*`) equal to the
+/// specifier outranks every wildcard; among matching wildcard patterns the LONGEST PREFIX (the text
+/// before `*`) wins and the suffix plays no part; a tie on the longest prefix is
+/// [`TsconfigAliasHits::TiedPatterns`]. A selected pattern's substitutions are tried in order and
+/// the first with at least one indexed hit decides; a substitution's candidates are the substituted
+/// path itself when it ends in an [`EXACT_SUBSTITUTION_EXTENSIONS`] extension, then
+/// [`candidate_paths`] — every indexed candidate is a hit, none is ranked. Reuses
+/// [`match_alias_pattern`] and [`candidate_paths`] (one pattern grammar, one extension list);
+/// [`resolve_tsconfig_alias`] (the LiveGraph route's union) is a different function and unchanged.
+pub fn tsconfig_alias_hits(
+    specifier: &str,
+    config: &TsconfigAliasConfig,
+    inv: &FileInventory,
+) -> TsconfigAliasHits {
+    // baseUrl is relative to the mapping's anchor directory (`partition_prefix`); an absolute or
+    // root-escaping baseUrl gives no substitution a candidate (oracle-corrections.md OC-4).
+    let effective_base = join_within_repository(&config.partition_prefix, &config.base_url);
+    let effective_base = effective_base.as_deref();
+    if let Some((_, targets)) = config
+        .paths
+        .iter()
+        .find(|(pattern, _)| !pattern.contains('*') && pattern.as_str() == specifier)
+    {
+        return TsconfigAliasHits::SelectedPattern(deciding_substitution_hits(
+            effective_base,
+            targets,
+            "",
+            inv,
+        ));
+    }
+    // Matching wildcard patterns, each with its prefix length and `*` capture.
+    let matching: Vec<(usize, &Vec<String>, String)> = config
+        .paths
+        .iter()
+        .filter(|(pattern, _)| pattern.contains('*'))
+        .filter_map(|(pattern, targets)| {
+            let capture = match_alias_pattern(pattern, specifier)?;
+            let prefix_len = pattern.find('*').unwrap_or(pattern.len());
+            Some((prefix_len, targets, capture))
+        })
+        .collect();
+    let Some(longest) = matching.iter().map(|(len, _, _)| *len).max() else {
+        return TsconfigAliasHits::NoPatternMatches;
+    };
+    let mut selected = matching.iter().filter(|(len, _, _)| *len == longest);
+    match (selected.next(), selected.next()) {
+        (Some((_, targets, capture)), None) => TsconfigAliasHits::SelectedPattern(
+            deciding_substitution_hits(effective_base, targets, capture, inv),
+        ),
+        _ => TsconfigAliasHits::TiedPatterns(
+            matching
+                .iter()
+                .filter(|(len, _, _)| *len == longest)
+                .flat_map(|(_, targets, capture)| {
+                    deciding_substitution_hits(effective_base, targets, capture, inv)
+                })
+                .collect(),
+        ),
+    }
+}
+
+/// The indexed hits of the first substitution of `targets` (in order) that has any; empty when
+/// none has. `capture` replaces the substitution's one `*`. `effective_base` is `None` when the
+/// mapping's baseUrl leaves the repository: no substitution then has a candidate. A substitution
+/// whose joined path leaves the repository has no candidate and is skipped (OC-4).
+fn deciding_substitution_hits(
+    effective_base: Option<&str>,
+    targets: &[String],
+    capture: &str,
+    inv: &FileInventory,
+) -> BTreeSet<String> {
+    let Some(effective_base) = effective_base else {
+        return BTreeSet::new();
+    };
+    for target in targets {
+        let substituted = target.replacen('*', capture, 1);
+        let Some(base) = join_within_repository(effective_base, &substituted) else {
+            continue;
+        };
+        let exact = EXACT_SUBSTITUTION_EXTENSIONS
+            .iter()
+            .any(|ext| base.ends_with(ext))
+            .then(|| base.clone());
+        let hits: BTreeSet<String> = exact
+            .into_iter()
+            .chain(candidate_paths(&base))
+            .filter_map(|path| inv.file_key_for(&path).map(str::to_string))
+            .collect();
+        if !hits.is_empty() {
+            return hits;
+        }
+    }
+    BTreeSet::new()
+}
+
+/// TS-ALIAS-RESOLUTION-1 (oracle-corrections.md OC-4): `spec` joined to the repo-relative
+/// directory `dir`, left to right, or `None` when the result is not a repo-relative path inside the
+/// repository: `spec` is absolute (starts with `/`), or one of its `..` segments has no directory
+/// segment left to pop. Unlike [`normalize_join`], which drops such a `..` and reads a leading `/`
+/// as relative (its other callers keep that behaviour), it never clamps to the root.
+fn join_within_repository(dir: &str, spec: &str) -> Option<String> {
+    if spec.starts_with('/') {
+        return None;
+    }
+    let mut parts: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+    for seg in spec.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            s => parts.push(s),
+        }
+    }
+    Some(parts.join("/"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,6 +689,231 @@ mod tests {
         assert_eq!(
             resolve_tsconfig_alias("@/lib/api", &cfg, &inv),
             AliasResolution::Ambiguous
+        );
+    }
+
+    // ── tsconfig_alias_hits (TS-ALIAS-RESOLUTION-1) ──
+
+    fn paths_config(
+        prefix: &str,
+        base_url: &str,
+        paths: &[(&str, &[&str])],
+    ) -> TsconfigAliasConfig {
+        TsconfigAliasConfig {
+            base_url: base_url.to_string(),
+            paths: paths
+                .iter()
+                .map(|(p, ts)| (p.to_string(), ts.iter().map(|t| t.to_string()).collect()))
+                .collect(),
+            partition_prefix: prefix.to_string(),
+        }
+    }
+
+    fn inv_of(paths: &[&str]) -> FileInventory {
+        FileInventory::from_file_keys(paths.iter().map(|p| format!("repo:{p}:FILE")))
+    }
+
+    fn keys(paths: &[&str]) -> BTreeSet<String> {
+        paths.iter().map(|p| format!("repo:{p}:FILE")).collect()
+    }
+
+    #[test]
+    fn tsconfig_alias_hits_selects_the_longest_matching_pattern() {
+        let inv = inv_of(&["exact/x.ts", "long/x.ts", "short/ui/x.ts", "suffix/ui/x.ts"]);
+        // An exact pattern outranks every wildcard.
+        let cfg = paths_config(
+            "",
+            ".",
+            &[
+                ("@/ui/x", &["./exact/x"]),
+                ("@/ui/*", &["./long/*"]),
+                ("@/*", &["./short/*"]),
+            ],
+        );
+        assert_eq!(
+            tsconfig_alias_hits("@/ui/x", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(keys(&["exact/x.ts"]))
+        );
+        // The longer prefix wins over a shorter one, whatever their suffixes.
+        let cfg = paths_config(
+            "",
+            ".",
+            &[
+                ("@/ui/*", &["./long/*"]),
+                ("@/*x", &["./suffix/*x"]),
+                ("@/*", &["./short/*"]),
+            ],
+        );
+        assert_eq!(
+            tsconfig_alias_hits("@/ui/x", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(keys(&["long/x.ts"]))
+        );
+        // Two matching wildcards with the same longest prefix: a tie, no pick.
+        let cfg = paths_config(
+            "",
+            ".",
+            &[("@/*", &["./short/*"]), ("@/*x", &["./suffix/*x"])],
+        );
+        assert_eq!(
+            tsconfig_alias_hits("@/ui/x", &cfg, &inv),
+            TsconfigAliasHits::TiedPatterns(keys(&["short/ui/x.ts", "suffix/ui/x.ts"]))
+        );
+    }
+
+    #[test]
+    fn tsconfig_alias_hits_tries_substitutions_in_order_and_the_first_with_an_indexed_hit_decides()
+    {
+        let inv = inv_of(&["admin/generated/lib/api.ts", "admin/src/lib/api.ts"]);
+        // The first substitution reaches nothing: the second decides.
+        let cfg = paths_config(
+            "admin",
+            ".",
+            &[("@/*", &["./missing/*", "./src/*", "./generated/*"])],
+        );
+        assert_eq!(
+            tsconfig_alias_hits("@/lib/api", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(keys(&["admin/src/lib/api.ts"])),
+            "the first substitution with a hit decides; a later one is never consulted"
+        );
+        // No substitution reaches a file: the selected pattern's hit set is empty.
+        let cfg = paths_config("admin", ".", &[("@/*", &["./missing/*", "./gone/*"])]);
+        assert_eq!(
+            tsconfig_alias_hits("@/lib/api", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(BTreeSet::new())
+        );
+        // baseUrl joins the anchor directory.
+        let cfg = paths_config("admin", "src", &[("@/*", &["./*"])]);
+        assert_eq!(
+            tsconfig_alias_hits("@/lib/api", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(keys(&["admin/src/lib/api.ts"]))
+        );
+    }
+
+    #[test]
+    fn tsconfig_alias_hits_of_the_deciding_substitution_carry_every_indexed_candidate() {
+        let inv = inv_of(&["lib/x.ts", "lib/x/index.ts", "lib/x.tsx", "other/x.ts"]);
+        let cfg = paths_config("", ".", &[("@/*", &["./lib/*", "./other/*"])]);
+        assert_eq!(
+            tsconfig_alias_hits("@/x", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(keys(&["lib/x.ts", "lib/x.tsx", "lib/x/index.ts"])),
+            "every indexed candidate of the deciding substitution, none ranked; the next \
+             substitution is not consulted"
+        );
+    }
+
+    #[test]
+    fn tsconfig_alias_hits_reports_that_no_pattern_matches() {
+        let inv = inv_of(&["src/x.ts"]);
+        let cfg = paths_config("", ".", &[("@/*", &["./src/*"]), ("~lib", &["./src/x"])]);
+        assert_eq!(
+            tsconfig_alias_hits("react", &cfg, &inv),
+            TsconfigAliasHits::NoPatternMatches
+        );
+        // An exact pattern matches only the whole specifier.
+        assert_eq!(
+            tsconfig_alias_hits("~lib/x", &cfg, &inv),
+            TsconfigAliasHits::NoPatternMatches
+        );
+        assert_eq!(
+            tsconfig_alias_hits("x", &paths_config("", ".", &[]), &inv),
+            TsconfigAliasHits::NoPatternMatches
+        );
+    }
+
+    #[test]
+    fn tsconfig_alias_hits_probes_an_extension_bearing_substitution_as_itself_first() {
+        let inv = inv_of(&["src/foo/one.ts", "src/foo/two.ts"]);
+        let cfg = paths_config(
+            "",
+            ".",
+            &[
+                ("@one", &["./src/foo/one.ts"]),
+                ("@two", &["./src/foo/two"]),
+            ],
+        );
+        assert_eq!(
+            tsconfig_alias_hits("@one", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(keys(&["src/foo/one.ts"])),
+            "a value written with its extension names its file"
+        );
+        assert_eq!(
+            tsconfig_alias_hits("@two", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(keys(&["src/foo/two.ts"])),
+            "a value without one still goes through candidate_paths"
+        );
+        // The exact probe adds a candidate, it never ranks one: `x.js` beside `x.ts` is two hits.
+        let inv = inv_of(&["src/x.js", "src/x.ts"]);
+        let cfg = paths_config("", ".", &[("@x", &["./src/x.js"])]);
+        assert_eq!(
+            tsconfig_alias_hits("@x", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(keys(&["src/x.js", "src/x.ts"]))
+        );
+    }
+
+    #[test]
+    fn tsconfig_alias_hits_reports_every_hit_of_patterns_tied_for_the_longest_prefix() {
+        let cfg = paths_config("", ".", &[("@/*", &["./a/*"]), ("@/*x", &["./b/*x"])]);
+        assert_eq!(
+            tsconfig_alias_hits("@/x", &cfg, &inv_of(&["a/x.ts", "b/x.ts"])),
+            TsconfigAliasHits::TiedPatterns(keys(&["a/x.ts", "b/x.ts"]))
+        );
+        // One tied pattern reaching nothing: the other's hit is kept, never dropped.
+        assert_eq!(
+            tsconfig_alias_hits("@/x", &cfg, &inv_of(&["b/x.ts"])),
+            TsconfigAliasHits::TiedPatterns(keys(&["b/x.ts"]))
+        );
+        // Neither reaching a file.
+        assert_eq!(
+            tsconfig_alias_hits("@/x", &cfg, &inv_of(&["c/x.ts"])),
+            TsconfigAliasHits::TiedPatterns(BTreeSet::new())
+        );
+    }
+
+    #[test]
+    fn tsconfig_alias_hits_yields_no_candidate_for_an_absolute_substitution_or_base_url() {
+        // oracle-corrections.md OC-4: an absolute path is never read as repo-relative.
+        let inv = inv_of(&["external/x.ts", "src/x.ts"]);
+        let cfg = paths_config("", ".", &[("@x/*", &["/external/*"])]);
+        assert_eq!(
+            tsconfig_alias_hits("@x/x", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(BTreeSet::new()),
+            "an absolute substitution gives no candidate, never the root-relative clamp"
+        );
+        let cfg = paths_config("", "/", &[("@/*", &["./src/*"])]);
+        assert_eq!(
+            tsconfig_alias_hits("@/x", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(BTreeSet::new()),
+            "an absolute baseUrl gives no candidate"
+        );
+        // An absolute substitution is skipped; a later in-repository one still decides.
+        let cfg = paths_config("", ".", &[("@/*", &["/external/*", "./src/*"])]);
+        assert_eq!(
+            tsconfig_alias_hits("@/x", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(keys(&["src/x.ts"]))
+        );
+    }
+
+    #[test]
+    fn tsconfig_alias_hits_yields_no_candidate_when_dot_dot_escapes_the_repository_root() {
+        // oracle-corrections.md OC-4: a `..` with no directory left to pop leaves the repository.
+        let inv = inv_of(&["external/x.ts", "lib/x.ts"]);
+        let cfg = paths_config("", ".", &[("@x", &["../external/x"])]);
+        assert_eq!(
+            tsconfig_alias_hits("@x", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(BTreeSet::new()),
+            "a root tsconfig's `../external/x` never clamps to `external/x`"
+        );
+        let cfg = paths_config("app", "../..", &[("@x/*", &["./external/*"])]);
+        assert_eq!(
+            tsconfig_alias_hits("@x/x", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(BTreeSet::new()),
+            "a baseUrl `../..` under an anchor one directory deep leaves the repository"
+        );
+        // A `..` that stays inside the repository is followed.
+        let cfg = paths_config("", ".", &[("@/*", &["./src/../lib/*"])]);
+        assert_eq!(
+            tsconfig_alias_hits("@/x", &cfg, &inv),
+            TsconfigAliasHits::SelectedPattern(keys(&["lib/x.ts"]))
         );
     }
 

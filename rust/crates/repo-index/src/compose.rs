@@ -42,7 +42,7 @@ use repo_graph_c_extractor::{
     SocketFamily as RawSocketFamily, SocketType as RawSocketType,
 };
 use repo_graph_classification::spring_liveness::{classify_spring_liveness, SpringNodeInput};
-use repo_graph_classification::types::{PackageDependencySet, TsconfigAliases};
+use repo_graph_classification::types::{PackageDependencySet, StoredTsconfigAliases};
 use repo_graph_indexer::cargo_manifest::{
     self, CargoModule, CargoModuleCandidateInput, CargoModuleEvidenceInput, CargoModuleStorePort,
     FileOwnershipInput,
@@ -615,7 +615,10 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
                 // second, drifting classification of one fact.
                 let language = classify_file_language(&ok.rel_path, Some(ok.content.as_bytes()));
                 let empty_deps = PackageDependencySet { names: vec![] };
-                let empty_tsconfig = TsconfigAliases { entries: vec![] };
+                let empty_tsconfig = StoredTsconfigAliases {
+                    entries: vec![],
+                    sole_inspected_covering_project_mapping: None,
+                };
                 let (pkg_deps, tsconfig) = match language {
                     Some("rust") => {
                         // Rust: Cargo.toml. tsconfig not applicable.
@@ -660,7 +663,11 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
                     } else {
                         Some(pkg_deps)
                     },
-                    tsconfig_aliases: if tsconfig.entries.is_empty() {
+                    // TS-ALIAS-RESOLUTION-1: a file with no nearest-tsconfig entries and no
+                    // mapping of a sole inspected covering project stays signal-free, as at HEAD.
+                    tsconfig_aliases: if tsconfig.entries.is_empty()
+                        && tsconfig.sole_inspected_covering_project_mapping.is_none()
+                    {
                         None
                     } else {
                         Some(tsconfig)

@@ -60,6 +60,12 @@ repo-graph-classification = { path = "../classification" }
 # (boundary-interaction depends on nothing).
 repo-graph-boundary-interaction = { path = "../boundary-interaction" }
 
+# TS-ALIAS-RESOLUTION-1 (D-TSA-RESOLVER-EDGE-1, the human's ruling "Ok a"): the one tsconfig
+# `paths` matcher (`tsconfig_alias_hits`, reusing the crate's pattern grammar and candidate list)
+# and the re-exported `TsconfigAliasConfig`. Raw inputs only (strings, the FILE inventory); no
+# LiveGraph type crosses. Acyclic: the import-resolver depends on `repo-graph-ir` alone.
+repo-graph-import-resolver = { path = "../repo-graph-import-resolver" }
+
 # Contract schema crate — domain types for proto parsing (ProtoMessage,
 # ProtoSyntax, etc.). Policy → policy.
 contract-schema = { path = "../contract-schema" }

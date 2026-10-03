@@ -80,6 +80,8 @@ pub enum ImportEntryReason {
 fn format_import_row(imp: &ImportEntry) -> String {
     let resolution = if imp.resolution == "inferred" {
         inferred_row_state(imp)
+    } else if imp.resolution == "static" {
+        static_row_state(imp)
     } else if imp.resolution.is_empty() {
         "-".to_string()
     } else {
@@ -152,6 +154,37 @@ fn inferred_row_state(imp: &ImportEntry) -> String {
             MISSING.to_string()
         }
         None => "inferred".to_string(),
+    }
+}
+
+/// TS-ALIAS-RESOLUTION-1 (D-TSA-RECORD-CONFLICT-1: "output wording to clarify if needed"): what a
+/// static row says about the rule that bound it. A row whose recorded reason is `tsconfig_paths`
+/// with exactly one candidate equal to the row's own `file` — the `paths` stage bound it
+/// (`indexer/src/resolver.rs` `resolve_tsconfig_paths_import`) — prints
+/// `static (resolved through tsconfig paths)`; a `tsconfig_paths` reason that disagrees with the row
+/// is unreadable, never evidence (the [`inferred_row_state`] re-check applied to a static row); a
+/// static row whose stored reason storage decoded as `Unreadable` prints
+/// `static: reason unreadable (<storage's text>)` for every basis (oracle-corrections.md OC-3);
+/// every static row with no reason, or a readable reason other than `tsconfig_paths`, prints
+/// `static`, as before.
+fn static_row_state(imp: &ImportEntry) -> String {
+    let unreadable = |what: &str| format!("static: reason unreadable ({what})");
+    match &imp.reason {
+        Some(ImportEntryReason::Recorded { basis, candidates }) if basis == "tsconfig_paths" => {
+            match candidates.as_slice() {
+                [one] if *one == imp.file => "static (resolved through tsconfig paths)".to_string(),
+                [one] => unreadable(&format!("candidate {one} is not the row's file")),
+                [] => unreadable("candidates is empty"),
+                many => unreadable(&format!(
+                    "{} candidates under a tsconfig paths binding",
+                    many.len()
+                )),
+            }
+        }
+        // OC-3: storage decoded the carrier as present but malformed or contradicting its edge;
+        // the unreadable state is the carrier's, whatever basis it named.
+        Some(ImportEntryReason::Unreadable { unreadable: what }) => unreadable(what),
+        _ => "static".to_string(),
     }
 }
 
@@ -564,6 +597,33 @@ mod unresolved {
             ("ambiguous_workspace_source_entry", _) => {
                 "several workspace source entries".to_string()
             }
+            // TS-ALIAS-RESOLUTION-1: written only when the file's one tsconfig `paths` mapping (the
+            // sole inspected project covering it, repo-index/src/config.rs) selects a pattern whose
+            // deciding substitution reaches two or more indexed files
+            // (indexer/src/resolver.rs `resolve_tsconfig_paths_import`).
+            ("ambiguous_tsconfig_paths", Some(m)) => {
+                format!("the tsconfig paths that apply to this file reach {m} indexed files")
+            }
+            ("ambiguous_tsconfig_paths", None) => {
+                "the tsconfig paths that apply to this file reach several indexed files".to_string()
+            }
+            // TS-ALIAS-RESOLUTION-1: written only when two or more wildcard patterns of that mapping
+            // tie for the longest prefix and their deciding substitutions reach one or more indexed
+            // files (repo-graph-import-resolver `tsconfig_alias_hits` → `TiedPatterns`).
+            ("tied_tsconfig_paths_patterns", Some(1)) => {
+                "two or more tsconfig paths patterns tie for the longest prefix; together they \
+                 reach 1 indexed file"
+                    .to_string()
+            }
+            ("tied_tsconfig_paths_patterns", Some(m)) => format!(
+                "two or more tsconfig paths patterns tie for the longest prefix; together they \
+                 reach {m} indexed files"
+            ),
+            ("tied_tsconfig_paths_patterns", None) => {
+                "two or more tsconfig paths patterns tie for the longest prefix; together they \
+                 reach indexed files"
+                    .to_string()
+            }
             (other, _) => format!("{other} (no phrase for this reason in this build)"),
         }
     }
@@ -571,6 +631,8 @@ mod unresolved {
     /// The candidate clause (without its ` — ` prefix).
     fn candidate_clause(candidates: &Candidates) -> String {
         match candidates {
+            // TS-ALIAS-RESOLUTION-1: a tied-patterns row can record one candidate.
+            Candidates::Paths(paths) if paths.len() == 1 => format!("1 candidate: {}", paths[0]),
             Candidates::Paths(paths) => format!("{} candidates: {}", paths.len(), paths.join(", ")),
             Candidates::NotRecorded => "candidate paths not recorded with this import".to_string(),
             Candidates::Unreadable(text) => format!("candidates unreadable (\"{text}\")"),
@@ -596,8 +658,14 @@ mod unresolved {
             (None, Some(basis)) => out.push_str(&reason_text(basis, &row.candidates)),
             (None, None) => {}
         }
+        // TS-ALIAS-RESOLUTION-1: a row of the two `paths` ambiguity bases always says what became of
+        // its candidates (the stage records them on every such row; their absence is stated).
         let with_candidates = is_ambiguity_category(&row.category)
-            || !matches!(row.candidates, Candidates::NotRecorded);
+            || !matches!(row.candidates, Candidates::NotRecorded)
+            || matches!(
+                row.basis.as_deref(),
+                Some("ambiguous_tsconfig_paths" | "tied_tsconfig_paths_patterns")
+            );
         if with_candidates {
             if !out.is_empty() {
                 out.push_str(" — ");
@@ -2604,6 +2672,200 @@ mod tests {
         // Never a count for candidates that were not recorded, never one candidate picked.
         assert!(!out.contains("0 candidates"), "{out}");
         assert!(!out.contains("→"), "{out}");
+    }
+
+    // ── TS-ALIAS-RESOLUTION-1: the alias rows (SLICE_DOC §2.2 is binding) ──
+
+    /// An unresolved alias row of `several/src/main.ts`'s shape with the given reason and candidates.
+    fn alias_row(basis: Option<&str>, candidates: serde_json::Value) -> serde_json::Value {
+        urow(
+            "@/x",
+            Some("@/x"),
+            None,
+            Some(1),
+            "imports_file_not_found",
+            "internal_candidate",
+            "specifier_matches_project_alias",
+            basis,
+            candidates,
+        )
+    }
+
+    fn alias_listing_lines(rows: Vec<serde_json::Value>) -> Vec<String> {
+        let out = listing_with_rows(
+            "several/src/main.ts",
+            vec![],
+            rows,
+            "typescript",
+            ts_forms(),
+        )
+        .render_human();
+        out.lines()
+            .filter(|l| l.starts_with("  @/x  "))
+            .map(str::to_string)
+            .collect()
+    }
+
+    const ALIAS_TAIL: &str = " · this repository? (specifier matches a tsconfig paths alias)";
+
+    #[test]
+    fn unresolved_alias_row_whose_applicable_tsconfig_paths_reach_several_indexed_files_states_every_candidate(
+    ) {
+        assert_eq!(
+            alias_listing_lines(vec![alias_row(
+                Some("ambiguous_tsconfig_paths"),
+                serde_json::json!(["several/lib/x.ts", "several/lib/x/index.ts"]),
+            )]),
+            vec![format!(
+                "  @/x  line 1  the tsconfig paths that apply to this file reach 2 indexed files — 2 candidates: several/lib/x.ts, several/lib/x/index.ts{ALIAS_TAIL}"
+            )]
+        );
+    }
+
+    #[test]
+    fn unresolved_alias_row_without_a_readable_candidate_list_says_several_indexed_files() {
+        assert_eq!(
+            alias_listing_lines(vec![alias_row(
+                Some("ambiguous_tsconfig_paths"),
+                serde_json::Value::Null,
+            )]),
+            vec![format!(
+                "  @/x  line 1  the tsconfig paths that apply to this file reach several indexed files — candidate paths not recorded with this import{ALIAS_TAIL}"
+            )]
+        );
+        assert_eq!(
+            alias_listing_lines(vec![alias_row(
+                Some("ambiguous_tsconfig_paths"),
+                serde_json::json!({"unreadable": "r9:lib/x.ts:FILE"}),
+            )]),
+            vec![format!(
+                "  @/x  line 1  the tsconfig paths that apply to this file reach several indexed files — candidates unreadable (\"r9:lib/x.ts:FILE\"){ALIAS_TAIL}"
+            )]
+        );
+    }
+
+    #[test]
+    fn unresolved_alias_row_whose_tsconfig_paths_patterns_tie_states_the_tie_and_every_candidate() {
+        let tie =
+            "two or more tsconfig paths patterns tie for the longest prefix; together they reach";
+        assert_eq!(
+            alias_listing_lines(vec![alias_row(
+                Some("tied_tsconfig_paths_patterns"),
+                serde_json::json!(["tied/a/x.ts", "tied/b/x.ts"]),
+            )]),
+            vec![format!(
+                "  @/x  line 1  {tie} 2 indexed files — 2 candidates: tied/a/x.ts, tied/b/x.ts{ALIAS_TAIL}"
+            )]
+        );
+        assert_eq!(
+            alias_listing_lines(vec![alias_row(
+                Some("tied_tsconfig_paths_patterns"),
+                serde_json::json!(["tied/b/x.ts"]),
+            )]),
+            vec![format!(
+                "  @/x  line 1  {tie} 1 indexed file — 1 candidate: tied/b/x.ts{ALIAS_TAIL}"
+            )]
+        );
+        assert_eq!(
+            alias_listing_lines(vec![alias_row(
+                Some("tied_tsconfig_paths_patterns"),
+                serde_json::Value::Null,
+            )]),
+            vec![format!(
+                "  @/x  line 1  {tie} indexed files — candidate paths not recorded with this import{ALIAS_TAIL}"
+            )]
+        );
+    }
+
+    #[test]
+    fn static_tsconfig_paths_row_renders_its_basis_and_a_disagreeing_reason_is_unreadable() {
+        const BUTTON: &str = "admin/src/components/ui/button.tsx";
+        let resp = listing_with_inferred(vec![row_json(
+            BUTTON,
+            "static",
+            "ts-core:0.2.0",
+            Some(serde_json::json!({"basis": "tsconfig_paths", "candidates": [BUTTON]})),
+        )]);
+        assert_eq!(
+            only_row(&resp),
+            format!("  {BUTTON}  depth=1  static (resolved through tsconfig paths)")
+        );
+        for reason in [
+            serde_json::json!({"basis": "tsconfig_paths", "candidates": ["admin/src/other.tsx"]}),
+            serde_json::json!({"basis": "tsconfig_paths", "candidates": [BUTTON, "admin/src/y.ts"]}),
+            serde_json::json!({"basis": "tsconfig_paths", "candidates": []}),
+        ] {
+            let resp = listing_with_inferred(vec![row_json(
+                BUTTON,
+                "static",
+                "ts-core:0.2.0",
+                Some(reason.clone()),
+            )]);
+            let line = only_row(&resp);
+            assert!(
+                line.starts_with(&format!("  {BUTTON}  depth=1  static: reason unreadable ("))
+                    && line.ends_with(')'),
+                "{reason}: {line}"
+            );
+            assert!(
+                !line.contains("resolved through"),
+                "{reason}: never evidence: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn static_unique_suffix_row_still_renders_static() {
+        let resp = listing_with_inferred(vec![
+            row_json(
+                "lib/src/util/foo.h",
+                "static",
+                "cpp-core:0.2.0",
+                Some(
+                    serde_json::json!({"basis": "unique_suffix", "candidates": ["lib/src/util/foo.h"]}),
+                ),
+            ),
+            row_json("src/b.ts", "static", "ts-core:0.2.0", None),
+        ]);
+        let out = resp.render_human();
+        for line in [
+            "  lib/src/util/foo.h  depth=1  static",
+            "  src/b.ts  depth=1  static",
+        ] {
+            assert!(out.lines().any(|l| l == line), "missing [{line}]:\n{out}");
+        }
+    }
+
+    #[test]
+    fn static_row_whose_stored_reason_is_unreadable_prints_static_reason_unreadable_for_every_basis(
+    ) {
+        // oracle-corrections.md OC-3, the served seam: storage decodes a carrier that is present but
+        // malformed or contradicts its edge to `Unreadable` before the row reaches the renderer; a
+        // static row prints that state with storage's text, whatever basis the carrier named.
+        for (file, extractor, text) in [
+            (
+                "admin/src/components/ui/button.tsx",
+                "ts-core:0.2.0",
+                "candidate r1:src/other.ts:FILE is not the edge's target",
+            ),
+            (
+                "lib/src/util/foo.h",
+                "cpp-core:0.2.0",
+                "2 candidates under the unique basis unique_suffix",
+            ),
+            ("src/a.ts", "ts-core:0.2.0", "candidates is empty"),
+        ] {
+            let resp = listing_with_inferred(vec![row_json(
+                file,
+                "static",
+                extractor,
+                Some(serde_json::json!({ "unreadable": text })),
+            )]);
+            assert_eq!(
+                only_row(&resp),
+                format!("  {file}  depth=1  static: reason unreadable ({text})")
+            );
+        }
     }
 
     #[test]

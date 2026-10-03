@@ -115,6 +115,7 @@ pub mod resolver;
 pub mod routing;
 pub mod settings_gradle;
 pub mod storage_port;
+pub mod tsconfig_paths_import;
 pub mod type_only;
 pub mod types;
 pub mod workspace_import;

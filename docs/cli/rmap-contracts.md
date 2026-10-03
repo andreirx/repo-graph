@@ -278,6 +278,68 @@ section is emitted when the file has resolved, inferred or unresolved imports. B
 field is absent; `imports without a confirmed target: unreadable — rmap imports {file}` when it is
 not a non-negative integer. The LiveGraph-served Imports leaf carries the same count.
 
+### `imports <file>` — tsconfig `paths` imports (TS-ALIAS-RESOLUTION-1)
+
+RG-REQ-006-L04 (first clause), as ruled by D-TSA-RECORD-CONFLICT-1 and D-TSA-BOUNDED-SCOPE-1. An
+import whose recorded non-relative specifier is matched by the `paths` of the sole inspected
+tsconfig project covering its file — exactly one inspected project covers it (the inspected
+projects: the nearest `tsconfig.json` and its one-level `references`; a project covers a file by its
+`files`, `include` and `exclude`, `allowJs` for a JavaScript file, never under its `outDir`) — and
+whose deciding substitution has exactly one indexed hit, is a static import of that file. The
+selection is TypeScript's: the exact pattern, else the matching wildcard pattern with the longest
+prefix; its substitutions in order, the first with at least one indexed hit deciding. A
+substitution's candidates are the substituted path itself when it ends in one of `.ts`, `.tsx`,
+`.d.ts`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.json`, and then the relative-import
+candidate set; its hits are every candidate that is an indexed file, none ranked over another (so
+`./x.js` with both `x.js` and `x.ts` indexed is two hits). A substitution or `baseUrl` that is
+absolute, or whose `..` segments leave the repository, gives no candidate. Static asserts the
+language's resolution (the compiler's binding), never a runtime proof; the row renders
+`static (resolved through tsconfig paths)`; the alias stage runs before the workspace-source stage.
+When the deciding substitution has several indexed hits, or two or
+more patterns tie for the longest prefix and the substitutions of the tied patterns match at least
+one indexed file, the row stays without a confirmed target and records every candidate and which of
+the two happened; when nothing matches an indexed file the workspace-source stage runs and otherwise
+the row stays as before. A file that zero or several inspected projects cover, or whose one inspected covering
+project has no `paths`, takes no `paths` binding and its rows stay as before, as does a file whose
+inspected projects include a config with a malformed field that decides membership or target
+selection (`extends`, `references`, `compilerOptions`, `paths`, `baseUrl`, `outDir`, `allowJs`,
+`files`, `include`, `exclude`; the index prints one warning naming the file and the config).
+**Scope limit:** one level of `references` and relative `extends` only — no package `extends` and no
+tsconfig elsewhere in the repository is read — so a file outside the inspected projects is not shown
+to be compiled by no project, and a project outside them is not consulted. The stored alias signal
+(`file_signals.tsconfig_aliases_json`) carries, beside the nearest tsconfig's `entries` (unchanged,
+the classifier's input), the sole inspected covering project's mapping
+`soleInspectedCoveringProjectMapping: {anchorDir, baseUrl, entries}` with the directory its substitutions
+resolve from; the key is absent when the stage does not act for the file.
+
+Source: `repo-index/src/config.rs` `resolve_tsconfig_aliases` (membership and the mapping);
+`repo-graph-import-resolver/src/lib.rs` `tsconfig_alias_hits` (the selection);
+`indexer/src/resolver.rs` `resolve_tsconfig_paths_import` (the stage); `storage/src/queries.rs`
+`RECORDED_BASES` (`tsconfig_paths`) and `AMBIGUOUS_BASES`; `rgr/src/presentation/imports.rs`.
+
+**Resolved row** (`imports[].reason` = `{"basis": "tsconfig_paths", "candidates": [<the row's file>]}`):
+`  {file}  depth=1  static (resolved through tsconfig paths)`; a `tsconfig_paths` reason whose
+candidates are not exactly the row's own file → `static: reason unreadable ({what})`; a static row
+whose stored reason storage could not read (`imports[].reason` = `{"unreadable": "{what}"}`: a
+carrier present but malformed or contradicting its edge, whatever basis it names) →
+`static: reason unreadable ({what})` with storage's text; a static row with no reason, or with a
+readable reason of another basis, prints `static`, as before.
+
+**Rows without a confirmed target** (category `imports_file_not_found`, so the reason clause prints
+bare as the first part; these extend the reason and candidate clauses above):
+
+- `ambiguous_tsconfig_paths` → `the tsconfig paths that apply to this file reach {m} indexed files`
+  (`{m}` the recorded candidate count; `… reach several indexed files` without a readable list).
+- `tied_tsconfig_paths_patterns` →
+  `two or more tsconfig paths patterns tie for the longest prefix; together they reach {m} indexed files`
+  (`… reach 1 indexed file` when one is recorded; `… together they reach indexed files` without a
+  readable list). The phrase states the tie and the files reached, never which pattern TypeScript
+  selects (it takes the first declared; the stored `paths` keep no declaration order).
+- The candidate clause always follows these two reasons; one recorded path prints
+  `1 candidate: {path}`.
+
+Example: `  @/x  line 1  the tsconfig paths that apply to this file reach 2 indexed files — 2 candidates: lib/x.ts, lib/x/index.ts · this repository? (specifier matches a tsconfig paths alias)`.
+
 ### `stats` — `--engine`
 
 ```

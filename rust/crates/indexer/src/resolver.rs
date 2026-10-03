@@ -31,6 +31,12 @@ use crate::workspace_import::{
     match_workspace_package_import, NpmWorkspacePackages, WorkspaceImportMatch,
     AMBIGUOUS_WORKSPACE_SOURCE_ENTRY_BASIS, WORKSPACE_SOURCE_ENTRY_BASIS,
 };
+use repo_graph_import_resolver::TsconfigAliasHits;
+
+use crate::tsconfig_paths_import::{
+    TsconfigPathsIndex, AMBIGUOUS_TSCONFIG_PATHS_BASIS, TIED_TSCONFIG_PATHS_PATTERNS_BASIS,
+    TSCONFIG_PATHS_BASIS,
+};
 
 /// Provenance prefix of the Rust extractor (`ExtractedEdge.extractor`), whose
 /// value is `rust-core:<version>` (see `rust-extractor::EXTRACTOR_NAME`). The
@@ -287,6 +293,21 @@ enum TargetResolution {
     /// row's own category, never a pick; `metadata_json` carries the ambiguous basis and every
     /// candidate.
     WorkspaceSourceEntryAmbiguous { metadata_json: String },
+    /// TS-ALIAS-RESOLUTION-1 (RG-REQ-006-L04; D-TSA-RECORD-CONFLICT-1): a TS import whose source
+    /// file's stored `paths` mapping (that of its sole inspected covering tsconfig project) selects
+    /// exactly one indexed file. A STATIC edge — static
+    /// asserting the language's resolution (what the compiler binds), never a runtime proof — fed
+    /// to `resolved_import_pairs` like any certain import; `metadata_json` is the extractor's
+    /// carrier with `basis: tsconfig_paths` and the target as its one candidate.
+    TsconfigPathsBound {
+        target_uid: String,
+        metadata_json: String,
+    },
+    /// TS-ALIAS-RESOLUTION-1 (RG-REQ-002-L11): the mapping's selection reaches several indexed
+    /// files, or patterns tied for the longest prefix reach one or more. Unresolved with the row's
+    /// own category, never a pick; `metadata_json` carries the basis that names which of the two
+    /// happened and every candidate.
+    TsconfigPathsAmbiguous { metadata_json: String },
     /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L02 / RG-REQ-002-L11): a Python `obj.m()` on an
     /// untyped receiver whose method name has exactly ONE candidate. The name alone is not
     /// evidence, so the edge is written `resolution: inferred` with its basis, its receiver text and
@@ -410,6 +431,11 @@ pub struct ResolverIndex {
     /// `workspace_import::build_npm_workspace_packages`). Read only by the trailing TS-only workspace
     /// import stage; empty → the stage is a no-op.
     pub npm_workspace_packages: NpmWorkspacePackages,
+    /// TS-ALIAS-RESOLUTION-1 (RG-REQ-006-L04): each file's one tsconfig `paths` mapping (the
+    /// mapping of the sole inspected project covering it) and the FILE inventory. Built once by the
+    /// orchestrator from the stored alias signals; read only by the TS-only `paths` stage; empty →
+    /// the stage is a no-op.
+    pub tsconfig_paths: TsconfigPathsIndex,
 }
 
 /// IMPORT-RESOLUTION-JAVA-1 §2.1: the Java suffix index. Keyed by file basename (e.g.
@@ -703,6 +729,46 @@ pub fn resolve_edges(
                     source_file_uid,
                 });
             }
+            // TS-ALIAS-RESOLUTION-1: a static `paths` binding — a certain import, so it feeds the
+            // persisted MODULE→MODULE graph like any static import.
+            TargetResolution::TsconfigPathsBound {
+                target_uid,
+                metadata_json,
+            } => {
+                resolved_import_pairs.push((
+                    edge.source_node_uid.clone(),
+                    target_uid.clone(),
+                    import_edge_type_only(edge),
+                ));
+                resolved.push(ResolvedEdge {
+                    edge_uid: edge.edge_uid.clone(),
+                    snapshot_uid: edge.snapshot_uid.clone(),
+                    repo_uid: edge.repo_uid.clone(),
+                    source_node_uid: edge.source_node_uid.clone(),
+                    target_node_uid: target_uid,
+                    edge_type: edge.edge_type,
+                    resolution: Resolution::Static,
+                    extractor: edge.extractor.clone(),
+                    location: edge.location,
+                    metadata_json: Some(metadata_json),
+                });
+            }
+            // TS-ALIAS-RESOLUTION-1: several (or tied) `paths` hits. The row keeps the category it
+            // has without the stage; only its carrier gains the basis and every candidate.
+            TargetResolution::TsconfigPathsAmbiguous { metadata_json } => {
+                let category = categorize_unresolved_edge(edge);
+                let source_file_uid = index
+                    .node_uid_to_file_uid
+                    .get(&edge.source_node_uid)
+                    .cloned();
+                let mut unresolved_edge = edge.clone();
+                unresolved_edge.metadata_json = Some(metadata_json);
+                still_unresolved.push(CategorizedUnresolvedEdge {
+                    edge: unresolved_edge,
+                    category,
+                    source_file_uid,
+                });
+            }
             // PYTHON-RECEIVER-BINDING-1: a name-only binding on an untyped receiver. Resolved to
             // the single candidate but marked INFERRED with its basis, receiver and pool of one
             // (RG-REQ-005-L02, RG-REQ-002-L11) — overriding the extractor's `static`.
@@ -953,11 +1019,16 @@ fn resolve_import_ladder(edge: &ExtractedEdge, index: &ResolverIndex) -> TargetR
         None if is_c_family_extractor(&edge.extractor) => {
             resolve_include_suffix_or_basename(edge, index).unwrap_or(TargetResolution::Unresolved)
         }
-        // Stage 7 (TS-WORKSPACE-RESOLUTION-1, RG-REQ-006-L04): a bare TS import naming an npm
-        // workspace member of this repository. Runs last and only for TS edges, so no binding an
-        // earlier stage makes ever flips (RG-REQ-006-L03).
+        // Stage 7 (TS-ALIAS-RESOLUTION-1 then TS-WORKSPACE-RESOLUTION-1, RG-REQ-006-L04): only for
+        // TS edges every earlier stage missed, so no certain binding ever flips (RG-REQ-006-L03).
+        // The tsconfig `paths` stage runs BEFORE the workspace-source stage (D-TSA-RECORD-CONFLICT-1:
+        // L04's order and TypeScript's precedence); the workspace stage runs only when the `paths`
+        // stage returns no binding and no named ambiguity — a matched pattern with no indexed hit
+        // included, as TypeScript falls through to package lookup.
         None if edge.extractor.starts_with(TS_EXTRACTOR_PREFIX) => {
-            resolve_workspace_package_import(edge, index).unwrap_or(TargetResolution::Unresolved)
+            resolve_tsconfig_paths_import(edge, index)
+                .or_else(|| resolve_workspace_package_import(edge, index))
+                .unwrap_or(TargetResolution::Unresolved)
         }
         None => TargetResolution::Unresolved,
     }
@@ -1116,6 +1187,75 @@ fn resolve_workspace_package_import(
             metadata_json,
         },
         None => TargetResolution::WorkspaceSourceEntryAmbiguous { metadata_json },
+    })
+}
+
+/// TS-ALIAS-RESOLUTION-1 (RG-REQ-006-L04 as ruled by D-TSA-RECORD-CONFLICT-1 and
+/// D-TSA-BOUNDED-SCOPE-1; RG-REQ-002-L11): the tsconfig `paths` stage. Applies only when the
+/// edge's carrier is a JSON object whose `rawPath` equals the edge's `target_key` (the specifier
+/// the TS extractor records) and that specifier is non-relative (TypeScript applies `paths` only to
+/// non-relative names: not `.`, `..`, nor starting `./`, `../` or `/`). Asks the source file's one
+/// mapping ([`TsconfigPathsIndex::hits_for`]) and decides:
+///
+/// - one hit of the selected pattern → STATIC edge, the carrier merged with `basis:
+///   tsconfig_paths` and `candidates: [the target's FILE stable key]`;
+/// - several hits of the selected pattern → unresolved, `basis: ambiguous_tsconfig_paths` and every
+///   candidate;
+/// - patterns tied for the longest prefix reaching one or more files → unresolved, `basis:
+///   tied_tsconfig_paths_patterns` and every candidate;
+/// - no mapping for the file, no matching pattern, or no indexed hit (tied or not) → `None`: the
+///   workspace-source stage runs, and with no workspace binding the row stays exactly as before.
+///
+/// PURE: reads only the resolver index.
+fn resolve_tsconfig_paths_import(
+    edge: &ExtractedEdge,
+    index: &ResolverIndex,
+) -> Option<TargetResolution> {
+    if index.tsconfig_paths.is_empty() {
+        return None;
+    }
+    let mut carrier =
+        match serde_json::from_str::<serde_json::Value>(edge.metadata_json.as_deref()?) {
+            Ok(serde_json::Value::Object(obj)) => obj,
+            Ok(_) | Err(_) => return None,
+        };
+    let specifier = edge.target_key.as_str();
+    if carrier.get("rawPath").and_then(serde_json::Value::as_str) != Some(specifier) {
+        return None;
+    }
+    let relative = specifier == "."
+        || specifier == ".."
+        || specifier.starts_with("./")
+        || specifier.starts_with("../")
+        || specifier.starts_with('/');
+    if relative {
+        return None;
+    }
+    let file_uid = index.node_uid_to_file_uid.get(&edge.source_node_uid)?;
+    let (basis, candidates) = match index.tsconfig_paths.hits_for(file_uid, specifier)? {
+        TsconfigAliasHits::NoPatternMatches => return None,
+        TsconfigAliasHits::SelectedPattern(hits) if hits.is_empty() => return None,
+        TsconfigAliasHits::TiedPatterns(hits) if hits.is_empty() => return None,
+        TsconfigAliasHits::SelectedPattern(hits) if hits.len() == 1 => {
+            let target_key = hits.into_iter().next()?;
+            let target_uid = index.nodes_by_stable_key.get(&target_key)?.node_uid.clone();
+            carrier.insert("basis".to_string(), serde_json::json!(TSCONFIG_PATHS_BASIS));
+            carrier.insert("candidates".to_string(), serde_json::json!([target_key]));
+            return Some(TargetResolution::TsconfigPathsBound {
+                target_uid,
+                metadata_json: serde_json::Value::Object(carrier).to_string(),
+            });
+        }
+        TsconfigAliasHits::SelectedPattern(hits) => (AMBIGUOUS_TSCONFIG_PATHS_BASIS, hits),
+        TsconfigAliasHits::TiedPatterns(hits) => (TIED_TSCONFIG_PATHS_PATTERNS_BASIS, hits),
+    };
+    carrier.insert("basis".to_string(), serde_json::json!(basis));
+    carrier.insert(
+        "candidates".to_string(),
+        serde_json::json!(candidates.into_iter().collect::<Vec<String>>()),
+    );
+    Some(TargetResolution::TsconfigPathsAmbiguous {
+        metadata_json: serde_json::Value::Object(carrier).to_string(),
     })
 }
 
@@ -3586,6 +3726,7 @@ mod tests {
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
             npm_workspace_packages: HashMap::new(),
+            tsconfig_paths: Default::default(),
         }
     }
 
@@ -4766,6 +4907,7 @@ mod tests {
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
             npm_workspace_packages: HashMap::new(),
+            tsconfig_paths: Default::default(),
         };
         index
             .nodes_by_stable_key
@@ -4803,6 +4945,7 @@ mod tests {
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
             npm_workspace_packages: HashMap::new(),
+            tsconfig_paths: Default::default(),
         };
         index
             .nodes_by_name
@@ -4835,6 +4978,7 @@ mod tests {
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
             npm_workspace_packages: HashMap::new(),
+            tsconfig_paths: Default::default(),
         };
         index
             .nodes_by_name
@@ -5076,6 +5220,7 @@ mod tests {
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
             npm_workspace_packages: HashMap::new(),
+            tsconfig_paths: Default::default(),
         };
         index
             .nodes_by_stable_key
@@ -5111,6 +5256,7 @@ mod tests {
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
             npm_workspace_packages: HashMap::new(),
+            tsconfig_paths: Default::default(),
         };
         index
             .nodes_by_stable_key
@@ -5152,6 +5298,7 @@ mod tests {
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
             npm_workspace_packages: HashMap::new(),
+            tsconfig_paths: Default::default(),
         };
         index
             .nodes_by_stable_key
@@ -5198,6 +5345,7 @@ mod tests {
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
             npm_workspace_packages: HashMap::new(),
+            tsconfig_paths: Default::default(),
         };
         index
             .nodes_by_name
@@ -5262,6 +5410,7 @@ mod tests {
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
             npm_workspace_packages: HashMap::new(),
+            tsconfig_paths: Default::default(),
         };
         // The target module exports "readFile", NOT "rf".
         index
@@ -5330,6 +5479,7 @@ mod tests {
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
             npm_workspace_packages: HashMap::new(),
+            tsconfig_paths: Default::default(),
         };
         // The target module exports "helper".
         index
@@ -5405,6 +5555,7 @@ mod tests {
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
             npm_workspace_packages: HashMap::new(),
+            tsconfig_paths: Default::default(),
         };
         // There exists a "readFile" function globally.
         index
@@ -6428,6 +6579,418 @@ mod tests {
         assert_eq!(
             result.resolved_import_pairs[0].1,
             "n:packages/api/src/routes.ts"
+        );
+    }
+
+    // ── TS tsconfig `paths` stage (TS-ALIAS-RESOLUTION-1, RG-REQ-006-L04) ──
+
+    /// One file's stored `soleInspectedCoveringProjectMapping`: (file, anchor dir, baseUrl, paths).
+    type MappingSeed<'a> = (&'a str, &'a str, &'a str, &'a [(&'a str, &'a [&'a str])]);
+
+    /// `index` with the `paths` lookup the orchestrator builds from the stored alias signals: each
+    /// seed becomes the JSON repo-index writes for that file (`entries` empty, the mapping set).
+    fn with_mappings(mut index: ResolverIndex, seeds: &[MappingSeed]) -> ResolverIndex {
+        use repo_graph_classification::types::{
+            StoredTsconfigAliases, TsconfigAliasEntry, TsconfigAliasMapping,
+        };
+        let rows: Vec<(String, String)> = seeds
+            .iter()
+            .map(|(file, anchor, base, paths)| {
+                let stored = StoredTsconfigAliases {
+                    entries: vec![],
+                    sole_inspected_covering_project_mapping: Some(TsconfigAliasMapping {
+                        anchor_dir: anchor.to_string(),
+                        base_url: base.to_string(),
+                        entries: paths
+                            .iter()
+                            .map(|(pattern, subs)| TsconfigAliasEntry {
+                                pattern: pattern.to_string(),
+                                substitutions: subs.iter().map(|x| x.to_string()).collect(),
+                            })
+                            .collect(),
+                    }),
+                };
+                (
+                    format!("r1:{file}"),
+                    serde_json::to_string(&stored).unwrap(),
+                )
+            })
+            .collect();
+        let keys: Vec<String> = index
+            .nodes_by_stable_key
+            .keys()
+            .filter(|k| k.ends_with(":FILE"))
+            .cloned()
+            .collect();
+        index.tsconfig_paths = TsconfigPathsIndex::build(
+            rows.iter().map(|(f, j)| (f.as_str(), Some(j.as_str()))),
+            keys,
+        );
+        index
+    }
+
+    /// The amodx `admin` shape: Toolbar.tsx's one mapping `@/*` → `./src/*`, anchored at `admin`.
+    fn toolbar_index(extra: &[&str]) -> ResolverIndex {
+        let mut paths = vec!["admin/src/components/editor/Toolbar.tsx"];
+        paths.extend_from_slice(extra);
+        with_mappings(
+            c_include_index(&paths),
+            &[(
+                "admin/src/components/editor/Toolbar.tsx",
+                "admin",
+                ".",
+                &[("@/*", &["./src/*"])],
+            )],
+        )
+    }
+
+    const TOOLBAR: &str = "admin/src/components/editor/Toolbar.tsx";
+
+    #[test]
+    fn tsconfig_paths_import_resolves_static_to_the_one_indexed_candidate() {
+        let index = toolbar_index(&["admin/src/components/ui/button.tsx"]);
+        let e = ts_import("e1", TOOLBAR, "@/components/ui/button");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(result.still_unresolved.is_empty());
+        assert_eq!(result.resolved.len(), 1);
+        let r = &result.resolved[0];
+        assert_eq!(r.target_node_uid, "n:admin/src/components/ui/button.tsx");
+        assert_eq!(r.resolution, Resolution::Static);
+        // A certain import: it feeds the module-edge derivation.
+        assert_eq!(result.resolved_import_pairs.len(), 1);
+        assert_eq!(
+            result.resolved_import_pairs[0].1,
+            "n:admin/src/components/ui/button.tsx"
+        );
+    }
+
+    #[test]
+    fn tsconfig_paths_import_with_several_indexed_candidates_stays_unresolved_with_every_candidate()
+    {
+        let index = with_mappings(
+            c_include_index(&["src/main.ts", "lib/x.ts", "lib/x/index.ts"]),
+            &[("src/main.ts", "", ".", &[("@/*", &["./lib/*"])])],
+        );
+        let e = ts_import("e1", "src/main.ts", "@/x");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(result.resolved.is_empty(), "never a pick");
+        assert!(result.resolved_import_pairs.is_empty());
+        assert_eq!(result.still_unresolved.len(), 1);
+        let u = &result.still_unresolved[0];
+        assert_eq!(u.category, UnresolvedEdgeCategory::ImportsFileNotFound);
+        assert_eq!(
+            u.category,
+            categorize_unresolved_edge(&e),
+            "the row's own category"
+        );
+        assert_eq!(
+            carrier(&u.edge.metadata_json),
+            serde_json::json!({
+                "rawPath": "@/x",
+                "isTypeOnly": false,
+                "basis": "ambiguous_tsconfig_paths",
+                "candidates": ["r1:lib/x.ts:FILE", "r1:lib/x/index.ts:FILE"],
+            }),
+            "both FILE keys recorded, no other key added"
+        );
+    }
+
+    #[test]
+    fn tsconfig_paths_import_without_an_indexed_candidate_stays_unresolved_as_a_project_alias() {
+        let index = toolbar_index(&["admin/src/other.ts"]);
+        let e = ts_import("e1", TOOLBAR, "@/components/ui/missing");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(result.resolved.is_empty());
+        assert_eq!(result.still_unresolved.len(), 1);
+        let u = &result.still_unresolved[0];
+        assert_eq!(u.category, UnresolvedEdgeCategory::ImportsFileNotFound);
+        assert_eq!(
+            u.edge.metadata_json, e.metadata_json,
+            "the row is exactly HEAD's: no basis, no candidates"
+        );
+    }
+
+    #[test]
+    fn tsconfig_paths_stage_runs_after_every_head_stage_misses_and_before_the_workspace_stage() {
+        // A repo-prefix binding (HEAD's stage) is untouched by a `paths` pattern that would reach
+        // another indexed file.
+        let index = with_mappings(
+            ws_index(
+                &["app/main.ts", "lib/index.ts", "alt/lib.ts"],
+                &[("lib", "lib", &["lib/dist/index.js"])],
+            ),
+            &[("app/main.ts", "", ".", &[("lib", &["./alt/lib"])])],
+        );
+        let e = ts_import("e1", "app/main.ts", "lib");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        let r = &result.resolved[0];
+        assert_eq!(r.target_node_uid, "n:lib/index.ts", "the earlier binding");
+        assert_eq!(r.resolution, Resolution::Static);
+        assert_eq!(r.metadata_json, e.metadata_json, "the carrier is untouched");
+        // A `paths` match binds before the workspace stage is consulted.
+        let index = with_mappings(
+            ws_index(
+                &[
+                    "app/main.ts",
+                    "packages/w/src/index.ts",
+                    "vendor/w/index.ts",
+                ],
+                &[("@w/pkg", "packages/w", &["packages/w/dist/index.js"])],
+            ),
+            &[("app/main.ts", "", ".", &[("@w/*", &["./vendor/w/*"])])],
+        );
+        let e = ts_import("e2", "app/main.ts", "@w/pkg");
+        // `@w/pkg` → `vendor/w/pkg` reaches nothing; the workspace stage binds as at HEAD.
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].resolution, Resolution::Inferred);
+        let e = ts_import("e3", "app/main.ts", "@w/index");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].target_node_uid, "n:vendor/w/index.ts");
+        assert_eq!(result.resolved[0].resolution, Resolution::Static);
+    }
+
+    #[test]
+    fn tsconfig_paths_static_edge_carries_its_basis_and_the_target_as_candidate() {
+        let index = toolbar_index(&["admin/src/lib/utils.ts"]);
+        let e = ts_import("e1", TOOLBAR, "@/lib/utils");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        let r = &result.resolved[0];
+        assert_eq!(r.resolution, Resolution::Static);
+        assert_eq!(r.extractor, TS_EXTRACTOR);
+        assert_eq!(
+            carrier(&r.metadata_json),
+            serde_json::json!({
+                "rawPath": "@/lib/utils",
+                "isTypeOnly": false,
+                "basis": "tsconfig_paths",
+                "candidates": ["r1:admin/src/lib/utils.ts:FILE"],
+            })
+        );
+    }
+
+    #[test]
+    fn tsconfig_paths_match_wins_over_the_workspace_stage_for_the_same_specifier() {
+        let index = with_mappings(
+            ws_index(
+                &[
+                    "packages/api/src/server.ts",
+                    "packages/engine/src/index.ts",
+                    "packages/other/src/index.ts",
+                ],
+                &[
+                    (
+                        "@fraktag/engine",
+                        "packages/engine",
+                        &["packages/engine/dist/index.js"],
+                    ),
+                    (
+                        "@x/other",
+                        "packages/other",
+                        &["packages/other/dist/index.js"],
+                    ),
+                ],
+            ),
+            &[(
+                "packages/api/src/server.ts",
+                "",
+                ".",
+                &[("@fraktag/*", &["./packages/*/src"])],
+            )],
+        );
+        let e = ts_import("e1", "packages/api/src/server.ts", "@fraktag/engine");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        let r = &result.resolved[0];
+        assert_eq!(r.target_node_uid, "n:packages/engine/src/index.ts");
+        assert_eq!(r.resolution, Resolution::Static, "the compiler's answer");
+        assert_eq!(carrier(&r.metadata_json)["basis"], "tsconfig_paths");
+        // A specifier matching no pattern still reaches the workspace stage, inferred as at HEAD.
+        let e = ts_import("e2", "packages/api/src/server.ts", "@x/other");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].resolution, Resolution::Inferred);
+        assert_eq!(
+            carrier(&result.resolved[0].metadata_json)["basis"],
+            "workspace_source_entry"
+        );
+    }
+
+    #[test]
+    fn tsconfig_paths_match_with_no_indexed_hit_falls_through_to_the_workspace_stage() {
+        let index = with_mappings(
+            fraktag_index(),
+            &[(
+                "packages/api/src/server.ts",
+                "",
+                ".",
+                &[("@fraktag/*", &["./nowhere/*"])],
+            )],
+        );
+        let e = ts_import("e1", "packages/api/src/server.ts", "@fraktag/engine");
+        let with_paths = resolve_edges(std::slice::from_ref(&e), &index, None);
+        let head = resolve_edges(std::slice::from_ref(&e), &fraktag_index(), None);
+        assert_eq!(with_paths.resolved, head.resolved, "exactly HEAD's binding");
+        assert_eq!(with_paths.resolved.len(), 1);
+        assert_eq!(with_paths.resolved[0].resolution, Resolution::Inferred);
+        assert_eq!(
+            carrier(&with_paths.resolved[0].metadata_json)["basis"],
+            "workspace_source_entry"
+        );
+    }
+
+    #[test]
+    fn non_ts_import_never_reaches_the_tsconfig_paths_stage() {
+        let index = toolbar_index(&["admin/src/components/ui/button.tsx"]);
+        for extractor in [
+            "python-core:0.2.0",
+            "java-core:0.1.0",
+            "rust-core:0.1.0",
+            "c-core:0.1.0",
+            "cpp-core:0.2.0",
+            "test:1",
+        ] {
+            let mut e = ts_import("e1", TOOLBAR, "@/components/ui/button");
+            e.extractor = extractor.into();
+            let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+            assert!(result.resolved.is_empty(), "{extractor}");
+            assert_eq!(result.still_unresolved.len(), 1, "{extractor}");
+            assert_eq!(
+                result.still_unresolved[0].edge.metadata_json, e.metadata_json,
+                "{extractor}"
+            );
+        }
+    }
+
+    #[test]
+    fn relative_specifier_never_reaches_the_tsconfig_paths_stage() {
+        let index = with_mappings(
+            c_include_index(&["app/main.ts", "src/x.ts", "src/index.ts", "src/y.ts"]),
+            &[("app/main.ts", "", ".", &[("*", &["./src/*"])])],
+        );
+        for specifier in [".", "..", "./x", "../x", "/x"] {
+            let e = ts_import("e1", "app/main.ts", specifier);
+            let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+            assert!(
+                !result.resolved.iter().any(|r| r
+                    .metadata_json
+                    .as_deref()
+                    .is_some_and(|m| m.contains("tsconfig_paths"))),
+                "{specifier}: never bound through paths"
+            );
+            assert!(
+                !result.still_unresolved.iter().any(|u| u
+                    .edge
+                    .metadata_json
+                    .as_deref()
+                    .is_some_and(|m| m.contains("tsconfig_paths"))),
+                "{specifier}"
+            );
+        }
+        // The non-relative control (no earlier stage binds it) binds through the same `*` pattern.
+        let e = ts_import("e2", "app/main.ts", "y");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].target_node_uid, "n:src/y.ts");
+        assert_eq!(
+            carrier(&result.resolved[0].metadata_json)["basis"],
+            "tsconfig_paths"
+        );
+    }
+
+    #[test]
+    fn tsconfig_paths_stage_is_a_no_op_for_a_file_whose_aliases_carry_no_mapping() {
+        let mut index = c_include_index(&[TOOLBAR, "admin/src/components/ui/button.tsx"]);
+        let keys: Vec<String> = index.nodes_by_stable_key.keys().cloned().collect();
+        let head_row = r#"{"entries":[{"pattern":"@/*","substitutions":["./src/*"]}]}"#;
+        let malformed = r#"{"entries":[],"soleInspectedCoveringProjectMapping":{"anchorDir":7,"baseUrl":".","entries":[]}}"#;
+        let file_uid = format!("r1:{TOOLBAR}");
+        for row in [Some(head_row), Some(malformed), Some("not json"), None] {
+            index.tsconfig_paths =
+                TsconfigPathsIndex::build([(file_uid.as_str(), row)], keys.clone());
+            assert!(index.tsconfig_paths.is_empty(), "{row:?}");
+            let e = ts_import("e1", TOOLBAR, "@/components/ui/button");
+            let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+            assert!(result.resolved.is_empty(), "{row:?}");
+            assert_eq!(
+                result.still_unresolved[0].edge.metadata_json, e.metadata_json,
+                "{row:?}: the row stays HEAD's"
+            );
+        }
+        // Another file's mapping never applies to a file that carries none.
+        let index = with_mappings(
+            c_include_index(&[
+                TOOLBAR,
+                "admin/src/other.ts",
+                "admin/src/components/ui/button.tsx",
+            ]),
+            &[("admin/src/other.ts", "admin", ".", &[("@/*", &["./src/*"])])],
+        );
+        let e = ts_import("e1", TOOLBAR, "@/components/ui/button");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(result.resolved.is_empty());
+    }
+
+    #[test]
+    fn tsconfig_paths_stage_honours_base_url_relative_to_the_anchor_directory() {
+        let index = with_mappings(
+            c_include_index(&["web/app/main.ts", "web/src/a.ts", "src/a.ts"]),
+            &[("web/app/main.ts", "web", "src", &[("@/*", &["./*"])])],
+        );
+        let e = ts_import("e1", "web/app/main.ts", "@/a");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(
+            result.resolved[0].target_node_uid, "n:web/src/a.ts",
+            "baseUrl `src` joined under the anchor `web`, never the repository root"
+        );
+    }
+
+    #[test]
+    fn tied_tsconfig_paths_patterns_stay_unresolved_with_every_candidate() {
+        let tied: &[(&str, &[&str])] = &[("@/*", &["./a/*"]), ("@/*x", &["./b/*x"])];
+        // Both tied patterns reach a file.
+        let index = with_mappings(
+            c_include_index(&["src/main.ts", "a/x.ts", "b/x.ts"]),
+            &[("src/main.ts", "", ".", tied)],
+        );
+        let e = ts_import("e1", "src/main.ts", "@/x");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(result.resolved.is_empty(), "never a pick");
+        let u = &result.still_unresolved[0];
+        assert_eq!(u.category, categorize_unresolved_edge(&e));
+        assert_eq!(
+            carrier(&u.edge.metadata_json),
+            serde_json::json!({
+                "rawPath": "@/x",
+                "isTypeOnly": false,
+                "basis": "tied_tsconfig_paths_patterns",
+                "candidates": ["r1:a/x.ts:FILE", "r1:b/x.ts:FILE"],
+            })
+        );
+        // One tied pattern reaching one file, the other none: the same row with that candidate.
+        let index = with_mappings(
+            c_include_index(&["src/main.ts", "b/x.ts"]),
+            &[("src/main.ts", "", ".", tied)],
+        );
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(result.resolved.is_empty());
+        let c = carrier(&result.still_unresolved[0].edge.metadata_json);
+        assert_eq!(c["basis"], "tied_tsconfig_paths_patterns");
+        assert_eq!(c["candidates"], serde_json::json!(["r1:b/x.ts:FILE"]));
+        // Neither reaching a file: no named ambiguity — the row stays as at HEAD.
+        let index = with_mappings(
+            c_include_index(&["src/main.ts", "c/x.ts"]),
+            &[("src/main.ts", "", ".", tied)],
+        );
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(result.resolved.is_empty());
+        assert_eq!(
+            result.still_unresolved[0].edge.metadata_json,
+            e.metadata_json
         );
     }
 }

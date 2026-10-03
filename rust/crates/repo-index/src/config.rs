@@ -19,7 +19,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
-use repo_graph_classification::types::{PackageDependencySet, TsconfigAliasEntry, TsconfigAliases};
+use repo_graph_classification::types::{
+    PackageDependencySet, StoredTsconfigAliases, TsconfigAliasEntry, TsconfigAliasMapping,
+    TsconfigAliases,
+};
 
 /// Pre-computed config context for a repo. Caches config lookups
 /// by directory so each directory is resolved at most once.
@@ -28,6 +31,12 @@ pub struct RepoConfigContext {
     pkg_cache: HashMap<String, PackageDependencySet>,
     /// Directory → TsconfigAliases cache.
     tsconfig_cache: HashMap<String, TsconfigAliases>,
+    /// TS-ALIAS-RESOLUTION-1: directory → the repo-relative path of its nearest `tsconfig.json`
+    /// (`None` = none up to the repository root).
+    tsconfig_nearest_cache: HashMap<String, Option<String>>,
+    /// TS-ALIAS-RESOLUTION-1: repo-relative config path → the config as read (or why it could not
+    /// be read). Each config is read once; membership is evaluated per file, never cached.
+    tsconfig_project_cache: HashMap<String, Result<TsconfigFile, String>>,
     /// Directory → PackageDependencySet cache (for Rust via Cargo.toml).
     cargo_cache: HashMap<String, PackageDependencySet>,
     /// Java FILE directory → its Gradle declared set (DEPS-GRADLE-CATALOG-1A: keyed by the file's
@@ -62,6 +71,8 @@ impl RepoConfigContext {
         Self {
             pkg_cache: HashMap::new(),
             tsconfig_cache: HashMap::new(),
+            tsconfig_nearest_cache: HashMap::new(),
+            tsconfig_project_cache: HashMap::new(),
             cargo_cache: HashMap::new(),
             gradle_cache: HashMap::new(),
             gradle_reads: crate::manifest_deps::GradleReadCache::default(),
@@ -159,9 +170,41 @@ impl RepoConfigContext {
         empty
     }
 
+    /// TS-ALIAS-RESOLUTION-1 (RG-REQ-006-L04; D-TSA-BOUNDED-SCOPE-1): the alias signal stored for
+    /// a file. `entries` are HEAD's discovery result, unchanged (the nearest `tsconfig.json`'s own
+    /// `paths` through its relative extends chain — the classifier's input); the mapping is the
+    /// effective `paths` mapping of the ONE inspected project that covers the file, when exactly one
+    /// covers it and has `paths` ([`Self::sole_inspected_covering_project_mapping`]). A config the reader
+    /// cannot use leaves the file without a mapping and prints one warning naming the file and the
+    /// config.
+    pub fn resolve_tsconfig_aliases(
+        &mut self,
+        file_rel_path: &str,
+        repo_root: &Path,
+    ) -> StoredTsconfigAliases {
+        let entries = self
+            .resolve_nearest_tsconfig_entries(file_rel_path, repo_root)
+            .entries;
+        let sole_inspected_covering_project_mapping =
+            match self.sole_inspected_covering_project_mapping(file_rel_path, repo_root) {
+                Ok(mapping) => mapping,
+                Err(why) => {
+                    eprintln!(
+                        "warning: {why}; no tsconfig paths mapping for {file_rel_path} \
+                         (its tsconfig paths imports are not resolved)"
+                    );
+                    None
+                }
+            };
+        StoredTsconfigAliases {
+            entries,
+            sole_inspected_covering_project_mapping,
+        }
+    }
+
     /// Resolve tsconfig aliases for a file.
     /// Walks from file's directory upward to repo root.
-    pub fn resolve_tsconfig_aliases(
+    fn resolve_nearest_tsconfig_entries(
         &mut self,
         file_rel_path: &str,
         repo_root: &Path,
@@ -1082,6 +1125,482 @@ pub fn read_tsconfig_aliases_from_path(path: &Path) -> Option<TsconfigAliases> {
     Some(empty)
 }
 
+// ── Tsconfig project membership (TS-ALIAS-RESOLUTION-1) ──────────
+//
+// D-TSA-CONFIG-APPLICABILITY-1 as corrected by D-TSA-BOUNDED-SCOPE-1: a tsconfig project's `paths`
+// apply to a file only when the project's MEMBERSHIP covers the file. The inspected projects are the
+// nearest `tsconfig.json` and the targets of its own `references`, one level deep; each project's
+// fields are its own, else inherited through its RELATIVE `extends` chain (a string or an array, the
+// later entry winning; the child over every config it extends). The reader's scope is a stated
+// limit: a referenced project's own `references`, a package `extends` and a tsconfig elsewhere in
+// the repository are not read. FAIL CLOSED: a config that cannot be read or parsed, or a malformed
+// value of a field that decides membership or target selection, leaves the file with no mapping; a
+// default applies only when a field is ABSENT. HEAD's lenient `entries` reader
+// (`read_tsconfig_aliases_from_path`) is separate and unchanged; it feeds only the classifier.
+
+/// TypeScript's default `exclude` when a project declares none (relative to the project directory).
+const TSCONFIG_DEFAULT_EXCLUDE: [&str; 3] = ["node_modules", "bower_components", "jspm_packages"];
+
+/// The JavaScript extensions a project covers only with `allowJs: true`.
+const TSCONFIG_JS_EXTENSIONS: [&str; 4] = [".js", ".jsx", ".mjs", ".cjs"];
+
+/// A value declared by a config, with the repo-relative directory of the config that declares it
+/// (the directory its relative paths resolve against).
+#[derive(Debug, Clone)]
+struct Declared<T> {
+    value: T,
+    dir: String,
+}
+
+/// The fields of one tsconfig the membership reader reads, each `None` when absent. As read from
+/// one file, or effective after its extends chain.
+#[derive(Debug, Clone, Default)]
+struct TsconfigFields {
+    paths: Option<Declared<Vec<TsconfigAliasEntry>>>,
+    base_url: Option<Declared<String>>,
+    allow_js: Option<bool>,
+    out_dir: Option<Declared<String>>,
+    files: Option<Declared<Vec<String>>>,
+    include: Option<Declared<Vec<String>>>,
+    exclude: Option<Declared<Vec<String>>>,
+}
+
+impl TsconfigFields {
+    /// `self` overridden, field by field, by every field `over` declares (TypeScript's inheritance:
+    /// `paths` is replaced as a whole, never merged).
+    fn overridden_by(mut self, over: TsconfigFields) -> TsconfigFields {
+        if over.paths.is_some() {
+            self.paths = over.paths;
+        }
+        if over.base_url.is_some() {
+            self.base_url = over.base_url;
+        }
+        if over.allow_js.is_some() {
+            self.allow_js = over.allow_js;
+        }
+        if over.out_dir.is_some() {
+            self.out_dir = over.out_dir;
+        }
+        if over.files.is_some() {
+            self.files = over.files;
+        }
+        if over.include.is_some() {
+            self.include = over.include;
+        }
+        if over.exclude.is_some() {
+            self.exclude = over.exclude;
+        }
+        self
+    }
+}
+
+/// One tsconfig file as read: its own fields, its relative `extends` targets (repo-relative, in
+/// declaration order) and its `references` targets (repo-relative config paths, in order).
+#[derive(Debug, Clone)]
+struct TsconfigFile {
+    own: TsconfigFields,
+    extends: Vec<String>,
+    references: Vec<String>,
+}
+
+impl RepoConfigContext {
+    /// TS-ALIAS-RESOLUTION-1 (D-TSA-BOUNDED-SCOPE-1): the effective `paths` mapping of the ONE
+    /// inspected tsconfig project whose membership covers `file_rel_path` — `Ok(None)` when no
+    /// inspected project, or two or more (whatever their `paths`), cover the file, or when the one
+    /// inspected covering project has no effective `paths`; never a pick, a merge or a union. `Err` names the
+    /// config the reader could not use (fail closed: the file gets no mapping).
+    fn sole_inspected_covering_project_mapping(
+        &mut self,
+        file_rel_path: &str,
+        repo_root: &Path,
+    ) -> Result<Option<TsconfigAliasMapping>, String> {
+        let Some(nearest) = self.nearest_tsconfig_path(&parent_dir(file_rel_path), repo_root)
+        else {
+            return Ok(None);
+        };
+        let mut projects = vec![nearest.clone()];
+        for reference in self.tsconfig_file(&nearest, repo_root)?.references {
+            if !projects.contains(&reference) {
+                projects.push(reference);
+            }
+        }
+        let mut effective = Vec::with_capacity(projects.len());
+        for project in &projects {
+            effective.push((
+                parent_dir(project),
+                self.effective_tsconfig(project, repo_root, &mut Vec::new())?,
+            ));
+        }
+        // No inspected project declares `paths`: no mapping, whatever the membership.
+        if effective.iter().all(|(_, fields)| fields.paths.is_none()) {
+            return Ok(None);
+        }
+        let mut covering = Vec::new();
+        for (dir, fields) in &effective {
+            if tsconfig_project_covers(fields, dir, file_rel_path)? {
+                covering.push(fields);
+            }
+        }
+        let [sole] = covering.as_slice() else {
+            return Ok(None);
+        };
+        let Some(paths) = &sole.paths else {
+            return Ok(None);
+        };
+        let (anchor_dir, base_url) = match &sole.base_url {
+            Some(base) => (base.dir.clone(), base.value.clone()),
+            None => (paths.dir.clone(), ".".to_string()),
+        };
+        let mut entries = paths.value.clone();
+        entries.sort_by(|a, b| a.pattern.cmp(&b.pattern));
+        Ok(Some(TsconfigAliasMapping {
+            anchor_dir,
+            base_url,
+            entries,
+        }))
+    }
+
+    /// The repo-relative path of the nearest `tsconfig.json` at or above `dir` (the walk HEAD's
+    /// entries reader takes: the first directory whose `tsconfig.json` read is not `NotFound`).
+    fn nearest_tsconfig_path(&mut self, dir: &str, repo_root: &Path) -> Option<String> {
+        if let Some(cached) = self.tsconfig_nearest_cache.get(dir) {
+            return cached.clone();
+        }
+        let candidate = join_config_dir(dir, "tsconfig.json");
+        let found = match std::fs::metadata(repo_root.join(&candidate)) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if dir.is_empty() {
+                    None
+                } else {
+                    self.nearest_tsconfig_path(&parent_dir(dir), repo_root)
+                }
+            }
+            _ => Some(candidate),
+        };
+        self.tsconfig_nearest_cache
+            .insert(dir.to_string(), found.clone());
+        found
+    }
+
+    /// One config as read, cached by path. `Err` says what made it unusable.
+    fn tsconfig_file(&mut self, rel: &str, repo_root: &Path) -> Result<TsconfigFile, String> {
+        if let Some(cached) = self.tsconfig_project_cache.get(rel) {
+            return cached.clone();
+        }
+        let read = read_tsconfig_file(rel, repo_root);
+        self.tsconfig_project_cache
+            .insert(rel.to_string(), read.clone());
+        read
+    }
+
+    /// The effective fields of the config at `rel` after its relative extends chain: each relative
+    /// `extends` target in order (a later one over an earlier one), then the config's own fields.
+    fn effective_tsconfig(
+        &mut self,
+        rel: &str,
+        repo_root: &Path,
+        chain: &mut Vec<String>,
+    ) -> Result<TsconfigFields, String> {
+        if chain.iter().any(|c| c == rel) {
+            return Err(format!("tsconfig {rel} extends itself through its chain"));
+        }
+        if chain.len() >= MAX_EXTENDS_DEPTH {
+            return Err(format!(
+                "tsconfig {rel} is more than {MAX_EXTENDS_DEPTH} extends deep"
+            ));
+        }
+        let file = self.tsconfig_file(rel, repo_root)?;
+        chain.push(rel.to_string());
+        let mut effective = TsconfigFields::default();
+        for base in &file.extends {
+            effective = effective.overridden_by(self.effective_tsconfig(base, repo_root, chain)?);
+        }
+        chain.pop();
+        Ok(effective.overridden_by(file.own))
+    }
+}
+
+/// Read and validate one tsconfig (repo-relative `rel`). JSONC: comments and trailing commas are
+/// accepted, as TypeScript accepts them. Every field the membership reader reads is validated; a
+/// default is never applied in place of a malformed value.
+fn read_tsconfig_file(rel: &str, repo_root: &Path) -> Result<TsconfigFile, String> {
+    let raw = std::fs::read_to_string(repo_root.join(rel))
+        .map_err(|e| format!("tsconfig {rel} unreadable ({e})"))?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&strip_json_trailing_commas(&strip_json_comments(&raw)))
+            .map_err(|e| format!("tsconfig {rel} did not parse ({e})"))?;
+    let obj = parsed
+        .as_object()
+        .ok_or_else(|| format!("tsconfig {rel} is not a JSON object"))?;
+    let dir = parent_dir(rel);
+    let malformed = |field: &str, what: &str| format!("tsconfig {rel}: {field} {what}");
+    let string_list = |field: &str, value: &serde_json::Value| -> Result<Vec<String>, String> {
+        value
+            .as_array()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .map(|i| i.as_str().map(str::to_string))
+                    .collect::<Option<Vec<String>>>()
+            })
+            .ok_or_else(|| malformed(field, "is not a list of strings"))
+    };
+    let declared_list = |field: &str| -> Result<Option<Declared<Vec<String>>>, String> {
+        obj.get(field)
+            .map(|v| {
+                string_list(field, v).map(|value| Declared {
+                    value,
+                    dir: dir.clone(),
+                })
+            })
+            .transpose()
+    };
+
+    let extends_raw: Vec<String> = match obj.get("extends") {
+        None => Vec::new(),
+        Some(serde_json::Value::String(e)) => vec![e.clone()],
+        Some(v) => string_list("extends", v)
+            .map_err(|_| malformed("extends", "is not a string or a list of strings"))?,
+    };
+    // Only relative `extends` are followed (a package `extends` stays unread — a stated limit).
+    let mut extends = Vec::new();
+    for e in extends_raw.iter().filter(|e| e.starts_with('.')) {
+        let target = join_repo_relative(&dir, e)
+            .ok_or_else(|| malformed("extends", &format!("{e} leaves the repository")))?;
+        extends.push(if target.ends_with(".json") {
+            target
+        } else {
+            format!("{target}.json")
+        });
+    }
+
+    let references = match obj.get("references") {
+        None => Vec::new(),
+        Some(serde_json::Value::Array(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                let path = item
+                    .get("path")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        malformed("references", "holds an entry without a string path")
+                    })?;
+                let target = join_repo_relative(&dir, path).ok_or_else(|| {
+                    malformed("references", &format!("{path} leaves the repository"))
+                })?;
+                out.push(if target.ends_with(".json") {
+                    target
+                } else {
+                    join_config_dir(&target, "tsconfig.json")
+                });
+            }
+            out
+        }
+        Some(_) => return Err(malformed("references", "is not a list")),
+    };
+
+    let empty = serde_json::Map::new();
+    let compiler_options = match obj.get("compilerOptions") {
+        None => &empty,
+        Some(serde_json::Value::Object(co)) => co,
+        Some(_) => return Err(malformed("compilerOptions", "is not an object")),
+    };
+    let paths = match compiler_options.get("paths") {
+        None => None,
+        Some(serde_json::Value::Object(map)) => {
+            let mut entries = Vec::with_capacity(map.len());
+            for (pattern, subs) in map {
+                let substitutions = string_list("paths", subs).map_err(|_| {
+                    malformed("paths", &format!("{pattern} is not a list of strings"))
+                })?;
+                entries.push(TsconfigAliasEntry {
+                    pattern: pattern.clone(),
+                    substitutions,
+                });
+            }
+            Some(Declared {
+                value: entries,
+                dir: dir.clone(),
+            })
+        }
+        Some(_) => return Err(malformed("paths", "is not an object")),
+    };
+    let declared_string = |field: &str| -> Result<Option<Declared<String>>, String> {
+        match compiler_options.get(field) {
+            None => Ok(None),
+            Some(serde_json::Value::String(v)) => Ok(Some(Declared {
+                value: v.clone(),
+                dir: dir.clone(),
+            })),
+            Some(_) => Err(malformed(field, "is not a string")),
+        }
+    };
+    let base_url = declared_string("baseUrl")?;
+    let out_dir = declared_string("outDir")?;
+    let allow_js = match compiler_options.get("allowJs") {
+        None => None,
+        Some(serde_json::Value::Bool(b)) => Some(*b),
+        Some(_) => return Err(malformed("allowJs", "is not a boolean")),
+    };
+    Ok(TsconfigFile {
+        own: TsconfigFields {
+            paths,
+            base_url,
+            allow_js,
+            out_dir,
+            files: declared_list("files")?,
+            include: declared_list("include")?,
+            exclude: declared_list("exclude")?,
+        },
+        extends,
+        references,
+    })
+}
+
+/// Does the project (effective `fields`, its config in `project_dir`) cover `file`? A JavaScript
+/// file needs `allowJs: true`; a file under `outDir` is never a member; then a `files` entry names
+/// the file, or `include` (default: everything under the project directory, unless `files` is set
+/// without `include`) matches it and `exclude` (default: TypeScript's) does not — `exclude` narrows
+/// `include` only, never `files`.
+fn tsconfig_project_covers(
+    fields: &TsconfigFields,
+    project_dir: &str,
+    file: &str,
+) -> Result<bool, String> {
+    if TSCONFIG_JS_EXTENSIONS.iter().any(|ext| file.ends_with(ext)) && fields.allow_js != Some(true)
+    {
+        return Ok(false);
+    }
+    if let Some(out_dir) = &fields.out_dir {
+        if tsconfig_entry_matches(&out_dir.value, &out_dir.dir, file, false)? {
+            return Ok(false);
+        }
+    }
+    if let Some(files) = &fields.files {
+        for entry in &files.value {
+            if join_repo_relative(&files.dir, entry).as_deref() == Some(file) {
+                return Ok(true);
+            }
+        }
+        if fields.include.is_none() {
+            return Ok(false);
+        }
+    }
+    let included = match &fields.include {
+        Some(include) => any_tsconfig_entry_matches(&include.value, &include.dir, file)?,
+        // Neither `files` nor `include`: everything under the project directory.
+        None => project_dir.is_empty() || file.starts_with(&format!("{project_dir}/")),
+    };
+    if !included {
+        return Ok(false);
+    }
+    let excluded = match &fields.exclude {
+        Some(exclude) => any_tsconfig_entry_matches(&exclude.value, &exclude.dir, file)?,
+        None => {
+            let defaults: Vec<String> = TSCONFIG_DEFAULT_EXCLUDE.map(str::to_string).to_vec();
+            any_tsconfig_entry_matches(&defaults, project_dir, file)?
+        }
+    };
+    Ok(!excluded)
+}
+
+fn any_tsconfig_entry_matches(entries: &[String], dir: &str, file: &str) -> Result<bool, String> {
+    for entry in entries {
+        if tsconfig_entry_matches(entry, dir, file, true)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// One `include`/`exclude`/`outDir` entry, resolved against `dir`: an entry without a wildcard
+/// names a file or a directory and everything under it; a wildcard entry (`*`, `?`, `**`; only
+/// when `wildcards` is allowed) is matched against the whole path with `glob::Pattern`, `*` never
+/// crossing `/`.
+fn tsconfig_entry_matches(
+    entry: &str,
+    dir: &str,
+    file: &str,
+    wildcards: bool,
+) -> Result<bool, String> {
+    let Some(joined) = join_repo_relative(dir, entry) else {
+        return Ok(false); // An entry outside the repository names no indexed file.
+    };
+    if wildcards && (entry.contains('*') || entry.contains('?')) {
+        let pattern = glob::Pattern::new(&joined).map_err(|e| {
+            format!("tsconfig pattern {entry} in {dir} is not a valid pattern ({e})")
+        })?;
+        let options = glob::MatchOptions {
+            case_sensitive: true,
+            require_literal_separator: true,
+            require_literal_leading_dot: false,
+        };
+        return Ok(pattern.matches_with(file, options));
+    }
+    Ok(joined.is_empty() || file == joined || file.starts_with(&format!("{joined}/")))
+}
+
+/// `dir` joined with the relative path `rel` (`.` and `..` resolved, `/`-separated, no trailing
+/// slash; `""` = the repository root). `None` when `rel` is absolute or a `..` leaves the
+/// repository.
+fn join_repo_relative(dir: &str, rel: &str) -> Option<String> {
+    if rel.starts_with('/') {
+        return None;
+    }
+    let mut parts: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+    for seg in rel.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            s => parts.push(s),
+        }
+    }
+    Some(parts.join("/"))
+}
+
+/// `<dir>/<name>`, or `<name>` at the repository root.
+fn join_config_dir(dir: &str, name: &str) -> String {
+    if dir.is_empty() {
+        name.to_string()
+    } else {
+        format!("{dir}/{name}")
+    }
+}
+
+/// Remove a JSON trailing comma (a `,` followed only by whitespace before `}` or `]`) outside
+/// strings — the JSONC form TypeScript accepts in a tsconfig. Run after [`strip_json_comments`].
+fn strip_json_trailing_commas(source: &str) -> String {
+    let chars: Vec<char> = source.chars().collect();
+    let mut out = String::with_capacity(source.len());
+    let mut in_string = false;
+    let mut escape_next = false;
+    for (i, &ch) in chars.iter().enumerate() {
+        if in_string {
+            out.push(ch);
+            if escape_next {
+                escape_next = false;
+            } else if ch == '\\' {
+                escape_next = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+        } else if ch == ',' {
+            let next = chars[i + 1..].iter().find(|c| !c.is_whitespace());
+            if matches!(next, Some('}') | Some(']')) {
+                continue;
+            }
+        }
+        out.push(ch);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1282,6 +1801,617 @@ mod tests {
         let aliases = ctx.resolve_tsconfig_aliases("src/index.ts", root);
         assert_eq!(aliases.entries.len(), 1);
         assert_eq!(aliases.entries[0].pattern, "@/*");
+    }
+
+    // ── Tsconfig project membership (TS-ALIAS-RESOLUTION-1) ─────
+
+    /// (case name, the files written, the config the warning must name).
+    type MalformedConfigCase<'a> = (&'a str, Vec<(&'a str, String)>, &'a str);
+    /// (the files written, the importing file, its nearest tsconfig.json).
+    type TsconfigLayout<'a> = (Vec<(&'a str, &'a str)>, &'a str, &'a str);
+
+    /// Write `(path, content)` files under a fresh temp repository.
+    fn ts_repo(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for (rel, content) in files {
+            let path = dir.path().join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+        }
+        dir
+    }
+
+    /// The stored mapping of `file` (a fresh context, so nothing is cached across calls).
+    fn mapping_of(root: &Path, file: &str) -> Option<TsconfigAliasMapping> {
+        RepoConfigContext::new()
+            .resolve_tsconfig_aliases(file, root)
+            .sole_inspected_covering_project_mapping
+    }
+
+    /// The reader's own answer: `Err` is the warning's reason (the file then gets no mapping).
+    fn reader_of(root: &Path, file: &str) -> Result<Option<TsconfigAliasMapping>, String> {
+        RepoConfigContext::new().sole_inspected_covering_project_mapping(file, root)
+    }
+
+    fn alias(pattern: &str, subs: &[&str]) -> TsconfigAliasEntry {
+        TsconfigAliasEntry {
+            pattern: pattern.into(),
+            substitutions: subs.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn mapping(anchor: &str, base: &str, entries: Vec<TsconfigAliasEntry>) -> TsconfigAliasMapping {
+        TsconfigAliasMapping {
+            anchor_dir: anchor.into(),
+            base_url: base.into(),
+            entries,
+        }
+    }
+
+    const AMODX_ROOT: &str = r#"{
+  "files": [],
+  "references": [ { "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" } ],
+  "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./root/*"] } }
+}"#;
+    const AMODX_APP: &str = r#"{
+  "compilerOptions": {
+    /* Bundler mode */
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"], },
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"],
+}"#;
+    const NODE_PROJECT: &str = r#"{ "include": ["vite.config.ts"] }"#;
+    const HEX_ROOT: &str = r#"{ "files": [], "references": [ { "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" } ] }"#;
+
+    #[test]
+    fn tsconfig_alias_mapping_carries_its_anchor_directory_and_base_url() {
+        // baseUrl declared beside `paths`: the anchor is that config's directory.
+        let repo = ts_repo(&[(
+            "pkg/tsconfig.json",
+            r#"{ "compilerOptions": { "baseUrl": "./src", "paths": { "@/*": ["./*"] } } }"#,
+        )]);
+        assert_eq!(
+            mapping_of(repo.path(), "pkg/src/a.ts"),
+            Some(mapping("pkg", "./src", vec![alias("@/*", &["./*"])]))
+        );
+        // baseUrl inherited from an extended config: the anchor is the config that supplies it.
+        let repo = ts_repo(&[
+            (
+                "configs/base.json",
+                r#"{ "compilerOptions": { "baseUrl": ".." } }"#,
+            ),
+            (
+                "app/tsconfig.json",
+                r#"{ "extends": "../configs/base.json", "compilerOptions": { "paths": { "@/*": ["app/src/*"] } } }"#,
+            ),
+        ]);
+        assert_eq!(
+            mapping_of(repo.path(), "app/src/a.ts"),
+            Some(mapping("configs", "..", vec![alias("@/*", &["app/src/*"])]))
+        );
+        // No baseUrl in the chain: the anchor is the config that supplies the `paths`, base ".".
+        let repo = ts_repo(&[
+            (
+                "configs/base.json",
+                r#"{ "compilerOptions": { "paths": { "@/*": ["./shared/*"] } } }"#,
+            ),
+            ("app/tsconfig.json", r#"{ "extends": "../configs/base" }"#),
+        ]);
+        assert_eq!(
+            mapping_of(repo.path(), "app/src/a.ts"),
+            Some(mapping("configs", ".", vec![alias("@/*", &["./shared/*"])]))
+        );
+    }
+
+    #[test]
+    fn tsconfig_paths_from_a_referenced_project_are_discovered_when_the_nearest_tsconfig_has_only_references(
+    ) {
+        let repo = ts_repo(&[
+            ("frontend/tsconfig.json", HEX_ROOT),
+            (
+                "frontend/tsconfig.app.json",
+                r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./src/*"] } }, "include": ["src"] }"#,
+            ),
+            ("frontend/tsconfig.node.json", NODE_PROJECT),
+        ]);
+        let mut ctx = RepoConfigContext::new();
+        let app = ctx.resolve_tsconfig_aliases("frontend/src/App.tsx", repo.path());
+        assert!(
+            app.entries.is_empty(),
+            "entries stay HEAD's: the nearest has no paths"
+        );
+        assert_eq!(
+            app.sole_inspected_covering_project_mapping,
+            Some(mapping("frontend", ".", vec![alias("@/*", &["./src/*"])]))
+        );
+        // tsconfig.node.json is the sole inspected covering project of vite.config.ts and has no paths.
+        assert_eq!(mapping_of(repo.path(), "frontend/vite.config.ts"), None);
+    }
+
+    #[test]
+    fn a_file_no_candidate_project_covers_carries_no_mapping() {
+        let repo = ts_repo(&[
+            ("frontend/tsconfig.json", HEX_ROOT),
+            (
+                "frontend/tsconfig.app.json",
+                r#"{ "compilerOptions": { "paths": { "@/*": ["./src/*"] } }, "include": ["src"] }"#,
+            ),
+            ("frontend/tsconfig.node.json", NODE_PROJECT),
+        ]);
+        assert_eq!(reader_of(repo.path(), "frontend/scripts/seed.ts"), Ok(None));
+        let stored = RepoConfigContext::new()
+            .resolve_tsconfig_aliases("frontend/scripts/seed.ts", repo.path());
+        assert!(stored.entries.is_empty());
+        assert_eq!(stored.sole_inspected_covering_project_mapping, None);
+        // No tsconfig.json at all: no mapping.
+        let repo = ts_repo(&[("src/a.ts", "")]);
+        assert_eq!(reader_of(repo.path(), "src/a.ts"), Ok(None));
+    }
+
+    #[test]
+    fn tsconfig_paths_from_an_array_extends_chain_are_discovered() {
+        let repo = ts_repo(&[
+            ("cfg/a.json", r#"{ "compilerOptions": { "strict": true } }"#),
+            (
+                "cfg/b.json",
+                r#"{ "compilerOptions": { "paths": { "~/*": ["../lib/*"] } } }"#,
+            ),
+            (
+                "tsconfig.json",
+                r#"{ "extends": ["./cfg/a.json", "./cfg/b.json", "@tsconfig/node20"] }"#,
+            ),
+        ]);
+        assert_eq!(
+            mapping_of(repo.path(), "src/a.ts"),
+            Some(mapping("cfg", ".", vec![alias("~/*", &["../lib/*"])]))
+        );
+    }
+
+    #[test]
+    fn array_extends_later_entry_overrides_earlier_paths_and_base_url() {
+        let repo = ts_repo(&[
+            (
+                "cfg/a.json",
+                r#"{ "compilerOptions": { "baseUrl": "a", "paths": { "@/*": ["./a/*"], "~a": ["./a/x"] } } }"#,
+            ),
+            (
+                "cfg/b.json",
+                r#"{ "compilerOptions": { "baseUrl": "b", "paths": { "@/*": ["./b/*"] } } }"#,
+            ),
+            (
+                "tsconfig.json",
+                r#"{ "extends": ["./cfg/a.json", "./cfg/b.json"] }"#,
+            ),
+        ]);
+        assert_eq!(
+            mapping_of(repo.path(), "src/a.ts"),
+            Some(mapping("cfg", "b", vec![alias("@/*", &["./b/*"])])),
+            "the later entry wins; `paths` is replaced whole, never merged"
+        );
+        // The child overrides every config it extends.
+        let repo = ts_repo(&[
+            (
+                "cfg/a.json",
+                r#"{ "compilerOptions": { "baseUrl": "a", "paths": { "@/*": ["./a/*"] } } }"#,
+            ),
+            (
+                "tsconfig.json",
+                r#"{ "extends": ["./cfg/a.json"], "compilerOptions": { "paths": { "~/*": ["./c/*"] } } }"#,
+            ),
+        ]);
+        assert_eq!(
+            mapping_of(repo.path(), "src/a.ts"),
+            Some(mapping("cfg", "a", vec![alias("~/*", &["./c/*"])]))
+        );
+    }
+
+    #[test]
+    fn same_directory_files_covered_by_different_referenced_projects_get_their_own_mappings() {
+        let repo = ts_repo(&[
+            (
+                "tsconfig.json",
+                r#"{ "files": [], "references": [ { "path": "./tsconfig.one.json" }, { "path": "./tsconfig.two.json" } ] }"#,
+            ),
+            (
+                "tsconfig.one.json",
+                r#"{ "files": ["src/one.ts"], "compilerOptions": { "paths": { "@/*": ["./one/*"] } } }"#,
+            ),
+            (
+                "tsconfig.two.json",
+                r#"{ "files": ["src/two.ts"], "compilerOptions": { "paths": { "@/*": ["./two/*"] } } }"#,
+            ),
+        ]);
+        let one = Some(mapping("", ".", vec![alias("@/*", &["./one/*"])]));
+        let two = Some(mapping("", ".", vec![alias("@/*", &["./two/*"])]));
+        for order in [["src/one.ts", "src/two.ts"], ["src/two.ts", "src/one.ts"]] {
+            let mut ctx = RepoConfigContext::new();
+            for file in order {
+                let got = ctx
+                    .resolve_tsconfig_aliases(file, repo.path())
+                    .sole_inspected_covering_project_mapping;
+                let want = if file == "src/one.ts" { &one } else { &two };
+                assert_eq!(&got, want, "{order:?} {file}");
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_or_unreadable_project_config_leaves_the_file_without_mappings_and_one_warning() {
+        let app = |extra: &str| {
+            format!(
+                r#"{{ "compilerOptions": {{ "paths": {{ "@/*": ["./src/*"] }}{extra} }}, "include": ["src"]{} }}"#,
+                ""
+            )
+        };
+        let cases: Vec<MalformedConfigCase> = vec![
+            ("unparseable nearest", vec![("tsconfig.json", "{ not json".into())], "tsconfig.json"),
+            ("not an object", vec![("tsconfig.json", "[1, 2]".into())], "tsconfig.json"),
+            (
+                "missing reference",
+                vec![("tsconfig.json", r#"{ "files": [], "references": [ { "path": "./tsconfig.app.json" } ] }"#.into())],
+                "tsconfig.app.json",
+            ),
+            (
+                "missing extends target",
+                vec![("tsconfig.json", r#"{ "extends": "./base.json", "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }"#.into())],
+                "base.json",
+            ),
+            ("baseUrl a number", vec![("tsconfig.json", app(r#", "baseUrl": 7"#))], "tsconfig.json"),
+            ("outDir a number", vec![("tsconfig.json", app(r#", "outDir": 7"#))], "tsconfig.json"),
+            (
+                "files not a list",
+                vec![("tsconfig.json", r#"{ "files": "src/a.ts", "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }"#.into())],
+                "tsconfig.json",
+            ),
+            (
+                "include not a list",
+                vec![("tsconfig.json", r#"{ "include": "src", "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }"#.into())],
+                "tsconfig.json",
+            ),
+            (
+                "exclude holds a number",
+                vec![("tsconfig.json", r#"{ "exclude": ["dist", 3], "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }"#.into())],
+                "tsconfig.json",
+            ),
+        ];
+        for (name, files, config) in cases {
+            let owned: Vec<(&str, &str)> = files.iter().map(|(p, c)| (*p, c.as_str())).collect();
+            let repo = ts_repo(&owned);
+            let why = reader_of(repo.path(), "src/a.ts").expect_err(name);
+            assert!(
+                why.contains(config),
+                "{name}: the warning names the config: {why}"
+            );
+            let stored = RepoConfigContext::new().resolve_tsconfig_aliases("src/a.ts", repo.path());
+            assert_eq!(
+                stored.sole_inspected_covering_project_mapping, None,
+                "{name}"
+            );
+            assert_eq!(
+                stored.entries,
+                read_tsconfig_aliases_from_path(&repo.path().join("tsconfig.json"))
+                    .map(|a| a.entries)
+                    .unwrap_or_default(),
+                "{name}: entries exactly HEAD's"
+            );
+        }
+        // `baseUrl` ABSENT: the default "." applies and the mapping is stored.
+        let repo = ts_repo(&[("tsconfig.json", &app(""))]);
+        assert_eq!(
+            mapping_of(repo.path(), "src/a.ts"),
+            Some(mapping("", ".", vec![alias("@/*", &["./src/*"])]))
+        );
+    }
+
+    #[test]
+    fn a_malformed_paths_references_extends_or_allow_js_value_leaves_the_file_without_a_mapping() {
+        // The covering project `app` (extends `base`), another inspected project `other`.
+        let layout = |app_extra: &str, other_extra: &str, base_extra: &str| {
+            let root = r#"{ "files": [], "references": [ { "path": "./app.json" }, { "path": "./other.json" } ] }"#.to_string();
+            let app = format!(
+                r#"{{ "extends": "./base.json", "include": ["src"], "compilerOptions": {{ "paths": {{ "@/*": ["./src/*"] }} }}{app_extra} }}"#
+            );
+            let other = format!(r#"{{ "include": ["tools"]{other_extra} }}"#);
+            let base = format!(r#"{{ "compilerOptions": {{ "strict": true }}{base_extra} }}"#);
+            ts_repo(&[
+                ("tsconfig.json", &root),
+                ("app.json", &app),
+                ("other.json", &other),
+                ("base.json", &base),
+            ])
+        };
+        let malformed = [
+            (
+                "paths an array",
+                r#", "compilerOptions": { "paths": ["./src/*"] }"#,
+            ),
+            (
+                "paths with a non-string substitution",
+                r#", "compilerOptions": { "paths": { "~/*": ["./x/*", 7] } }"#,
+            ),
+            ("references not a list", r#", "references": "./x.json""#),
+            (
+                "a reference without a string path",
+                r#", "references": [ { "path": 1 } ]"#,
+            ),
+            ("extends a number", r#", "extends": 5"#),
+            (
+                "extends a list holding a non-string",
+                r#", "extends": ["./base.json", 5]"#,
+            ),
+            (
+                "allowJs a string",
+                r#", "compilerOptions": { "allowJs": "true" }"#,
+            ),
+            (
+                "compilerOptions a string",
+                r#", "compilerOptions": "strict""#,
+            ),
+        ];
+        for (name, field) in malformed {
+            for position in ["covering", "other", "extends parent"] {
+                // A second key of the same name in a JSON object: serde keeps the last, so the
+                // malformed value replaces the valid one in the covering project.
+                let repo = match position {
+                    "covering" => layout(field, "", ""),
+                    "other" => layout("", field, ""),
+                    _ => layout("", "", field),
+                };
+                assert!(
+                    reader_of(repo.path(), "src/a.ts").is_err(),
+                    "{name} in {position}: fail closed, never a default or a filtered value"
+                );
+                let stored =
+                    RepoConfigContext::new().resolve_tsconfig_aliases("src/a.ts", repo.path());
+                assert_eq!(
+                    stored.sole_inspected_covering_project_mapping, None,
+                    "{name} in {position}"
+                );
+                assert!(
+                    stored.entries.is_empty(),
+                    "{name} in {position}: HEAD's lenient entries"
+                );
+            }
+        }
+        // Every field ABSENT: the defaults apply and the mapping is stored.
+        let repo = layout("", "", "");
+        assert_eq!(
+            mapping_of(repo.path(), "src/a.ts"),
+            Some(mapping("", ".", vec![alias("@/*", &["./src/*"])]))
+        );
+    }
+
+    #[test]
+    fn exclude_narrows_include_and_never_removes_a_file_listed_in_files() {
+        let repo = ts_repo(&[(
+            "tsconfig.json",
+            r#"{ "files": ["src/keep.ts"], "include": ["src"], "exclude": ["src/keep.ts", "src/drop.ts", "src/gen/**/*.ts"], "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }"#,
+        )]);
+        let some = Some(mapping("", ".", vec![alias("@/*", &["./src/*"])]));
+        assert_eq!(
+            mapping_of(repo.path(), "src/keep.ts"),
+            some,
+            "listed in files"
+        );
+        assert_eq!(mapping_of(repo.path(), "src/other.ts"), some, "included");
+        assert_eq!(
+            mapping_of(repo.path(), "src/drop.ts"),
+            None,
+            "excluded from include"
+        );
+        assert_eq!(
+            mapping_of(repo.path(), "src/gen/a/b.ts"),
+            None,
+            "a wildcard exclude"
+        );
+    }
+
+    #[test]
+    fn a_file_two_inspected_projects_cover_carries_no_mapping() {
+        let two_refs = |first: &str, second: &str| {
+            format!(
+                r#"{{ "files": [], "references": [ {{ "path": "./{first}" }}, {{ "path": "./{second}" }} ] }}"#
+            )
+        };
+        let with_paths = |dir: &str| {
+            format!(
+                r#"{{ "include": ["src"], "compilerOptions": {{ "paths": {{ "@/*": ["./{dir}/*"] }} }} }}"#
+            )
+        };
+        let without_paths = r#"{ "include": ["src"] }"#.to_string();
+        let variants: Vec<(&str, String, String)> = vec![
+            ("different paths", with_paths("one"), with_paths("two")),
+            ("equal paths", with_paths("one"), with_paths("one")),
+            (
+                "paths in only one",
+                with_paths("one"),
+                without_paths.clone(),
+            ),
+        ];
+        for (name, a, b) in &variants {
+            for (first, second) in [("a.json", "b.json"), ("b.json", "a.json")] {
+                let repo = ts_repo(&[
+                    ("tsconfig.json", &two_refs(first, second)),
+                    ("a.json", a),
+                    ("b.json", b),
+                ]);
+                assert_eq!(
+                    reader_of(repo.path(), "src/main.ts"),
+                    Ok(None),
+                    "{name}, {first} first: a decline, never a pick, a merge or a union, and no warning"
+                );
+                let stored =
+                    RepoConfigContext::new().resolve_tsconfig_aliases("src/main.ts", repo.path());
+                assert!(stored.entries.is_empty(), "{name}: entries as at HEAD");
+            }
+        }
+        // A nearest tsconfig.json without `files` and `include` (it covers everything under it)
+        // beside a reference that also covers the file.
+        let repo = ts_repo(&[
+            (
+                "tsconfig.json",
+                r#"{ "references": [ { "path": "./app.json" } ], "compilerOptions": { "paths": { "@/*": ["./root/*"] } } }"#,
+            ),
+            ("app.json", &with_paths("child")),
+        ]);
+        assert_eq!(reader_of(repo.path(), "src/main.ts"), Ok(None));
+        assert_eq!(
+            RepoConfigContext::new()
+                .resolve_tsconfig_aliases("src/main.ts", repo.path())
+                .entries,
+            vec![alias("@/*", &["./root/*"])],
+            "entries stay the nearest's, as at HEAD"
+        );
+    }
+
+    #[test]
+    fn a_sole_inspected_covering_project_without_paths_gives_the_file_no_mapping() {
+        let repo = ts_repo(&[
+            (
+                "tsconfig.json",
+                r#"{ "files": [], "references": [ { "path": "./app.json" }, { "path": "./tools.json" } ] }"#,
+            ),
+            ("app.json", r#"{ "include": ["src"] }"#),
+            (
+                "tools.json",
+                r#"{ "include": ["tools"], "compilerOptions": { "paths": { "@/*": ["./tools/*"] } } }"#,
+            ),
+        ]);
+        assert_eq!(reader_of(repo.path(), "src/main.ts"), Ok(None));
+        assert_eq!(
+            mapping_of(repo.path(), "tools/run.ts"),
+            Some(mapping("", ".", vec![alias("@/*", &["./tools/*"])]))
+        );
+    }
+
+    #[test]
+    fn a_root_tsconfig_with_empty_files_and_its_own_paths_supplies_no_mapping_and_the_covering_reference_does(
+    ) {
+        let repo = ts_repo(&[
+            ("admin/tsconfig.json", AMODX_ROOT),
+            ("admin/tsconfig.app.json", AMODX_APP),
+            ("admin/tsconfig.node.json", NODE_PROJECT),
+        ]);
+        let stored = RepoConfigContext::new()
+            .resolve_tsconfig_aliases("admin/src/components/editor/Toolbar.tsx", repo.path());
+        assert_eq!(
+            stored.sole_inspected_covering_project_mapping,
+            Some(mapping("admin", ".", vec![alias("@/*", &["./src/*"])])),
+            "the child's mapping (JSONC comments and trailing commas read as TypeScript reads them)"
+        );
+        assert_eq!(
+            stored.entries,
+            vec![alias("@/*", &["./root/*"])],
+            "entries stay the root's, as at HEAD"
+        );
+        // The child's `exclude` narrows its `include`.
+        assert_eq!(mapping_of(repo.path(), "admin/src/a.test.ts"), None);
+    }
+
+    #[test]
+    fn the_nearest_tsconfig_paths_apply_only_to_files_its_membership_covers() {
+        let repo = ts_repo(&[(
+            "tsconfig.json",
+            r#"{ "include": ["src"], "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }"#,
+        )]);
+        assert_eq!(
+            mapping_of(repo.path(), "src/a.ts"),
+            Some(mapping("", ".", vec![alias("@/*", &["./src/*"])]))
+        );
+        assert_eq!(mapping_of(repo.path(), "scripts/build.ts"), None);
+        assert_eq!(
+            RepoConfigContext::new()
+                .resolve_tsconfig_aliases("scripts/build.ts", repo.path())
+                .entries,
+            vec![alias("@/*", &["./src/*"])],
+            "the classifier's entries are unchanged"
+        );
+    }
+
+    #[test]
+    fn a_js_file_is_a_member_only_of_a_project_with_allow_js() {
+        for (allow_js, member) in [
+            ("", false),
+            (r#", "allowJs": false"#, false),
+            (r#", "allowJs": true"#, true),
+        ] {
+            let repo = ts_repo(&[(
+                "tsconfig.json",
+                &format!(
+                    r#"{{ "compilerOptions": {{ "paths": {{ "@/*": ["./src/*"] }}{allow_js} }} }}"#
+                ),
+            )]);
+            for file in ["src/a.js", "src/a.jsx", "src/a.mjs", "src/a.cjs"] {
+                assert_eq!(
+                    mapping_of(repo.path(), file).is_some(),
+                    member,
+                    "{allow_js} {file}"
+                );
+            }
+            assert!(mapping_of(repo.path(), "src/a.ts").is_some(), "{allow_js}");
+        }
+    }
+
+    #[test]
+    fn a_file_under_the_project_out_dir_is_not_a_member() {
+        for include in ["", r#", "include": ["src", "dist"]"#] {
+            let repo = ts_repo(&[(
+                "tsconfig.json",
+                &format!(
+                    r#"{{ "compilerOptions": {{ "outDir": "./dist", "paths": {{ "@/*": ["./src/*"] }} }}{include} }}"#
+                ),
+            )]);
+            assert_eq!(mapping_of(repo.path(), "dist/a.ts"), None, "{include}");
+            assert!(mapping_of(repo.path(), "src/a.ts").is_some(), "{include}");
+        }
+    }
+
+    #[test]
+    fn head_entries_stay_the_nearest_tsconfig_aliases_for_the_classifier() {
+        let layouts: Vec<TsconfigLayout> = vec![
+            (
+                vec![
+                    ("admin/tsconfig.json", AMODX_ROOT),
+                    ("admin/tsconfig.app.json", AMODX_APP),
+                    ("admin/tsconfig.node.json", NODE_PROJECT),
+                ],
+                "admin/src/a.ts",
+                "admin/tsconfig.json",
+            ),
+            (
+                vec![
+                    ("frontend/tsconfig.json", HEX_ROOT),
+                    ("frontend/tsconfig.app.json", AMODX_APP),
+                    ("frontend/tsconfig.node.json", NODE_PROJECT),
+                ],
+                "frontend/src/a.ts",
+                "frontend/tsconfig.json",
+            ),
+            (
+                vec![
+                    (
+                        "cfg/base.json",
+                        r#"{ "compilerOptions": { "paths": { "@/*": ["./x/*"] } } }"#,
+                    ),
+                    ("pkg/tsconfig.json", r#"{ "extends": "../cfg/base.json" }"#),
+                ],
+                "pkg/src/a.ts",
+                "pkg/tsconfig.json",
+            ),
+        ];
+        for (files, file, nearest) in layouts {
+            let repo = ts_repo(&files);
+            let stored = RepoConfigContext::new().resolve_tsconfig_aliases(file, repo.path());
+            assert_eq!(
+                stored.entries,
+                read_tsconfig_aliases_from_path(&repo.path().join(nearest))
+                    .map(|a| a.entries)
+                    .unwrap_or_default(),
+                "{file}"
+            );
+        }
     }
 
     // ── extract_cargo_dependencies ───────────────────────────

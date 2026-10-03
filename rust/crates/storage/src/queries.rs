@@ -221,9 +221,10 @@ struct RecordedBasis {
 
 /// TS-WORKSPACE-RESOLUTION-1 (extending CPP-INCLUDE-BASENAME-1's rule): every basis a bound
 /// IMPORTS edge records. The strings are the stored contract (`indexer::resolver::INCLUDE_*_BASIS`,
-/// `indexer::workspace_import::WORKSPACE_SOURCE_ENTRY_BASIS`; storage takes no dependency on the
+/// `indexer::workspace_import::WORKSPACE_SOURCE_ENTRY_BASIS`,
+/// `indexer::tsconfig_paths_import::TSCONFIG_PATHS_BASIS`; storage takes no dependency on the
 /// indexer).
-const RECORDED_BASES: [RecordedBasis; 3] = [
+const RECORDED_BASES: [RecordedBasis; 4] = [
     RecordedBasis {
         basis: "unique_suffix",
         producer: ReasonProducer::CFamily,
@@ -242,14 +243,24 @@ const RECORDED_BASES: [RecordedBasis; 3] = [
         resolution: "inferred",
         shape: CandidateShape::TargetThenDeclared,
     },
+    // TS-ALIAS-RESOLUTION-1 (D-TSA-RECORD-CONFLICT-1): a static import bound through the one
+    // tsconfig project's `paths`; the target is its one candidate.
+    RecordedBasis {
+        basis: "tsconfig_paths",
+        producer: ReasonProducer::Ts,
+        resolution: "static",
+        shape: CandidateShape::TargetOnly,
+    },
 ];
 
 /// The bases a stage writes only on an UNRESOLVED row (several candidates, none picked) — never
 /// evidence on a bound edge.
-const AMBIGUOUS_BASES: [&str; 3] = [
+const AMBIGUOUS_BASES: [&str; 5] = [
     "ambiguous_suffix",
     "ambiguous_basename",
     "ambiguous_workspace_source_entry",
+    "ambiguous_tsconfig_paths",
+    "tied_tsconfig_paths_patterns",
 ];
 
 /// Was this edge written by the C or C++ extractor (`c-core:<v>` / `cpp-core:<v>`, the
@@ -7954,6 +7965,94 @@ mod tests {
                 unreadable(&rows[0].reason),
                 "{kind} {resolution} {carrier}: {:?}",
                 rows[0].reason
+            );
+        }
+    }
+
+    // ── TS-ALIAS-RESOLUTION-1: the `tsconfig_paths` reason on a static row ──
+
+    #[test]
+    fn find_imports_tsconfig_paths_static_row_carries_its_basis_and_target_candidate() {
+        let rows = imports_of_main(&[(
+            "admin/src/components/ui/button.tsx",
+            "FILE",
+            "static",
+            "ts-core:0.2.0",
+            Some(
+                r#"{"rawPath":"@/components/ui/button","isTypeOnly":false,"basis":"tsconfig_paths","candidates":["r1:admin/src/components/ui/button.tsx:FILE"]}"#,
+            ),
+        )]);
+        assert_eq!(
+            rows[0].reason,
+            Some(ImportReason::Recorded {
+                basis: "tsconfig_paths".into(),
+                candidates: vec!["admin/src/components/ui/button.tsx".into()],
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&rows[0]).unwrap()["reason"],
+            serde_json::json!({"basis": "tsconfig_paths", "candidates": ["admin/src/components/ui/button.tsx"]})
+        );
+    }
+
+    #[test]
+    fn find_imports_tsconfig_paths_static_row_with_a_disagreeing_candidate_is_unreadable() {
+        // oracle-corrections.md OC-3: each disagreeing carrier decodes to `Unreadable` with the
+        // exact text of the agreement check that fails — the text the served static row prints.
+        let key = r#""r1:src/x.ts:FILE""#;
+        let cases: Vec<(&str, &str, String, &str)> = vec![
+            // A candidate other than the edge's target.
+            (
+                "static",
+                "ts-core:0.2.0",
+                r#"{"basis":"tsconfig_paths","candidates":["r1:src/other.ts:FILE"]}"#.to_string(),
+                "candidate r1:src/other.ts:FILE is not the edge's target",
+            ),
+            // Several candidates under the one-target basis.
+            (
+                "static",
+                "ts-core:0.2.0",
+                format!(r#"{{"basis":"tsconfig_paths","candidates":[{key},"r1:src/y.ts:FILE"]}}"#),
+                "2 candidates under the unique basis tsconfig_paths",
+            ),
+            // The basis on an inferred edge, or on another producer's edge.
+            (
+                "inferred",
+                "ts-core:0.2.0",
+                format!(r#"{{"basis":"tsconfig_paths","candidates":[{key}]}}"#),
+                "basis tsconfig_paths on a inferred edge",
+            ),
+            (
+                "static",
+                "c-core:0.1.0",
+                format!(r#"{{"basis":"tsconfig_paths","candidates":[{key}]}}"#),
+                "basis tsconfig_paths on an edge of c-core:0.1.0",
+            ),
+            // The two ambiguity bases are never evidence on a bound edge.
+            (
+                "static",
+                "ts-core:0.2.0",
+                format!(
+                    r#"{{"basis":"ambiguous_tsconfig_paths","candidates":[{key},"r1:src/y.ts:FILE"]}}"#
+                ),
+                "ambiguous basis ambiguous_tsconfig_paths on a bound edge",
+            ),
+            (
+                "static",
+                "ts-core:0.2.0",
+                format!(r#"{{"basis":"tied_tsconfig_paths_patterns","candidates":[{key}]}}"#),
+                "ambiguous basis tied_tsconfig_paths_patterns on a bound edge",
+            ),
+        ];
+        for (resolution, extractor, carrier, text) in &cases {
+            let rows =
+                imports_of_main(&[("src/x.ts", "FILE", resolution, extractor, Some(carrier))]);
+            assert_eq!(
+                rows[0].reason,
+                Some(ImportReason::Unreadable {
+                    unreadable: text.to_string()
+                }),
+                "{resolution} {extractor} {carrier}"
             );
         }
     }

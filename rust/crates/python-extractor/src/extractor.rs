@@ -2645,6 +2645,7 @@ def callee():
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
             npm_workspace_packages: HashMap::new(),
+            tsconfig_paths: Default::default(),
         };
         for n in &result.nodes {
             let node = ResolverNode {
