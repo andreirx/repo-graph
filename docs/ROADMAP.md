@@ -1406,6 +1406,8 @@ not say so) and should be root-caused as one family before any packet is cut. Al
 `core`'s 58 unindexed Scala files unsaid, vscode's 313 KB generated decision tree ranked complexity #1 unmarked, no `CHANGELOG.md`.
 NEXT: the human orders the queue; the first packet root-causes items 1–3 together.
 
+**Scope ruling (human, 2026-10-03):** the remaining bad grades were classified as fundamental capability gaps (call-graph resolution < 50 %, reader coverage, seed model, large-repo latency), wiring (store facts no surface reads; two surfaces reading one snapshot differently; the alias resolver that exists only on the never-served LiveGraph path), output formatting, and corpus-bound F grades. Ruled: clear the wiring and output buckets first (the ratified queue) and let those slices set the standard for how an output surface is wired and shown — recorded with the standard's statement in `docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md` (decisions framed by usefulness to an agent net of misdirection; reader phrases restate predicates, never conclusions). The capability bucket is a horizon decision after the queue lands.
+
 **Queue RATIFIED by the human 2026-10-03 ("Ok for the proposal"), after D-TSA-RESOLVER-EDGE-1 ("Ok a"):** IMPORTS-UNRESOLVED-REMAINDER-1 (RC-1 + the RC-11 universe line) → TS-ALIAS-RESOLUTION-1 (RC-2 under D-TSA-RESOLVER-EDGE-1: `indexer → repo-graph-import-resolver`, `references` reader, full reindex) → TS-WORKSPACE-SUBPATH-EXPORTS-1 (RC-12; packeted only after the human revisits D-TWR-REVIEW-1's indexed-`exports`-as-veto rule) → the adjudicator's 4–16 in order → latent/unprobed last.
 
 

@@ -1,0 +1,13 @@
+# D-IUR-ENGINE-SCOPE — RG-REQ-006-L12's per-file unresolved listing is the canonical `auto`/`sqlite` answer; `--engine livegraph|compare` are diagnostic read-model views that say so
+
+Raised: 2026-10-03 by the document review of IMPORTS-UNRESOLVED-REMAINDER-1 (INPUT-1, cycle 0; reviewer codex gpt-6-sol; `.agent-manager/slices/IMPORTS-UNRESOLVED-REMAINDER-1-PREP/review-0.json`, local).
+
+**What the review established.** RG-REQ-006-L12 says `imports <file>` lists each unresolved import. The allocation excludes `--engine livegraph` and `--engine compare` from the unresolved listing although both accept `<file>` (`docs/cli/rmap-contracts.md:151-160`), and its draft contract text called those two modes "repo-wide" — wrong: with `<file>` they answer one file. The reviewer asked whether L12 is limited to the canonical answer (A), reaches every per-file engine mode (B), or is deferred (C), and recommended A.
+
+**The problem in plain words.** `--engine auto` (the default) and `--engine sqlite` are the one answer an agent gets without asking for an engine. `--engine livegraph` is a diagnostic surface of the in-memory read model (it has no resolution class and no unresolved table — `imports --include-inferred` is already refused with it, dispatch.rs:1634-1641), and `--engine compare` is the LiveGraph-vs-SQLite readiness report. Making them list unresolved rows would add a SQLite dependence to the LiveGraph diagnostic and change what `compare` compares.
+
+Resolved: 2026-10-03 by the OPERATOR (in-place manager) as the reviewer's option **A**, overridable by the human: the per-file unresolved listing is the `auto`/`sqlite` answer; the `livegraph` and `compare` per-file answers carry no `unresolved` key and their human render states, in one line, that they are a read-model / readiness view that does not list unresolved imports — `rmap imports <file>` (no engine) does. The requirement text is not amended: L12 describes `imports <file>`, the command an agent runs; the engine flag selects a diagnostic view, which this record names as outside L12's listing. The slice's contract section (docs/cli/rmap-contracts.md) replaces "repo-wide" with that exact statement.
+
+## What this record authorizes
+- IMPORTS-UNRESOLVED-REMAINDER-1 P-IUR-02 as written (livegraph/compare untouched in data) plus ONE additive line on their human render naming the limit and the command that lists unresolved imports; a renderer test for that line.
+- It does NOT decide D-IUR-FASTPATH (whether the default `auto` answer may read SQLite for the unresolved rows on a GREEN-certified LiveGraph serve) — that is the human's.
