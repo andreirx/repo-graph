@@ -27,6 +27,10 @@ use repo_graph_classification::types::{
 use crate::include_resolver::{IncludePathMatch, IncludeResolutionMap, ResolutionStatus};
 use crate::storage_port::TypeOnlyDisposition;
 use crate::types::{EdgeType, ExtractedEdge, Resolution};
+use crate::workspace_import::{
+    match_workspace_package_import, NpmWorkspacePackages, WorkspaceImportMatch,
+    AMBIGUOUS_WORKSPACE_SOURCE_ENTRY_BASIS, WORKSPACE_SOURCE_ENTRY_BASIS,
+};
 
 /// Provenance prefix of the Rust extractor (`ExtractedEdge.extractor`), whose
 /// value is `rust-core:<version>` (see `rust-extractor::EXTRACTOR_NAME`). The
@@ -54,6 +58,11 @@ const JAVA_EXTRACTOR_PREFIX: &str = "java-core:";
 /// does not depend on the python-extractor crate — the string is the stable cross-boundary
 /// provenance already on every extracted edge.
 const PYTHON_EXTRACTOR_PREFIX: &str = "python-core:";
+
+/// Provenance prefix of the TS/JS extractor (`ts-core:<version>`). TS-WORKSPACE-RESOLUTION-1: the
+/// workspace member import stage is gated to edges carrying it, so no other language's import can
+/// bind to a workspace package's source entry.
+const TS_EXTRACTOR_PREFIX: &str = "ts-core:";
 
 /// PYTHON-RECEIVER-BINDING-1 (D-PRB-CARRIER-1 as corrected 2026-09-24): the exact extractor
 /// version that wrote self/cls call carriers WITHOUT the `receiverBinding` key. A carrier lacking
@@ -265,6 +274,19 @@ enum TargetResolution {
     /// indexed files. Unresolved as `ImportsAmbiguousMatch`, never a pick; `metadata_json` carries
     /// the ambiguous basis and every candidate.
     IncludeAmbiguous { metadata_json: String },
+    /// TS-WORKSPACE-RESOLUTION-1 (RG-REQ-006-L04, RG-REQ-002-L11): a bare TS import naming a
+    /// workspace member whose declared entries are not indexed, bound to the member's one indexed
+    /// source entry. Always `inferred` (the index cannot show the build maps the source entry to
+    /// the declared one), never fed to `resolved_import_pairs`; `metadata_json` is the extractor's
+    /// carrier with `basis` and `candidates` (the source entry, then every declared target).
+    WorkspaceSourceEntryBound {
+        target_uid: String,
+        metadata_json: String,
+    },
+    /// TS-WORKSPACE-RESOLUTION-1: the member has several indexed source entries. Unresolved with the
+    /// row's own category, never a pick; `metadata_json` carries the ambiguous basis and every
+    /// candidate.
+    WorkspaceSourceEntryAmbiguous { metadata_json: String },
     /// PYTHON-RECEIVER-BINDING-1 (RG-REQ-005-L02 / RG-REQ-002-L11): a Python `obj.m()` on an
     /// untyped receiver whose method name has exactly ONE candidate. The name alone is not
     /// evidence, so the edge is written `resolution: inferred` with its basis, its receiver text and
@@ -382,6 +404,12 @@ pub struct ResolverIndex {
     /// segments for nested classes / static members). Empty when no `.java` files were indexed →
     /// the Java import stage is a no-op.
     pub java_suffix_index: JavaSuffixIndex,
+    /// TS-WORKSPACE-RESOLUTION-1 (RG-REQ-006-L04): npm workspace package name → every member that
+    /// declares it (root, declared entries). Built once by the orchestrator from
+    /// `IndexOptions.declared_modules` (npm ecosystem only,
+    /// `workspace_import::build_npm_workspace_packages`). Read only by the trailing TS-only workspace
+    /// import stage; empty → the stage is a no-op.
+    pub npm_workspace_packages: NpmWorkspacePackages,
 }
 
 /// IMPORT-RESOLUTION-JAVA-1 §2.1: the Java suffix index. Keyed by file basename (e.g.
@@ -640,6 +668,41 @@ pub fn resolve_edges(
                     source_file_uid,
                 });
             }
+            // TS-WORKSPACE-RESOLUTION-1: an inferred workspace import. Kept OUT of
+            // `resolved_import_pairs`: the persisted MODULE→MODULE graph is fed by certain imports.
+            TargetResolution::WorkspaceSourceEntryBound {
+                target_uid,
+                metadata_json,
+            } => {
+                resolved.push(ResolvedEdge {
+                    edge_uid: edge.edge_uid.clone(),
+                    snapshot_uid: edge.snapshot_uid.clone(),
+                    repo_uid: edge.repo_uid.clone(),
+                    source_node_uid: edge.source_node_uid.clone(),
+                    target_node_uid: target_uid,
+                    edge_type: edge.edge_type,
+                    resolution: Resolution::Inferred,
+                    extractor: edge.extractor.clone(),
+                    location: edge.location,
+                    metadata_json: Some(metadata_json),
+                });
+            }
+            // TS-WORKSPACE-RESOLUTION-1: several source entries. The row keeps the category it has
+            // without the stage; only its carrier gains the pool.
+            TargetResolution::WorkspaceSourceEntryAmbiguous { metadata_json } => {
+                let category = categorize_unresolved_edge(edge);
+                let source_file_uid = index
+                    .node_uid_to_file_uid
+                    .get(&edge.source_node_uid)
+                    .cloned();
+                let mut unresolved_edge = edge.clone();
+                unresolved_edge.metadata_json = Some(metadata_json);
+                still_unresolved.push(CategorizedUnresolvedEdge {
+                    edge: unresolved_edge,
+                    category,
+                    source_file_uid,
+                });
+            }
             // PYTHON-RECEIVER-BINDING-1: a name-only binding on an untyped receiver. Resolved to
             // the single candidate but marked INFERRED with its basis, receiver and pool of one
             // (RG-REQ-005-L02, RG-REQ-002-L11) — overriding the extractor's `static`.
@@ -890,6 +953,12 @@ fn resolve_import_ladder(edge: &ExtractedEdge, index: &ResolverIndex) -> TargetR
         None if is_c_family_extractor(&edge.extractor) => {
             resolve_include_suffix_or_basename(edge, index).unwrap_or(TargetResolution::Unresolved)
         }
+        // Stage 7 (TS-WORKSPACE-RESOLUTION-1, RG-REQ-006-L04): a bare TS import naming an npm
+        // workspace member of this repository. Runs last and only for TS edges, so no binding an
+        // earlier stage makes ever flips (RG-REQ-006-L03).
+        None if edge.extractor.starts_with(TS_EXTRACTOR_PREFIX) => {
+            resolve_workspace_package_import(edge, index).unwrap_or(TargetResolution::Unresolved)
+        }
         None => TargetResolution::Unresolved,
     }
 }
@@ -970,6 +1039,83 @@ fn resolve_include_suffix_or_basename(
             metadata_json,
         },
         None => TargetResolution::IncludeAmbiguous { metadata_json },
+    })
+}
+
+/// TS-WORKSPACE-RESOLUTION-1 (RG-REQ-006-L04 as amended by D-TS-WORKSPACE-1 = A; RG-REQ-002-L11):
+/// the workspace member import stage. Applies only when the edge's carrier is a JSON object whose
+/// `rawPath` equals the edge's `target_key` (the bare specifier the TS extractor emits); asks
+/// [`match_workspace_package_import`] and decides:
+///
+/// - bound → `inferred` edge to the source entry's FILE node, the carrier merged with `basis:
+///   workspace_source_entry` and `candidates` (the source entry, then every declared target, as
+///   FILE stable keys — none selected);
+/// - ambiguous → the row stays unresolved, the carrier merged with `basis:
+///   ambiguous_workspace_source_entry` and every candidate;
+/// - otherwise, or with any other carrier → `None` (the row stays exactly as before).
+///
+/// PURE: reads only the resolver index.
+fn resolve_workspace_package_import(
+    edge: &ExtractedEdge,
+    index: &ResolverIndex,
+) -> Option<TargetResolution> {
+    if index.npm_workspace_packages.is_empty() {
+        return None;
+    }
+    let mut carrier =
+        match serde_json::from_str::<serde_json::Value>(edge.metadata_json.as_deref()?) {
+            Ok(serde_json::Value::Object(obj)) => obj,
+            Ok(_) | Err(_) => return None,
+        };
+    if carrier.get("rawPath").and_then(serde_json::Value::as_str) != Some(edge.target_key.as_str())
+    {
+        return None;
+    }
+    let file_key = |path: &str| format!("{}:{}:FILE", edge.repo_uid, path);
+    let is_indexed = |path: &str| index.nodes_by_stable_key.contains_key(&file_key(path));
+    let (basis, candidates, bound_uid) = match match_workspace_package_import(
+        &edge.target_key,
+        &index.npm_workspace_packages,
+        is_indexed,
+    ) {
+        WorkspaceImportMatch::NotBound => return None,
+        WorkspaceImportMatch::Bound {
+            source_entry,
+            declared_entries,
+        } => {
+            let target_uid = index
+                .nodes_by_stable_key
+                .get(&file_key(&source_entry))?
+                .node_uid
+                .clone();
+            let candidates: Vec<String> = std::iter::once(&source_entry)
+                .chain(declared_entries.iter())
+                .map(|p| file_key(p))
+                .collect();
+            (WORKSPACE_SOURCE_ENTRY_BASIS, candidates, Some(target_uid))
+        }
+        WorkspaceImportMatch::Ambiguous {
+            source_entries,
+            declared_entries,
+        } => (
+            AMBIGUOUS_WORKSPACE_SOURCE_ENTRY_BASIS,
+            source_entries
+                .iter()
+                .chain(declared_entries.iter())
+                .map(|p| file_key(p))
+                .collect(),
+            None,
+        ),
+    };
+    carrier.insert("basis".to_string(), serde_json::json!(basis));
+    carrier.insert("candidates".to_string(), serde_json::json!(candidates));
+    let metadata_json = serde_json::Value::Object(carrier).to_string();
+    Some(match bound_uid {
+        Some(target_uid) => TargetResolution::WorkspaceSourceEntryBound {
+            target_uid,
+            metadata_json,
+        },
+        None => TargetResolution::WorkspaceSourceEntryAmbiguous { metadata_json },
     })
 }
 
@@ -3439,6 +3585,7 @@ mod tests {
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
+            npm_workspace_packages: HashMap::new(),
         }
     }
 
@@ -4618,6 +4765,7 @@ mod tests {
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
+            npm_workspace_packages: HashMap::new(),
         };
         index
             .nodes_by_stable_key
@@ -4654,6 +4802,7 @@ mod tests {
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
+            npm_workspace_packages: HashMap::new(),
         };
         index
             .nodes_by_name
@@ -4685,6 +4834,7 @@ mod tests {
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
+            npm_workspace_packages: HashMap::new(),
         };
         index
             .nodes_by_name
@@ -4925,6 +5075,7 @@ mod tests {
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
+            npm_workspace_packages: HashMap::new(),
         };
         index
             .nodes_by_stable_key
@@ -4959,6 +5110,7 @@ mod tests {
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
+            npm_workspace_packages: HashMap::new(),
         };
         index
             .nodes_by_stable_key
@@ -4999,6 +5151,7 @@ mod tests {
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
+            npm_workspace_packages: HashMap::new(),
         };
         index
             .nodes_by_stable_key
@@ -5044,6 +5197,7 @@ mod tests {
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
+            npm_workspace_packages: HashMap::new(),
         };
         index
             .nodes_by_name
@@ -5107,6 +5261,7 @@ mod tests {
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
+            npm_workspace_packages: HashMap::new(),
         };
         // The target module exports "readFile", NOT "rf".
         index
@@ -5174,6 +5329,7 @@ mod tests {
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
+            npm_workspace_packages: HashMap::new(),
         };
         // The target module exports "helper".
         index
@@ -5248,6 +5404,7 @@ mod tests {
             include_resolver: None,
             rust_crate_roots: HashMap::new(),
             java_suffix_index: HashMap::new(),
+            npm_workspace_packages: HashMap::new(),
         };
         // There exists a "readFile" function globally.
         index
@@ -6012,5 +6169,265 @@ mod tests {
                 "never overwritten, never coerced"
             );
         }
+    }
+
+    // ── TS workspace member import stage (TS-WORKSPACE-RESOLUTION-1, RG-REQ-006-L04) ──
+
+    const TS_EXTRACTOR: &str = "ts-core:0.2.0";
+
+    /// The production resolver maps over `paths` (`c_include_index`) plus the npm workspace members
+    /// the orchestrator builds from the declared-module catalog (each entry declared by `main`).
+    fn ws_index(paths: &[&str], members: &[(&str, &str, &[&str])]) -> ResolverIndex {
+        let mut index = c_include_index(paths);
+        let declared: Vec<crate::types::DeclaredModule> = members
+            .iter()
+            .map(|(name, root, entries)| crate::types::DeclaredModule {
+                ecosystem: "npm".to_string(),
+                name: name.to_string(),
+                canonical_root: root.to_string(),
+                npm_declared_entries: entries
+                    .iter()
+                    .map(|e| crate::types::NpmDeclaredEntry::Main(e.to_string()))
+                    .collect(),
+            })
+            .collect();
+        index.npm_workspace_packages =
+            crate::workspace_import::build_npm_workspace_packages(&declared);
+        index
+    }
+
+    /// A bare TS import of `specifier` from the FILE node of `from`, with the carrier the extractor
+    /// writes (`rawPath`) and the one the orchestrator injects (`isTypeOnly`).
+    fn ts_import(uid: &str, from: &str, specifier: &str) -> ExtractedEdge {
+        let mut e = make_edge(uid, specifier, EdgeType::Imports);
+        e.source_node_uid = format!("n:{from}");
+        e.extractor = TS_EXTRACTOR.into();
+        e.metadata_json =
+            Some(serde_json::json!({"rawPath": specifier, "isTypeOnly": false}).to_string());
+        e
+    }
+
+    /// FRAKTAG's shape: `packages/api/src/server.ts` imports `@fraktag/engine`, whose manifest
+    /// declares `main: dist/index.js` (not indexed) and whose `src/index.ts` is indexed.
+    fn fraktag_index() -> ResolverIndex {
+        ws_index(
+            &[
+                "packages/api/src/server.ts",
+                "packages/engine/src/index.ts",
+                "packages/engine/src/core.ts",
+            ],
+            &[(
+                "@fraktag/engine",
+                "packages/engine",
+                &["packages/engine/dist/index.js"],
+            )],
+        )
+    }
+
+    #[test]
+    fn workspace_package_import_resolves_inferred_to_its_source_entry_with_every_candidate() {
+        let index = fraktag_index();
+        let e = ts_import("e1", "packages/api/src/server.ts", "@fraktag/engine");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(
+            result.still_unresolved.is_empty(),
+            "{:?}",
+            result.still_unresolved.len()
+        );
+        assert_eq!(result.resolved.len(), 1);
+        let r = &result.resolved[0];
+        assert_eq!(r.target_node_uid, "n:packages/engine/src/index.ts");
+        assert_eq!(r.resolution, Resolution::Inferred, "never static");
+        assert_eq!(r.extractor, TS_EXTRACTOR);
+        assert_eq!(
+            carrier(&r.metadata_json),
+            serde_json::json!({
+                "rawPath": "@fraktag/engine",
+                "isTypeOnly": false,
+                "basis": "workspace_source_entry",
+                "candidates": [
+                    "r1:packages/engine/src/index.ts:FILE",
+                    "r1:packages/engine/dist/index.js:FILE"
+                ],
+            })
+        );
+
+        // Several declared targets are all recorded after the source entry, none selected.
+        let index = ws_index(
+            &[
+                "packages/plugins/src/common/EffectControls.tsx",
+                "packages/effects/src/index.ts",
+            ],
+            &[(
+                "@amodx/effects",
+                "packages/effects",
+                &[
+                    "packages/effects/dist/index.d.ts",
+                    "packages/effects/dist/index.js",
+                ],
+            )],
+        );
+        let e = ts_import(
+            "e2",
+            "packages/plugins/src/common/EffectControls.tsx",
+            "@amodx/effects",
+        );
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        assert_eq!(result.resolved[0].resolution, Resolution::Inferred);
+        assert_eq!(
+            carrier(&result.resolved[0].metadata_json)["candidates"],
+            serde_json::json!([
+                "r1:packages/effects/src/index.ts:FILE",
+                "r1:packages/effects/dist/index.d.ts:FILE",
+                "r1:packages/effects/dist/index.js:FILE"
+            ])
+        );
+    }
+
+    #[test]
+    fn workspace_package_import_with_several_source_entries_stays_unresolved_with_the_pool() {
+        let index = ws_index(
+            &[
+                "packages/api/src/server.ts",
+                "packages/engine/src/index.ts",
+                "packages/engine/src/index.js",
+            ],
+            &[(
+                "@fraktag/engine",
+                "packages/engine",
+                &["packages/engine/dist/index.js"],
+            )],
+        );
+        let e = ts_import("e1", "packages/api/src/server.ts", "@fraktag/engine");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(result.resolved.is_empty(), "never a pick");
+        assert!(result.resolved_import_pairs.is_empty());
+        assert_eq!(result.still_unresolved.len(), 1);
+        let u = &result.still_unresolved[0];
+        assert_eq!(
+            u.category,
+            categorize_unresolved_edge(&e),
+            "the category is the one the row had"
+        );
+        assert_eq!(u.edge.target_key, "@fraktag/engine");
+        assert_eq!(
+            carrier(&u.edge.metadata_json),
+            serde_json::json!({
+                "rawPath": "@fraktag/engine",
+                "isTypeOnly": false,
+                "basis": "ambiguous_workspace_source_entry",
+                "candidates": [
+                    "r1:packages/engine/src/index.js:FILE",
+                    "r1:packages/engine/src/index.ts:FILE",
+                    "r1:packages/engine/dist/index.js:FILE"
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn workspace_stage_runs_only_after_every_earlier_stage_misses() {
+        // A member named like a directory whose `index.ts` the repo-prefix stage already finds.
+        let index = ws_index(
+            &["app/main.ts", "lib/index.ts", "lib/src/index.ts"],
+            &[("lib", "lib", &["lib/dist/index.js"])],
+        );
+        let e = ts_import("e1", "app/main.ts", "lib");
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert_eq!(result.resolved.len(), 1);
+        let r = &result.resolved[0];
+        assert_eq!(r.target_node_uid, "n:lib/index.ts", "the earlier binding");
+        assert_eq!(r.resolution, Resolution::Static);
+        assert_eq!(r.metadata_json, e.metadata_json, "the carrier is untouched");
+        assert_eq!(result.resolved_import_pairs.len(), 1);
+    }
+
+    #[test]
+    fn non_ts_import_never_reaches_the_workspace_stage() {
+        let index = fraktag_index();
+        for extractor in [
+            "python-core:0.2.0",
+            "java-core:0.1.0",
+            "rust-core:0.1.0",
+            "c-core:0.1.0",
+            "cpp-core:0.2.0",
+            "test:1",
+        ] {
+            let mut e = ts_import("e1", "packages/api/src/server.ts", "@fraktag/engine");
+            e.extractor = extractor.into();
+            let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+            assert!(result.resolved.is_empty(), "{extractor}");
+            assert_eq!(result.still_unresolved.len(), 1, "{extractor}");
+            let u = &result.still_unresolved[0];
+            assert_eq!(
+                u.category,
+                UnresolvedEdgeCategory::ImportsFileNotFound,
+                "{extractor}"
+            );
+            assert_eq!(u.edge.metadata_json, e.metadata_json, "{extractor}");
+        }
+    }
+
+    #[test]
+    fn workspace_package_import_with_malformed_or_mismatched_carrier_declines() {
+        let index = fraktag_index();
+        for raw in [
+            None,
+            Some("not json"),
+            Some("[1,2]"),
+            Some("7"),
+            Some(r#"{"isTypeOnly":false}"#),
+            Some(r#"{"rawPath":"@fraktag/other","isTypeOnly":false}"#),
+            Some(r#"{"rawPath":7}"#),
+        ] {
+            let mut e = ts_import("e1", "packages/api/src/server.ts", "@fraktag/engine");
+            e.metadata_json = raw.map(str::to_string);
+            let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+            assert!(result.resolved.is_empty(), "{raw:?}");
+            assert_eq!(result.still_unresolved.len(), 1, "{raw:?}");
+            let u = &result.still_unresolved[0];
+            assert_eq!(u.category, categorize_unresolved_edge(&e), "{raw:?}");
+            assert_eq!(
+                u.edge.metadata_json.as_deref(),
+                raw,
+                "never overwritten, never coerced"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_inferred_import_never_feeds_the_module_edge_pairs() {
+        let index = ws_index(
+            &[
+                "packages/api/src/server.ts",
+                "packages/api/src/routes.ts",
+                "packages/engine/src/index.ts",
+            ],
+            &[(
+                "@fraktag/engine",
+                "packages/engine",
+                &["packages/engine/dist/index.js"],
+            )],
+        );
+        let inferred = ts_import("e1", "packages/api/src/server.ts", "@fraktag/engine");
+        let mut certain = make_edge(
+            "e2",
+            "r1:packages/api/src/routes.ts:FILE",
+            EdgeType::Imports,
+        );
+        certain.source_node_uid = "n:packages/api/src/server.ts".into();
+        certain.extractor = TS_EXTRACTOR.into();
+        let result = resolve_edges(&[inferred, certain], &index, None);
+        assert_eq!(result.resolved.len(), 2);
+        let by_uid = |uid: &str| result.resolved.iter().find(|r| r.edge_uid == uid).unwrap();
+        assert_eq!(by_uid("e1").resolution, Resolution::Inferred);
+        assert_eq!(by_uid("e2").resolution, Resolution::Static);
+        // Only the certain import reaches the module-edge derivation.
+        assert_eq!(result.resolved_import_pairs.len(), 1);
+        assert_eq!(
+            result.resolved_import_pairs[0].1,
+            "n:packages/api/src/routes.ts"
+        );
     }
 }

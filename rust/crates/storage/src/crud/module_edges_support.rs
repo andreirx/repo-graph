@@ -225,13 +225,17 @@ impl StorageConnection {
 
     // ── DEP-1: Dependency reconciliation queries ──────────────────
 
-    /// Read all external library import specifiers for a snapshot.
+    /// Read the observed package references `deps list` reconciles for a snapshot.
     ///
-    /// Returns unresolved edges classified as `external_library_candidate`
-    /// with their target_key (the import specifier) and source file UID.
-    /// The source file UID is resolved via the source_node's file_uid.
+    /// Returns (1) unresolved edges classified as `external_library_candidate`
+    /// with their specifier and source file UID (the source file UID is resolved
+    /// via the source_node's file_uid), plus (2) TS-WORKSPACE-RESOLUTION-1 — the
+    /// TS IMPORTS edges bound INFERRED to a workspace member's source entry, each
+    /// checked against its own edge by `checked_workspace_import_sites` and
+    /// returned as an import site of the package it spells. A carrier that fails
+    /// that check makes this read fail with a named error.
     ///
-    /// Order is deterministic: sorted by (source_file_uid, target_key).
+    /// Order is deterministic: sorted by (source_file_uid, specifier).
     pub fn get_external_imports_for_snapshot(
         &self,
         snapshot_uid: &str,
@@ -276,6 +280,20 @@ impl StorageConnection {
         for row in rows {
             results.push(row?);
         }
+        // TS-WORKSPACE-RESOLUTION-1 (RG-REQ-006-L07): an import the resolver bound INFERRED to a
+        // workspace member's source entry left `unresolved_edges`; it is still an import site of its
+        // package, by its spelled specifier — checked against its own edge first.
+        for site in self.checked_workspace_import_sites(snapshot_uid, "deps imports")? {
+            results.push(ExternalImportFact {
+                source_file_uid: site.source_file_uid,
+                source_file_path: site.source_file_path,
+                specifier: site.specifier,
+                is_import_edge: true,
+            });
+        }
+        results.sort_by(|a, b| {
+            (&a.source_file_uid, &a.specifier).cmp(&(&b.source_file_uid, &b.specifier))
+        });
         Ok(results)
     }
 
@@ -392,7 +410,10 @@ impl StorageConnection {
     /// Read external imports with file paths and locations for `deps why`.
     ///
     /// Returns unresolved edges classified as `external_library_candidate`
-    /// enriched with file path and line/column information. Used for
+    /// enriched with file path and line/column information, plus the checked
+    /// workspace-bound TS imports of `checked_workspace_import_sites`
+    /// (TS-WORKSPACE-RESOLUTION-1), each at its own location; a carrier that
+    /// fails the check makes this read fail with a named error. Used for
     /// sample import evidence in the CLI.
     ///
     /// Order is deterministic: sorted by (file_path, line_start, specifier).
@@ -430,8 +451,190 @@ impl StorageConnection {
         for row in rows {
             results.push(row?);
         }
+        // TS-WORKSPACE-RESOLUTION-1: the checked workspace-bound imports, each at its own location.
+        for site in self.checked_workspace_import_sites(snapshot_uid, "deps import locations")? {
+            results.push(ExternalImportWithLocation {
+                file_uid: site.source_file_uid,
+                file_path: site.source_file_path,
+                specifier: site.specifier,
+                line_start: site.line_start,
+                col_start: site.col_start,
+            });
+        }
+        results.sort_by(|a, b| {
+            (&a.file_path, a.line_start, &a.specifier).cmp(&(
+                &b.file_path,
+                b.line_start,
+                &b.specifier,
+            ))
+        });
         Ok(results)
     }
+
+    /// TS-WORKSPACE-RESOLUTION-1 (RG-REQ-006-L07, RG-REQ-002-L04): every IMPORTS edge the resolver
+    /// bound INFERRED for the TS extractor (only the workspace import stage writes one) as an
+    /// import site of its package — after checking its carrier against its own edge, in Rust (never
+    /// with SQL JSON functions, so no unrelated carrier can fail the query):
+    ///
+    /// the carrier is a JSON object; `basis` is `workspace_source_entry`; `rawPath` is a non-empty
+    /// bare package specifier (no leading `.` or `/`, no `:`); `candidates` holds two or more
+    /// strings whose first is the edge's target stable key; the target node is a FILE; the
+    /// importing node has a file.
+    ///
+    /// A candidate edge that fails any clause is a NAMED error (the importing file, the line and
+    /// the failed clause): the deps answers then fail by name — the import is never dropped (a false
+    /// `no static import`) and never counted on unchecked evidence. Inferred edges of every other
+    /// producer are not candidates.
+    fn checked_workspace_import_sites(
+        &self,
+        snapshot_uid: &str,
+        reader: &str,
+    ) -> Result<Vec<WorkspaceImportSite>, StorageError> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT sn.stable_key AS source_key,
+			        sn.file_uid AS source_file_uid,
+			        f.path AS source_file_path,
+			        e.line_start,
+			        e.col_start,
+			        e.metadata_json,
+			        tn.stable_key AS target_key,
+			        tn.kind AS target_kind
+			 FROM edges e
+			 JOIN nodes sn ON sn.node_uid = e.source_node_uid
+			 LEFT JOIN files f ON f.file_uid = sn.file_uid
+			 LEFT JOIN nodes tn ON tn.node_uid = e.target_node_uid
+			 WHERE e.snapshot_uid = ?
+			   AND e.type = 'IMPORTS'
+			   AND e.resolution = 'inferred'
+			   AND substr(e.extractor, 1, 8) = 'ts-core:'
+			 ORDER BY source_file_path ASC, e.line_start ASC, e.col_start ASC",
+        )?;
+        let rows = stmt.query_map([snapshot_uid], |row| {
+            Ok(StoredWorkspaceImport {
+                source_key: row.get("source_key")?,
+                source_file_uid: row.get("source_file_uid")?,
+                source_file_path: row.get("source_file_path")?,
+                line_start: row.get("line_start")?,
+                col_start: row.get("col_start")?,
+                metadata_json: row.get("metadata_json")?,
+                target_key: row.get("target_key")?,
+                target_kind: row.get("target_kind")?,
+            })
+        })?;
+        let mut sites = Vec::new();
+        for row in rows {
+            sites.push(check_workspace_import(reader, snapshot_uid, row?)?);
+        }
+        Ok(sites)
+    }
+}
+
+/// One stored TS inferred IMPORTS edge, as read for the deps check.
+struct StoredWorkspaceImport {
+    source_key: String,
+    source_file_uid: Option<String>,
+    source_file_path: Option<String>,
+    line_start: Option<i64>,
+    col_start: Option<i64>,
+    metadata_json: Option<String>,
+    target_key: Option<String>,
+    target_kind: Option<String>,
+}
+
+/// A checked workspace-bound import: one import site of the package it spells.
+struct WorkspaceImportSite {
+    source_file_uid: String,
+    source_file_path: String,
+    specifier: String,
+    line_start: Option<i64>,
+    col_start: Option<i64>,
+}
+
+/// Check one stored TS inferred import against its own edge (see
+/// `checked_workspace_import_sites`); a failed clause is a named error.
+fn check_workspace_import(
+    reader: &str,
+    snapshot_uid: &str,
+    row: StoredWorkspaceImport,
+) -> Result<WorkspaceImportSite, StorageError> {
+    let at = format!(
+        "{} line {}",
+        row.source_file_path.as_deref().unwrap_or(&row.source_key),
+        row.line_start
+            .map(|l| l.to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    );
+    let fail = |clause: String| {
+        StorageError::SerializationError(format!(
+            "{reader}: the inferred workspace import at {at} of snapshot {snapshot_uid} is \
+             unreadable: {clause} — it can be neither counted nor dropped; run \
+             `rmap repo rebuild <path>`"
+        ))
+    };
+    let raw = row
+        .metadata_json
+        .as_deref()
+        .ok_or_else(|| fail("no metadata_json carrier".to_string()))?;
+    let carrier = match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(serde_json::Value::Object(obj)) => obj,
+        Ok(_) | Err(_) => return Err(fail("the carrier is not a JSON object".to_string())),
+    };
+    match carrier.get("basis") {
+        Some(serde_json::Value::String(b)) if b == "workspace_source_entry" => {}
+        Some(other) => return Err(fail(format!("basis {other} is not workspace_source_entry"))),
+        None => return Err(fail("the carrier has no basis".to_string())),
+    }
+    let specifier = match carrier.get("rawPath") {
+        Some(serde_json::Value::String(p))
+            if !p.is_empty() && !p.starts_with('.') && !p.starts_with('/') && !p.contains(':') =>
+        {
+            p.clone()
+        }
+        Some(other) => {
+            return Err(fail(format!(
+                "rawPath {other} is not a bare package specifier"
+            )))
+        }
+        None => return Err(fail("the carrier has no rawPath".to_string())),
+    };
+    let candidates = match carrier.get("candidates") {
+        Some(serde_json::Value::Array(items)) if items.len() >= 2 => items
+            .iter()
+            .map(|c| c.as_str())
+            .collect::<Option<Vec<&str>>>()
+            .ok_or_else(|| fail("candidates holds a non-string".to_string()))?,
+        Some(_) => {
+            return Err(fail(
+                "candidates is not an array of two or more entries".to_string(),
+            ))
+        }
+        None => return Err(fail("the carrier has no candidates".to_string())),
+    };
+    if Some(candidates[0]) != row.target_key.as_deref() {
+        return Err(fail(format!(
+            "the first candidate {} is not the edge's target",
+            candidates[0]
+        )));
+    }
+    if row.target_kind.as_deref() != Some("FILE") {
+        return Err(fail(format!(
+            "the target is {}, not a FILE",
+            row.target_kind.as_deref().unwrap_or("missing")
+        )));
+    }
+    let (Some(source_file_uid), Some(source_file_path)) =
+        (row.source_file_uid, row.source_file_path)
+    else {
+        return Err(fail("the importing node has no file".to_string()));
+    };
+    Ok(WorkspaceImportSite {
+        source_file_uid,
+        source_file_path,
+        specifier,
+        line_start: row.line_start,
+        col_start: row.col_start,
+    })
 }
 
 /// An external import fact from unresolved_edges.
@@ -715,6 +918,418 @@ mod tests {
         );
         assert_eq!(facts[0].specifier, "asgiref.sync");
         assert!(facts[0].is_import_edge, "an IMPORTS edge is an import site");
+    }
+
+    // ── TS-WORKSPACE-RESOLUTION-1: the deps readers keep a workspace-bound import ──
+
+    /// A TS FILE node for `path` (stable key `<repo>:<path>:FILE`, node uid `n:<path>`) with its
+    /// `files` row.
+    fn ts_file_node(conn: &StorageConnection, snap: &str, repo: &str, path: &str, kind: &str) {
+        conn.connection()
+            .execute(
+                "INSERT OR IGNORE INTO files (file_uid, repo_uid, path) VALUES (?, ?, ?)",
+                rusqlite::params![format!("{repo}:{path}"), repo, path],
+            )
+            .expect("insert file");
+        conn.connection()
+            .execute(
+                "INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind, file_uid) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                rusqlite::params![
+                    format!("n:{path}"),
+                    snap,
+                    repo,
+                    format!("{repo}:{path}:{kind}"),
+                    path,
+                    kind,
+                    format!("{repo}:{path}")
+                ],
+            )
+            .expect("insert node");
+    }
+
+    /// One IMPORTS edge from `n:<from>` to `n:<to>` at `line`/`col`.
+    #[allow(clippy::too_many_arguments)]
+    fn import_edge(
+        conn: &StorageConnection,
+        snap: &str,
+        repo: &str,
+        uid: &str,
+        from: &str,
+        to: &str,
+        resolution: &str,
+        extractor: &str,
+        line: i64,
+        carrier: Option<&str>,
+    ) {
+        conn.connection()
+            .execute(
+                "INSERT INTO edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_node_uid, \
+                 type, resolution, extractor, line_start, col_start, metadata_json) \
+                 VALUES (?, ?, ?, ?, ?, 'IMPORTS', ?, ?, ?, 0, ?)",
+                rusqlite::params![
+                    uid,
+                    snap,
+                    repo,
+                    format!("n:{from}"),
+                    format!("n:{to}"),
+                    resolution,
+                    extractor,
+                    line,
+                    carrier
+                ],
+            )
+            .expect("insert edge");
+    }
+
+    /// One unresolved external-library IMPORTS row from `n:<from>`.
+    fn external_row(
+        conn: &StorageConnection,
+        snap: &str,
+        repo: &str,
+        uid: &str,
+        from: &str,
+        spec: &str,
+        line: i64,
+    ) {
+        conn.connection()
+            .execute(
+                "INSERT INTO unresolved_edges \
+                 (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key, type, \
+                  resolution, extractor, line_start, col_start, category, classification, \
+                  classifier_version, basis_code, observed_at) \
+                 VALUES (?, ?, ?, ?, ?, 'IMPORTS', 'static', 'ts-core:0.2.0', ?, 0, \
+                  'imports_file_not_found', 'external_library_candidate', 1, \
+                  'specifier_matches_package_dependency', '2024-01-01T00:00:00Z')",
+                rusqlite::params![uid, snap, repo, format!("n:{from}"), spec, line],
+            )
+            .expect("insert unresolved edge");
+    }
+
+    const SERVER: &str = "packages/api/src/server.ts";
+    const ENGINE_SRC: &str = "packages/engine/src/index.ts";
+
+    /// FRAKTAG's shape: server.ts:6 imports `@fraktag/engine` (bound INFERRED to the engine's
+    /// source entry) and server.ts:3 imports `express` (an unresolved external row).
+    fn fraktag_store(
+        carrier: Option<&str>,
+        target_kind: &str,
+    ) -> (StorageConnection, String, String) {
+        let conn = fresh_storage();
+        let (repo, snap) = setup_test_snapshot(&conn);
+        ts_file_node(&conn, &snap, &repo, SERVER, "FILE");
+        ts_file_node(&conn, &snap, &repo, ENGINE_SRC, target_kind);
+        import_edge(
+            &conn,
+            &snap,
+            &repo,
+            "e-ws",
+            SERVER,
+            ENGINE_SRC,
+            "inferred",
+            "ts-core:0.2.0",
+            6,
+            carrier,
+        );
+        external_row(&conn, &snap, &repo, "u-express", SERVER, "express", 3);
+        (conn, repo, snap)
+    }
+
+    fn workspace_carrier(repo: &str) -> String {
+        serde_json::json!({
+            "rawPath": "@fraktag/engine",
+            "isTypeOnly": false,
+            "basis": "workspace_source_entry",
+            "candidates": [
+                format!("{repo}:{ENGINE_SRC}:FILE"),
+                format!("{repo}:packages/engine/dist/index.js:FILE"),
+            ],
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn external_import_facts_include_checked_workspace_inferred_imports_by_their_spelled_specifier()
+    {
+        let conn = fresh_storage();
+        let (repo, snap) = setup_test_snapshot(&conn);
+        ts_file_node(&conn, &snap, &repo, SERVER, "FILE");
+        ts_file_node(&conn, &snap, &repo, ENGINE_SRC, "FILE");
+        ts_file_node(&conn, &snap, &repo, "packages/api/src/routes.ts", "FILE");
+        let carrier = workspace_carrier(&repo);
+        import_edge(
+            &conn,
+            &snap,
+            &repo,
+            "e-ws",
+            SERVER,
+            ENGINE_SRC,
+            "inferred",
+            "ts-core:0.2.0",
+            6,
+            Some(&carrier),
+        );
+        // A certain TS import is not an external import.
+        import_edge(
+            &conn,
+            &snap,
+            &repo,
+            "e-rel",
+            SERVER,
+            "packages/api/src/routes.ts",
+            "static",
+            "ts-core:0.2.0",
+            2,
+            Some(
+                r#"{"rawPath":"./routes","resolvedPath":"packages/api/src/routes.ts","isTypeOnly":false}"#,
+            ),
+        );
+        external_row(&conn, &snap, &repo, "u-express", SERVER, "express", 3);
+
+        let facts = conn
+            .get_external_imports_for_snapshot(&snap)
+            .expect("query external imports");
+        let file_uid = format!("{repo}:{SERVER}");
+        assert_eq!(
+            facts,
+            vec![
+                ExternalImportFact {
+                    source_file_uid: file_uid.clone(),
+                    source_file_path: SERVER.to_string(),
+                    specifier: "@fraktag/engine".to_string(),
+                    is_import_edge: true,
+                },
+                ExternalImportFact {
+                    source_file_uid: file_uid,
+                    source_file_path: SERVER.to_string(),
+                    specifier: "express".to_string(),
+                    is_import_edge: true,
+                },
+            ],
+            "the workspace import is one import site of its package, by its spelled specifier, \
+             in the reader's order"
+        );
+    }
+
+    #[test]
+    fn external_imports_with_locations_include_checked_workspace_inferred_imports() {
+        let (conn, repo, snap) = fraktag_store(None, "FILE");
+        // Replace the carrier-less edge with a checked one.
+        conn.connection()
+            .execute(
+                "UPDATE edges SET metadata_json = ? WHERE edge_uid = 'e-ws'",
+                [workspace_carrier(&repo)],
+            )
+            .unwrap();
+        let rows = conn
+            .get_external_imports_with_locations(&snap)
+            .expect("query locations");
+        let file_uid = format!("{repo}:{SERVER}");
+        assert_eq!(
+            rows,
+            vec![
+                ExternalImportWithLocation {
+                    file_uid: file_uid.clone(),
+                    file_path: SERVER.to_string(),
+                    specifier: "express".to_string(),
+                    line_start: Some(3),
+                    col_start: Some(0),
+                },
+                ExternalImportWithLocation {
+                    file_uid,
+                    file_path: SERVER.to_string(),
+                    specifier: "@fraktag/engine".to_string(),
+                    line_start: Some(6),
+                    col_start: Some(0),
+                },
+            ],
+            "the workspace import keeps its own line and column, ordered by file, line, specifier"
+        );
+    }
+
+    #[test]
+    fn inferred_imports_of_another_producer_never_join_the_external_import_facts() {
+        let conn = fresh_storage();
+        let (repo, snap) = setup_test_snapshot(&conn);
+        ts_file_node(&conn, &snap, &repo, "src/event/ngx_event.c", "FILE");
+        ts_file_node(&conn, &snap, &repo, "src/core/ngx_core.h", "FILE");
+        ts_file_node(&conn, &snap, &repo, "pkg/app.py", "FILE");
+        ts_file_node(&conn, &snap, &repo, "pkg/sub.py", "FILE");
+        import_edge(
+            &conn,
+            &snap,
+            &repo,
+            "e-c",
+            "src/event/ngx_event.c",
+            "src/core/ngx_core.h",
+            "inferred",
+            "c-core:0.1.0",
+            1,
+            Some(&format!(
+                r#"{{"isTypeOnly":false,"basis":"unique_basename","candidates":["{repo}:src/core/ngx_core.h:FILE"]}}"#
+            )),
+        );
+        import_edge(
+            &conn,
+            &snap,
+            &repo,
+            "e-py",
+            "pkg/app.py",
+            "pkg/sub.py",
+            "inferred",
+            "python-core:0.2.0",
+            1,
+            Some(&format!(
+                r#"{{"importedName":"sub","alternateTarget":"{repo}:pkg/__init__.py:FILE","basis":"python_submodule"}}"#
+            )),
+        );
+        // Even a malformed carrier of another producer never fails or joins the reads.
+        import_edge(
+            &conn,
+            &snap,
+            &repo,
+            "e-py2",
+            "pkg/app.py",
+            "pkg/sub.py",
+            "inferred",
+            "python-core:0.2.0",
+            2,
+            Some("not json"),
+        );
+        assert_eq!(
+            conn.get_external_imports_for_snapshot(&snap).unwrap(),
+            vec![]
+        );
+        assert_eq!(
+            conn.get_external_imports_with_locations(&snap).unwrap(),
+            vec![]
+        );
+    }
+
+    #[test]
+    fn a_malformed_workspace_carrier_fails_both_deps_reads_by_name_never_dropped() {
+        let src = |repo: &str| format!("{repo}:{ENGINE_SRC}:FILE");
+        let dec = |repo: &str| format!("{repo}:packages/engine/dist/index.js:FILE");
+        // (carrier builder, target kind, the clause the error names)
+        type Case = (
+            Box<dyn Fn(&str) -> Option<String>>,
+            &'static str,
+            &'static str,
+        );
+        let cases: Vec<Case> = vec![
+            (Box::new(|_| None), "FILE", "no metadata_json carrier"),
+            (
+                Box::new(|_| Some("not json".into())),
+                "FILE",
+                "not a JSON object",
+            ),
+            (
+                Box::new(|_| Some("[1]".into())),
+                "FILE",
+                "not a JSON object",
+            ),
+            (
+                Box::new(move |r| {
+                    Some(serde_json::json!({"rawPath": "@fraktag/engine", "candidates": [src(r), dec(r)]}).to_string())
+                }),
+                "FILE",
+                "basis",
+            ),
+            (
+                Box::new(move |r| {
+                    Some(serde_json::json!({"rawPath": "@fraktag/engine", "basis": "unique_basename", "candidates": [src(r), dec(r)]}).to_string())
+                }),
+                "FILE",
+                "basis",
+            ),
+            (
+                Box::new(move |r| {
+                    Some(serde_json::json!({"basis": "workspace_source_entry", "candidates": [src(r), dec(r)]}).to_string())
+                }),
+                "FILE",
+                "rawPath",
+            ),
+            (
+                Box::new(move |r| {
+                    Some(serde_json::json!({"rawPath": "./engine", "basis": "workspace_source_entry", "candidates": [src(r), dec(r)]}).to_string())
+                }),
+                "FILE",
+                "rawPath",
+            ),
+            (
+                Box::new(move |r| {
+                    Some(serde_json::json!({"rawPath": "npm:@fraktag/engine", "basis": "workspace_source_entry", "candidates": [src(r), dec(r)]}).to_string())
+                }),
+                "FILE",
+                "rawPath",
+            ),
+            (
+                Box::new(move |r| {
+                    Some(serde_json::json!({"rawPath": "@fraktag/engine", "basis": "workspace_source_entry", "candidates": [dec(r), src(r)]}).to_string())
+                }),
+                "FILE",
+                "first candidate",
+            ),
+            (
+                Box::new(move |r| {
+                    Some(serde_json::json!({"rawPath": "@fraktag/engine", "basis": "workspace_source_entry", "candidates": [src(r)]}).to_string())
+                }),
+                "FILE",
+                "candidates",
+            ),
+            (
+                Box::new(move |r| {
+                    Some(serde_json::json!({"rawPath": "@fraktag/engine", "basis": "workspace_source_entry", "candidates": [src(r), 7]}).to_string())
+                }),
+                "FILE",
+                "candidates",
+            ),
+            (
+                Box::new(move |r| {
+                    Some(serde_json::json!({"rawPath": "@fraktag/engine", "basis": "workspace_source_entry", "candidates": [format!("{r}:{ENGINE_SRC}:SYMBOL"), dec(r)]}).to_string())
+                }),
+                "SYMBOL",
+                "not a FILE",
+            ),
+        ];
+        for (carrier, kind, clause) in &cases {
+            let conn = fresh_storage();
+            let (repo, snap) = setup_test_snapshot(&conn);
+            ts_file_node(&conn, &snap, &repo, SERVER, "FILE");
+            ts_file_node(&conn, &snap, &repo, ENGINE_SRC, kind);
+            let c = carrier(&repo);
+            import_edge(
+                &conn,
+                &snap,
+                &repo,
+                "e-ws",
+                SERVER,
+                ENGINE_SRC,
+                "inferred",
+                "ts-core:0.2.0",
+                6,
+                c.as_deref(),
+            );
+            external_row(&conn, &snap, &repo, "u-express", SERVER, "express", 3);
+            for (reader, err) in [
+                (
+                    "get_external_imports_for_snapshot",
+                    conn.get_external_imports_for_snapshot(&snap).err(),
+                ),
+                (
+                    "get_external_imports_with_locations",
+                    conn.get_external_imports_with_locations(&snap).err(),
+                ),
+            ] {
+                let err =
+                    err.unwrap_or_else(|| panic!("{reader} {c:?}: a named error, never a count"));
+                let msg = err.to_string();
+                assert!(
+                    msg.contains(SERVER) && msg.contains("line 6") && msg.contains(clause),
+                    "{reader} {c:?}: the error names the file, the line and the clause `{clause}`: {msg}"
+                );
+            }
+        }
     }
 
     // ── File ownership tests ───────────────────────────────────────

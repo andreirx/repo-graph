@@ -92,16 +92,37 @@ fn format_import_row(imp: &ImportEntry) -> String {
     )
 }
 
-/// CPP-INCLUDE-BASENAME-1 (RG-REQ-002-L11, RG-REQ-002-L04): what an inferred row says about its
-/// reason. The renderer prints JSON it did not produce, so it re-checks the one agreement it prints
-/// — a `unique_basename` reason with exactly one candidate equal to the row's own `file` — and
-/// states every other reason as unreadable, never as evidence. A C/C++ inferred row without a
-/// reason (its reason carrier was lost) says so with the remedy; any other row without a reason
-/// prints `inferred`, as before.
+/// CPP-INCLUDE-BASENAME-1 / TS-WORKSPACE-RESOLUTION-1 (RG-REQ-002-L11, RG-REQ-002-L04): what an
+/// inferred row says about its reason. The renderer prints JSON it did not produce, so it re-checks
+/// the agreement it prints — a `unique_basename` reason with exactly one candidate equal to the
+/// row's own `file`; a `workspace_source_entry` reason whose first candidate is the row's own
+/// `file` followed by one or more declared entries — and states every other reason as unreadable,
+/// never as evidence. An inferred row of a producer that must carry a reason (C/C++, TS) without
+/// one says so with the remedy; any other row without a reason prints `inferred`, as before.
 fn inferred_row_state(imp: &ImportEntry) -> String {
     const MISSING: &str = "inferred (reason missing — re-index)";
     let unreadable = |what: &str| format!("inferred: reason unreadable ({what})");
     match &imp.reason {
+        Some(ImportEntryReason::Recorded { basis, candidates })
+            if basis == "workspace_source_entry" =>
+        {
+            match candidates.as_slice() {
+                [source, declared @ ..] if *source == imp.file && !declared.is_empty() => {
+                    let (noun, list) = match declared {
+                        [one] => ("entry", one.clone()),
+                        many => ("entries", many.join(", ")),
+                    };
+                    format!(
+                        "inferred: workspace source entry → {source} (declared {noun} {list} not indexed)"
+                    )
+                }
+                [source, ..] if *source != imp.file => {
+                    unreadable(&format!("candidate {source} is not the row's file"))
+                }
+                [_] => unreadable("no declared entry beside the source entry"),
+                _ => unreadable("candidates is empty"),
+            }
+        }
         Some(ImportEntryReason::Recorded { basis, candidates }) => {
             if basis != "unique_basename" {
                 return unreadable(&format!("basis {basis} on an inferred row"));
@@ -124,15 +145,43 @@ fn inferred_row_state(imp: &ImportEntry) -> String {
                 unreadable("a reason this build does not read")
             }
         }
-        None if imp
-            .evidence
-            .iter()
-            .any(|e| e.starts_with("c-core:") || e.starts_with("cpp-core:")) =>
+        None if imp.evidence.iter().any(|e| {
+            e.starts_with("c-core:") || e.starts_with("cpp-core:") || e.starts_with("ts-core:")
+        }) =>
         {
             MISSING.to_string()
         }
         None => "inferred".to_string(),
     }
+}
+
+/// TS-WORKSPACE-RESOLUTION-1 (RG-REQ-006-L04): the LiveGraph class of a bare import naming this
+/// repository's own workspace package. The LiveGraph route keeps the label until one rule serves
+/// both routes; every human render that prints it explains it once ([`workspace_label_note`]).
+const WORKSPACE_LOCAL_UNEDGEABLE: &str = "WorkspaceLocalUnedgeable";
+
+/// The one line that explains the `WorkspaceLocalUnedgeable` label. It states only what holds for
+/// EVERY import with that label (D-TWR-NOTE): the renderer sees the label, not the default route's
+/// outcome for each import — the label also covers workspace subpath imports and root imports whose
+/// declared entry is indexed, which the workspace-source rule leaves unresolved. So the line says
+/// the default route MAY record such an import as inferred, only under the rule's condition, names
+/// where to look (the file's listing under `--include-inferred` when the render is about one file,
+/// the module view under `--include-inferred` otherwise), and sends the agent to open any other.
+fn workspace_label_note(file: Option<&str>) -> String {
+    let command = match file {
+        Some(f) => format!(
+            "rmap imports {} --include-inferred",
+            crate::presentation::import_partition::shell_quote(f)
+        ),
+        None => "rmap modules deps --include-inferred".to_string(),
+    };
+    format!(
+        "  note: [{WORKSPACE_LOCAL_UNEDGEABLE}] is an import of this repo's own workspace package; \
+         this route forms no edge for it until one rule serves both routes — the default route \
+         may record it as an inferred import of the package's source entry, but only for an \
+         import of the package root whose declared entries are not indexed ({command}); for any \
+         other import with this label, open the import and look inside\n"
+    )
 }
 
 /// Response structure for imports command.
@@ -335,6 +384,18 @@ impl LivegraphImportsResponse {
                 ));
             }
         }
+        // TS-WORKSPACE-RESOLUTION-1: the label is printed (in `by class`, or on a listed row) —
+        // explain it once.
+        let label_printed = self
+            .observation_class_counts
+            .contains_key(WORKSPACE_LOCAL_UNEDGEABLE)
+            || self
+                .observations
+                .iter()
+                .any(|o| o.class == WORKSPACE_LOCAL_UNEDGEABLE && (o.blocking || show_benign));
+        if label_printed {
+            out.push_str(&workspace_label_note(self.file_filter.as_deref()));
+        }
         out
     }
 }
@@ -475,6 +536,13 @@ impl ImportsCompareResponse {
             for o in &c.blocking_observations {
                 out.push_str(&format!("    ! {} [{}]\n", o.raw_specifier, o.class));
             }
+            // TS-WORKSPACE-RESOLUTION-1: explain the label once when a listed row carries it.
+            if c.blocking_observations
+                .iter()
+                .any(|o| o.class == WORKSPACE_LOCAL_UNEDGEABLE)
+            {
+                out.push_str(&workspace_label_note(Some(&self.file)));
+            }
         }
         out
     }
@@ -599,6 +667,12 @@ impl ImportsReadinessReport {
                 .map(|(k, v)| format!("{k}={v}"))
                 .collect();
             out.push_str(&format!("    by class: {}\n", by.join("  ")));
+            // TS-WORKSPACE-RESOLUTION-1: explain the label once when the classes print it.
+            if m.blocking_observation_by_class
+                .contains_key(WORKSPACE_LOCAL_UNEDGEABLE)
+            {
+                out.push_str(&workspace_label_note(None));
+            }
         }
         out.push_str(&format!(
             "  import-bearing files (sqlite / livegraph) = {} / {}\n",
@@ -1275,5 +1349,396 @@ mod tests {
                 "{evidence}"
             );
         }
+    }
+
+    // ── TS-WORKSPACE-RESOLUTION-1: the workspace row and the LiveGraph label ──────────────
+
+    const ENGINE_SRC: &str = "packages/engine/src/index.ts";
+    const ENGINE_DIST: &str = "packages/engine/dist/index.js";
+
+    #[test]
+    fn inferred_workspace_row_renders_its_source_entry_and_every_declared_entry() {
+        let resp: ImportsResponse = serde_json::from_value(serde_json::json!({
+            "file": "packages/api/src/server.ts",
+            "imports": [row_json(
+                ENGINE_SRC,
+                "inferred",
+                "ts-core:0.2.0",
+                Some(serde_json::json!({
+                    "basis": "workspace_source_entry",
+                    "candidates": [ENGINE_SRC, ENGINE_DIST]
+                })),
+            )],
+            "import_view": {"include_tests": false, "include_inferred": true},
+            "import_remainder": zero_remainder(),
+        }))
+        .unwrap();
+        assert_eq!(
+            resp.render_human(),
+            format!(
+                "Imports: packages/api/src/server.ts\n\n1 import\n\n  {ENGINE_SRC}  depth=1  \
+                 inferred: workspace source entry → {ENGINE_SRC} (declared entry {ENGINE_DIST} not indexed)\n"
+            )
+        );
+        // Several declared entries: every one listed, none chosen.
+        let fx = "packages/effects/src/index.ts";
+        let resp = listing_with_inferred(vec![row_json(
+            fx,
+            "inferred",
+            "ts-core:0.2.0",
+            Some(serde_json::json!({
+                "basis": "workspace_source_entry",
+                "candidates": [fx, "packages/effects/dist/index.d.ts", "packages/effects/dist/index.js"]
+            })),
+        )]);
+        assert_eq!(
+            only_row(&resp),
+            format!(
+                "  {fx}  depth=1  inferred: workspace source entry → {fx} (declared entries \
+                 packages/effects/dist/index.d.ts, packages/effects/dist/index.js not indexed)"
+            )
+        );
+    }
+
+    #[test]
+    fn inferred_workspace_row_whose_reason_disagrees_is_unreadable() {
+        for reason in [
+            // The source entry is not the row's file.
+            serde_json::json!({"basis": "workspace_source_entry", "candidates": [ENGINE_DIST, ENGINE_SRC]}),
+            // No declared entry beside the source entry.
+            serde_json::json!({"basis": "workspace_source_entry", "candidates": [ENGINE_SRC]}),
+            serde_json::json!({"basis": "workspace_source_entry", "candidates": []}),
+            // The ambiguous basis is never a bound row.
+            serde_json::json!({"basis": "ambiguous_workspace_source_entry", "candidates": [ENGINE_SRC, ENGINE_DIST]}),
+        ] {
+            let resp = listing_with_inferred(vec![row_json(
+                ENGINE_SRC,
+                "inferred",
+                "ts-core:0.2.0",
+                Some(reason.clone()),
+            )]);
+            let line = only_row(&resp);
+            let prefix = format!("  {ENGINE_SRC}  depth=1  inferred: reason unreadable (");
+            assert!(
+                line.starts_with(&prefix) && line.ends_with(')'),
+                "{reason}: {line}"
+            );
+            assert!(
+                !line.contains('→'),
+                "{reason}: never printed as evidence: {line}"
+            );
+        }
+        // The storage read's own unreadable form.
+        let resp = listing_with_inferred(vec![row_json(
+            ENGINE_SRC,
+            "inferred",
+            "ts-core:0.2.0",
+            Some(serde_json::json!({"unreadable": "candidate r1:x:FILE is not the edge's target"})),
+        )]);
+        assert_eq!(
+            only_row(&resp),
+            format!(
+                "  {ENGINE_SRC}  depth=1  inferred: reason unreadable (candidate r1:x:FILE is not the edge's target)"
+            )
+        );
+    }
+
+    #[test]
+    fn ts_inferred_row_without_a_reason_key_says_reason_missing_never_bare_inferred() {
+        let resp = listing_with_inferred(vec![row_json(
+            ENGINE_SRC,
+            "inferred",
+            "ts-core:0.2.0",
+            None,
+        )]);
+        assert_eq!(
+            only_row(&resp),
+            format!("  {ENGINE_SRC}  depth=1  inferred (reason missing — re-index)")
+        );
+        let resp = listing_with_inferred(vec![row_json(
+            ENGINE_SRC,
+            "inferred",
+            "ts-core:0.2.0",
+            Some(serde_json::json!({"missing": "no reason carrier"})),
+        )]);
+        assert_eq!(
+            only_row(&resp),
+            format!("  {ENGINE_SRC}  depth=1  inferred (reason missing — re-index)")
+        );
+    }
+
+    const WS_NOTE_HEAD: &str = "note: [WorkspaceLocalUnedgeable] is an import of this repo's own \
+         workspace package; this route forms no edge for it until one rule serves both routes — \
+         the default route may record it as an inferred import of the package's source entry, but \
+         only for an import of the package root whose declared entries are not indexed (";
+    /// What follows the command in the note.
+    const WS_NOTE_TAIL: &str =
+        "); for any other import with this label, open the import and look inside\n";
+
+    fn count(out: &str, needle: &str) -> usize {
+        out.matches(needle).count()
+    }
+
+    #[test]
+    fn workspace_local_unedgeable_label_is_kept_and_explained_once_on_every_render() {
+        // LiveGraph listing, repo-wide: the label stays, one note names the module view.
+        let out = sample_lg().render_human();
+        assert!(out.contains("[WorkspaceLocalUnedgeable] BLOCKING"), "{out}");
+        assert!(out.contains("WorkspaceLocalUnedgeable=1"), "{out}");
+        assert_eq!(count(&out, WS_NOTE_HEAD), 1, "{out}");
+        assert!(
+            out.contains(&format!(
+                "{WS_NOTE_HEAD}rmap modules deps --include-inferred{WS_NOTE_TAIL}"
+            )),
+            "{out}"
+        );
+        assert!(
+            out.ends_with(&format!(
+                "  {WS_NOTE_HEAD}rmap modules deps --include-inferred{WS_NOTE_TAIL}"
+            )),
+            "after its observations: {out}"
+        );
+        // LiveGraph listing for one file: the note names that file's listing (shell-quoted).
+        let mut r = sample_lg();
+        r.file_filter = Some("a/src/my file.ts".to_string());
+        let out = r.render_human();
+        assert_eq!(count(&out, WS_NOTE_HEAD), 1, "{out}");
+        assert!(
+            out.ends_with(&format!(
+                "  {WS_NOTE_HEAD}rmap imports 'a/src/my file.ts' --include-inferred{WS_NOTE_TAIL}"
+            )),
+            "{out}"
+        );
+        // A workspace-local observation counted only (not blocking, repo-wide) still prints the
+        // label in `by class`, so the note is there.
+        let mut r = sample_lg();
+        r.observations
+            .retain(|o| o.class != "WorkspaceLocalUnedgeable");
+        let out = r.render_human();
+        assert!(out.contains("WorkspaceLocalUnedgeable=1"));
+        assert_eq!(count(&out, WS_NOTE_HEAD), 1, "{out}");
+
+        // Compare listing: the blocking observation keeps its label; the note names the file.
+        let compare: ImportsCompareResponse = serde_json::from_value(serde_json::json!({
+            "file": "app/src/x.ts",
+            "imports": [],
+            "comparison": {
+                "status": "NoLossLivegraphSuperset",
+                "blocking_observations": [
+                    {"raw_specifier": "@scope/wslocal", "class": "WorkspaceLocalUnedgeable"},
+                    {"raw_specifier": "@/alias", "class": "PackageUnresolved"}
+                ]
+            },
+        }))
+        .unwrap();
+        let out = compare.render_human();
+        assert!(
+            out.contains("! @scope/wslocal [WorkspaceLocalUnedgeable]"),
+            "{out}"
+        );
+        assert_eq!(count(&out, WS_NOTE_HEAD), 1, "{out}");
+        assert!(
+            out.ends_with(&format!(
+                "    ! @/alias [PackageUnresolved]\n  {WS_NOTE_HEAD}rmap imports app/src/x.ts --include-inferred{WS_NOTE_TAIL}"
+            )),
+            "{out}"
+        );
+
+        // Readiness report (repo-wide): the note follows the blocking classes.
+        let r: ImportsReadinessReport = serde_json::from_value(serde_json::json!({
+            "display_name": "amodx", "verdict": "GREEN", "coverage_complete": true,
+            "metrics": {"blocking_observation_total": 5,
+                        "blocking_observation_by_class": {"WorkspaceLocalUnedgeable": 5}},
+            "regressions": [], "unknowns": []
+        }))
+        .unwrap();
+        let out = r.render_human();
+        assert!(out.contains("WorkspaceLocalUnedgeable=5"), "{out}");
+        assert_eq!(count(&out, WS_NOTE_HEAD), 1, "{out}");
+        assert!(
+            out.contains(&format!(
+                "    by class: WorkspaceLocalUnedgeable=5\n  {WS_NOTE_HEAD}rmap modules deps --include-inferred{WS_NOTE_TAIL}"
+            )),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn renders_without_the_workspace_label_print_no_note() {
+        let mut r = sample_lg();
+        r.observations
+            .retain(|o| o.class != "WorkspaceLocalUnedgeable");
+        r.observation_class_counts
+            .remove("WorkspaceLocalUnedgeable");
+        r.observation_count = 1;
+        r.blocking_observation_count = 0;
+        assert!(!r.render_human().contains("note:"));
+        r.file_filter = Some("a/src/x.ts".to_string());
+        assert!(!r.render_human().contains("note:"));
+
+        let compare: ImportsCompareResponse = serde_json::from_value(serde_json::json!({
+            "file": "app/src/x.ts",
+            "imports": [],
+            "comparison": {"status": "NoLossLivegraphSuperset",
+                           "blocking_observations": [{"raw_specifier": "@/alias", "class": "PackageUnresolved"}]},
+        }))
+        .unwrap();
+        assert!(!compare.render_human().contains("note:"));
+
+        let report: ImportsReadinessReport = serde_json::from_value(serde_json::json!({
+            "display_name": "x", "verdict": "GREEN", "coverage_complete": true,
+            "metrics": {"blocking_observation_by_class": {"PackageUnresolved": 2}},
+            "regressions": [], "unknowns": []
+        }))
+        .unwrap();
+        assert!(!report.render_human().contains("note:"));
+        // The default listing never prints the note.
+        assert!(!sample_imports().render_human().contains("note:"));
+    }
+
+    // ── D-TWR-NOTE (OC-2): the note states only what the rule does, on every render ──
+
+    /// The approved note line (SLICE_DOC §2.1 item 7) with its command.
+    fn ws_note_line(command: &str) -> String {
+        format!(
+            "  note: [WorkspaceLocalUnedgeable] is an import of this repo's own workspace package; \
+             this route forms no edge for it until one rule serves both routes — the default route \
+             may record it as an inferred import of the package's source entry, but only for an \
+             import of the package root whose declared entries are not indexed ({command}); for any \
+             other import with this label, open the import and look inside\n"
+        )
+    }
+
+    /// A LiveGraph listing filtered to `file` whose one blocking observation is `specifier`
+    /// labelled `WorkspaceLocalUnedgeable`.
+    fn lg_for_one_labelled_import(
+        display: &str,
+        file: &str,
+        specifier: &str,
+    ) -> LivegraphImportsResponse {
+        LivegraphImportsResponse {
+            display_name: display.to_string(),
+            file_filter: Some(file.to_string()),
+            edges: vec![],
+            edge_count: 0,
+            observations: vec![LgImportObservation {
+                source_file: file.to_string(),
+                raw_specifier: specifier.to_string(),
+                class: "WorkspaceLocalUnedgeable".to_string(),
+                blocking: true,
+            }],
+            observation_count: 1,
+            blocking_observation_count: 1,
+            observation_class_counts: BTreeMap::from([("WorkspaceLocalUnedgeable".to_string(), 1)]),
+            module_cycle_completeness: "IncompleteImportClasses".to_string(),
+            module_cycle_answer_class: "Exact".to_string(),
+            freshness: "Fresh".to_string(),
+            missing_partitions: vec![],
+        }
+    }
+
+    fn compare_for_one_labelled_import(file: &str, specifier: &str) -> ImportsCompareResponse {
+        serde_json::from_value(serde_json::json!({
+            "file": file,
+            "imports": [],
+            "comparison": {
+                "status": "NoLossLivegraphSuperset",
+                "blocking_observations": [
+                    {"raw_specifier": specifier, "class": "WorkspaceLocalUnedgeable"}
+                ]
+            },
+        }))
+        .unwrap()
+    }
+
+    fn report_counting_the_label(display: &str) -> ImportsReadinessReport {
+        serde_json::from_value(serde_json::json!({
+            "display_name": display, "verdict": "GREEN", "coverage_complete": true,
+            "metrics": {"blocking_observation_total": 1,
+                        "blocking_observation_by_class": {"WorkspaceLocalUnedgeable": 1}},
+            "regressions": [], "unknowns": []
+        }))
+        .unwrap()
+    }
+
+    /// The note on one render: the label kept, exactly one note line equal to the approved text,
+    /// its qualifying clauses present, and no line claiming that the import IS recorded.
+    fn assert_note_states_only_what_the_rule_does(out: &str, label: &str, command: &str) {
+        assert!(out.contains(label), "the label is kept: {out}");
+        let notes: Vec<&str> = out.lines().filter(|l| l.contains("note:")).collect();
+        assert_eq!(notes.len(), 1, "exactly one note line: {out}");
+        assert_eq!(format!("{}\n", notes[0]), ws_note_line(command), "{out}");
+        assert!(out.contains("may record"), "{out}");
+        assert!(
+            out.contains(
+                "only for an import of the package root whose declared entries are not indexed"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("open the import and look inside"), "{out}");
+        assert!(
+            !out.lines().any(|l| l.contains("records it as")),
+            "no line claims the import is recorded: {out}"
+        );
+    }
+
+    /// amodx `admin/src/components/editor/Toolbar.tsx:10`
+    /// `import { getPluginList } from "@amodx/plugins/admin";` — a workspace SUBPATH import, which
+    /// the LiveGraph classifier labels `WorkspaceLocalUnedgeable` and the workspace-source rule
+    /// leaves unresolved: no render may claim the default route records it.
+    #[test]
+    fn workspace_note_never_claims_an_inferred_edge_for_a_subpath_import_on_every_render() {
+        let file = "admin/src/components/editor/Toolbar.tsx";
+        let spec = "@amodx/plugins/admin";
+        let file_cmd = "rmap imports admin/src/components/editor/Toolbar.tsx --include-inferred";
+        let out = lg_for_one_labelled_import("amodx", file, spec).render_human();
+        assert_note_states_only_what_the_rule_does(
+            &out,
+            "@amodx/plugins/admin  [WorkspaceLocalUnedgeable] BLOCKING",
+            file_cmd,
+        );
+        let out = compare_for_one_labelled_import(file, spec).render_human();
+        assert_note_states_only_what_the_rule_does(
+            &out,
+            "! @amodx/plugins/admin [WorkspaceLocalUnedgeable]",
+            file_cmd,
+        );
+        let out = report_counting_the_label("amodx").render_human();
+        assert_note_states_only_what_the_rule_does(
+            &out,
+            "WorkspaceLocalUnedgeable=1",
+            "rmap modules deps --include-inferred",
+        );
+    }
+
+    /// storybook `code/frameworks/ember/template/cli/Button.stories.js:1`
+    /// `import { linkTo } from '@storybook/addon-links';` — a ROOT import whose member declares an
+    /// indexed target (`"code": "./src/index.ts"`), which the rule leaves unresolved: no render may
+    /// claim the default route records it.
+    #[test]
+    fn workspace_note_never_claims_an_inferred_edge_for_a_root_import_whose_declared_entry_is_indexed_on_every_render(
+    ) {
+        let file = "code/frameworks/ember/template/cli/Button.stories.js";
+        let spec = "@storybook/addon-links";
+        let file_cmd =
+            "rmap imports code/frameworks/ember/template/cli/Button.stories.js --include-inferred";
+        let out = lg_for_one_labelled_import("storybook", file, spec).render_human();
+        assert_note_states_only_what_the_rule_does(
+            &out,
+            "@storybook/addon-links  [WorkspaceLocalUnedgeable] BLOCKING",
+            file_cmd,
+        );
+        let out = compare_for_one_labelled_import(file, spec).render_human();
+        assert_note_states_only_what_the_rule_does(
+            &out,
+            "! @storybook/addon-links [WorkspaceLocalUnedgeable]",
+            file_cmd,
+        );
+        let out = report_counting_the_label("storybook").render_human();
+        assert_note_states_only_what_the_rule_does(
+            &out,
+            "WorkspaceLocalUnedgeable=1",
+            "rmap modules deps --include-inferred",
+        );
     }
 }

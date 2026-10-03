@@ -163,9 +163,9 @@ pub struct ImportResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ImportReason {
-    /// A reason that agrees with its row: a unique basis, exactly one candidate that is the
-    /// edge's own FILE target (carried as its repo-relative path), the basis matching the
-    /// resolution (`unique_basename` ⇔ inferred, `unique_suffix` ⇔ static).
+    /// A reason that agrees with its row: a recorded basis of the row's producer, riding the
+    /// resolution that basis rides, whose candidates have the basis's shape and begin with the
+    /// edge's own FILE target (carried as repo-relative paths, in order) — see [`RECORDED_BASES`].
     Recorded {
         basis: String,
         candidates: Vec<String>,
@@ -173,19 +173,83 @@ pub enum ImportReason {
     /// A carrier that is present but malformed or contradicts its edge — what failed. Never
     /// evidence, never dropped.
     Unreadable { unreadable: String },
-    /// A C/C++ inferred include (a row only CPP-INCLUDE-BASENAME-1 produces, so it must carry a
-    /// reason) whose carrier is NULL or has no `basis`.
+    /// An inferred row of a producer whose inferred imports must carry a reason (C/C++ includes,
+    /// CPP-INCLUDE-BASENAME-1; TS workspace imports, TS-WORKSPACE-RESOLUTION-1) whose carrier is
+    /// NULL or has no `basis`.
     Missing { missing: String },
 }
 
-/// The four `basis` values the C/C++ include suffix/basename stage writes
-/// (`indexer::resolver::INCLUDE_*_BASIS`; storage takes no dependency on the indexer — the
-/// strings are the stored contract).
-const INCLUDE_BASES: [&str; 4] = [
-    "unique_suffix",
-    "unique_basename",
+/// The producers whose IMPORTS rows carry a recorded basis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReasonProducer {
+    /// The C and C++ extractors (`c-core:<v>` / `cpp-core:<v>`).
+    CFamily,
+    /// The TS/JS extractor (`ts-core:<v>`).
+    Ts,
+}
+
+impl ReasonProducer {
+    fn of(extractor: Option<&str>) -> Option<Self> {
+        if is_c_family_extractor(extractor) {
+            Some(Self::CFamily)
+        } else if extractor.is_some_and(|e| e.starts_with("ts-core:")) {
+            Some(Self::Ts)
+        } else {
+            None
+        }
+    }
+}
+
+/// The shape of a recorded basis's candidate list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CandidateShape {
+    /// Exactly one candidate: the edge's own FILE target.
+    TargetOnly,
+    /// The edge's own FILE target, then one or more distinct FILE stable keys different from it
+    /// (a workspace member's declared entries).
+    TargetThenDeclared,
+}
+
+/// One basis a bound IMPORTS edge records, with its producer, the resolution it rides and the
+/// shape of its candidates.
+struct RecordedBasis {
+    basis: &'static str,
+    producer: ReasonProducer,
+    resolution: &'static str,
+    shape: CandidateShape,
+}
+
+/// TS-WORKSPACE-RESOLUTION-1 (extending CPP-INCLUDE-BASENAME-1's rule): every basis a bound
+/// IMPORTS edge records. The strings are the stored contract (`indexer::resolver::INCLUDE_*_BASIS`,
+/// `indexer::workspace_import::WORKSPACE_SOURCE_ENTRY_BASIS`; storage takes no dependency on the
+/// indexer).
+const RECORDED_BASES: [RecordedBasis; 3] = [
+    RecordedBasis {
+        basis: "unique_suffix",
+        producer: ReasonProducer::CFamily,
+        resolution: "static",
+        shape: CandidateShape::TargetOnly,
+    },
+    RecordedBasis {
+        basis: "unique_basename",
+        producer: ReasonProducer::CFamily,
+        resolution: "inferred",
+        shape: CandidateShape::TargetOnly,
+    },
+    RecordedBasis {
+        basis: "workspace_source_entry",
+        producer: ReasonProducer::Ts,
+        resolution: "inferred",
+        shape: CandidateShape::TargetThenDeclared,
+    },
+];
+
+/// The bases a stage writes only on an UNRESOLVED row (several candidates, none picked) — never
+/// evidence on a bound edge.
+const AMBIGUOUS_BASES: [&str; 3] = [
     "ambiguous_suffix",
     "ambiguous_basename",
+    "ambiguous_workspace_source_entry",
 ];
 
 /// Was this edge written by the C or C++ extractor (`c-core:<v>` / `cpp-core:<v>`, the
@@ -194,16 +258,23 @@ fn is_c_family_extractor(extractor: Option<&str>) -> bool {
     extractor.is_some_and(|e| e.starts_with("c-core:") || e.starts_with("cpp-core:"))
 }
 
-/// CPP-INCLUDE-BASENAME-1 (RG-REQ-002-L11, RG-REQ-002-L04; F-CIB-REASON-VALIDITY,
-/// F-CIB-MISSING-REASON): the ONE rule that turns an IMPORTS edge's carrier into the row's reason,
-/// judged against the row's own edge — a reason is evidence only when it agrees with the fact it
-/// explains.
+/// The repo-relative path of a FILE stable key (`<repo>:<path>:FILE`), or `None` for any other key.
+fn file_key_path(key: &str) -> Option<&str> {
+    key.strip_suffix(":FILE")
+        .and_then(|k| k.split_once(':'))
+        .map(|(_, path)| path)
+}
+
+/// CPP-INCLUDE-BASENAME-1 / TS-WORKSPACE-RESOLUTION-1 (RG-REQ-002-L11, RG-REQ-002-L04): the ONE
+/// rule that turns an IMPORTS edge's carrier into the row's reason, judged against the row's own
+/// edge — a reason is evidence only when it agrees with the fact it explains.
 ///
-/// - A C/C++ `inferred` edge (only CPP-INCLUDE-BASENAME-1 writes one) must carry a valid reason:
-///   a NULL carrier or one without `basis` is `Missing`, never absent.
-/// - Every other row (every `static` row, every other producer's row) carries no reason when its
-///   carrier is NULL, has no `basis`, or names a string basis outside [`INCLUDE_BASES`].
-/// - Otherwise the reason is `Recorded` only when every clause holds (see [`ImportReason`]), and
+/// - An `inferred` edge of a producer that must carry a reason (C/C++, TS) with a NULL carrier or
+///   one without `basis` is `Missing`, never absent.
+/// - Every other row carries no reason when its carrier is NULL, has no `basis`, or names a string
+///   basis that is neither recorded ([`RECORDED_BASES`]) nor ambiguous ([`AMBIGUOUS_BASES`]).
+/// - Otherwise the reason is `Recorded` only when every clause of its basis holds (producer,
+///   resolution, candidate shape, the first candidate the edge's own FILE target), and
 ///   `Unreadable` with what failed in every other case.
 fn import_row_reason(
     resolution: Option<&str>,
@@ -212,7 +283,8 @@ fn import_row_reason(
     target_stable_key: &str,
     target_kind: &str,
 ) -> Option<ImportReason> {
-    let required = resolution == Some("inferred") && is_c_family_extractor(extractor);
+    let producer = ReasonProducer::of(extractor);
+    let required = resolution == Some("inferred") && producer.is_some();
     let unreadable = |what: String| Some(ImportReason::Unreadable { unreadable: what });
     let missing = |what: &str| {
         required.then(|| ImportReason::Missing {
@@ -231,18 +303,18 @@ fn import_row_reason(
         Some(serde_json::Value::String(basis)) => basis.as_str(),
         Some(_) => return unreadable("basis is not a string".into()),
     };
-    if !INCLUDE_BASES.contains(&basis) {
+    if AMBIGUOUS_BASES.contains(&basis) {
+        return unreadable(format!("ambiguous basis {basis} on a bound edge"));
+    }
+    let Some(recorded) = RECORDED_BASES.iter().find(|r| r.basis == basis) else {
         return if required {
             unreadable(format!(
-                "basis {basis} is not one an inferred include carries"
+                "basis {basis} is not one an inferred import of this producer carries"
             ))
         } else {
             None
         };
-    }
-    if basis.starts_with("ambiguous_") {
-        return unreadable(format!("ambiguous basis {basis} on a bound edge"));
-    }
+    };
     let candidates = match obj.get("candidates") {
         None => return unreadable("candidates missing".into()),
         Some(serde_json::Value::Array(items)) => items,
@@ -255,42 +327,54 @@ fn import_row_reason(
     else {
         return unreadable("candidates holds a non-string".into());
     };
-    let candidate = match candidates.as_slice() {
-        [] => return unreadable("candidates is empty".into()),
-        [one] => *one,
-        many => {
+    match (recorded.shape, candidates.as_slice()) {
+        (_, []) => return unreadable("candidates is empty".into()),
+        (CandidateShape::TargetOnly, [_]) => {}
+        (CandidateShape::TargetOnly, many) => {
             return unreadable(format!(
                 "{} candidates under the unique basis {basis}",
                 many.len()
             ))
         }
-    };
-    let agrees = matches!(
-        (basis, resolution),
-        ("unique_basename", Some("inferred")) | ("unique_suffix", Some("static"))
-    );
-    if !agrees {
+        (CandidateShape::TargetThenDeclared, [_]) => {
+            return unreadable(format!(
+                "basis {basis} records no declared entry beside the source entry"
+            ))
+        }
+        (CandidateShape::TargetThenDeclared, _) => {}
+    }
+    if Some(recorded.resolution) != resolution {
         return unreadable(format!(
             "basis {basis} on a {} edge",
             resolution.unwrap_or("resolution-less")
         ));
     }
-    if candidate != target_stable_key {
-        return unreadable(format!("candidate {candidate} is not the edge's target"));
+    if producer != Some(recorded.producer) {
+        return unreadable(format!(
+            "basis {basis} on an edge of {}",
+            extractor.unwrap_or("no extractor")
+        ));
+    }
+    let first = candidates[0];
+    if first != target_stable_key {
+        return unreadable(format!("candidate {first} is not the edge's target"));
     }
     if target_kind != "FILE" {
         return unreadable(format!("the target is a {target_kind}, not a FILE"));
     }
-    let Some(path) = candidate
-        .strip_suffix(":FILE")
-        .and_then(|k| k.split_once(':'))
-        .map(|(_, path)| path)
-    else {
-        return unreadable(format!("candidate {candidate} is not a FILE stable key"));
-    };
+    let mut paths: Vec<String> = Vec::with_capacity(candidates.len());
+    for (i, candidate) in candidates.iter().enumerate() {
+        let Some(path) = file_key_path(candidate) else {
+            return unreadable(format!("candidate {candidate} is not a FILE stable key"));
+        };
+        if candidates[..i].contains(candidate) {
+            return unreadable(format!("candidate {candidate} is recorded twice"));
+        }
+        paths.push(path.to_string());
+    }
     Some(ImportReason::Recorded {
         basis: basis.to_string(),
-        candidates: vec![path.to_string()],
+        candidates: paths,
     })
 }
 
@@ -7403,5 +7487,195 @@ mod tests {
                 missing: "reason carrier has no basis".into()
             })
         );
+    }
+
+    // ── TS-WORKSPACE-RESOLUTION-1: the reason on a workspace-bound `imports <file>` row ──
+
+    const TS: &str = "ts-core:0.2.0";
+
+    #[test]
+    fn find_imports_workspace_inferred_row_carries_every_candidate_path() {
+        let rows = imports_of_main(&[
+            (
+                "packages/effects/src/index.ts",
+                "FILE",
+                "inferred",
+                TS,
+                Some(
+                    r#"{"rawPath":"@amodx/effects","isTypeOnly":false,"basis":"workspace_source_entry","candidates":["r1:packages/effects/src/index.ts:FILE","r1:packages/effects/dist/index.d.ts:FILE","r1:packages/effects/dist/index.js:FILE"]}"#,
+                ),
+            ),
+            (
+                "packages/engine/src/index.ts",
+                "FILE",
+                "inferred",
+                TS,
+                Some(
+                    r#"{"rawPath":"@fraktag/engine","isTypeOnly":false,"basis":"workspace_source_entry","candidates":["r1:packages/engine/src/index.ts:FILE","r1:packages/engine/dist/index.js:FILE"]}"#,
+                ),
+            ),
+        ]);
+        assert_eq!(
+            rows[0].reason,
+            Some(ImportReason::Recorded {
+                basis: "workspace_source_entry".into(),
+                candidates: vec![
+                    "packages/effects/src/index.ts".into(),
+                    "packages/effects/dist/index.d.ts".into(),
+                    "packages/effects/dist/index.js".into(),
+                ],
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&rows[1]).unwrap()["reason"],
+            serde_json::json!({
+                "basis": "workspace_source_entry",
+                "candidates": ["packages/engine/src/index.ts", "packages/engine/dist/index.js"]
+            })
+        );
+    }
+
+    #[test]
+    fn find_imports_workspace_reason_that_disagrees_with_its_row_is_unreadable_never_evidence() {
+        let src = r#""r1:pkg/src/index.ts:FILE""#;
+        let dec = r#""r1:pkg/dist/index.js:FILE""#;
+        let cases: Vec<(&str, &str, &str, String)> = vec![
+            // One candidate only: the declared entry is missing.
+            (
+                "FILE",
+                "inferred",
+                TS,
+                format!(r#"{{"basis":"workspace_source_entry","candidates":[{src}]}}"#),
+            ),
+            // The first candidate is not the edge's target.
+            (
+                "FILE",
+                "inferred",
+                TS,
+                format!(r#"{{"basis":"workspace_source_entry","candidates":[{dec},{src}]}}"#),
+            ),
+            // A declared candidate equal to the target, or repeated.
+            (
+                "FILE",
+                "inferred",
+                TS,
+                format!(r#"{{"basis":"workspace_source_entry","candidates":[{src},{src}]}}"#),
+            ),
+            (
+                "FILE",
+                "inferred",
+                TS,
+                format!(r#"{{"basis":"workspace_source_entry","candidates":[{src},{dec},{dec}]}}"#),
+            ),
+            // A declared candidate that is not a FILE stable key.
+            (
+                "FILE",
+                "inferred",
+                TS,
+                format!(
+                    r#"{{"basis":"workspace_source_entry","candidates":[{src},"pkg/dist/index.js"]}}"#
+                ),
+            ),
+            // A static edge, or another producer, under the workspace basis.
+            (
+                "FILE",
+                "static",
+                TS,
+                format!(r#"{{"basis":"workspace_source_entry","candidates":[{src},{dec}]}}"#),
+            ),
+            (
+                "FILE",
+                "inferred",
+                "c-core:0.1.0",
+                format!(r#"{{"basis":"workspace_source_entry","candidates":[{src},{dec}]}}"#),
+            ),
+            (
+                "FILE",
+                "inferred",
+                "python-core:0.2.0",
+                format!(r#"{{"basis":"workspace_source_entry","candidates":[{src},{dec}]}}"#),
+            ),
+            // A TS inferred edge under an include basis.
+            (
+                "FILE",
+                "inferred",
+                TS,
+                format!(r#"{{"basis":"unique_basename","candidates":[{src}]}}"#),
+            ),
+            // A non-FILE target.
+            (
+                "SYMBOL",
+                "inferred",
+                TS,
+                format!(
+                    r#"{{"basis":"workspace_source_entry","candidates":["r1:pkg/src/index.ts#sym",{dec}]}}"#
+                ),
+            ),
+            // The ambiguous basis is never an edge.
+            (
+                "FILE",
+                "inferred",
+                TS,
+                format!(
+                    r#"{{"basis":"ambiguous_workspace_source_entry","candidates":[{src},{dec}]}}"#
+                ),
+            ),
+            // A basis no producer writes, on a TS inferred edge.
+            (
+                "FILE",
+                "inferred",
+                TS,
+                format!(r#"{{"basis":"python_submodule","candidates":[{src},{dec}]}}"#),
+            ),
+        ];
+        for (kind, resolution, extractor, carrier) in &cases {
+            let rows = imports_of_main(&[(
+                "pkg/src/index.ts",
+                kind,
+                resolution,
+                extractor,
+                Some(carrier),
+            )]);
+            assert!(
+                unreadable(&rows[0].reason),
+                "{kind} {resolution} {extractor} {carrier}: {:?}",
+                rows[0].reason
+            );
+        }
+    }
+
+    #[test]
+    fn find_imports_ts_inferred_row_without_a_reason_reports_its_reason_missing() {
+        let rows = imports_of_main(&[
+            ("pkg/a/src/index.ts", "FILE", "inferred", TS, None),
+            (
+                "pkg/b/src/index.ts",
+                "FILE",
+                "inferred",
+                TS,
+                Some(r#"{"rawPath":"b","isTypeOnly":false}"#),
+            ),
+        ]);
+        assert_eq!(
+            rows[0].reason,
+            Some(ImportReason::Missing {
+                missing: "no reason carrier".into()
+            })
+        );
+        assert_eq!(
+            rows[1].reason,
+            Some(ImportReason::Missing {
+                missing: "reason carrier has no basis".into()
+            })
+        );
+        // A static TS row keeps no reason, as before.
+        let rows = imports_of_main(&[(
+            "src/a.ts",
+            "FILE",
+            "static",
+            TS,
+            Some(r#"{"rawPath":"./a","resolvedPath":"src/a.ts","isTypeOnly":false}"#),
+        )]);
+        assert_eq!(rows[0].reason, None);
     }
 }

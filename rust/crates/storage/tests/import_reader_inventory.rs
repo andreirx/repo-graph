@@ -128,7 +128,12 @@ const INVENTORY: &[(&str, &str, &str)] = &[
     (
         "crud/module_edges_support.rs",
         "get_external_imports_for_snapshot",
-        "unresolved_edges only — reads no edge",
+        "deps list: unresolved_edges rows classified external_library_candidate (its own SQL reads no edge), plus the checked workspace import sites of checked_workspace_import_sites",
+    ),
+    (
+        "crud/module_edges_support.rs",
+        "checked_workspace_import_sites",
+        "deps list/why (TS-WORKSPACE-RESOLUTION-1): TS inferred IMPORTS edges only, each carrier checked against its own edge (named error otherwise); counted as an import site of the spelled package, never as a module edge; test status kept, as for the unresolved rows beside it",
     ),
 ];
 

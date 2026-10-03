@@ -773,6 +773,7 @@ fn declared_modules_from_cargo(cargo: &CargoExtractionResult) -> Vec<DeclaredMod
                 .clone()
                 .unwrap_or_else(|| m.module.package_name.clone()),
             canonical_root: m.module.crate_root.clone(),
+            npm_declared_entries: Vec::new(),
         })
         .collect()
 }
@@ -3419,7 +3420,13 @@ pub fn index_into_storage_with_progress(
             c_include_roots: options.c_include_roots.clone(),
             // IMPORT-RESOLUTION-RUST-1 §2.1: carry the declared-crate catalog so the
             // resolver can map cross-crate `use` paths to files (index path).
-            declared_modules: declared_modules_from_cargo(&prepared.cargo_modules),
+            // TS-WORKSPACE-RESOLUTION-1: the npm workspace members join the same catalog.
+            declared_modules: declared_modules_from_cargo(&prepared.cargo_modules)
+                .into_iter()
+                .chain(package_json::declared_modules_from_npm(
+                    prepared.npm_modules.modules.iter().map(|m| &m.module),
+                ))
+                .collect(),
             on_progress: Some(&mut indexer_progress_callback),
             ..IndexOptions::default()
         };
@@ -3858,7 +3865,13 @@ pub fn refresh_into_storage_with_progress(
         c_include_roots: options.c_include_roots.clone(),
         // IMPORT-RESOLUTION-RUST-1 §2.1: carry the declared-crate catalog (refresh path,
         // symmetric with the index path — spec §3 requires threading it here too).
-        declared_modules: declared_modules_from_cargo(&prepared.cargo_modules),
+        // TS-WORKSPACE-RESOLUTION-1: the npm workspace members join the same catalog.
+        declared_modules: declared_modules_from_cargo(&prepared.cargo_modules)
+            .into_iter()
+            .chain(package_json::declared_modules_from_npm(
+                prepared.npm_modules.modules.iter().map(|m| &m.module),
+            ))
+            .collect(),
         on_progress: Some(&mut indexer_progress_callback),
         ..IndexOptions::default()
     };

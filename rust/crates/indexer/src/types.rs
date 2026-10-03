@@ -552,7 +552,8 @@ pub struct IndexOptions<'a> {
 ///   only AFTER the snapshot is READY, unavailable at resolution time).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeclaredModule {
-    /// Package ecosystem. `"cargo"` for this slice; the stage acts only on that value.
+    /// Package ecosystem: `"cargo"` (read by the Rust-crate import stage) or `"npm"` (read by the
+    /// TS workspace import stage, TS-WORKSPACE-RESOLUTION-1); each stage acts only on its value.
     pub ecosystem: String,
     /// The import-facing module name (Cargo package name, or `[lib] name` when it
     /// overrides). Matched against an import specifier's first segment THROUGH the shared
@@ -561,6 +562,40 @@ pub struct DeclaredModule {
     /// Crate root directory, repo-relative (e.g. `"rust/crates/storage"`, or `"."` for a
     /// root crate). Candidate FILE keys are generated under `<canonical_root>/src/`.
     pub canonical_root: String,
+    /// TS-WORKSPACE-RESOLUTION-1 (RG-REQ-006-L04): for an `"npm"` workspace member, every root
+    /// target its manifest declares explicitly (`exports`, else `main`), repo-relative, in manifest
+    /// order, each tagged with where the manifest declares it (`package_json::declared_entries`).
+    /// Raw data, no manifest struct. Empty for every Cargo crate and for a member that declares no
+    /// entry or whose declaration is undeterminable.
+    pub npm_declared_entries: Vec<NpmDeclaredEntry>,
+}
+
+/// TS-WORKSPACE-RESOLUTION-1 (RG-REQ-006-L04, D-TWR-ENTRY-ORIGIN): one root target an npm
+/// manifest declares, tagged with its origin, because Node resolves the two differently.
+///
+/// - what: a repo-relative declared path and whether it came from `main` or from `exports`.
+/// - concrete current users: produced by `package_json::declared_entries`; carried by
+///   [`DeclaredModule`] and `workspace_import::NpmWorkspacePackage`; consumed by
+///   `workspace_import::match_workspace_package_import`, which completes by variant.
+/// - force: the workspace rule completes `main` targets only; a plain path loses the origin across
+///   the compose→indexer boundary.
+/// - growth axis: closed — Node declares a package root by `main` or by `exports` only.
+/// - rejected simpler: a `bool` beside each path, or one per-member flag (can disagree with the list).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NpmDeclaredEntry {
+    /// The target of the `main` field. Node completes it (`.js`, `.json`, `.node`, `/index.js`).
+    Main(String),
+    /// A root `exports` target. Node resolves it exactly as written.
+    Export(String),
+}
+
+impl NpmDeclaredEntry {
+    /// The repo-relative declared path, whatever its origin.
+    pub fn path(&self) -> &str {
+        match self {
+            NpmDeclaredEntry::Main(path) | NpmDeclaredEntry::Export(path) => path,
+        }
+    }
 }
 
 /// Result of contract schema extraction (CS-1+).

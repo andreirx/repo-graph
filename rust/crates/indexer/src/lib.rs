@@ -117,6 +117,7 @@ pub mod settings_gradle;
 pub mod storage_port;
 pub mod type_only;
 pub mod types;
+pub mod workspace_import;
 
 // ── Public re-exports ────────────────────────────────────────
 

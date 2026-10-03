@@ -43,6 +43,8 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::types::NpmDeclaredEntry;
+
 // ── Extraction output types ──────────────────────────────────────────
 
 /// A package discovered from package.json parsing.
@@ -62,6 +64,14 @@ pub struct NpmModule {
     pub is_workspace_member: bool,
     /// Source of discovery: "package_json" or "pnpm_workspace_yaml"
     pub source_type: String,
+    /// TS-WORKSPACE-RESOLUTION-1 (RG-REQ-006-L04): every root target the manifest declares
+    /// EXPLICITLY (`exports`, else `main`), as repo-relative paths in manifest order, without
+    /// duplicates, each tagged with its origin — see [`declared_entries`]. Never narrowed to one
+    /// target (the importer's mode and bundler conditions are not known to the index) and never
+    /// Node's implicit `index.js`. Empty when the manifest declares no root entry or its declaration
+    /// is undeterminable. Read only by the workspace import stage; never persisted (the evidence
+    /// payload is unchanged).
+    pub declared_entries: Vec<NpmDeclaredEntry>,
 }
 
 /// Result of parsing a package.json manifest.
@@ -104,6 +114,22 @@ struct PackageJson {
     name: Option<String>,
     version: Option<String>,
     workspaces: Option<WorkspacesField>,
+    /// TS-WORKSPACE-RESOLUTION-1: `main` and `exports` are read as raw JSON (`Some` whenever the
+    /// key is present, `null` included), never as typed fields, so a manifest whose `main` is a
+    /// number or whose `exports` is any JSON parses exactly as before.
+    #[serde(default, deserialize_with = "present_json")]
+    main: Option<serde_json::Value>,
+    #[serde(default, deserialize_with = "present_json")]
+    exports: Option<serde_json::Value>,
+}
+
+/// A key that is present yields `Some(value)` — `Some(Value::Null)` for an explicit `null` — so
+/// "present and null" stays distinct from "absent" (`exports: null` still declares the root).
+fn present_json<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde_json::Value::deserialize(deserializer).map(Some)
 }
 
 /// Workspaces can be an array or an object with "packages" field.
@@ -181,6 +207,7 @@ pub fn parse_package_json(
     let is_workspace_root = !workspace_patterns.is_empty();
 
     // Extract module if package has a name.
+    let entries = declared_entries(package_root, parsed.main.as_ref(), parsed.exports.as_ref());
     let module = parsed.name.map(|name| NpmModule {
         package_name: name,
         package_root: package_root.to_string(),
@@ -188,6 +215,7 @@ pub fn parse_package_json(
         manifest_path: manifest_path.to_string(),
         is_workspace_member: false, // Will be updated by caller if discovered via workspace
         source_type: "package_json".to_string(),
+        declared_entries: entries,
     });
 
     Ok(PackageJsonParseResult {
@@ -195,6 +223,169 @@ pub fn parse_package_json(
         workspace_patterns,
         is_workspace_root,
     })
+}
+
+// ── Declared entries (TS-WORKSPACE-RESOLUTION-1) ─────────────────────
+
+/// The manifest's declaration could not be read as a list of root targets (a mixed `exports`
+/// object, a nested subpath map under a condition, a non-string target, a target without `./`, a
+/// target that leaves the package, or a non-string `main`).
+struct Undeterminable;
+
+/// TS-WORKSPACE-RESOLUTION-1 (RG-REQ-006-L04): every root target a package manifest declares
+/// EXPLICITLY, as repo-relative paths under `package_root`, in manifest order, deduplicated, each
+/// tagged with its origin: [`NpmDeclaredEntry::Export`] for a target of `exports`,
+/// [`NpmDeclaredEntry::Main`] for the target of `main` (D-TWR-ENTRY-ORIGIN).
+///
+/// - `exports`, when the key is present (`null` included), alone declares the root (Node ignores
+///   `main` then): a string is the root target; an object whose keys all start with `.` is a
+///   subpath map whose `"."` value is the root (no `"."` → no root); a conditions object
+///   contributes the targets of EVERY condition in its key order, recursively; an array every
+///   element; `null` nothing.
+/// - else a non-empty string `main`, with or without `./`.
+/// - else nothing: Node's implicit `index.js` is never a declared entry.
+///
+/// Every target must start with `./` (`main` excepted) and stay inside the package after
+/// normalization. An undeterminable declaration yields no entries. PURE.
+pub fn declared_entries(
+    package_root: &str,
+    main: Option<&serde_json::Value>,
+    exports: Option<&serde_json::Value>,
+) -> Vec<NpmDeclaredEntry> {
+    let targets = match declared_targets(package_root, main, exports) {
+        Ok(targets) => targets,
+        Err(Undeterminable) => return Vec::new(),
+    };
+    let mut entries: Vec<NpmDeclaredEntry> = Vec::with_capacity(targets.len());
+    for t in targets {
+        if !entries.contains(&t) {
+            entries.push(t);
+        }
+    }
+    entries
+}
+
+fn declared_targets(
+    package_root: &str,
+    main: Option<&serde_json::Value>,
+    exports: Option<&serde_json::Value>,
+) -> Result<Vec<NpmDeclaredEntry>, Undeterminable> {
+    use serde_json::Value;
+    if let Some(exports) = exports {
+        let root_value = match exports {
+            Value::Object(map) if map.keys().any(|k| k.starts_with('.')) => {
+                if !map.keys().all(|k| k.starts_with('.')) {
+                    return Err(Undeterminable);
+                }
+                match map.get(".") {
+                    Some(root) => root,
+                    None => return Ok(Vec::new()),
+                }
+            }
+            other => other,
+        };
+        let mut out = Vec::new();
+        collect_export_targets(package_root, root_value, &mut out)?;
+        return Ok(out.into_iter().map(NpmDeclaredEntry::Export).collect());
+    }
+    match main {
+        None => Ok(Vec::new()),
+        Some(Value::String(m)) if m.is_empty() => Ok(Vec::new()),
+        Some(Value::String(m)) => {
+            let target = if m.starts_with("./") {
+                m.clone()
+            } else {
+                format!("./{m}")
+            };
+            Ok(vec![NpmDeclaredEntry::Main(package_target(
+                package_root,
+                &target,
+            )?)])
+        }
+        Some(_) => Err(Undeterminable),
+    }
+}
+
+/// The targets of one root export value (string, conditions object, array or null), in order.
+fn collect_export_targets(
+    package_root: &str,
+    value: &serde_json::Value,
+    out: &mut Vec<String>,
+) -> Result<(), Undeterminable> {
+    use serde_json::Value;
+    match value {
+        Value::Null => Ok(()),
+        Value::String(target) => {
+            out.push(package_target(package_root, target)?);
+            Ok(())
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_export_targets(package_root, item, out)?;
+            }
+            Ok(())
+        }
+        Value::Object(conditions) => {
+            if conditions.keys().any(|k| k.starts_with('.')) {
+                // A nested subpath map under a condition.
+                return Err(Undeterminable);
+            }
+            for target in conditions.values() {
+                collect_export_targets(package_root, target, out)?;
+            }
+            Ok(())
+        }
+        Value::Bool(_) | Value::Number(_) => Err(Undeterminable),
+    }
+}
+
+/// A `./`-relative manifest target as a repo-relative path under `package_root` (`.` = the repo
+/// root). `.` and empty segments are dropped, `..` pops; a target that leaves the package, or names
+/// the package directory itself, is undeterminable.
+fn package_target(package_root: &str, target: &str) -> Result<String, Undeterminable> {
+    let rest = target.strip_prefix("./").ok_or(Undeterminable)?;
+    let mut segments: Vec<&str> = if package_root == "." {
+        Vec::new()
+    } else {
+        package_root.split('/').collect()
+    };
+    let base = segments.len();
+    for segment in rest.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                if segments.len() <= base {
+                    return Err(Undeterminable);
+                }
+                segments.pop();
+            }
+            name => segments.push(name),
+        }
+    }
+    if segments.len() == base {
+        return Err(Undeterminable);
+    }
+    Ok(segments.join("/"))
+}
+
+/// TS-WORKSPACE-RESOLUTION-1: project the parsed npm workspace MEMBERS into the raw declared-module
+/// catalog carried across the compose→indexer boundary (`ecosystem: "npm"`, the package name, the
+/// package root, the declared entries). The root package and non-members are not members and are
+/// not projected; a member without declared entries is projected (the import stage declines it,
+/// and it still counts when two members declare one name).
+pub fn declared_modules_from_npm<'a>(
+    modules: impl IntoIterator<Item = &'a NpmModule>,
+) -> Vec<crate::types::DeclaredModule> {
+    modules
+        .into_iter()
+        .filter(|m| m.is_workspace_member)
+        .map(|m| crate::types::DeclaredModule {
+            ecosystem: "npm".to_string(),
+            name: m.package_name.clone(),
+            canonical_root: m.package_root.clone(),
+            npm_declared_entries: m.declared_entries.clone(),
+        })
+        .collect()
 }
 
 /// Parse a pnpm-workspace.yaml file and extract workspace patterns.
@@ -448,6 +639,7 @@ packages:
             manifest_path: "packages/core/package.json".to_string(),
             is_workspace_member: true,
             source_type: "package_json".to_string(),
+            declared_entries: Vec::new(),
         };
 
         let (candidate, evidence) = to_storage_inputs(&module, "repo-1", "snap-1");
@@ -467,5 +659,207 @@ packages:
         assert_eq!(payload.package_name, "@scope/core");
         assert!(payload.workspace_member);
         assert_eq!(payload.version, Some("1.0.0".to_string()));
+    }
+
+    // ── Declared entries (TS-WORKSPACE-RESOLUTION-1, RG-REQ-006-L04) ──
+
+    fn entries_of(manifest: &str, path: &str) -> Vec<NpmDeclaredEntry> {
+        parse_package_json(manifest, path)
+            .expect("the manifest parses")
+            .module
+            .expect("a named package")
+            .declared_entries
+    }
+
+    /// Expected entries declared by `main` (completed by Node).
+    fn mains(paths: &[&str]) -> Vec<NpmDeclaredEntry> {
+        paths
+            .iter()
+            .map(|p| NpmDeclaredEntry::Main(p.to_string()))
+            .collect()
+    }
+
+    /// Expected entries declared by the root `exports` (matched as written).
+    fn exports(paths: &[&str]) -> Vec<NpmDeclaredEntry> {
+        paths
+            .iter()
+            .map(|p| NpmDeclaredEntry::Export(p.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn declared_entries_are_main_when_there_are_no_exports() {
+        // FRAKTAG packages/engine/package.json: `"main": "dist/index.js"` (no `./`).
+        let m = r#"{"name":"@fraktag/engine","main":"dist/index.js","types":"dist/index.d.ts"}"#;
+        assert_eq!(
+            entries_of(m, "packages/engine/package.json"),
+            mains(&["packages/engine/dist/index.js"])
+        );
+        // With `./`, and at the repository root.
+        let m = r#"{"name":"root","main":"./lib/main.js"}"#;
+        assert_eq!(entries_of(m, "package.json"), mains(&["lib/main.js"]));
+    }
+
+    #[test]
+    fn declared_entries_are_every_leaf_of_the_root_export_in_manifest_order() {
+        // amodx packages/effects: a conditional root export — BOTH targets, in key order, none
+        // selected.
+        let m = r#"{"name":"@amodx/effects","main":"dist/index.js",
+            "exports":{".":{"types":"./dist/index.d.ts","default":"./dist/index.js"},
+                       "./package.json":"./package.json"}}"#;
+        assert_eq!(
+            entries_of(m, "packages/effects/package.json"),
+            exports(&[
+                "packages/effects/dist/index.d.ts",
+                "packages/effects/dist/index.js"
+            ])
+        );
+        // A `require` placed before `import` changes only the recorded order.
+        let m = r#"{"name":"p","exports":{"require":"./dist/a.cjs","import":"./dist/a.mjs"}}"#;
+        assert_eq!(
+            entries_of(m, "p/package.json"),
+            exports(&["p/dist/a.cjs", "p/dist/a.mjs"])
+        );
+        let m = r#"{"name":"p","exports":{"import":"./dist/a.mjs","require":"./dist/a.cjs"}}"#;
+        assert_eq!(
+            entries_of(m, "p/package.json"),
+            exports(&["p/dist/a.mjs", "p/dist/a.cjs"])
+        );
+        // A string export, nested conditions, an array, a null leaf and a duplicate.
+        let m = r#"{"name":"p","exports":"./index.js"}"#;
+        assert_eq!(entries_of(m, "p/package.json"), exports(&["p/index.js"]));
+        let m = r#"{"name":"p","exports":{".":{"node":{"import":"./n.mjs","require":"./n.cjs"},
+            "browser":["./b.js",null],"code":"./src/index.ts","default":"./n.mjs"}}}"#;
+        assert_eq!(
+            entries_of(m, "p/package.json"),
+            exports(&["p/n.mjs", "p/n.cjs", "p/b.js", "p/src/index.ts"])
+        );
+        // `exports` alone declares the root: `main` is ignored when `exports` is present.
+        let m = r#"{"name":"p","main":"./main.js","exports":{".":"./exported.js"}}"#;
+        assert_eq!(entries_of(m, "p/package.json"), exports(&["p/exported.js"]));
+    }
+
+    #[test]
+    fn undeterminable_entries_leave_the_member_without_declared_entries() {
+        for m in [
+            // `.`-keys mixed with condition keys.
+            r#"{"name":"p","exports":{".":"./a.js","import":"./b.js"}}"#,
+            // A nested subpath map under a condition.
+            r#"{"name":"p","exports":{".":{"import":{"./x":"./x.js"}}}}"#,
+            // A non-string target.
+            r#"{"name":"p","exports":{".":{"import":7}}}"#,
+            r#"{"name":"p","exports":true}"#,
+            // A target without `./`.
+            r#"{"name":"p","exports":{".":"dist/index.js"}}"#,
+            // A target that leaves the package.
+            r#"{"name":"p","exports":"./../q/index.js"}"#,
+            r#"{"name":"p","main":"../q/index.js"}"#,
+            // A target that names the package directory itself.
+            r#"{"name":"p","exports":"./"}"#,
+            // A non-string `main`.
+            r#"{"name":"p","main":3}"#,
+            r#"{"name":"p","main":["./a.js"]}"#,
+        ] {
+            assert!(entries_of(m, "p/package.json").is_empty(), "{m}");
+        }
+    }
+
+    #[test]
+    fn declared_entries_are_none_without_a_root_export() {
+        for m in [
+            // Subpaths only (amodx `@amodx/plugins` exports `./admin` and `./render`).
+            r#"{"name":"p","main":"./main.js","exports":{"./admin":"./dist/admin.js","./render":"./dist/render.js"}}"#,
+            // `exports: null` declares the root as nothing; `main` is not consulted.
+            r#"{"name":"p","main":"./main.js","exports":null}"#,
+            r#"{"name":"p","exports":{".":null}}"#,
+        ] {
+            assert!(entries_of(m, "p/package.json").is_empty(), "{m}");
+        }
+    }
+
+    #[test]
+    fn declared_entries_are_none_without_main_or_exports_never_an_implicit_index_js() {
+        for m in [
+            r#"{"name":"p"}"#,
+            r#"{"name":"p","main":""}"#,
+            r#"{"name":"p","main":null}"#,
+            r#"{"name":"p","types":"./dist/index.d.ts","module":"./dist/index.mjs"}"#,
+        ] {
+            let entries = entries_of(m, "p/package.json");
+            assert!(entries.is_empty(), "{m}: {entries:?}");
+        }
+    }
+
+    #[test]
+    fn declared_entries_are_normalized_under_the_package_root() {
+        let m = r#"{"name":"p","main":"./dist/../lib//./index.js"}"#;
+        assert_eq!(
+            entries_of(m, "packages/p/package.json"),
+            mains(&["packages/p/lib/index.js"])
+        );
+        let m = r#"{"name":"p","exports":{".":{"types":"./a/../types/index.d.ts"}}}"#;
+        assert_eq!(
+            entries_of(m, "package.json"),
+            exports(&["types/index.d.ts"])
+        );
+    }
+
+    #[test]
+    fn non_string_main_or_exports_never_fails_the_manifest_parse() {
+        for m in [
+            r#"{"name":"p","main":7}"#,
+            r#"{"name":"p","main":{"x":1}}"#,
+            r#"{"name":"p","exports":12}"#,
+            r#"{"name":"p","exports":[1,{"a":false}]}"#,
+            r#"{"name":"p","exports":{".":{"import":[null,3]}},"main":false}"#,
+        ] {
+            let parsed = parse_package_json(m, "p/package.json").expect(m);
+            let module = parsed.module.expect("the named package is still extracted");
+            assert_eq!(module.package_name, "p");
+            assert_eq!(module.package_root, "p");
+            assert!(module.declared_entries.is_empty(), "{m}");
+        }
+    }
+
+    #[test]
+    fn declared_modules_carry_npm_workspace_members_with_their_declared_entries() {
+        let member = |name: &str, root: &str, entries: &[&str], member: bool| NpmModule {
+            package_name: name.to_string(),
+            package_root: root.to_string(),
+            version: None,
+            manifest_path: format!("{root}/package.json"),
+            is_workspace_member: member,
+            source_type: "package_json".to_string(),
+            declared_entries: mains(entries),
+        };
+        let modules = [
+            member("fraktag", ".", &["dist/index.js"], false),
+            member(
+                "@fraktag/engine",
+                "packages/engine",
+                &["packages/engine/dist/index.js"],
+                true,
+            ),
+            member("@fraktag/ui", "packages/ui", &[], true),
+        ];
+        let declared = declared_modules_from_npm(modules.iter());
+        assert_eq!(
+            declared,
+            vec![
+                crate::types::DeclaredModule {
+                    ecosystem: "npm".to_string(),
+                    name: "@fraktag/engine".to_string(),
+                    canonical_root: "packages/engine".to_string(),
+                    npm_declared_entries: mains(&["packages/engine/dist/index.js"]),
+                },
+                crate::types::DeclaredModule {
+                    ecosystem: "npm".to_string(),
+                    name: "@fraktag/ui".to_string(),
+                    canonical_root: "packages/ui".to_string(),
+                    npm_declared_entries: vec![],
+                },
+            ],
+            "workspace members only — the root package is not a member"
+        );
     }
 }

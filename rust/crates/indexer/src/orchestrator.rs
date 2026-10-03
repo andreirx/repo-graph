@@ -63,7 +63,9 @@ const COPIED_SIGNALS_READ_CHUNK: usize = 500;
 /// Also the `indexer` component of every snapshot toolchain stamp ([`build_toolchain_json`]).
 /// 1.4.0 (TEST-EDGE-SCOPE-1A): `testsuite/` joins the test conventions and the
 /// tracked-only (contract, config) writers take them, so stored `is_test` moves.
-pub const INDEXER_VERSION: &str = "indexer:1.5.0";
+/// 1.6.0 (TS-WORKSPACE-RESOLUTION-1): a bare TS import naming an npm workspace member can bind
+/// INFERRED to the member's source entry, so stored IMPORTS edges and unresolved rows move.
+pub const INDEXER_VERSION: &str = "indexer:1.6.0";
 
 // ── Error type ───────────────────────────────────────────────────
 
@@ -915,6 +917,12 @@ fn run_pipeline<S: IndexerStoragePort>(
     // knowledge; empty (a no-op) when the snapshot has no `.java` files.
     let java_suffix_index = crate::resolver::build_java_suffix_index(all_file_paths);
 
+    // TS-WORKSPACE-RESOLUTION-1 (RG-REQ-006-L04): npm workspace package name → member root and
+    // declared entries, from the same catalog (npm ecosystem only). Read by the trailing TS-only
+    // workspace import stage; empty (a no-op) when the repository has no npm workspace members.
+    let npm_workspace_packages =
+        crate::workspace_import::build_npm_workspace_packages(declared_modules);
+
     let mut index = ResolverIndex {
         nodes_by_stable_key: HashMap::new(),
         nodes_by_name: HashMap::new(),
@@ -928,6 +936,7 @@ fn run_pipeline<S: IndexerStoragePort>(
         include_resolver: Some(include_resolution_map),
         rust_crate_roots,
         java_suffix_index,
+        npm_workspace_packages,
     };
 
     for node in &resolver_nodes {
@@ -4380,15 +4389,15 @@ mod tests {
         };
         let (mut a, mut b, mut c) = (named("ts-core:0.2.0"), named("c-core:0.1.0"), named("z:9"));
         let ports: Vec<&mut dyn ExtractorPort> = vec![&mut c, &mut a, &mut b];
-        assert_eq!(INDEXER_VERSION, "indexer:1.5.0");
+        assert_eq!(INDEXER_VERSION, "indexer:1.6.0");
         assert_eq!(
             build_toolchain_json(&ports),
-            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.5.0"}"#
+            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.6.0"}"#
         );
         let none: Vec<&mut dyn ExtractorPort> = Vec::new();
         assert_eq!(
             build_toolchain_json(&none),
-            r#"{"extractors":[],"indexer":"indexer:1.5.0"}"#
+            r#"{"extractors":[],"indexer":"indexer:1.6.0"}"#
         );
     }
 
