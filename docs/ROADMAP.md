@@ -1426,7 +1426,7 @@ The round-six queue Q1–Q9 is GROUNDED on the catalog: each slice packet (`docs
 allocates Implements / Changes (pre-authorised headline movements) / Preserves and carries a Regression watch — preserved L →
 what would regress → the proving test. No relay launches until the human approves the catalog revision and orders the queue.
 
-Open follow-ups awaiting ratification/scheduling: LOCK-TEST-FLAKE-1 (three wall-clock lock-hold
+Open follow-ups awaiting ratification/scheduling: TS-ALIAS-TIE-ORDER-1 and TS-ALIAS-CONFIG-DIAGNOSTIC-1 (D-TSA-STATED-LIMITS-1, 2026-10-03: the two limits the shipped TS-ALIAS-RESOLUTION-1 contract states — a longest-prefix `paths` tie stays unresolved with every candidate; a malformed or unreadable tsconfig leaves the file's rows as at HEAD with the reason in the index log only — ratified by the INPUT-13 re-pin review, each with zero corpus rows today; the reviewer's highest-priority recommendation is CONFIG-DIAGNOSTIC-1); TS-ALIAS-MULTI-PROJECT-1, TS-CONFIG-REFRESH-1, ALIAS-SELECTION-PARITY-1, EXPLICIT-EXTENSION-IMPORT-1 (TS-ALIAS-RESOLUTION-1 follow-ups); LOCK-TEST-FLAKE-1 (four wall-clock tests now — the `enrich_lifecycle` 20 s wait joined on 2026-10-03; three lock-hold
 tests fail under a loaded parallel suite and pass alone — `foreground_open::tests::lock_held_beyond_
 patience_is_locked_after_retries_and_bounded` (DEPS-1B gate), `connection::tests::writer_past_busy_
 timeout_yields_honest_error_not_a_hang` + `writer_held_past_production_5s_bound_yields_honest_busy`

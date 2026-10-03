@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-13-2",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-13.json",
+    "sha256": "sha256:bb399e62c0b3b0d3642a25d9d40b408bd4173c8c2e6bf59255baec4736d4d706"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-13"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-13-2"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-03T20:04:27.000Z",
+  "report": "Standalone read-only review (codex exec --sandbox read-only, gpt-6-sol, high; session 01a1035c-bd0e-74a1-8fc8-70444da29a1f), pass 2, self-contained prompt with the one diff and the governance record inlined (/private/tmp/rgbootstrap13/review-2.txt). Subject = INPUT-12 + the re-pin of docs/cli/rmap-contracts.md (changed by the shipped, implementation-reviewed, gate-green TS-ALIAS-RESOLUTION-1, 1510da10: the imports tsconfig paths section) plus the governance record D-TSA-STATED-LIMITS-1. Pass 1 (session 01a10359-aed0-7ce3-8a46-3ef6340e252d) was decision-required on the two unratified limits.\n\nRESULT: accepted\n\nThe re-pin is consistent on the supplied evidence. `docs/cli/rmap-contracts.md:298-307,338-343` states the two shipped limits, and RECORD A ratifies each with a named follow-up. The text does not claim a confirmed edge for either case, and it keeps unknown distinct from zero. RECORD A presents the incidence figures as measurements, including the 20 tsconfig files its measurement could not parse, not as proof that the cases cannot occur. Its options state the interim reward and risk honestly. This is a contract review, not independent code validation.\n\nHighest-priority recommendation: implement TS-ALIAS-CONFIG-DIAGNOSTIC-1 so an affected agent-facing row gives the config failure reason; the supplied corpus already contains four affected fixture directories.\n"
+}
