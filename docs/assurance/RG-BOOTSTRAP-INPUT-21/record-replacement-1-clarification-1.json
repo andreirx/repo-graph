@@ -1,0 +1,23 @@
+{
+  "formatVersion": 1,
+  "kind": "record-correction-note",
+  "noteId": "RG-BOOTSTRAP-INPUT-21-record-replacement-1-clarification-1",
+  "recordedAt": "2026-10-04T16:35:00.000Z",
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "corrects": [
+    {
+      "path": "docs/assurance/RG-BOOTSTRAP-INPUT-21/record-replacement-1.json",
+      "sha256": "sha256:bddf80304224f843fc695854563acb671cdb4a1ccb03ba3c4f9bb6857fbe48f4",
+      "defect": "its field `parsedChain` lists four records as one parsed chain; admission (agent-manager src/core/assurance.ts:1633-1653) builds and parses only `requirements-review.json` and `baseline-approval.json` of the baseline directory."
+    },
+    {
+      "path": "docs/assurance/RG-BOOTSTRAP-INPUT-20/requirements-review-pass2-correction-1.json",
+      "sha256": "sha256:59fe3bbdf2dbdead4cdadec997364bd659d8d6e4767d99f5d58debc9f4966efc",
+      "defect": "its statement calls requirements-review-2.json 'the parsed, schema-valid review of the current leaf' (admission does not read it), and says the pass-2 file's kind 'should read record-correction-note' (the file records a review, not a correction of a record)."
+    }
+  ],
+  "statement": "Read by admission for RG-BOOTSTRAP-INPUT-21: docs/assurance/RG-BOOTSTRAP-INPUT-21/requirements-review.json (sha256:c8cfc440ff39fc51c3e43d16e2b46c9c58182918d33db47e5b6303004c98bdd5; the re-pin diff review) and docs/assurance/RG-BOOTSTRAP-INPUT-21/baseline-approval.json (sha256:2328207e31a4f8fae99459e9fd146323f118222caaea2d00366aa1a3b67b592d). Supplemental evidence for a reader, in the review-record and approval-record shapes but not read by admission: docs/assurance/RG-BOOTSTRAP-INPUT-21/requirements-review-2.json (sha256:fbfc3cb8ee5cd0b524893c48369bd1913eed91b9fcb784d7699e107940bfa47e; the full-leaf review of RG-REQ-006-L14, codex session 01a107b6-d5ed-74d1-ada6-1ad60ae6a5d3, accepted) and docs/assurance/RG-BOOTSTRAP-INPUT-21/baseline-approval-2.json (sha256:19ddf0c019f76945e472aea6345e2d4dbdfc51283780a51eaa966654cb79a060). docs/assurance/RG-BOOTSTRAP-INPUT-20/requirements-review-pass2.json (sha256:c3b9bbc402069ce8ce60eb288604f4704a71c4dc533a91e4aa05b9fcd5bb87e4) is the narrative record of the second independent INPUT-20 review (session 01a107a0-db04-73f1-b269-35a412fdd2ed, refinement-required, F-1); it is neither a runtime-read review record nor a correction note, and carries no runtime kind. Commit message 3d5dbac1's 'parsed-shape' is read the same way. Rule: 'parsed', 'schema-valid' and 'chain' describe only requirements-review.json and baseline-approval.json; every other file under docs/assurance/<baseline>/ is supplemental evidence. No record is edited by this note."
+}
