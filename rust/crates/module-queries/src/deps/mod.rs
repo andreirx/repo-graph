@@ -43,4 +43,5 @@ pub use resolve::{build_identifier_resolution_map, resolve_import_specifier};
 pub use types::{
     DependencyCategory, DependencyEntry, DriftEntry, DriftKind, ManifestContext, ManifestErrorKind,
     ManifestProvenance, ModuleDependencySummary, PackageUsage, ProvenanceRead, UndeterminedBlocks,
+    UnresolvedAliasRefs,
 };

@@ -58,6 +58,10 @@ pub mod config;
 // `pub(crate)` — only compose's index / refresh call sites invoke it.
 pub(crate) mod cpp_test_reclassify;
 pub mod express_detector;
+// DEPS-GRADLE-CATALOG-1B: Gradle version-catalog aliases — the alias miner the Gradle reader feeds,
+// the catalog sources of a build and the one binding rule. `pub(crate)` — its users are `config.rs`
+// and `manifest_deps.rs` (both over the 500-line guardrail, so the new responsibility lives here).
+pub(crate) mod gradle_catalog;
 pub(crate) mod http_boundary;
 pub mod impact_propagation;
 // DEPS-LIST-REWRITE-1 §2.2: manifest provenance + the pyproject/Gradle readers. `pub(crate)` — no

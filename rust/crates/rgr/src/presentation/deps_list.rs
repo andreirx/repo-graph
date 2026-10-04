@@ -190,6 +190,18 @@ pub struct DepsListResponse {
     /// nonzero count → the count-only form renders instead (never dropped).
     #[serde(default)]
     pub declared_undetermined_note: String,
+    /// DEPS-GRADLE-CATALOG-1B (D-DGC1B-ALIAS-MARKING-1; RG-REQ-002-L11): the number of Gradle
+    /// version-catalog alias references in this view's builds that the index could not bind to a
+    /// group — the declared set may be missing what they name. Additive, `#[serde(default)]`: an
+    /// older daemon (or untracked provenance) omits it → 0 → today's output. Nonzero → one note line
+    /// after the undetermined-blocks line (it adds no row suffix).
+    #[serde(default)]
+    pub declared_unresolved_alias_refs: u64,
+    /// The daemon's sentence for `declared_unresolved_alias_refs` (`declared set may be incomplete:
+    /// N alias reference(s) could not be resolved (<first>) — investigate`). Empty with a nonzero
+    /// count → the count-only form renders instead (never dropped).
+    #[serde(default)]
+    pub declared_unresolved_alias_note: String,
     #[serde(default)]
     pub results: Vec<DepModule>,
 }
@@ -461,6 +473,22 @@ impl DepsListResponse {
                 ));
             } else {
                 out.push_str(&self.declared_undetermined_note);
+                out.push('\n');
+            }
+        }
+
+        // DEPS-GRADLE-CATALOG-1B (D-DGC1B-ALIAS-MARKING-1): alias references the index could not
+        // bind to a group make the declared set possibly incomplete — one line, right after the
+        // undetermined-blocks line, naming the first site and the test that failed for it. It adds
+        // no row suffix (only the undetermined-blocks marking does, as before).
+        if self.declared_unresolved_alias_refs > 0 {
+            if self.declared_unresolved_alias_note.is_empty() {
+                out.push_str(&format!(
+                    "declared set may be incomplete: {} alias reference(s) could not be resolved — investigate\n",
+                    self.declared_unresolved_alias_refs
+                ));
+            } else {
+                out.push_str(&self.declared_unresolved_alias_note);
                 out.push('\n');
             }
         }
@@ -2016,5 +2044,338 @@ mod tests {
                 .any(|h| h.ends_with("[svc/build.gradle]")),
             "no header reads [svc/build.gradle] as parsed:\n{human}"
         );
+    }
+
+    // ── DEPS-GRADLE-CATALOG-1B (D-DGC1B-ALIAS-MARKING-1; RG-REQ-002-L11) — unbound alias references ──
+
+    const ALIAS_NOTE: &str = "declared set may be incomplete: 1 alias reference(s) could not be resolved (build.gradle:5 libs.nope: no catalog entry) — investigate";
+
+    /// The alias line renders once, right after the undetermined-blocks line; it does not add the
+    /// row suffix (only the undetermined-blocks marking drives ` (declared set incomplete)`); without
+    /// the undetermined line it still renders after the coverage line, before the first row.
+    #[test]
+    fn declared_unresolved_alias_refs_renders_one_line_after_the_undetermined_blocks_line() {
+        let out = resp(marking_payload(serde_json::json!({
+            "declared_undetermined_blocks": 5,
+            "declared_undetermined_note": MARK_NOTE,
+            "declared_unresolved_alias_refs": 1,
+            "declared_unresolved_alias_note": ALIAS_NOTE
+        })))
+        .render_human();
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(
+            lines.iter().filter(|l| **l == ALIAS_NOTE).count(),
+            1,
+            "the alias line renders exactly once: {out}"
+        );
+        let mark = lines.iter().position(|l| *l == MARK_NOTE).unwrap();
+        let alias = lines.iter().position(|l| *l == ALIAS_NOTE).unwrap();
+        assert_eq!(
+            alias,
+            mark + 1,
+            "right after the undetermined-blocks line: {out}"
+        );
+
+        let alone = resp(marking_payload(serde_json::json!({
+            "declared_unresolved_alias_refs": 1,
+            "declared_unresolved_alias_note": ALIAS_NOTE
+        })))
+        .render_human();
+        let lines: Vec<&str> = alone.lines().collect();
+        let alias = lines
+            .iter()
+            .position(|l| *l == ALIAS_NOTE)
+            .expect("line present");
+        let coverage = lines
+            .iter()
+            .position(|l| l.contains("java manifests attributed to a module"))
+            .expect("coverage line present");
+        let first_row = lines
+            .iter()
+            .position(|l| l.starts_with("  used "))
+            .expect("row present");
+        assert!(coverage < alias && alias < first_row, "{alone}");
+        assert!(
+            alone.contains("· undeclared 2 · builtins 3")
+                && !alone.contains("(declared set incomplete)"),
+            "the alias marking alone adds no row suffix: {alone}"
+        );
+    }
+
+    /// An envelope without the two alias keys (an older daemon, untracked provenance) renders
+    /// exactly as today; a zero count renders byte-identically to an absent one.
+    #[test]
+    fn envelope_without_alias_keys_renders_as_today() {
+        let r = resp(marking_payload(serde_json::json!({})));
+        assert_eq!(r.declared_unresolved_alias_refs, 0);
+        assert_eq!(r.declared_unresolved_alias_note, "");
+        let today = r.render_human();
+        assert!(!today.contains("alias reference"), "{today}");
+        let zero = resp(marking_payload(serde_json::json!({
+            "declared_unresolved_alias_refs": 0,
+            "declared_unresolved_alias_note": ""
+        })))
+        .render_human();
+        assert_eq!(zero, today);
+    }
+
+    /// The fixture of DGC-B02 / DGC-B04 (vii): `settings.gradle`, a TOML catalog with `slf`, and a
+    /// `build.gradle` whose lines 1-6 hold a literal, `libs.slf` and `libs.nope`.
+    fn alias_fixture(root: &std::path::Path, toml: &str) {
+        put_file(root, "settings.gradle", "rootProject.name = \"fx\"\n");
+        put_file(root, "gradle/libs.versions.toml", toml);
+        put_file(
+            root,
+            "build.gradle",
+            "plugins { id \"java\" }\ndependencies {\n  implementation \"org.apache.commons:commons-lang3:3.14.0\"\n  implementation libs.slf\n  implementation libs.nope\n}\n",
+        );
+        put_file(
+            root,
+            "src/main/java/app/A.java",
+            "package app;\nimport org.apache.commons.lang3.StringUtils;\nimport org.slf4j.LoggerFactory;\npublic class A {\n  boolean b() { LoggerFactory.getLogger(A.class); return StringUtils.isBlank(\"\"); }\n}\n",
+        );
+    }
+
+    /// Is `group` on a row under a declared category (the entry's package equal to the group or
+    /// extending it on a `.` boundary)?
+    fn declared_on_a_row(json: &serde_json::Value, group: &str) -> bool {
+        const DECLARED_CATS: [&str; 3] = [
+            "declared_and_used",
+            "declared_but_unobserved",
+            "type_only_import",
+        ];
+        json["results"].as_array().into_iter().flatten().any(|r| {
+            r["entries"].as_array().into_iter().flatten().any(|e| {
+                let p = e["package"].as_str().unwrap_or("");
+                DECLARED_CATS.contains(&e["category"].as_str().unwrap_or(""))
+                    && (p == group || p.starts_with(&format!("{group}.")))
+            })
+        })
+    }
+
+    /// End to end through the real daemon: an alias with no catalog entry is counted and named —
+    /// the JSON keys and the same human line — while the resolved alias and the literal beside it
+    /// are declared.
+    #[test]
+    fn deps_list_alias_with_no_catalog_entry_is_counted_and_named_in_json_and_human() {
+        // Two catalog sources answer `slf`: the TOML catalog, and (review-1 F2 and review-2 F2 of
+        // admission 3) a readable Groovy alias map whose script also holds `println "libs"`, a
+        // proven entry read and the map rendered as text (`println libs`, `"${libs}"`) — none
+        // writes the map, so `slf` binds and only `libs.nope` is counted, with the reason
+        // actually detected (`no catalog entry`).
+        for groovy in [false, true] {
+            let fixture = tempfile::tempdir().unwrap();
+            let root = fixture.path();
+            if groovy {
+                alias_fixture(root, "");
+                std::fs::remove_file(root.join("gradle/libs.versions.toml")).unwrap();
+                let script = std::fs::read_to_string(root.join("build.gradle")).unwrap();
+                put_file(
+                    root,
+                    "build.gradle",
+                    &format!("{script}apply from: \"gradle/deps.gradle\"\n"),
+                );
+                put_file(
+                root,
+                "gradle/deps.gradle",
+                "ext { libs = [:] }\nlibs += [ slf: \"org.slf4j:slf4j-api:2.0.9\" ]\nprintln \"libs\"\nprintln libs.slf\nprintln libs\nprintln \"${libs}\"\n",
+            );
+            } else {
+                alias_fixture(root, "[libraries]\nslf = \"org.slf4j:slf4j-api:2.0.9\"\n");
+            }
+            let (json, human) = deps_list_java_through_the_daemon(root);
+            assert_eq!(
+                json["declared_unresolved_alias_refs"],
+                serde_json::json!(1),
+                "{json:#}"
+            );
+            assert_eq!(
+                json["declared_unresolved_alias_note"],
+                serde_json::json!(ALIAS_NOTE)
+            );
+            assert!(human.lines().any(|l| l == ALIAS_NOTE), "{human}");
+            assert!(declared_on_a_row(&json, "org.slf4j"), "{json:#}\n{human}");
+            assert!(
+                declared_on_a_row(&json, "org.apache.commons"),
+                "{json:#}\n{human}"
+            );
+        }
+    }
+
+    /// End to end through the real daemon: the aliases of a build whose catalog cannot be read are
+    /// all counted with the `could not be read` reason; no alias binds, and the literal declaration
+    /// stays declared.
+    #[test]
+    fn deps_list_alias_of_a_build_whose_catalog_cannot_be_read_is_counted_and_named_in_json_and_human(
+    ) {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path();
+        alias_fixture(root, "[libraries]\nslf = { module = \n");
+        let (json, human) = deps_list_java_through_the_daemon(root);
+        assert_eq!(
+            json["declared_unresolved_alias_refs"],
+            serde_json::json!(2),
+            "{json:#}"
+        );
+        let note = json["declared_unresolved_alias_note"]
+            .as_str()
+            .unwrap_or("");
+        assert!(
+            note.starts_with(
+                "declared set may be incomplete: 2 alias reference(s) could not be resolved (build.gradle:4 libs.slf: catalog gradle/libs.versions.toml could not be read ("
+            ) && note.ends_with(") — investigate"),
+            "{note}"
+        );
+        assert!(human.lines().any(|l| l == note), "{human}");
+        assert!(!declared_on_a_row(&json, "org.slf4j"), "{json:#}\n{human}");
+        assert!(
+            declared_on_a_row(&json, "org.apache.commons"),
+            "{json:#}\n{human}"
+        );
+    }
+
+    /// Is `group` under a declared category on the row whose `module` is `module`?
+    fn declared_on_module_row(json: &serde_json::Value, module: &str, group: &str) -> bool {
+        let row: Vec<&serde_json::Value> = json["results"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|r| r["module"] == serde_json::json!(module))
+            .collect();
+        assert_eq!(row.len(), 1, "one row for module {module}: {json:#}");
+        declared_on_a_row(&serde_json::json!({ "results": row }), group)
+    }
+
+    /// End to end through the real daemon (D-DGC1B-ALIAS-APPLICABILITY-1, the record's
+    /// counterexample): a rename in project `a`'s script applies to `a` only — `a`'s reference binds,
+    /// `b`'s is counted naming the rename, in the JSON keys and the same human line; `b`'s literal
+    /// stays declared.
+    #[test]
+    fn deps_list_alias_whose_rename_does_not_apply_to_its_project_is_counted_and_named_in_json_and_human(
+    ) {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path();
+        put_file(
+            root,
+            "settings.gradle",
+            "rootProject.name = \"fx\"\ninclude 'a', 'b'\n",
+        );
+        put_file(
+            root,
+            "gradle/libs.versions.toml",
+            "[libraries]\nfoo = \"org.slf4j:slf4j-api:2.0.9\"\n",
+        );
+        put_file(
+            root,
+            "a/build.gradle",
+            "ext {\n  libraries = libs\n}\ndependencies {\n  implementation libraries.foo\n}\n",
+        );
+        put_file(
+            root,
+            "b/build.gradle",
+            "dependencies {\n  implementation \"org.apache.commons:commons-lang3:3.14.0\"\n  implementation libraries.foo\n}\n",
+        );
+        put_file(
+            root,
+            "a/src/main/java/a/A.java",
+            "package a;\nimport org.slf4j.LoggerFactory;\npublic class A {\n  void f() { LoggerFactory.getLogger(A.class); }\n}\n",
+        );
+        put_file(
+            root,
+            "b/src/main/java/b/B.java",
+            "package b;\nimport org.apache.commons.lang3.StringUtils;\nimport org.slf4j.LoggerFactory;\npublic class B {\n  boolean f() { LoggerFactory.getLogger(B.class); return StringUtils.isBlank(\"\"); }\n}\n",
+        );
+        let (json, human) = deps_list_java_through_the_daemon(root);
+        let line = "declared set may be incomplete: 1 alias reference(s) could not be resolved (b/build.gradle:3 libraries.foo: rename at a/build.gradle:2 not shown to apply to this project) — investigate";
+        assert_eq!(
+            json["declared_unresolved_alias_refs"],
+            serde_json::json!(1),
+            "{json:#}"
+        );
+        assert_eq!(
+            json["declared_unresolved_alias_note"],
+            serde_json::json!(line)
+        );
+        assert!(human.lines().any(|l| l == line), "{human}");
+        assert!(
+            declared_on_module_row(&json, "a", "org.slf4j"),
+            "{json:#}\n{human}"
+        );
+        assert!(
+            declared_on_module_row(&json, "b", "org.apache.commons"),
+            "{json:#}\n{human}"
+        );
+        assert!(
+            !declared_on_module_row(&json, "b", "org.slf4j"),
+            "{json:#}\n{human}"
+        );
+    }
+
+    /// End to end through the real daemon (D-DGC1B-MAP-GRAMMAR-1): a Groovy alias map one of whose
+    /// assignments sits under a condition is unreadable as a whole — its unconditional `slf` entry
+    /// binds nothing — and the reference is counted naming that statement, in the JSON keys and the
+    /// same human line; the literal beside it stays declared.
+    #[test]
+    fn deps_list_alias_whose_map_is_not_a_top_level_literal_assignment_is_counted_and_named_in_json_and_human(
+    ) {
+        // The record's fixture (a conditional `+=`), and review-0 F1's two write forms of admission
+        // 3 (safe navigation, a quoted key) after an entry that would otherwise bind `slf`.
+        for (deps, line_no) in [
+            (
+                "ext { libs = [:] }\nlibs += [ slf: \"org.slf4j:slf4j-api:2.0.9\" ]\nif (project.hasProperty(\"extra\")) {\n  libs += [ extra: \"com.acme:extra:1.0\" ]\n}\n",
+                4,
+            ),
+            (
+                "ext { libs = [:] }\nlibs += [ slf: \"org.slf4j:slf4j-api:2.0.9\" ]\nlibs?.put(\"slf\", \"com.other:x:1\")\n",
+                3,
+            ),
+            (
+                "ext { libs = [:] }\nlibs += [ slf: \"org.slf4j:slf4j-api:2.0.9\" ]\nlibs.\"slf\" = \"com.other:x:1\"\n",
+                3,
+            ),
+            // Review-2 F3 of admission 3: a quoted property write replaces the map; neither the
+            // old group nor the new one binds.
+            (
+                "ext { libs = [:] }\nlibs += [ slf: \"org.slf4j:slf4j-api:2.0.9\" ]\next.\"libs\" = [ slf: \"com.other:x:1\" ]\n",
+                3,
+            ),
+            (
+                "ext { libs = [:] }\nlibs += [ slf: \"org.slf4j:slf4j-api:2.0.9\" ]\next.'libs' = [ slf: \"com.other:x:1\" ]\n",
+                3,
+            ),
+        ] {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path();
+        put_file(root, "settings.gradle", "rootProject.name = \"fx\"\n");
+        put_file(
+            root,
+            "build.gradle",
+            "plugins { id \"java\" }\napply from: \"gradle/deps.gradle\"\ndependencies {\n  implementation \"org.apache.commons:commons-lang3:3.14.0\"\n  implementation libs.slf\n}\n",
+        );
+        put_file(root, "gradle/deps.gradle", deps);
+        put_file(
+            root,
+            "src/main/java/app/A.java",
+            "package app;\nimport org.apache.commons.lang3.StringUtils;\nimport org.slf4j.LoggerFactory;\npublic class A {\n  boolean b() { LoggerFactory.getLogger(A.class); return StringUtils.isBlank(\"\"); }\n}\n",
+        );
+        let (json, human) = deps_list_java_through_the_daemon(root);
+        let line = format!("declared set may be incomplete: 1 alias reference(s) could not be resolved (build.gradle:5 libs.slf: alias map in gradle/deps.gradle:{line_no} is not a top-level literal assignment) — investigate");
+        assert_eq!(
+            json["declared_unresolved_alias_refs"],
+            serde_json::json!(1),
+            "{json:#}"
+        );
+        assert_eq!(
+            json["declared_unresolved_alias_note"],
+            serde_json::json!(line)
+        );
+        assert!(human.lines().any(|l| l == line), "{human}");
+        assert!(!declared_on_a_row(&json, "org.slf4j"), "{json:#}\n{human}");
+        assert!(
+            declared_on_a_row(&json, "org.apache.commons"),
+            "{json:#}\n{human}"
+        );
+        assert!(!declared_on_a_row(&json, "com.other"), "{json:#}\n{human}");
+        }
     }
 }

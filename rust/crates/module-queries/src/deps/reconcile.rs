@@ -67,6 +67,18 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
         .iter()
         .map(|s| s.as_str())
         .collect();
+    // DEPS-GRADLE-CATALOG-1B (RG-REQ-006-L13): does a declared name match observed `package`? For
+    // the `java` ecosystem a declared group matches a package on a `.`-segment boundary (equal, or
+    // the package starts with the group followed by `.` — the predicate the index-time classifier
+    // already applies); every other ecosystem matches exactly.
+    let segment_rule = input.ecosystem == "java";
+    let declared_matches = |declared: &str, package: &str| -> bool {
+        declared == package
+            || (segment_rule
+                && package.len() > declared.len()
+                && package.starts_with(declared)
+                && package.as_bytes()[declared.len()] == b'.')
+    };
 
     // DEPS-SELF-1: the repo's own manifest names, normalized once per the ecosystem's package-name
     // semantics, for the self-reference check below. Normalization is a real domain rule (Python
@@ -119,7 +131,13 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
 
     // Categorize each observed package (specifier-shaped, non-builtin).
     for (package, observed) in &observed_packages {
-        if declared_set.contains(package.as_str()) {
+        let declared = declared_set.contains(package.as_str())
+            || (segment_rule
+                && input
+                    .declared_dependencies
+                    .iter()
+                    .any(|d| declared_matches(d, package)));
+        if declared {
             entries.push(DependencyEntry {
                 package: package.clone(),
                 category: DependencyCategory::DeclaredAndUsed,
@@ -173,7 +191,11 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
         let observed_set: HashSet<&str> = observed_packages.keys().map(|s| s.as_str()).collect();
 
         for declared in &input.declared_dependencies {
-            if !observed_set.contains(declared.as_str()) {
+            // A declared name is unobserved only when it matches no observed package (Java: on a
+            // `.`-segment boundary; every other ecosystem: exactly).
+            let observed = observed_set.contains(declared.as_str())
+                || (segment_rule && observed_set.iter().any(|p| declared_matches(declared, p)));
+            if !observed {
                 // §2.2 item 3: a declared package with no value use, but imported type-only, is
                 // `TypeOnlyImport` — not `DeclaredButUnobserved`. `type_only_package_heads` holds
                 // already-normalized heads, so the declared name is compared directly.
@@ -773,5 +795,143 @@ mod tests {
         // Only react should be counted
         assert_eq!(summary.entries.len(), 1);
         assert_eq!(summary.entries[0].package, "react");
+    }
+
+    // ── DEPS-GRADLE-CATALOG-1B: Java declared group ↔ observed package on a `.`-segment boundary ──
+
+    fn reconcile_eco(
+        ecosystem: &str,
+        declared: &[&str],
+        observed: &[&str],
+    ) -> ModuleDependencySummary {
+        reconcile_module_dependencies(ReconcileInput {
+            module: "m".to_string(),
+            manifest_context: ManifestContext::Parsed {
+                path: "build.gradle".to_string(),
+            },
+            declared_dependencies: declared.iter().map(|s| s.to_string()).collect(),
+            manifest_scope_available: true,
+            observed_external_imports: obs(observed),
+            runtime_builtins: HashSet::new(),
+            ecosystem: ecosystem.to_string(),
+            pre_rejected_non_specifier: 0,
+            own_manifest_names: HashSet::new(),
+            type_only_package_heads: HashSet::new(),
+        })
+    }
+
+    fn category_of(summary: &ModuleDependencySummary, package: &str) -> Option<DependencyCategory> {
+        summary
+            .entries
+            .iter()
+            .find(|e| e.package == package)
+            .map(|e| e.category)
+    }
+
+    /// Both query-time sites apply the segment rule for Java: the observed package
+    /// `com.github.luben.zstd` that the declared group `com.github.luben` matches on a `.` boundary
+    /// is `used`, and the group is NOT `no static import found` (it matches an observed package).
+    #[test]
+    fn java_declared_group_matches_an_observed_package_on_a_segment_boundary() {
+        let s = reconcile_eco(
+            "java",
+            &["com.github.luben", "org.slf4j"],
+            &[
+                "com.github.luben.zstd.ZstdInputStreamNoFinalizer",
+                "org.slf4j.helpers.Util",
+            ],
+        );
+        assert_eq!(
+            category_of(&s, "com.github.luben.zstd"),
+            Some(DependencyCategory::DeclaredAndUsed)
+        );
+        assert_eq!(
+            category_of(&s, "org.slf4j.helpers"),
+            Some(DependencyCategory::DeclaredAndUsed)
+        );
+        assert_eq!(
+            category_of(&s, "com.github.luben"),
+            None,
+            "the group matches an observed package, so it is not `no static import found`"
+        );
+        assert_eq!(
+            s.by_category(DependencyCategory::DeclaredButUnobserved)
+                .len(),
+            0
+        );
+        assert_eq!(
+            s.by_category(DependencyCategory::ObservedButUndeclared)
+                .len(),
+            0
+        );
+    }
+
+    /// Never mid-segment: `com.foo` does not match `com.foobar.Type`'s package `com.foobar` — the
+    /// package stays `undeclared` and the group stays `no static import found`.
+    #[test]
+    fn java_declared_group_does_not_match_mid_segment() {
+        let s = reconcile_eco("java", &["com.foo"], &["com.foobar.Type"]);
+        assert_eq!(
+            category_of(&s, "com.foobar"),
+            Some(DependencyCategory::ObservedButUndeclared)
+        );
+        assert_eq!(
+            category_of(&s, "com.foo"),
+            Some(DependencyCategory::DeclaredButUnobserved)
+        );
+    }
+
+    /// The exact case still matches: declared `org.mockito`, observed package `org.mockito`.
+    #[test]
+    fn java_exact_package_still_matches() {
+        let s = reconcile_eco("java", &["org.mockito"], &["org.mockito.Mockito"]);
+        assert_eq!(
+            category_of(&s, "org.mockito"),
+            Some(DependencyCategory::DeclaredAndUsed)
+        );
+        assert_eq!(s.entries.len(), 1, "{:?}", s.entries);
+    }
+
+    /// The segment rule is Java's only: npm (`lodash` never matches the distinct package
+    /// `lodash.get`, at either site), python and cargo keep exact matching.
+    #[test]
+    fn npm_python_and_cargo_matching_stay_exact() {
+        let npm = reconcile_eco("npm", &["lodash"], &["lodash.get"]);
+        assert_eq!(
+            category_of(&npm, "lodash.get"),
+            Some(DependencyCategory::ObservedButUndeclared)
+        );
+        assert_eq!(
+            category_of(&npm, "lodash"),
+            Some(DependencyCategory::DeclaredButUnobserved)
+        );
+
+        let py = reconcile_eco(
+            "python",
+            &["google.cloud", "zope"],
+            &["google.cloud.storage", "zope.interface"],
+        );
+        assert_eq!(
+            category_of(&py, "google"),
+            Some(DependencyCategory::ObservedButUndeclared)
+        );
+        assert_eq!(
+            category_of(&py, "google.cloud"),
+            Some(DependencyCategory::DeclaredButUnobserved)
+        );
+        assert_eq!(
+            category_of(&py, "zope"),
+            Some(DependencyCategory::DeclaredAndUsed)
+        );
+
+        let cargo = reconcile_eco("cargo", &["serde"], &["serde_json::Value"]);
+        assert_eq!(
+            category_of(&cargo, "serde_json"),
+            Some(DependencyCategory::ObservedButUndeclared)
+        );
+        assert_eq!(
+            category_of(&cargo, "serde"),
+            Some(DependencyCategory::DeclaredButUnobserved)
+        );
     }
 }

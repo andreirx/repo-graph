@@ -225,6 +225,7 @@ mod tests {
             error: None,
             error_kind: None,
             undetermined_blocks: None,
+            unresolved_alias_refs: None,
         }
     }
 
@@ -236,6 +237,7 @@ mod tests {
             error: Some(reason.to_string()),
             error_kind: None,
             undetermined_blocks: None,
+            unresolved_alias_refs: None,
         }
     }
 

@@ -195,6 +195,7 @@ mod tests {
             error: None,
             error_kind: None,
             undetermined_blocks: None,
+            unresolved_alias_refs: None,
         }
     }
 

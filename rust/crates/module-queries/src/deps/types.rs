@@ -214,6 +214,14 @@ pub struct ManifestProvenance {
     /// the caller's `ProvenanceRead::Unavailable` path renders unknown-with-reason, never a zero.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub undetermined_blocks: Option<UndeterminedBlocks>,
+    /// DEPS-GRADLE-CATALOG-1B (D-DGC1B-ALIAS-MARKING-1; RG-REQ-002-L11): the version-catalog alias
+    /// references of this record's Gradle build that the index could not bind to a group — counted,
+    /// never guessed. Carried by the same one record per build as [`Self::undetermined_blocks`], so
+    /// a sum over records counts each reference once. `None` = no such reference (every non-Gradle
+    /// record, a record written before this field). A malformed value fails the whole
+    /// `deps_manifests` decode (`ProvenanceRead::Unavailable`), never a zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unresolved_alias_refs: Option<UnresolvedAliasRefs>,
 }
 
 impl ManifestProvenance {
@@ -264,6 +272,8 @@ struct ManifestProvenanceWire {
     error_kind: Option<ManifestErrorKind>,
     #[serde(default)]
     undetermined_blocks: Option<UndeterminedBlocks>,
+    #[serde(default)]
+    unresolved_alias_refs: Option<UnresolvedAliasRefs>,
 }
 
 impl TryFrom<ManifestProvenanceWire> for ManifestProvenance {
@@ -287,6 +297,7 @@ impl TryFrom<ManifestProvenanceWire> for ManifestProvenance {
                 .error_kind
                 .filter(|k| *k == ManifestErrorKind::Attribution),
             undetermined_blocks: w.undetermined_blocks,
+            unresolved_alias_refs: w.unresolved_alias_refs,
         })
     }
 }
@@ -300,6 +311,18 @@ pub struct UndeterminedBlocks {
     /// Number of skipped `dependencies` blocks in the build.
     pub count: u32,
     /// `<repo-relative path>:<line>` of the first skipped block.
+    pub first: String,
+}
+
+/// The count and first site of the version-catalog alias references one Gradle build's index
+/// could not bind to a group (DEPS-GRADLE-CATALOG-1B; the wire mirror of `repo-index`'s record
+/// field). `first` is `<repo-relative path>:<line> <accessor>: <predicate>` — the counted site with
+/// the smallest `(path, line)` and the binding test that failed for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnresolvedAliasRefs {
+    /// Number of alias references of the build that bound to no group.
+    pub count: u32,
+    /// The first counted site and the predicate that failed for it.
     pub first: String,
 }
 
@@ -587,6 +610,65 @@ mod tests {
             assert!(
                 decode(java_record(Some(malformed))).is_err(),
                 "a malformed marking must fail the decode, never default: {label}"
+            );
+        }
+    }
+
+    /// DEPS-GRADLE-CATALOG-1B (D-DGC1B-ALIAS-MARKING-1): the wire mirror of the index-time count of
+    /// alias references that bound to no group — the 1A `undetermined_blocks` triple, second
+    /// instance. ABSENT → `None`; PRESENT-VALID → `Some` with its `first`; PRESENT-MALFORMED (a
+    /// non-integer or negative `count`, a missing `first`) → the whole `deps_manifests` vector fails
+    /// to decode (the caller's `ProvenanceRead::Unavailable`, unknown-with-reason, never a zero).
+    #[test]
+    fn manifest_provenance_unresolved_alias_refs_absent_present_and_malformed() {
+        let record = |extra: Option<J>| {
+            let mut fields = vec![
+                ("path", J::S("build.gradle")),
+                ("dir", J::S("")),
+                ("ecosystem", J::S("java")),
+            ];
+            if let Some(e) = extra {
+                fields.push(("unresolved_alias_refs", e));
+            }
+            J::A(vec![J::M(fields)])
+        };
+        let absent = decode(record(None)).unwrap();
+        assert_eq!(absent[0].unresolved_alias_refs, None);
+        assert_eq!(absent[0].undetermined_blocks, None);
+
+        let present = decode(record(Some(J::M(vec![
+            ("count", J::I(2)),
+            ("first", J::S("build.gradle:5 libs.nope: no catalog entry")),
+        ]))))
+        .unwrap();
+        assert_eq!(
+            present[0].unresolved_alias_refs,
+            Some(UnresolvedAliasRefs {
+                count: 2,
+                first: "build.gradle:5 libs.nope: no catalog entry".to_string()
+            })
+        );
+
+        for (label, malformed) in [
+            (
+                "non-integer count",
+                J::M(vec![
+                    ("count", J::S("two")),
+                    ("first", J::S("b:1 libs.x: no catalog entry")),
+                ]),
+            ),
+            ("missing first", J::M(vec![("count", J::I(2))])),
+            (
+                "negative count",
+                J::M(vec![
+                    ("count", J::I(-1)),
+                    ("first", J::S("b:1 libs.x: no catalog entry")),
+                ]),
+            ),
+        ] {
+            assert!(
+                decode(record(Some(malformed))).is_err(),
+                "a malformed alias marking must fail the decode, never default: {label}"
             );
         }
     }

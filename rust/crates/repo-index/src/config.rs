@@ -496,29 +496,43 @@ pub struct GradleScriptScopes {
     pub subprojects: Vec<String>,
     /// Groups of the `dependencies {` blocks that are direct children of a top-level
     /// `project('<path>') {` block, keyed by the Gradle path AS WRITTEN (absolute `:a:b` or
-    /// relative `b`). Only paths whose blocks carry ≥1 coordinate are present.
+    /// relative `b`). Only paths whose blocks carry ≥1 coordinate or alias reference are present.
     pub projects: BTreeMap<String, Vec<String>>,
     /// 1-based lines of every COUNTED `dependencies` block, in line order: a `dependencies` head
     /// that is not DIRECT (bare under any other enclosing block, or receiver-qualified) and whose
     /// chain of enclosing heads holds no tooling head and no task/extension head. A count of skipped
     /// BLOCKS, not of declarations.
     pub undetermined_block_lines: Vec<u32>,
+    /// DEPS-GRADLE-CATALOG-1B: the version-catalog alias references (`libs.<alias>` /
+    /// `libraries.<alias>`) in a configuration argument position of a DIRECT block, in line order,
+    /// each with its block's scope (`gradle_catalog::AliasMiner`). Bound to groups at the build.
+    pub(crate) alias_refs: Vec<crate::gradle_catalog::GradleAliasRef>,
+    /// DEPS-GRADLE-CATALOG-1B: every `apply from:` statement of the script with its enclosing heads
+    /// (a root script's are the Groovy alias-map sources, `gradle_catalog::read_build_catalog`).
+    pub(crate) applied_scripts: Vec<crate::gradle_catalog::GradleApplyFrom>,
+    /// DEPS-GRADLE-CATALOG-1B: every `libraries = libs` statement of the script with its line and
+    /// enclosing heads (D-DGC1B-ALIAS-APPLICABILITY-1: it applies only where its scope reaches).
+    pub(crate) catalog_renames: Vec<crate::gradle_catalog::GradleRename>,
 }
 
 impl GradleScriptScopes {
-    /// True iff the script declares no group in any scope and has no counted block.
+    /// True iff the script declares no group in any scope, has no counted block and holds none of
+    /// the alias facts (an alias reference, an `apply from:`, `libraries = libs`).
     fn is_empty(&self) -> bool {
         self.own.is_empty()
             && self.allprojects.is_empty()
             && self.subprojects.is_empty()
             && self.projects.is_empty()
             && self.undetermined_block_lines.is_empty()
+            && self.alias_refs.is_empty()
+            && self.applied_scripts.is_empty()
+            && self.catalog_renames.is_empty()
     }
 }
 
 /// The scope a DIRECT `dependencies` block declares for.
-#[derive(Debug, Clone)]
-enum DirectScope {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DirectScope {
     Own,
     AllProjects,
     SubProjects,
@@ -576,7 +590,7 @@ fn is_task_head(head: &str) -> bool {
 
 /// The Gradle path of a `project('<path>')` / `project("<path>")` scope head — `project`, `(`, one
 /// quoted path, `)` and nothing else — kept as written. `from(project(':tools').jar)` is not one.
-fn project_block_path(head: &str) -> Option<String> {
+pub(crate) fn project_block_path(head: &str) -> Option<String> {
     let rest = head.strip_prefix("project")?.trim_start();
     let rest = rest.strip_prefix('(')?.trim_start();
     let quote = rest.chars().next().filter(|c| *c == '\'' || *c == '"')?;
@@ -668,13 +682,25 @@ fn direct_scope(head: &str, enclosing: &[GradleFrame]) -> Option<DirectScope> {
 /// Returns `None` when:
 ///   - a `dependencies` block (of any kind) is UNCLOSED at end of input — the block extents are
 ///     untrustworthy, so nothing is trusted (honest degradation);
-///   - the script has neither a direct block carrying a coordinate nor a counted block (a
-///     buildscript-only script, an empty or catalog-only script).
+///   - the script has neither a direct block carrying a coordinate or an alias reference, nor a
+///     counted block, nor an `apply from:` or `libraries = libs` statement (a buildscript-only
+///     script without `apply from:`, an empty script).
+///
+/// ## Version-catalog aliases (DEPS-GRADLE-CATALOG-1B)
+///
+/// In the same character pass, the own-depth text of each direct block is fed to a
+/// [`crate::gradle_catalog::AliasMiner`], which keeps the accessor tokens `libs.<alias>` /
+/// `libraries.<alias>` standing in a configuration argument position (outside strings, at the
+/// block's own depth, in the argument list of the statement's leading word — unparenthesised, in
+/// its own parentheses or in `platform(…)` / `enforcedPlatform(…)` there, continuation lines
+/// included; never in an assigning statement) as [`GradleScriptScopes::alias_refs`] with their
+/// scope. The script's `apply from:` and `libraries = libs` statements are recorded too, each with
+/// its line and enclosing heads (which projects it applies to is the build's decision). Binding a reference to a group is the build's
+/// decision (`gradle_catalog::bind_build_aliases`), not this reader's: no group is read here.
 ///
 /// ## Known limitations (honest degradation, documented)
-///   - Version catalogs (`implementation libs.guava` / `libraries.guava`),
-///     `project(':core')` deps, and the `kotlin("stdlib")` helper carry no
-///     literal coordinate on the line → not resolved (no fabrication; DEPS-GRADLE-CATALOG-1B).
+///   - `project(':core')` deps and the `kotlin("stdlib")` helper carry no literal coordinate on the
+///     line → not resolved (no fabrication).
 ///   - A head is read from its own line only: an Allman-style `{` on the next line has an empty
 ///     head, so a `dependencies` word on the line above it is not a block head (as before).
 ///   - Brace tracking is not string-aware: a `{`/`}` inside a coordinate's `${…}` version
@@ -684,6 +710,29 @@ pub fn extract_gradle_dependencies(content: &str) -> Option<GradleScriptScopes> 
     let cleaned = strip_gradle_comments(content);
     let mut sets = ScopeSets::default();
     let mut undetermined_block_lines: Vec<u32> = Vec::new();
+    // DEPS-GRADLE-CATALOG-1B: the alias miner of the open direct block, the alias references of the
+    // closed ones, and the script statements the alias binding needs.
+    let mut miner: Option<crate::gradle_catalog::AliasMiner> = None;
+    let mut alias_refs: Vec<crate::gradle_catalog::GradleAliasRef> = Vec::new();
+    let mut applied_scripts: Vec<crate::gradle_catalog::GradleApplyFrom> = Vec::new();
+    let mut catalog_renames: Vec<crate::gradle_catalog::GradleRename> = Vec::new();
+    let mut note_statement = |segment: &str, line: u32, stack: &[GradleFrame]| {
+        match crate::gradle_catalog::script_statement(segment) {
+            Some(crate::gradle_catalog::ScriptStatement::ApplyFrom(argument)) => applied_scripts
+                .push(crate::gradle_catalog::GradleApplyFrom {
+                    argument,
+                    line,
+                    enclosing: stack.iter().map(|f| f.head.clone()).collect(),
+                }),
+            Some(crate::gradle_catalog::ScriptStatement::LibrariesIsLibs) => {
+                catalog_renames.push(crate::gradle_catalog::GradleRename {
+                    line,
+                    enclosing: stack.iter().map(|f| f.head.clone()).collect(),
+                })
+            }
+            None => {}
+        }
+    };
 
     let mut stack: Vec<GradleFrame> = Vec::new();
     // The open DIRECT block: its stack index and the scope it declares for. At most one is open
@@ -706,6 +755,12 @@ pub fn extract_gradle_dependencies(content: &str) -> Option<GradleScriptScopes> 
                 if let Some((_, scope)) = &direct {
                     sets.mine(&mut in_block_line, scope);
                 }
+                if let (Some(m), Some((depth, _))) = (miner.as_mut(), &direct) {
+                    if stack.len() == depth + 1 {
+                        m.feed('\n', line);
+                    }
+                }
+                note_statement(&head, line, &stack);
                 cur_word.clear();
                 last_word.clear();
                 head.clear();
@@ -718,9 +773,17 @@ pub fn extract_gradle_dependencies(content: &str) -> Option<GradleScriptScopes> 
                 let is_dependencies_head = last_word == "dependencies";
                 let frame_head = head.trim().to_string();
                 head.clear();
+                if let (Some(m), Some((depth, _))) = (miner.as_mut(), &direct) {
+                    if stack.len() == depth + 1 {
+                        m.closure();
+                    }
+                }
                 if is_dependencies_head && direct.is_none() {
                     match direct_scope(&frame_head, &stack) {
-                        Some(scope) => direct = Some((stack.len(), scope)),
+                        Some(scope) => {
+                            miner = Some(crate::gradle_catalog::AliasMiner::new(scope.clone()));
+                            direct = Some((stack.len(), scope));
+                        }
                         None => {
                             let excluded = stack
                                 .iter()
@@ -741,11 +804,15 @@ pub fn extract_gradle_dependencies(content: &str) -> Option<GradleScriptScopes> 
                 if !cur_word.is_empty() {
                     last_word = std::mem::take(&mut cur_word);
                 }
+                note_statement(&head, line, &stack);
                 if stack.pop().is_some() {
                     if let Some((depth, scope)) = &direct {
                         if *depth == stack.len() {
                             sets.mine(&mut in_block_line, scope);
                             direct = None;
+                            if let Some(m) = miner.take() {
+                                alias_refs.extend(m.finish());
+                            }
                         }
                     }
                 }
@@ -761,7 +828,13 @@ pub fn extract_gradle_dependencies(content: &str) -> Option<GradleScriptScopes> 
                 if direct.is_some() {
                     in_block_line.push(c);
                 }
+                if let (Some(m), Some((depth, _))) = (miner.as_mut(), &direct) {
+                    if stack.len() == depth + 1 {
+                        m.feed(c, line);
+                    }
+                }
                 if c == ';' {
+                    note_statement(&head, line, &stack);
                     head.clear();
                 } else {
                     head.push(c);
@@ -773,6 +846,7 @@ pub fn extract_gradle_dependencies(content: &str) -> Option<GradleScriptScopes> 
     if let Some((_, scope)) = &direct {
         sets.mine(&mut in_block_line, scope);
     }
+    note_statement(&head, line, &stack);
 
     // An unclosed `dependencies` block (still open at end of input) is malformed: its extent is
     // untrustworthy, so discard everything rather than trust coordinates from a guessed end.
@@ -786,10 +860,18 @@ pub fn extract_gradle_dependencies(content: &str) -> Option<GradleScriptScopes> 
         projects: sets
             .projects
             .into_iter()
-            .filter(|(_, groups)| !groups.is_empty())
+            .filter(|(path, groups)| {
+                !groups.is_empty()
+                    || alias_refs
+                        .iter()
+                        .any(|r| r.scope == DirectScope::Project(path.clone()))
+            })
             .map(|(path, groups)| (path, groups.into_iter().collect()))
             .collect(),
         undetermined_block_lines,
+        alias_refs,
+        applied_scripts,
+        catalog_renames,
     };
     if scopes.is_empty() {
         return None;
@@ -822,7 +904,7 @@ fn extract_gradle_coordinates(line: &str, names: &mut BTreeSet<String>) {
 /// whose group and artifact are valid coordinate segments). This rejects
 /// `project(':core')` refs (`:core` → empty group), bare `exclude` args (no
 /// colon), and URLs (`https://…` → artifact segment contains `/`).
-fn coordinate_group(coord: &str) -> Option<String> {
+pub(crate) fn coordinate_group(coord: &str) -> Option<String> {
     let mut parts = coord.split(':');
     let group = parts.next()?;
     let artifact = parts.next()?;
@@ -835,7 +917,7 @@ fn coordinate_group(coord: &str) -> Option<String> {
 /// True iff `s` is a non-empty Maven coordinate segment: ASCII alphanumerics
 /// plus `.`, `-`, `_`. Excludes whitespace, `/`, `$`, `{` — so an interpolated
 /// version (`${v}`) or a URL never passes as a group/artifact.
-fn is_coordinate_segment(s: &str) -> bool {
+pub(crate) fn is_coordinate_segment(s: &str) -> bool {
     !s.is_empty()
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
@@ -923,7 +1005,7 @@ fn is_word_byte(b: u8) -> bool {
 /// a comment). Newlines are preserved so line structure survives. Triple-quoted
 /// GStrings are not special-cased (not used for coordinates). Sibling of
 /// [`strip_json_comments`], generalized to Groovy/Kotlin single-quote strings.
-fn strip_gradle_comments(source: &str) -> String {
+pub(crate) fn strip_gradle_comments(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
     let mut chars = source.chars().peekable();
     let mut quote: Option<char> = None;
@@ -2712,11 +2794,12 @@ dependencies {
         );
     }
 
-    /// Version-catalog refs (`libraries.guava`), `project(':core')` deps, and the
-    /// `kotlin("stdlib")` helper carry no literal coordinate → honestly not
-    /// captured (no fabrication). A block of only these yields `None`.
+    /// `project(':core')` deps and the `kotlin("stdlib")` helper carry no literal coordinate →
+    /// honestly not captured (no fabrication). The version-catalog accessors of the same block
+    /// (`libraries.guava`) are ALIAS REFERENCES (DEPS-GRADLE-CATALOG-1B) — not coordinates and not
+    /// nothing — so the script is no longer `None`; no group is read from them here.
     #[test]
-    fn gradle_non_literal_forms_not_fabricated() {
+    fn gradle_non_literal_forms_other_than_catalog_aliases_are_not_fabricated() {
         let content = r#"
 dependencies {
     implementation libraries.guava
@@ -2725,10 +2808,117 @@ dependencies {
     implementation(kotlin("stdlib"))
 }
 "#;
+        let s = extract_gradle_dependencies(content)
+            .expect("a block of alias references is not an empty script");
         assert!(
-            extract_gradle_dependencies(content).is_none(),
-            "no literal coordinates → None, never a fabricated group"
+            s.own.is_empty() && s.allprojects.is_empty() && s.subprojects.is_empty(),
+            "no literal coordinate → no group, never a fabricated one: {s:?}"
         );
+        assert!(s.projects.is_empty(), "{:?}", s.projects);
+        let refs: Vec<(&str, u32)> = s
+            .alias_refs
+            .iter()
+            .map(|r| (r.accessor.as_str(), r.line))
+            .collect();
+        assert_eq!(
+            refs,
+            vec![
+                ("libraries.guava", 3),
+                ("libraries.jsr305", 4),
+                ("libraries.errorprone.annotations", 4),
+            ],
+            "only the catalog accessors are alias references; project(…) and kotlin(…) are not"
+        );
+    }
+
+    /// DEPS-GRADLE-CATALOG-1B §2.1 item 1: an accessor token in a configuration argument position
+    /// of a DIRECT block is an alias reference — unparenthesised, in the verb's own parentheses
+    /// (with or without a space), in `platform(…)` / `enforcedPlatform(…)` there, and on a
+    /// continuation line (the grpc-java `core/build.gradle:23-24` shape) — with its scope and line.
+    /// It is never mined as a coordinate (the literal beside it is the only group), and a
+    /// `project('<p>')` block whose only facts are alias references is present.
+    #[test]
+    fn gradle_alias_reference_is_mined_as_an_alias_not_a_coordinate() {
+        let content = r#"
+dependencies {
+    implementation libraries.gson,
+            libraries.android.annotations
+    api(libs.guava)
+    api (libs.jsr305)
+    implementation platform(libs.bom)
+    implementation(enforcedPlatform(libs.bom.two))
+    implementation "com.lit:x:1"
+    testImplementation libs.junit; runtimeOnly libs.slf4j_api
+}
+project(':a') {
+  dependencies {
+    implementation libs.only
+  }
+}
+allprojects {
+  dependencies {
+    implementation(
+        libs.split
+    )
+  }
+}
+"#;
+        let s = extract_gradle_dependencies(content).unwrap();
+        assert_eq!(s.own, vec!["com.lit"], "the literal is the only group");
+        assert!(s.allprojects.is_empty(), "{:?}", s.allprojects);
+        let refs: Vec<(DirectScope, &str, u32)> = s
+            .alias_refs
+            .iter()
+            .map(|r| (r.scope.clone(), r.accessor.as_str(), r.line))
+            .collect();
+        assert_eq!(
+            refs,
+            vec![
+                (DirectScope::Own, "libraries.gson", 3),
+                (DirectScope::Own, "libraries.android.annotations", 4),
+                (DirectScope::Own, "libs.guava", 5),
+                (DirectScope::Own, "libs.jsr305", 6),
+                (DirectScope::Own, "libs.bom", 7),
+                (DirectScope::Own, "libs.bom.two", 8),
+                (DirectScope::Own, "libs.junit", 10),
+                (DirectScope::Own, "libs.slf4j_api", 10),
+                (DirectScope::Project(":a".to_string()), "libs.only", 14),
+                (DirectScope::AllProjects, "libs.split", 20),
+            ]
+        );
+        assert_eq!(
+            s.projects.get(":a"),
+            Some(&Vec::new()),
+            "an alias-only project block is present (its group is bound at the build)"
+        );
+    }
+
+    /// DEPS-GRADLE-CATALOG-1B §2.1 item 1, one negative fixture line per form: a token inside a
+    /// nested closure (one-line and multi-line), inside another call's parentheses (`because(…)`,
+    /// `files(…)`), inside a string, in a comment, in an assigning statement, or as the statement's
+    /// leading word is not a declaration. Only the two verb arguments are references.
+    #[test]
+    fn alias_token_outside_a_configuration_argument_is_not_a_declaration() {
+        let content = r#"
+dependencies {
+    implementation(libs.a) { because(libs.x1) }
+    implementation(libs.b) {
+        because(libs.x2)
+    }
+    implementation files(libs.x3)
+    implementation "libs.x4"
+    // implementation libs.x5
+    /* implementation libs.x6 */
+    def v = libs.x7
+    libs.x8
+    implementation because(libs.x9)
+    implementation(libs.c, "x") { because("libs.x10") }
+    configurations.x = libs.x11
+}
+"#;
+        let s = extract_gradle_dependencies(content).unwrap();
+        let accessors: Vec<&str> = s.alias_refs.iter().map(|r| r.accessor.as_str()).collect();
+        assert_eq!(accessors, vec!["libs.a", "libs.b", "libs.c"]);
     }
 
     /// Commented-out dependencies (`//` line, `/* */` block, incl. multi-line

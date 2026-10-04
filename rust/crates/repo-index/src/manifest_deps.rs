@@ -63,9 +63,13 @@ impl RepoConfigContext {
     /// - UNKNOWN, never guessed (RG-REQ-002-L11): a present-but-unreadable settings file, a
     ///   settings file with an unhandled `projectDir` form, or an unreadable project script of the
     ///   build makes the nearest script a FAILED record naming the cause; the set is empty.
+    /// - ALIASES (DEPS-GRADLE-CATALOG-1B): every project script's version-catalog alias references
+    ///   are bound once per build against the build's catalog (`gradle_catalog`); a bound group
+    ///   joins the scope of its line, exactly as a literal coordinate does. A reference that binds
+    ///   to no group is counted on the build's marking, never guessed.
     /// - MARKING (D-DGC-CONDITIONAL-1): the build's counted blocks (every project script of the
-    ///   build, root project's first) ride exactly one record of the build — see
-    ///   [`ManifestProvenanceCollector::offer_build_marking`].
+    ///   build, root project's first) and its unbound alias references ride exactly one record of
+    ///   the build — see [`ManifestProvenanceCollector::offer_build_marking`].
     /// - NO ANCESTOR SCRIPT (D-DGC-ATTRIBUTION-1): a file with no ancestor build script but an
     ///   ancestor settings file is never answered by the absence of a script. It goes through the
     ///   same BUILD/PROJECT attribution and reads its project's declared set (another script's
@@ -131,18 +135,15 @@ impl RepoConfigContext {
             }
             GradleAttribution::SingleScript => {
                 self.record_parsed_manifest(&script_dir, &file_name, "java");
-                if let Some(marking) =
-                    marking_of(&[(script_path.as_str(), &scopes.undetermined_block_lines)])
-                {
+                let (names, marking) = self.single_script_build(&script_path, &scopes, repo_root);
+                if let Some(marking) = marking {
                     self.manifest_provenance.offer_build_marking(
                         &script_path,
                         &marking,
                         &script_path,
                     );
                 }
-                let mut names: BTreeSet<String> = scopes.own.iter().cloned().collect();
-                names.extend(scopes.allprojects.iter().cloned());
-                names.into_iter().collect()
+                names
             }
             GradleAttribution::Project {
                 settings_dir,
@@ -206,6 +207,47 @@ impl RepoConfigContext {
                     .declared_for(project),
             },
         }
+    }
+
+    /// The declared set and marking of the single-project build rooted at the script `script_path`
+    /// (cached per script): the script's `own` ∪ `allprojects`, its alias references bound against
+    /// the build's catalog (the build directory is the script's; DEPS-GRADLE-CATALOG-1B), and the
+    /// marking of its counted blocks and unbound alias references.
+    fn single_script_build(
+        &mut self,
+        script_path: &str,
+        scopes: &GradleScriptScopes,
+        repo_root: &Path,
+    ) -> (Vec<String>, Option<BuildMarking>) {
+        if let Some(done) = self.gradle_reads.single.get(script_path) {
+            return done.clone();
+        }
+        let build_dir = parent_dir(script_path);
+        let shape = crate::gradle_catalog::BuildShape {
+            dir: &build_dir,
+            project_paths: vec![":"],
+            scripts: vec![Some((script_path, scopes))],
+        };
+        let binding = crate::gradle_catalog::bind_build_aliases(repo_root, &shape);
+        let bound = crate::gradle_catalog::with_bound_groups(
+            scopes,
+            binding
+                .bound
+                .get(script_path)
+                .map_or(&[][..], Vec::as_slice),
+        );
+        let mut names: BTreeSet<String> = bound.own.iter().cloned().collect();
+        names.extend(bound.allprojects.iter().cloned());
+        let marking = BuildMarking {
+            undetermined_blocks: marking_of(&[(script_path, &scopes.undetermined_block_lines)]),
+            unresolved_alias_refs: binding.unresolved,
+        }
+        .non_empty();
+        let done = (names.into_iter().collect::<Vec<_>>(), marking);
+        self.gradle_reads
+            .single
+            .insert(script_path.to_string(), done.clone());
+        done
     }
 
     /// The basename of the settings file at `settings_dir` (`settings.gradle`, else
@@ -422,7 +464,38 @@ impl RepoConfigContext {
         }
         let result = match failure {
             Some(reason) => Err(reason),
-            None => Ok(GradleBuild::new(key, projects, scripts)),
+            None => {
+                // DEPS-GRADLE-CATALOG-1B: bind every project script's alias references (each script
+                // once) against the catalog sources that apply to each project they reach, and join
+                // each bound group to its line's scope.
+                let shape = crate::gradle_catalog::BuildShape {
+                    dir: settings_dir,
+                    project_paths: projects.iter().map(|p| p.gradle_path.as_str()).collect(),
+                    scripts: scripts
+                        .iter()
+                        .map(|s| s.as_ref().map(|(p, sc)| (p.as_str(), sc)))
+                        .collect(),
+                };
+                let binding = crate::gradle_catalog::bind_build_aliases(repo_root, &shape);
+                let bound_scripts: Vec<Option<(String, GradleScriptScopes)>> = scripts
+                    .iter()
+                    .map(|script| {
+                        script.as_ref().map(|(path, scopes)| {
+                            let bound = binding.bound.get(path).map_or(&[][..], Vec::as_slice);
+                            (
+                                path.clone(),
+                                crate::gradle_catalog::with_bound_groups(scopes, bound),
+                            )
+                        })
+                    })
+                    .collect();
+                Ok(GradleBuild::new(
+                    key,
+                    projects,
+                    bound_scripts,
+                    binding.unresolved,
+                ))
+            }
         };
         let outcome = result.as_ref().map(|_| ()).map_err(|e| e.clone());
         self.gradle_reads
@@ -665,15 +738,18 @@ pub(crate) struct GradleBuild {
     key: String,
     projects: Vec<GradleProject>,
     scripts: Vec<Option<(String, GradleScriptScopes)>>,
-    marking: Option<UndeterminedBlocks>,
+    marking: Option<BuildMarking>,
     declared: HashMap<usize, Vec<String>>,
 }
 
 impl GradleBuild {
+    /// `scripts` carry their bound alias groups already; `unresolved_alias_refs` is the build's count
+    /// of alias references that did not bind (DEPS-GRADLE-CATALOG-1B).
     fn new(
         key: String,
         projects: Vec<GradleProject>,
         scripts: Vec<Option<(String, GradleScriptScopes)>>,
+        unresolved_alias_refs: Option<UnresolvedAliasRefs>,
     ) -> Self {
         // Counted blocks of every project script of the build, each script once, the root
         // project's script first, then the other scripts by repo-relative path (then line).
@@ -692,7 +768,11 @@ impl GradleBuild {
         }
         ordered.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
         let pairs: Vec<(&str, &Vec<u32>)> = ordered.iter().map(|(_, p, l)| (*p, *l)).collect();
-        let marking = marking_of(&pairs);
+        let marking = BuildMarking {
+            undetermined_blocks: marking_of(&pairs),
+            unresolved_alias_refs,
+        }
+        .non_empty();
         Self {
             key,
             projects,
@@ -745,6 +825,9 @@ pub(crate) struct GradleReadCache {
     settings: HashMap<String, GradleSettingsRead>,
     /// Settings directory → the build it defines (or why its attribution is unknown).
     builds: HashMap<String, Result<GradleBuild, String>>,
+    /// Script path → the declared set and marking of the single-project build rooted at it
+    /// (DEPS-GRADLE-CATALOG-1B: its catalog is read once).
+    single: HashMap<String, (Vec<String>, Option<BuildMarking>)>,
 }
 
 impl GradleReadCache {
@@ -834,7 +917,7 @@ fn deepest_project_containing(projects: &[GradleProject], dir: &str) -> Option<u
 }
 
 /// True iff Gradle path `a` is a strict ancestor of `b` (`:` of every other project; `:a` of `:a:b`).
-fn is_gradle_ancestor(a: &str, b: &str) -> bool {
+pub(crate) fn is_gradle_ancestor(a: &str, b: &str) -> bool {
     if a == b {
         return false;
     }
@@ -843,7 +926,7 @@ fn is_gradle_ancestor(a: &str, b: &str) -> bool {
 
 /// The absolute Gradle path a `project('<written>')` block in the script of project `base` names:
 /// an absolute path as written, a relative one against `base`.
-fn resolve_gradle_path(written: &str, base: &str) -> String {
+pub(crate) fn resolve_gradle_path(written: &str, base: &str) -> String {
     if written.starts_with(':') {
         format!(":{}", written.trim_start_matches(':'))
     } else if base == ":" {
@@ -908,6 +991,13 @@ pub struct ManifestRecord {
     /// record FAILED.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub undetermined_blocks: Option<UndeterminedBlocks>,
+    /// DEPS-GRADLE-CATALOG-1B (D-DGC1B-ALIAS-MARKING-1; RG-REQ-002-L11): the version-catalog alias
+    /// references of this record's BUILD that bound to no group — counted, never guessed. Carried
+    /// by exactly the record that carries the build's `undetermined_blocks` (one record per build,
+    /// the same carrier rule), so a sum over records counts each reference once. `None` (no key on
+    /// the wire — today's bytes) for every other record and a build whose references all bound.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unresolved_alias_refs: Option<UnresolvedAliasRefs>,
 }
 
 /// Which failure a FAILED manifest record states (D-DGC-BOUNDARY-1 (9)). The wire values are
@@ -936,6 +1026,37 @@ pub struct UndeterminedBlocks {
     pub first: String,
 }
 
+/// The count and first site of the version-catalog alias references one Gradle build could not
+/// bind to a group (DEPS-GRADLE-CATALOG-1B; D-DGC1B-ALIAS-MARKING-1 as corrected 2026-10-03).
+/// `first` is `<repo-relative path>:<line> <accessor>: <predicate>` of the counted site with the
+/// smallest `(path, line)`; the predicate is the first binding test that failed for it, one of
+/// five forms (SLICE_DOC section 2.2): `catalog <path> could not be read (<error>)`; `alias map in
+/// <script>:<line> is not a top-level literal assignment`; `rename at <path>:<line> not shown to
+/// apply to this project` / `map at <path>:<line> not shown to apply to this project`; `ambiguous
+/// accessor (<key>, <key> in <catalog path>)`; `no catalog entry`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UnresolvedAliasRefs {
+    /// Number of alias references of the build that bound to no group.
+    pub count: u32,
+    /// The first counted site and the predicate that failed for it.
+    pub first: String,
+}
+
+/// One Gradle build's marking, carried by one record of the build: its counted `dependencies`
+/// blocks (DEPS-GRADLE-CATALOG-1A) and its unbound alias references (DEPS-GRADLE-CATALOG-1B).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct BuildMarking {
+    pub(crate) undetermined_blocks: Option<UndeterminedBlocks>,
+    pub(crate) unresolved_alias_refs: Option<UnresolvedAliasRefs>,
+}
+
+impl BuildMarking {
+    /// `None` when the build has neither a counted block nor an unbound alias reference.
+    fn non_empty(self) -> Option<Self> {
+        (self.undetermined_blocks.is_some() || self.unresolved_alias_refs.is_some()).then_some(self)
+    }
+}
+
 /// Accumulates the manifests a repo's deps resolvers encountered: one record per path, a FAILED
 /// outcome winning over a PARSED one (see [`Self::record_failed`]).
 #[derive(Debug, Clone, Default)]
@@ -944,7 +1065,7 @@ pub struct ManifestProvenanceCollector {
     records: Vec<ManifestRecord>,
     /// DEPS-GRADLE-CATALOG-1A: per Gradle build (its settings file, or its one script for a
     /// single-project build) the build's marking and the record path currently carrying it.
-    build_markings: BTreeMap<String, (UndeterminedBlocks, String)>,
+    build_markings: BTreeMap<String, (BuildMarking, String)>,
     /// D-DGC-ATTRIBUTION-1: per Gradle build, every record path offered its marking — the
     /// candidates the marking moves to when its carrier is replaced by a failure.
     build_members: BTreeMap<String, BTreeSet<String>>,
@@ -963,6 +1084,7 @@ impl ManifestProvenanceCollector {
                 error: None,
                 error_kind: None,
                 undetermined_blocks: None,
+                unresolved_alias_refs: None,
             });
         }
     }
@@ -1018,6 +1140,7 @@ impl ManifestProvenanceCollector {
                 error: Some(reason),
                 error_kind,
                 undetermined_blocks: None,
+                unresolved_alias_refs: None,
             });
             return;
         }
@@ -1030,6 +1153,7 @@ impl ManifestProvenanceCollector {
         existing.error = Some(reason);
         existing.error_kind = error_kind;
         existing.undetermined_blocks = None;
+        existing.unresolved_alias_refs = None;
         let carried: Vec<String> = self
             .build_markings
             .iter()
@@ -1082,7 +1206,7 @@ impl ManifestProvenanceCollector {
     pub(crate) fn offer_build_marking(
         &mut self,
         build_key: &str,
-        marking: &UndeterminedBlocks,
+        marking: &BuildMarking,
         path: &str,
     ) {
         self.build_members
@@ -1111,22 +1235,33 @@ impl ManifestProvenanceCollector {
 
     /// Recompute the marking of the record at `path` from the builds it carries (normally one;
     /// several builds sharing one nearest script sum their counts, the first build's location
-    /// kept).
+    /// kept) — the counted blocks and the unbound alias references alike.
     fn refresh_record_marking(&mut self, path: &str) {
-        let mut carried = self
+        let carried: Vec<&BuildMarking> = self
             .build_markings
             .values()
             .filter(|(_, carrier)| carrier == path)
-            .map(|(m, _)| m);
-        let combined = carried.next().map(|first| {
-            let mut m = first.clone();
-            for more in carried {
-                m.count = m.count.saturating_add(more.count);
+            .map(|(m, _)| m)
+            .collect();
+        let mut blocks: Option<UndeterminedBlocks> = None;
+        let mut aliases: Option<UnresolvedAliasRefs> = None;
+        for m in carried {
+            if let Some(b) = &m.undetermined_blocks {
+                match &mut blocks {
+                    Some(acc) => acc.count = acc.count.saturating_add(b.count),
+                    None => blocks = Some(b.clone()),
+                }
             }
-            m
-        });
+            if let Some(a) = &m.unresolved_alias_refs {
+                match &mut aliases {
+                    Some(acc) => acc.count = acc.count.saturating_add(a.count),
+                    None => aliases = Some(a.clone()),
+                }
+            }
+        }
         if let Some(r) = self.records.iter_mut().find(|r| r.path == path) {
-            r.undetermined_blocks = combined;
+            r.undetermined_blocks = blocks;
+            r.unresolved_alias_refs = aliases;
         }
     }
 }
@@ -2080,6 +2215,7 @@ project(':c') {
             error: None,
             error_kind: None,
             undetermined_blocks: None,
+            unresolved_alias_refs: None,
         };
         assert_eq!(
             serde_json::to_string(&none).unwrap(),
@@ -2358,6 +2494,7 @@ project(':c') {
             error: None,
             error_kind: None,
             undetermined_blocks: None,
+            unresolved_alias_refs: None,
         };
         assert_eq!(
             serde_json::to_string(&parsed).unwrap(),

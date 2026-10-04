@@ -44,6 +44,7 @@ pub use deps::{
     ComposeDependenciesInput, ComposeDependenciesResult, DependencyCategory, DependencyEntry,
     DriftEntry, DriftKind, ManifestContext, ManifestErrorKind, ManifestProvenance,
     ModuleDependencySummary, PackageUsage, ProvenanceRead, ReconcileInput, UndeterminedBlocks,
+    UnresolvedAliasRefs,
 };
 pub use facts::{
     load_module_graph_facts, ModuleGraphFacts, ModuleQueryError, ModuleRelationPartitions,

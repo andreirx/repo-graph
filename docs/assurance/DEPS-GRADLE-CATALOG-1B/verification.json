@@ -1,0 +1,634 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-DEPS-GRADLE-CATALOG-1B-3",
+  "workItemId": "DEPS-GRADLE-CATALOG-1B",
+  "baseline": {
+    "path": "docs/requirements/baselines/DEPS-GRADLE-CATALOG-1B-INPUT-5.json",
+    "sha256": "sha256:6380e5e13a94a421a656a577e898e3295d2adcf5aeb86f220902b9bfdb295c2f"
+  },
+  "allocation": {
+    "path": "docs/slices/deps-gradle-catalog-1b.md",
+    "sha256": "sha256:cc275e9251dcbe57760afb77865409daa621746e5b241567ebae427a965e8a07"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "ee066e2cee037da5f4186f35fbf67bf16a4305d8",
+    "entries": [
+      {
+        "path": "docs/cli/rmap-contracts.md",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:6d86f6f4a114771a8984ba167f4b59485de3080735c5a2b55b657b302ce55de2",
+          "byteLength": 60011
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:bc4e533e56c8ce560085f313d53e7a94194e1bf16e1ce53e649e6ecb183bdf53",
+          "byteLength": 67903
+        }
+      },
+      {
+        "path": "rust/Cargo.lock",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:76facc27e7ce32a0844bc3649dfaab411034d4268854ca307498dc5f159c6af8",
+          "byteLength": 106436
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:5ec170324e2d186caccfc6c18a522bd6890a884504db75e1f0f06759c5eabd6d",
+          "byteLength": 106445
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/deps_coverage.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:19c8d259c7b158b4c2e83e08807e49de259008e53a3e546df88094bef24ff0a9",
+          "byteLength": 20523
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:db071d0fb6671b61b31f87c818851d47b80e949a0b46e1362a935c6fe59b502a",
+          "byteLength": 20564
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/deps_ecosystem_presence.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:6ca48b40684a8f6bc4ddeabc58a16351005376657da78a3401e7b7ba8bbe11ef",
+          "byteLength": 26290
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:05204b121bee5b8fff998511fba79a859c775baada34f208fe11fc57bd7329e9",
+          "byteLength": 26372
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/deps_undetermined.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:cdda927fbdb21070147cd28e6fdc2f48e94d52e7e15532489cf3e4f0a050b9e5",
+          "byteLength": 6904
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:eb6523421308c432eb21fc59cb878a5af9f1825fcc77187a4b0a2af64341a535",
+          "byteLength": 12014
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/reader_context.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:2f074d79fab0eb804055327ae0bc48d9c58a4772b2ae87905d37f9236359e1df",
+          "byteLength": 70837
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ac302b71ef6ad76552d7716549fd4ce1c3a410e074a5c2c4074c8150f3df16ca",
+          "byteLength": 70878
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/orchestrator.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:6530c196900f9c280d7263e877dec4726f0a7ca15c140ea0680851828aca174f",
+          "byteLength": 191793
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:52cce7213b28a6c18cee5243ed5159be27376db7d2aa35d97f8be7b30d4999e4",
+          "byteLength": 192067
+        }
+      },
+      {
+        "path": "rust/crates/module-queries/src/deps/compose.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:295cfac976309c559a18afcf0cecad20ee5802db3f48769a7872660fcdb55deb",
+          "byteLength": 78282
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:8adcc59bf800ae23bdb4800c4f75788cd6fa861b7bd138a5e18cd66269eede7b",
+          "byteLength": 78364
+        }
+      },
+      {
+        "path": "rust/crates/module-queries/src/deps/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:ccccfb29b234ded926b3cf4312ff2eba6a65f0fc3d80bfaeaf0d705fd2c4b761",
+          "byteLength": 1663
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:c1ee638b4dc0006687c4dcf7b8edf838eccea00ac8f6cec7a85dc2676196ad43",
+          "byteLength": 1688
+        }
+      },
+      {
+        "path": "rust/crates/module-queries/src/deps/reconcile.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:a35338f6d9d4861e68f9d72bf66c2f01bb4d722360a071ac863d50c1c1c0892a",
+          "byteLength": 33931
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:3447b57706c5950700e4d75b65666f2d4c8a95c4b45c8c5b83ab272dccff2a5e",
+          "byteLength": 40181
+        }
+      },
+      {
+        "path": "rust/crates/module-queries/src/deps/types.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:08d0098e707f6a09c46b58003f159c4babd47f77155ae4ede720140ed179a61f",
+          "byteLength": 31543
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:d1089bee3e6e91ed65d0ff4248e9b5ad07d2dfbbd566c4ab7c02ad7de3883321",
+          "byteLength": 35352
+        }
+      },
+      {
+        "path": "rust/crates/module-queries/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:8ab05c83e4c3aa29729c8fdd099e257a1afaf0c7ef9abda283c761482d9cc5e8",
+          "byteLength": 2170
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ce58d164b89ce88b60313e67b37153d4a045fa26c513364bfc5a3e5a49bd1c81",
+          "byteLength": 2195
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/Cargo.toml",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:7556186b359e9efb3f3726b1fb2297c898c5f572b6c909b70f037245e22636d6",
+          "byteLength": 5661
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:77b826229e1287df5ac40c5be8ff67dddf31b89a65018ef2994b841e0d0cf3fa",
+          "byteLength": 5858
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/src/config.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:78fecaa992b4599ddab2c3211e0adc98c794ea60aa8a0e0351904847febdb775",
+          "byteLength": 124229
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:fb3309d9fcca827d838dc260e37dd69e15f90378e90a73c1cdca58fc70043d92",
+          "byteLength": 133526
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/src/gradle_catalog.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:e754c06f6ac7b43c6fa0bf13e8ed13be32c7609aba5db4051d1c17eaebee55a5",
+          "byteLength": 107314
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:26ea3d40b06993eefeb0816054daea651296e16dd62619e94f52012123f93be9",
+          "byteLength": 5208
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:14f0fb438ec1b667cbb25f30b8750af8d77ab2182737b8a4fc59a2ccf54eaaed",
+          "byteLength": 5545
+        }
+      },
+      {
+        "path": "rust/crates/repo-index/src/manifest_deps.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d8cfe8568e13522381696b2d5199d864e6dccc59d1a9cc6fcf9c7a56c6918735",
+          "byteLength": 109400
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:876670d9319be11afa79964bb3dc619d0c0c1eb1d6289aa8314a58b68cdc29a4",
+          "byteLength": 116564
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/deps_list.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:2d73147491130dec9ccfcca2f7c18b9ba9a1083f7d2eab73e0af3562826d34dd",
+          "byteLength": 94628
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:9fa2cb6f13feb8739744f5632727c0015aefc50437a4039eae02f4b77614cecb",
+          "byteLength": 111840
+        }
+      }
+    ],
+    "sha256": "sha256:912ca65e5719c3202ac1c94a7d6f3ee43fbb9e6d9332c65c54633608cce0c85b"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-DEPS-GRADLE-CATALOG-1B-3"
+  },
+  "checks": [
+    {
+      "checkId": "DGC-B01",
+      "obligationIds": [
+        "RG-REQ-006-L13",
+        "RG-REQ-006-L07",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L01",
+        "P-DGC1B-01"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree; fail-closed gate: DEPS-GRADLE-CATALOG-1A's implementation-review record exists at HEAD with result accepted (its scope-attributed declared set is the carrier this slice fills); isolated rmap only (RMAP_STATE_ROOT/RMAP_SOCKET_PATH under the builder's work directory, RMAP_TRANSPORT=stdio, every background pass off); the manager's before-roots read-only",
+        "command": "git cat-file -e HEAD:docs/assurance/DEPS-GRADLE-CATALOG-1A/implementation-review.json && git show HEAD:docs/assurance/DEPS-GRADLE-CATALOG-1A/implementation-review.json | python3 -c \"import json,sys; d=json.load(sys.stdin); sys.exit(0 if (d.get('workItemId'), d.get('result')) == ('DEPS-GRADLE-CATALOG-1A', 'accepted') else 1)\" && ! grep -q 'fn gradle_non_literal_forms_not_fabricated' crates/repo-index/src/config.rs && ! grep -rq 'fn apply_from_inside_a_block_other_than_buildscript_is_not_followed_and_counts_every_alias_reference' crates/repo-index/src && ! grep -rq 'fn map_assignment_under_a_condition_or_callback_binds_nothing_and_its_dependent_references_are_counted' crates/repo-index/src && ( set -o pipefail; cargo test -p repo-graph-repo-index 2>&1 | tee /tmp/dgc1b-01.txt ) && grep -qE '^test result: ok\\.' /tmp/dgc1b-01.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/dgc1b-01.txt && for t in gradle_groovy_string_form_captures_group gradle_captures_all_standard_configuration_verbs gradle_captures_group_not_artifact_or_full_coordinate gradle_kotlin_string_form gradle_map_form_both_dsls gradle_exclude_group_not_captured gradle_commented_deps_not_captured gradle_scopes_to_dependencies_block gradle_nested_subprojects_block gradle_buildscript_dependencies_are_never_declared gradle_top_level_block_is_the_scripts_own_scope gradle_project_block_is_recorded_under_its_gradle_path gradle_evaluation_dependent_blocks_are_counted_with_their_lines gradle_leaf_without_deps_does_not_inherit_parent gradle_non_literal_forms_other_than_catalog_aliases_are_not_fabricated gradle_alias_reference_is_mined_as_an_alias_not_a_coordinate gradle_alias_accessor_normalises_dash_and_underscore_to_dot toml_catalog_libraries_string_form_resolves_to_its_group toml_catalog_libraries_table_form_module_resolves_to_its_group toml_catalog_is_read_from_the_settings_directory_gradle_folder toml_catalog_that_fails_to_parse_counts_every_alias_reference_of_the_build groovy_alias_map_applied_from_the_root_script_resolves_to_its_group groovy_alias_map_value_with_interpolated_version_keeps_its_literal_group groovy_alias_map_entry_with_interpolated_artifact_binds_to_its_literal_group groovy_alias_map_entry_with_interpolated_group_binds_nothing_and_is_counted alias_defined_in_no_catalog_is_counted_never_guessed catalog_rename_libraries_equals_libs_resolves_through_libs unresolved_alias_refs_ride_one_record_per_build_with_count_and_first alias_reference_joins_the_declared_set_of_exactly_its_blocks_scope alias_token_outside_a_configuration_argument_is_not_a_declaration applied_alias_script_that_cannot_be_read_counts_every_alias_reference_of_the_build catalog_rename_in_a_sibling_script_does_not_apply_and_its_dependent_references_are_counted conditional_apply_from_does_not_apply_and_its_dependent_references_are_counted catalog_rename_in_root_subprojects_applies_to_every_non_root_project apply_from_in_root_buildscript_applies_to_the_whole_build alias_map_later_replacement_erases_an_earlier_alias alias_map_later_addition_adds_an_alias alias_map_assignment_under_a_condition_or_loop_makes_the_map_unreadable_and_dependent_references_are_counted alias_map_assignment_in_a_non_ext_closure_makes_the_map_unreadable alias_map_assignment_in_any_other_statement_form_makes_the_map_unreadable alias_map_in_an_unconditional_ext_block_then_a_top_level_addition_binds alias_map_with_only_an_empty_literal_yields_no_entries two_catalog_keys_normalising_to_one_accessor_with_different_groups_resolve_to_neither; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/dgc1b-01.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/dgc1b-01.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-repo-index -- --list 2>/dev/null | grep -c ': test$')\" -ge 520 && grep -q '\"indexer:1.8.0\"' crates/indexer/src/orchestrator.rs && ! grep -q '\"indexer:1.7.0\"' crates/indexer/src/orchestrator.rs && cargo tree -p repo-graph-repo-index -e normal --depth 1 --prefix none 2>/dev/null | grep -qE '^toml v'",
+        "inputs": "GATE first: HEAD carries DEPS-GRADLE-CATALOG-1A's accepted implementation-review record (the scoping this slice builds on). The WHOLE repo-index suite (492 listed at HEAD 727c654b, 451cd595 and 6f6be078, EXECUTED `-- --list` 2026-10-03, and at f5dcd8ff and f8355dfc, EXECUTED 2026-10-04, f8355dfc listed again for INPUT-5; floor >= 520 = 492 + 28 new). EXISTING tests by name with unchanged assertions (14): the 13 1A config.rs tests (coordinate mining and scoping are preserved) and manifest_deps.rs `gradle_leaf_without_deps_does_not_inherit_parent` (its leaf script holds only `implementation libs.guava` and no catalog exists: the declared set stays empty — an alias no catalog defines is never a guessed group; under 1B that build's record also carries the unresolved-alias marking, which the test does not assert). RENAMED (TD-023: a name that states the reversed behaviour is a false name): `gradle_non_literal_forms_not_fabricated` → `gradle_non_literal_forms_other_than_catalog_aliases_are_not_fabricated` (`project(':core')` and `kotlin(\"stdlib\")` still read as nothing; the `libraries.` accessors of its fixture are now ALIAS REFERENCES, not coordinates and not nothing, so the script is no longer `None`) — the old name must be absent. SUPERSEDED (never in the candidate): `apply_from_inside_a_block_other_than_buildscript_is_not_followed_and_counts_every_alias_reference`, bound by INPUT-2 and INPUT-3, states the rule D-DGC1B-ALIAS-APPLICABILITY-1 replaces (an `apply from:` in a script's `allprojects`, `subprojects` or `project(…)` block now applies where that scope reaches, and only the references that depend on a statement not shown to apply are counted) — the name must be absent; its conditional fixtures move to `conditional_apply_from_does_not_apply_and_its_dependent_references_are_counted`. SUPERSEDED: `map_assignment_under_a_condition_or_callback_binds_nothing_and_its_dependent_references_are_counted`, bound by INPUT-4's document iteration 4, states the rule D-DGC1B-MAP-GRAMMAR-1 replaces (its first fixture kept the unconditional entries beside a conditional `libs +=` bound; under the grammar that map is unreadable as a whole) — the name must be absent; its `if` fixture moves, with the assertion reversed, to `alias_map_assignment_under_a_condition_or_loop_makes_the_map_unreadable_and_dependent_references_are_counted`, its `afterEvaluate` fixture to `alias_map_assignment_in_a_non_ext_closure_makes_the_map_unreadable`. NEW (28) in config.rs, gradle_catalog.rs and manifest_deps.rs. ALIAS POSITION (section 2.1 item 1): an accessor token `libs.<alias>` / `libraries.<alias>` is an alias reference only in a configuration argument position of a DIRECT block — outside every string literal (comments are stripped first, as today); at the block's own brace depth, never inside a closure nested in it; in the argument list of the statement's leading word (the configuration verb; any verb, as the coordinate miner is verb-agnostic), either unparenthesised (`implementation libs.a, libs.b`), inside the verb's own parentheses (`implementation(libs.a)`, `api (libs.a)`) or inside `platform(…)` / `enforcedPlatform(…)` there; continuation lines included when the statement's previous line ends with `,` or an argument parenthesis is still open (grpc-java core/build.gradle:23-24 `implementation libraries.gson,` / `libraries.android.annotations,`). A token inside any other call's parentheses (`because(libs.x)`, `files(libs.x)`), inside a closure (`implementation(libs.a) { because(libs.x) }`), inside a string (`because(\"libs.x\")`), in a comment, in a statement that assigns (`=` at its top level), or that is itself the statement's leading word is not a declaration (`alias_token_outside_a_configuration_argument_is_not_a_declaration`, one negative fixture line per form; MEASURED 2026-10-03 with a model of this rule: every accessor in kafka's and grpc-java's direct blocks — 347 tokens / 98 distinct, 312 / 71 — stands in such a position). The alias key is compared after `-`/`_` → `.` (Gradle's accessor rule: `libraries.mockito.core` ↔ `mockito-core`). CATALOG SOURCES (section 2.1 item 2): TOML `gradle/libs.versions.toml` of the build's settings directory (a single-script build: the script's directory), `[libraries]` string form `\"group:artifact:version\"` and table form `{ module = \"group:artifact\", … }` → the group (D-DGC1B-TOML-1); a Groovy map `libs = [ … ]` / `libs += [ alias: \"group:artifact:$versions.x\" ]` in a script named by an `apply from:` statement, a source for the projects that statement applies to (STATEMENT APPLICABILITY below) — the fixture of `groovy_alias_map_applied_from_the_root_script_resolves_to_its_group` puts the `apply from:` inside the root `buildscript { }`, the kafka form (build.gradle:22-23), and the test asserts the map is read — → the entry's group under the ALIAS-MAP ENTRY RULE (D-DGC1B-ARTIFACT-INTERPOLATION-1): an entry `alias: \"<group>:<artifact>[:…]\"` binds to `<group>` when `<group>` — the text before the first `:` — passes the coordinate-segment test `is_coordinate_segment` (config.rs:838: non-empty, only ASCII alphanumerics, `.`, `-`, `_`) and the artifact text after it is non-empty, whatever interpolation the artifact or the version carries (`groovy_alias_map_value_with_interpolated_version_keeps_its_literal_group`; kafka `gradle/dependencies.gradle:235 scalaLogging: \"com.typesafe.scala-logging:scala-logging_$versions.baseScala:$versions.scalaLogging\"` binds `libs.scalaLogging` (build.gradle:1109) to `com.typesafe.scala-logging` — `groovy_alias_map_entry_with_interpolated_artifact_binds_to_its_literal_group`; MEASURED 2026-10-04: the only one of kafka's 103 coordinate-shaped entries with an interpolated artifact, none with an interpolated group); an entry whose group fails the test (a `$` interpolation in the group) is not a catalog entry, so a reference to its key is counted with `<path>:<line> <accessor>: no catalog entry` and never guessed (`groovy_alias_map_entry_with_interpolated_group_binds_nothing_and_is_counted`); an entry whose value has no `:` is not a catalog entry; the 1A literal-coordinate reader `coordinate_group` (config.rs:825, both segments tested) is unchanged and its tests keep their assertions; a `libraries = libs` statement makes `libraries.` resolve through `libs` for the projects it applies to (the fixture of `catalog_rename_libraries_equals_libs_resolves_through_libs` puts it at the root script's top level). MAP GRAMMAR (D-DGC1B-MAP-GRAMMAR-1, the human's ruling, verbatim; it replaces INPUT-4's MAP ASSIGNMENT SCOPE and closes review findings F-DGC1B-MAP-SCOPE and F-DGC1B-MAP-ORDER): a map named `libs` (or the name the `libraries = …` rename resolves through) is READABLE only when EVERY statement in the applied script that assigns to it is a literal map `libs = [ … ]` or `libs += [ … ]` at the script's top level or directly inside an unconditional top-level `ext { }` block; the statements are evaluated in order (`=` replaces the map, `+=` adds entries; an entry's group is its literal first segment, D-DGC1B-ARTIFACT-INTERPOLATION-1); any other assignment form anywhere in the script — under `if`/`else`, in a loop, in any other closure or method call, a non-literal right-hand side, `libs.put`, `libs[...] =` — makes the WHOLE map unreadable, and every alias reference that depends on it is counted with `first` stating `{path}:{line} {accessor}: alias map in {script}:{stmt line} is not a top-level literal assignment`. Readings decided and recorded under the record (local mechanism, no further rule): a statement assigns to the map when its target is `libs`, a key of it or a mutating call on it (`libs = …`, `libs += …`, `ext.libs = …`, `libs.<key> = …`, `libs[…] = …`, `libs.put(…)`, `libs << …`); a literal map is `[:]` or `[ key: <value>, … ]`, and an entry whose value is not coordinate-shaped is no catalog entry (the entry rule above); \"directly inside\" means at the brace depth of an `ext { }` block opened at the script's top level; a key that a later `+=` adds again takes its later value, and every test of the binding rule (exactly one group; ambiguous accessor) reads the entries left after the statements are evaluated; `{script}:{stmt line}` names the first assigning statement, by line, that the grammar does not admit; the references that depend on an unreadable map are every alias reference of the projects its `apply from:` applies to (a `libraries.` accessor through a rename that applies included), because such a map could hold any key; a map in a script named by an `apply from:` that applies to no project is still read for its keys and, when the grammar cannot read it, has every key; an `apply from:` inside an applied script applies to no project (D-DGC1B-ALIAS-APPLICABILITY-1 scopes statements of the build's own scripts) and its script is read for keys only; a `libs` map in a build script that no `apply from:` names is not a catalog source, as before. Tests: `alias_map_later_replacement_erases_an_earlier_alias` (review-4's counterexample: an applied script with top-level `libs = [ foo: \"com.acme:foo:1\" ]` and then `libs = [:]`; `libs.foo` is counted `no catalog entry` and `com.acme` is in no declared set); `alias_map_later_addition_adds_an_alias` (`libs = [:]`, then `libs += [ foo: \"com.old:foo:1\" ]`, then `libs += [ foo: \"com.acme:foo:1\" ]`: `libs.foo` binds to `com.acme`, `com.old` is in no declared set, nothing counted); `alias_map_assignment_under_a_condition_or_loop_makes_the_map_unreadable_and_dependent_references_are_counted` (fixture one is INPUT-4's `if` fixture with its assertion reversed: `ext { libs = [ a: \"com.acme:a:1\" ] }`, top-level `libs += [ b: \"com.acme.b:b:1\" ]` and `if (project.hasProperty(\"x\")) { libs += [ c: \"com.acme.c:c:1\" ] }` — `libs.a`, `libs.b` and `libs.c` are all counted, `first` names the first reference site with `alias map in gradle/deps.gradle:<line of the += under if> is not a top-level literal assignment`, and no `com.acme` group is in any declared set; fixtures two and three put the same `+=` in `[\"x\"].each { … }` and in `for (k in [\"x\"]) { … }`, with the same outcome); `alias_map_assignment_in_a_non_ext_closure_makes_the_map_unreadable` (INPUT-4's `afterEvaluate { libs = [ d: \"com.acme.d:d:1\" ] }` fixture, and `allprojects { ext { libs += [ e: \"com.acme.e:e:1\" ] } }` — an `ext { }` that is not at the script's top level — each beside an unconditional `ext { libs = [ a: \"com.acme:a:1\" ] }`: every reference is counted with the form naming that statement's line, none bound); `alias_map_assignment_in_any_other_statement_form_makes_the_map_unreadable` (one fixture per form beside an unconditional `ext { libs = [ a: \"com.acme:a:1\" ] }`: a non-literal right-hand side `libs += other`, `libs.put(\"e\", \"com.acme.e:e:1\")`, `libs[\"e\"] = \"com.acme.e:e:1\"`, `ext.libs = [ e: \"com.acme.e:e:1\" ]` — each counts every reference with the form naming that statement's line); `alias_map_in_an_unconditional_ext_block_then_a_top_level_addition_binds` (the kafka shape: `ext { versions = [:]; libs = [:] }`, `if (hasProperty(\"scalaVersion\")) { versions[\"scala\"] = \"2.13\" }` — a condition that assigns `versions` only — and top-level `libs += [ zstd: \"com.github.luben:zstd-jni:$versions.zstd\" ]`: `libs.zstd` binds to `com.github.luben`, nothing counted); `alias_map_with_only_an_empty_literal_yields_no_entries` (`ext { libs = [:] }` alone: `libs.foo` is counted `no catalog entry`, never with the grammar form, and no group is declared). One rule covers the statements this slice reads: a rename or an `apply from:` counts only from a scope the reader establishes (STATEMENT APPLICABILITY below), and the map an applied script builds counts only under the grammar. STATEMENT APPLICABILITY (section 2.1 item 2(d); D-DGC1B-ALIAS-APPLICABILITY-1 — the 1A scope model applied to the two statements this slice introduces, never a script-wide or build-wide boolean): config.rs records every `libraries = libs` rename and every `apply from:` of a script with its line and its enclosing scope, found by the 1A brace walk with `ext { }` frames transparent (grpc-java `build.gradle:159 libraries = libs` sits in `subprojects { ext { … } }`, :14 and :73): WHOLE BUILD — the root script's top level or its `buildscript { }`; ALLPROJECTS / SUBPROJECTS / PROJECT(<path>) — directly inside a script's top-level `allprojects { }` / `subprojects { }` / `project('<path>') { }`, reaching the projects `GradleBuild::declared_for` (manifest_deps.rs:708-736) attributes that scope to (for the root script: every project / every non-root project / the named project); OWN — a non-root script's top level, its own project only; NOT APPLICABLE — anywhere else (a non-root script's `buildscript { }`, `if`/`else`, `afterEvaluate`, a task or any other closure). A statement applies to P when its scope reaches P; the TOML catalog of the settings directory applies to the whole build, as before. Tests: `catalog_rename_in_a_sibling_script_does_not_apply_and_its_dependent_references_are_counted` (the record's counterexample: `a/build.gradle` holds `ext { libraries = libs }` and `implementation libraries.foo`, `b/build.gradle` holds `implementation libraries.foo`, the TOML has `foo`; `a`'s declared set holds the group, `b`'s does not, and the build's record counts 1 with `first` `b/build.gradle:<line> libraries.foo: rename at a/build.gradle:<line> not shown to apply to this project`); `conditional_apply_from_does_not_apply_and_its_dependent_references_are_counted` (root fixtures `if (…) { apply from: \"gradle/aliases.gradle\" }` and `afterEvaluate { apply from: \"gradle/aliases.gradle\" }`, the applied map defining `x`, the TOML defining `y`: `libs.x` is counted with `map at build.gradle:<line> not shown to apply to this project` and the map's group is in no declared set, `libs.y` binds — it does not depend on the statement; a conditionally applied script that cannot be read counts every reference of the build with the same form); `catalog_rename_in_root_subprojects_applies_to_every_non_root_project` (grpc-java's shape `subprojects { ext { libraries = libs } }` in the root script: the `libraries.` references of two subprojects' own scripts bind, and a `libraries.` reference in the root script's top-level `dependencies` block — the root project, which `subprojects` does not reach — is counted with the `rename at` form); `apply_from_in_root_buildscript_applies_to_the_whole_build` (kafka's shape: root `buildscript { apply from: \"$rootDir/gradle/dependencies.gradle\" }` and `libs += [ zstd: \"com.github.luben:zstd-jni:$versions.zstd\" ]`; `implementation libs.zstd` in a root `project(':clients')` block and in another subproject's own script both bind to `com.github.luben`, nothing counted). MEASURED 2026-10-04 on the checkouts: kafka's only `apply from:` lines are `build.gradle:23` (root `buildscript`) and `:259` (root top level) and it has no rename; grpc-java has no `apply from:` and one rename (`build.gradle:159`, root `subprojects { ext { } }`); no non-root script of either carries either statement; kafka's only statements assigning to `libs` are `gradle/dependencies.gradle:22 libs = [:]`, directly inside the unconditional top-level `ext { }` (:20-23), and `:145 libs += [` at the top level, so its map is readable under the grammar, and its applied scripts apply nothing; grpc-java and spring-petclinic have no Groovy alias map (MEASURED 2026-10-04: a search of every Gradle script of the three checkouts for `libs =`, `libs +=`, `ext.libs`, `libs.put`, `libs[…] =` and `libs <<`); so no field row moves. ONE BINDING RULE (section 2.2; D-DGC1B-ALIAS-MARKING-1 as corrected 2026-10-03; D-DGC1B-ALIAS-APPLICABILITY-1): a reference is tested for each project its scope reaches; for project P it binds to a group only when (i) every catalog source that applies to P was read, (ii) exactly one group among those sources answers its accessor (a `libraries.` accessor through a rename that applies to P), (iii) every Groovy alias map that applies to P is readable under the map grammar, and (iv) no `apply from:` not shown to apply to P names a script that could not be read or whose map has the accessor's key (a map the grammar cannot read has every key). A site that fails the test for any project its scope reaches is counted once on the build's record `unresolved_alias_refs {count, first}`, never guessed; `first` is the first counted site by path, then line, and states the first test that failed for it, in this order: `<path>:<line> <accessor>: catalog <catalog path> could not be read (<error>)` when a source that applies to P could not be read — a TOML catalog that fails to parse (`toml_catalog_that_fails_to_parse_counts_every_alias_reference_of_the_build`) or a script applied by a root `apply from:` that is missing, outside the repository or named by an argument that is not a literal path (`applied_alias_script_that_cannot_be_read_counts_every_alias_reference_of_the_build`); every reference of the projects that source applies to counts and none binds; `<path>:<line> <accessor>: alias map in <script>:<stmt line> is not a top-level literal assignment` when (iii) fails — a Groovy alias map that applies to P has an assigning statement the map grammar does not admit, `<script>:<stmt line>` the first by line; every reference of the projects that map applies to counts and none binds; `<path>:<line> <accessor>: rename at <stmt path>:<stmt line> not shown to apply to this project` for a `libraries.` accessor when no rename applies to P and the build holds one (the first by path, then line; with no rename in the build the form is `no catalog entry`); `<path>:<line> <accessor>: map at <stmt path>:<stmt line> not shown to apply to this project` when (iv) fails, `<stmt path>:<stmt line>` naming that `apply from:`; `<path>:<line> <accessor>: ambiguous accessor (<key>, <key> in <catalog path>)` when two keys of the sources that apply to P normalise to the accessor with different groups — that reference binds to neither (`two_catalog_keys_normalising_to_one_accessor_with_different_groups_resolve_to_neither`; MEASURED: no such pair among grpc-java's 78 TOML entries or kafka's 103 coordinate-shaped map entries); `<path>:<line> <accessor>: no catalog entry` when every source that applies to P was read and none answers (`alias_defined_in_no_catalog_is_counted_never_guessed`). The words `rename` and `map` resolve the record's `rename/map` by the statement's kind. SCOPE: a resolved alias in a `project(':a')` block reaches `a` only, in `subprojects` every non-root project, in `allprojects` every project (`alias_reference_joins_the_declared_set_of_exactly_its_blocks_scope`); one record per build carries the marking (`unresolved_alias_refs_ride_one_record_per_build_with_count_and_first`). `INDEXER_VERSION` (`orchestrator.rs:73`, `pub const`; its test pins at :4415/:4418/:4423 hold the same literal) `indexer:1.7.0` → `indexer:1.8.0` (D-REFRESH-STALE-1: stored declared sets and classifications are index-time facts; TOOLCHAIN-STALENESS-1 schedules the re-index); `toml` is a direct dependency of repo-index."
+      },
+      "expected": "exit 0: a `libs.<alias>` / `libraries.<alias>` accessor in a configuration argument position of a direct dependencies block binds to a group, for each project its scope reaches, only when every catalog source that applies to that project was read, exactly one group answers it (a `libraries.` accessor through a rename that applies to that project) and every Groovy alias map applied to it is readable under the closed grammar, and no `apply from:` not shown to apply to it names an unreadable script or one whose map has that accessor (a map the grammar cannot read has every key) — read from the TOML `[libraries]` (string or `module` table) in the settings directory's `gradle/libs.versions.toml`, or from a Groovy alias map in a script named by an `apply from:` that applies to that project, whose map is built only by literal `libs = [ … ]` / `libs += [ … ]` statements at that script's top level or directly inside an unconditional top-level `ext { }`, evaluated in statement order (`=` replaces the map, `+=` adds entries) — any other assignment to the map anywhere in the script makes the whole map unreadable — and whose entry binds to its group when the group segment is a literal coordinate segment and the artifact text is non-empty, whatever interpolation the artifact or version carries (an entry with an interpolated group is no catalog entry) — and that group joins the declared set of exactly the scope the line sits in (own / allprojects / subprojects / project path, as 1A scopes it); a rename or `apply from:` applies to a project only where its statement's scope reaches it — the root script's top level or `buildscript`: the whole build; directly inside a script's `allprojects` / `subprojects` / `project(…)` block: as 1A attributes that scope; a non-root script's top level: its own project; elsewhere: no project; a token in any other position is not a declaration; every other reference is counted on the build's record with its first site and the predicate that failed for it (catalog could not be read; alias map not a top-level literal assignment; rename or map at a statement not shown to apply to this project; ambiguous accessor; no catalog entry) and is never a guessed group; the indexer version moves by exactly one minor; every preserved obligation this check carries is unchanged (no behavior change): coordinate mining, block scoping, attribution and the undetermined-block marking are preserved by the existing 1A tests, by name with unchanged assertions",
+      "candidateSha256": "sha256:912ca65e5719c3202ac1c94a7d6f3ee43fbb9e6d9332c65c54633608cce0c85b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "CHECK_EXIT=0; test result: ok. 323 passed; 0 failed. 520 tests listed (floor 520).",
+        "supportingEvidence": [
+          ".agent-manager/slices/DEPS-GRADLE-CATALOG-1B/admission-3/iter3/DGC-B01.log",
+          " .agent-manager/slices/DEPS-GRADLE-CATALOG-1B/admission-3/iter3/dgc1b-01.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "DGC-B02",
+      "obligationIds": [
+        "RG-REQ-006-L13",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L04",
+        "RG-REQ-006-L06",
+        "P-DGC1B-02",
+        "P-DGC1B-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree; fail-closed gate: DEPS-GRADLE-CATALOG-1A's implementation-review record exists at HEAD with result accepted (its scope-attributed declared set is the carrier this slice fills); isolated rmap only (RMAP_STATE_ROOT/RMAP_SOCKET_PATH under the builder's work directory, RMAP_TRANSPORT=stdio, every background pass off); the manager's before-roots read-only",
+        "command": "! grep -rq 'fn deps_list_alias_whose_map_assignment_is_conditional_is_counted_and_named_in_json_and_human' crates/rgr/src && ( set -o pipefail; cargo test -p repo-graph-module-queries 2>&1 | tee /tmp/dgc1b-02mq.txt ) && grep -qE '^test result: ok\\.' /tmp/dgc1b-02mq.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/dgc1b-02mq.txt && for t in declared_and_used_match observed_but_undeclared declared_but_unobserved self_import_is_first_party_not_undeclared manifest_provenance_undetermined_blocks_absent_present_and_malformed java_declared_group_matches_an_observed_package_on_a_segment_boundary java_declared_group_does_not_match_mid_segment java_exact_package_still_matches npm_python_and_cargo_matching_stay_exact manifest_provenance_unresolved_alias_refs_absent_present_and_malformed; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/dgc1b-02mq.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/dgc1b-02mq.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-module-queries -- --list 2>/dev/null | grep -c ': test$')\" -ge 100 && ( set -o pipefail; cargo test -p repo-graph-daemon-runtime --lib 2>&1 | tee /tmp/dgc1b-02dr.txt ) && grep -qE '^test result: ok\\.' /tmp/dgc1b-02dr.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/dgc1b-02dr.txt && for t in declared_unresolved_alias_refs_sums_the_view_ecosystems_records_and_names_the_first_by_path declared_undetermined_sums_the_view_ecosystems_records_and_names_the_first_by_path; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/dgc1b-02dr.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/dgc1b-02dr.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-daemon-runtime --lib -- --list 2>/dev/null | grep -c ': test$')\" -ge 884 && ( set -o pipefail; cargo test -p repo-graph-rgr --lib 2>&1 | tee /tmp/dgc1b-02rgr.txt ) && grep -qE '^test result: ok\\.' /tmp/dgc1b-02rgr.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' /tmp/dgc1b-02rgr.txt && for t in declared_unresolved_alias_refs_renders_one_line_after_the_undetermined_blocks_line envelope_without_alias_keys_renders_as_today deps_list_alias_with_no_catalog_entry_is_counted_and_named_in_json_and_human deps_list_alias_of_a_build_whose_catalog_cannot_be_read_is_counted_and_named_in_json_and_human deps_list_alias_whose_rename_does_not_apply_to_its_project_is_counted_and_named_in_json_and_human deps_list_alias_whose_map_is_not_a_top_level_literal_assignment_is_counted_and_named_in_json_and_human declared_undetermined_renders_the_note_after_coverage_and_suffixes_nonzero_undeclared deps_list_gradle_project_without_an_ancestor_script_is_declared_or_marked_in_json_and_human; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" /tmp/dgc1b-02rgr.txt || grep -qE \"^test $t \\.\\.\\. ok$\" /tmp/dgc1b-02rgr.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-rgr --lib -- --list 2>/dev/null | grep -c ': test$')\" -ge 1473",
+        "inputs": "The WHOLE module-queries suite (95 at HEAD 6f6be078, EXECUTED `-- --list` 2026-10-03; floor >= 100 = 95 + 5), daemon-runtime `--lib` (883; floor >= 884) and rgr `--lib` (1467 at 6f6be078 and f8355dfc; floor >= 1473 = 1467 + 6). NEW reconcile.rs (4): for the `java` ecosystem a declared group matches an observed package on a `.`-segment boundary — the two are equal, or the package starts with the group followed by `.` (`com.github.luben` → `com.github.luben.zstd`); BOTH query-time sites apply the match — the observed loop (reconcile.rs:122, `used` vs `undeclared`) and the declared-but-unobserved loop (reconcile.rs:171-196, its test at :176: a declared group is `no static import found` only when it matches no observed package) — and the positive test asserts both (`com.github.luben.zstd` is `used` AND `com.github.luben` is not `no static import found`); never mid-segment (`com.foo` ↛ `com.foobar.Type`, and `com.foo` stays `no static import found`); exact still matches; npm/python/cargo matching stays exact (unchanged). NEW types.rs (1): `ManifestProvenance.unresolved_alias_refs` ABSENT / PRESENT-VALID `{\"count\":N,\"first\":\"<path>:<line> <accessor>: no catalog entry\"}` / PRESENT-MALFORMED (non-integer count; missing first) → the whole `deps_manifests` decode fails → `ProvenanceRead::Unavailable`, unknown-with-reason, never a silent zero (the 1A `undetermined_blocks` triple, second instance). NEW daemon-runtime (1): the envelope keys `declared_unresolved_alias_refs` / `declared_unresolved_alias_note` summed over tracked provenance, each build once, first by path, attached by `attach_declared_undetermined` at its one call site (dispatch.rs:7109, unchanged). NEW rgr (6): the renderer prints `declared set may be incomplete: N alias reference(s) could not be resolved (<first>) — investigate` once, after the undetermined-blocks line (`declared_unresolved_alias_refs_renders_one_line_after_the_undetermined_blocks_line`); an envelope without the keys renders exactly as today (`envelope_without_alias_keys_renders_as_today`); and END TO END through the real daemon in-process — the existing harness `deps_list_java_through_the_daemon` (rgr `presentation/deps_list.rs` tests: a tempdir fixture indexed into a throwaway state root, `deps_list` dispatched, the envelope decoded and rendered; it backs the bound 1A test `deps_list_gradle_project_without_an_ancestor_script_is_declared_or_marked_in_json_and_human`) — one test per `{first}` form of D-DGC1B-ALIAS-MARKING-1's correction, one for the statement-applicability form of D-DGC1B-ALIAS-APPLICABILITY-1 with `rename`, and one for the map-grammar form of D-DGC1B-MAP-GRAMMAR-1. `deps_list_alias_with_no_catalog_entry_is_counted_and_named_in_json_and_human`: fixture `settings.gradle`; `gradle/libs.versions.toml` = `[libraries]` / `slf = \"org.slf4j:slf4j-api:2.0.9\"`; `build.gradle` lines 1-6 = `plugins { id \"java\" }`, `dependencies {`, `  implementation \"org.apache.commons:commons-lang3:3.14.0\"`, `  implementation libs.slf`, `  implementation libs.nope`, `}`; `src/main/java/app/A.java` importing `org.apache.commons.lang3.StringUtils` and `org.slf4j.LoggerFactory` and calling both. Asserted: JSON `declared_unresolved_alias_refs` = 1; `declared_unresolved_alias_note` = `declared set may be incomplete: 1 alias reference(s) could not be resolved (build.gradle:5 libs.nope: no catalog entry) — investigate`, and that exact line in the human output; `org.slf4j` and the literal `org.apache.commons` each on the row under a declared category (`declared_and_used`, `declared_but_unobserved` or `type_only_import`, the 1A test's set; the entry's package equal to the group or extending it on a `.` boundary). `deps_list_alias_of_a_build_whose_catalog_cannot_be_read_is_counted_and_named_in_json_and_human`: the same fixture with `gradle/libs.versions.toml` = `[libraries]` / `slf = { module = ` (does not parse). Asserted: count 2; the note starts `declared set may be incomplete: 2 alias reference(s) could not be resolved (build.gradle:4 libs.slf: catalog gradle/libs.versions.toml could not be read (` and ends `) — investigate`, and the same line in the human output; `org.slf4j` under no declared category; the literal `org.apache.commons` still under a declared category. `deps_list_alias_whose_rename_does_not_apply_to_its_project_is_counted_and_named_in_json_and_human` (the record's counterexample, end to end): fixture `settings.gradle` = `rootProject.name = \"fx\"` / `include 'a', 'b'`; `gradle/libs.versions.toml` = `[libraries]` / `foo = \"org.slf4j:slf4j-api:2.0.9\"`; no root `build.gradle`; `a/build.gradle` lines 1-6 = `ext {`, `  libraries = libs`, `}`, `dependencies {`, `  implementation libraries.foo`, `}`; `b/build.gradle` lines 1-4 = `dependencies {`, `  implementation \"org.apache.commons:commons-lang3:3.14.0\"`, `  implementation libraries.foo`, `}`; `a/src/main/java/a/A.java` importing `org.slf4j.LoggerFactory` and calling it; `b/src/main/java/b/B.java` importing `org.apache.commons.lang3.StringUtils` and `org.slf4j.LoggerFactory` and calling both. Asserted: JSON `declared_unresolved_alias_refs` = 1; `declared_unresolved_alias_note` = `declared set may be incomplete: 1 alias reference(s) could not be resolved (b/build.gradle:3 libraries.foo: rename at a/build.gradle:2 not shown to apply to this project) — investigate`, and that exact line in the human output; on the row whose `module` is `a`, `org.slf4j` under a declared category; on the row whose `module` is `b`, `org.apache.commons` under a declared category and `org.slf4j` under none. `deps_list_alias_whose_map_is_not_a_top_level_literal_assignment_is_counted_and_named_in_json_and_human` (D-DGC1B-MAP-GRAMMAR-1, end to end; it replaces INPUT-4's `deps_list_alias_whose_map_assignment_is_conditional_is_counted_and_named_in_json_and_human`, whose name must be absent, because that test asserted that the unconditional entry stays bound): fixture `settings.gradle` = `rootProject.name = \"fx\"`; no TOML catalog; `build.gradle` lines 1-6 = `plugins { id \"java\" }`, `apply from: \"gradle/deps.gradle\"`, `dependencies {`, `  implementation \"org.apache.commons:commons-lang3:3.14.0\"`, `  implementation libs.slf`, `}`; `gradle/deps.gradle` lines 1-5 = `ext { libs = [:] }`, `libs += [ slf: \"org.slf4j:slf4j-api:2.0.9\" ]`, `if (project.hasProperty(\"extra\")) {`, `  libs += [ extra: \"com.acme:extra:1.0\" ]`, `}`; `src/main/java/app/A.java` importing `org.slf4j.LoggerFactory` and `org.apache.commons.lang3.StringUtils` and calling both. Asserted: JSON `declared_unresolved_alias_refs` = 1; `declared_unresolved_alias_note` = `declared set may be incomplete: 1 alias reference(s) could not be resolved (build.gradle:5 libs.slf: alias map in gradle/deps.gradle:4 is not a top-level literal assignment) — investigate`, and that exact line in the human output; `org.slf4j` under no declared category (the conditional `+=` adds another key, and the whole map is unreadable, its unconditional `slf` entry included); the literal `org.apache.commons` under a declared category. EXISTING by name: the 1A marking tests (the renderer's and the end-to-end harness test) and the reconcile category tests."
+      },
+      "expected": "exit 0: Java declared-vs-observed matching is on `.`-segment boundaries and never mid-segment; the alias marking is absent / present-valid / present-malformed with the stated outcomes and renders one line in one place; indexed end to end through the daemon, an alias with no catalog entry and the aliases of a build whose catalog cannot be read each reach the `deps list` JSON keys and the human line with their `{first}` reason, and so does a reference whose only rename sits in a sibling project's script (`rename at … not shown to apply to this project`) while that sibling's own reference binds, and a reference to a map one of whose assignments sits under a condition (`alias map in … is not a top-level literal assignment`), that map's unconditional entry binding nothing, while the literal declaration beside them stays declared; every preserved obligation this check carries is unchanged (no behavior change): npm, python and cargo matching, every row's words, the undetermined-blocks marking and the row categories are preserved by the existing tests, by name with unchanged assertions",
+      "candidateSha256": "sha256:912ca65e5719c3202ac1c94a7d6f3ee43fbb9e6d9332c65c54633608cce0c85b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "CHECK_EXIT=0; module-queries: 98 passed; daemon-runtime --lib: 883 passed; 0 failed; 1 ignored; rgr --lib: 1473 passed.",
+        "supportingEvidence": [
+          ".agent-manager/slices/DEPS-GRADLE-CATALOG-1B/admission-3/iter3/DGC-B02.log"
+        ]
+      }
+    },
+    {
+      "checkId": "DGC-B03",
+      "obligationIds": [
+        "RG-REQ-006-L01",
+        "RG-REQ-006-L02",
+        "RG-REQ-006-L03",
+        "RG-REQ-006-L04",
+        "RG-REQ-006-L05",
+        "RG-REQ-006-L08",
+        "RG-REQ-006-L09",
+        "RG-REQ-006-L10",
+        "RG-REQ-006-L11",
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L05",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L07",
+        "RG-REQ-002-L08",
+        "P-DGC1B-04",
+        "P-DGC1B-06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree; fail-closed gate: DEPS-GRADLE-CATALOG-1A's implementation-review record exists at HEAD with result accepted (its scope-attributed declared set is the carrier this slice fills); isolated rmap only (RMAP_STATE_ROOT/RMAP_SOCKET_PATH under the builder's work directory, RMAP_TRANSPORT=stdio, every background pass off); the manager's before-roots read-only",
+        "command": "cargo fmt --all -- --check && ( set -o pipefail; cargo clippy -p repo-graph-repo-index -p repo-graph-indexer -p repo-graph-module-queries -p repo-graph-daemon-runtime -p repo-graph-rgr --all-targets -- -D warnings 2>&1 | tail -3 ) && git -C .. diff --quiet HEAD -- rust/crates/storage rust/crates/classification rust/crates/repo-graph-import-resolver rust/crates/indexer/src/resolver.rs rust/crates/indexer/src/invalidation.rs rust/crates/indexer/src/routing.rs && git -C .. diff --check && test -z \"$(git -C .. status --porcelain -- . ':!.agent-manager' ':!rust/target' | awk '{print $2}' | grep -vxF -f <(printf '%s\\n' rust/crates/repo-index/Cargo.toml rust/Cargo.lock rust/crates/repo-index/src/lib.rs rust/crates/repo-index/src/gradle_catalog.rs rust/crates/repo-index/src/config.rs rust/crates/repo-index/src/manifest_deps.rs rust/crates/indexer/src/orchestrator.rs rust/crates/module-queries/src/deps/reconcile.rs rust/crates/module-queries/src/deps/types.rs rust/crates/module-queries/src/deps/mod.rs rust/crates/module-queries/src/lib.rs rust/crates/module-queries/src/deps/compose.rs rust/crates/daemon-runtime/src/deps_undetermined.rs rust/crates/daemon-runtime/src/deps_coverage.rs rust/crates/daemon-runtime/src/deps_ecosystem_presence.rs rust/crates/daemon-runtime/src/reader_context.rs rust/crates/rgr/src/presentation/deps_list.rs docs/cli/rmap-contracts.md))\" && grep -c 'DEPS-GRADLE-CATALOG-1B' ../docs/cli/rmap-contracts.md | grep -qvx 0 && test \"$(git -C .. diff -U0 HEAD -- rust/crates/indexer/src/orchestrator.rs | grep -E '^[-+]' | grep -vE '^(\\+\\+\\+|---) ' | grep -vcE 'indexer:1\\.[78]\\.0|^[-+]\\s*///')\" -eq 0",
+        "inputs": "fmt; clippy -D warnings over the five touched crates (`--all-targets`); byte-identity of storage, classification, the import-resolver crate and the indexer's resolver, invalidation and routing files; whitespace; the porcelain restricted to the eighteen candidate paths; the CLI contract gained the catalog-alias, segment-matching and unresolved-alias sentences; the orchestrator diff is the version literal (and doc comments) only."
+      },
+      "expected": "exit 0: byte-identity of every file outside the eighteen candidate paths and of the storage, classification and import-resolver crates (no behavior change); the contract states that a catalog alias resolves to its group, that a declared group matches an observed package on a `.`-segment boundary, and that an alias reference the index cannot bind is counted and named with the predicate that failed; every preserved obligation this check carries is unchanged — no behavior change: every resolver stage, the import classifier, every reader other than the deps list marking line, and the daemon's isolation and self-exclusion rules are byte-identical",
+      "candidateSha256": "sha256:912ca65e5719c3202ac1c94a7d6f3ee43fbb9e6d9332c65c54633608cce0c85b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "CHECK_EXIT=0.",
+        "supportingEvidence": [
+          ".agent-manager/slices/DEPS-GRADLE-CATALOG-1B/admission-3/iter3/DGC-B03.log"
+        ]
+      }
+    },
+    {
+      "checkId": "DGC-B04",
+      "obligationIds": [
+        "RG-REQ-006-L13",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L02",
+        "P-DGC1B-03",
+        "P-DGC1B-05",
+        "P-DGC1B-06",
+        "RG-REQ-002-L09",
+        "RG-REQ-002-L10",
+        "RG-REQ-011-L06",
+        "RG-REQ-011-L07"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree; fail-closed gate: DEPS-GRADLE-CATALOG-1A's implementation-review record exists at HEAD with result accepted (its scope-attributed declared set is the carrier this slice fills); isolated rmap only (RMAP_STATE_ROOT/RMAP_SOCKET_PATH under the builder's work directory, RMAP_TRANSPORT=stdio, every background pass off); the manager's before-roots read-only",
+        "command": "bash -eu -o pipefail -c 'export RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off RMAP_SEED_VECTORS=off; L=\"/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases\"; test \"$(git -C \"$L/kafka\" rev-parse --short=7 HEAD)\" = 0dad6a7 && test \"$(git -C \"$L/grpc-java\" rev-parse --short=7 HEAD)\" = f430131 && test \"$(git -C \"$L/spring-petclinic\" rev-parse --short=7 HEAD)\" = edf4db2; cargo build --release -p repo-graph-rgr -p rmapd 2>&1 | tail -1; RM=\"$PWD/target/release/rmap\"; AM=\"/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager\"; C=\"$HOME/repo-graph-retained/audit-v0.20.0/reports/captures\"; B=/private/tmp/DEPS-GRADLE-CATALOG-1B; W=$(mktemp -d /private/tmp/DEPS-GRADLE-CATALOG-1B-run.XXXXXX); for r in kafka grpc-java petclinic; do (cd \"$B-$r-before\" && find . -type f \\( -name \"*.db\" -o -name \"*.db-wal\" -o -name registry.json \\) | sort | xargs shasum -a 256) > \"$W/$r.orig.sha\"; done; idx(){ local r=\"$1\" src=\"$2\"; mkdir -p \"$W/$r-after\"; (cd \"$src\" && RMAP_STATE_ROOT=\"$W/$r-after\" RMAP_SOCKET_PATH=\"$W/$r-after/d.sock\" \"$RM\" index \"$src\" > \"$W/$r-index.out\" 2>&1); }; idx kafka \"$L/kafka\"; idx grpc-java \"$L/grpc-java\"; idx petclinic \"$L/spring-petclinic\"; for r in kafka grpc-java; do python3 \"$AM/scripts/rg-store-diff.py\" \"$B-$r-before\" \"$W/$r-after\" --only files,nodes,edges > \"$W/$r.diff.txt\" 2>&1; grep -qx \"RG-STORE-DIFF PASS\" \"$W/$r.diff.txt\"; done; python3 \"$AM/scripts/rg-store-diff.py\" \"$B-petclinic-before\" \"$W/petclinic-after\" > \"$W/petclinic.diff.txt\" 2>&1; grep -qx \"RG-STORE-DIFF PASS\" \"$W/petclinic.diff.txt\"; python3 - \"$W\" \"$AM/scripts/rg-store-diff.py\" \"$B\" <<\"PY2\"\nimport sqlite3,glob,os,sys,json,importlib.util\nW,RGSD,B=sys.argv[1],sys.argv[2],sys.argv[3]\nsp=importlib.util.spec_from_file_location(\"rgsd\",RGSD); rgsd=importlib.util.module_from_spec(sp); sp.loader.exec_module(rgsd)\ndef conn(root):\n    dbs=glob.glob(root+\"/databases/*.db\"); assert len(dbs)==1,(root,dbs)\n    wal=dbs[0]+\"-wal\"; assert not (os.path.exists(wal) and os.path.getsize(wal)>0),(\"uncheckpointed WAL\",wal)\n    c=sqlite3.connect(\"file:\"+dbs[0]+\"?immutable=1\",uri=True)\n    s=c.execute(\"select snapshot_uid from snapshots where status=\\x27ready\\x27 order by created_at desc limit 1\").fetchone()[0]\n    return c,s\nDECL=\"select f.path, fs.package_dependencies_json from file_signals fs join files f on f.file_uid=fs.file_uid where fs.snapshot_uid=? and f.path like ? and f.path like \\x27%.java\\x27\"\ndef sets(c,s,like):\n    return {p:(tuple(sorted(json.loads(j)[\"names\"])) if j else ()) for p,j in c.execute(DECL,(s,like))}\nFILES=\"select f.path from files f join file_versions v on v.file_uid=f.file_uid where v.snapshot_uid=? and f.path like ? and f.path like \\x27%.java\\x27\"\ndef files(c,s,like):\n    return {p for (p,) in c.execute(FILES,(s,like))}\ndef declared_sets(name,cb,sb,ca,sa,like,groups,n):\n    fb=files(cb,sb,like); fa=files(ca,sa,like)\n    assert fa==fb and len(fa)==n,(name+\" indexed file set moved\",len(fa),len(fb),n)\n    before=sets(cb,sb,like); after=sets(ca,sa,like)\n    assert set(before)<=set(after),(name+\": a file-signal row was lost\",sorted(set(before)-set(after))[:3])\n    assert all(v==() for v in before.values()),name+\" before: a declared set was not empty\"\n    assert set(after)==fa,(name+\": an indexed file has no file-signal row after\",sorted(fa-set(after))[:3])\n    assert all(set(v)==set(groups) for v in after.values()),(name+\": a declared set is not exactly the catalog groups\",[(p,v) for p,v in after.items() if set(v)!=set(groups)][:3])\n    print(name,\"indexed Java files\",len(fa),\"unchanged; each declares exactly the\",len(groups),\"catalog groups; file-signal rows\",len(before),\"->\",len(after),\"(none lost)\")\nDECLARED_BASIS={\"specifier_matches_package_dependency\",\"callee_matches_external_import\",\"receiver_matches_external_import\"}\ndef moves(before,after,prefix):\n    cb,sb=conn(before); ca,sa=conn(after)\n    U0=rgsd.dump(cb,sb,[])[\"unresolved\"]; U1=rgsd.dump(ca,sa,[])[\"unresolved\"]\n    assert set(U0)==set(U1),(\"unresolved row keys moved\",len(set(U0)^set(U1)))\n    moved=0; in_prefix=0\n    for k in U0:\n        if U0[k]==U1[k]: continue\n        b=sorted(U0[k],key=lambda v:(v[0],str(v[3]),str(v[4]))); a=sorted(U1[k],key=lambda v:(v[0],str(v[3]),str(v[4])))\n        assert len(a)==len(b),k\n        for x,y in zip(b,a):\n            if x==y: continue\n            assert (x[0],x[3],x[4])==(y[0],y[3],y[4]),(\"category/metadata/extractor moved\",k,x,y)\n            assert y[1]==\"external_library_candidate\" and y[2] in DECLARED_BASIS and x[1] in (\"unknown\",\"external_library_candidate\"),(\"classification moved other than to a declared-dependency external\",k,x,y)\n            moved+=1; in_prefix+=str(k[0]).startswith(prefix)\n    assert in_prefix>0,(\"no row of \"+prefix+\" moved\",moved)\n    return moved,in_prefix\nprint(\"kafka unresolved rows moved to a declared-dependency basis\",moves(B+\"-kafka-before\",W+\"/kafka-after\",\"clients/src/\"))\nprint(\"grpc-java unresolved rows moved to a declared-dependency basis\",moves(B+\"-grpc-java-before\",W+\"/grpc-java-after\",\"core/src/\"))\nca,sa=conn(W+\"/kafka-after\"); cb,sb=conn(B+\"-kafka-before\")\nK=[\"at.yawk.lz4\",\"biz.aQute.bnd\",\"com.fasterxml.jackson.core\",\"com.fasterxml.jackson.datatype\",\"com.fasterxml.jackson.jakarta.rs\",\"com.github.dasniko\",\"com.github.luben\",\"com.github.spotbugs\",\"com.google.protobuf\",\"io.opentelemetry.proto\",\"net.jqwik\",\"org.bitbucket.b_c\",\"org.bouncycastle\",\"org.junit.jupiter\",\"org.mockito\",\"org.slf4j\",\"org.testcontainers\",\"org.xerial.snappy\"]\nassert len(K)==18\ndeclared_sets(\"kafka clients\",cb,sb,ca,sa,\"clients/src/%\",K,1811)\nca,sa=conn(W+\"/grpc-java-after\"); cb,sb=conn(B+\"-grpc-java-before\")\nG=[\"com.google.android\",\"com.google.code.gson\",\"com.google.errorprone\",\"com.google.guava\",\"com.google.truth\",\"io.perfmark\",\"junit\",\"net.sf.androidscents.signature\",\"org.codehaus.mojo\",\"org.codehaus.mojo.signature\",\"org.mockito\"]\nassert len(G)==11\ndeclared_sets(\"grpc-java core\",cb,sb,ca,sa,\"core/src/%\",G,233)\nca,sa=conn(W+\"/petclinic-after\"); cb,sb=conn(B+\"-petclinic-before\")\nassert sets(ca,sa,\"%\")==sets(cb,sb,\"%\"),\"petclinic declared sets moved\"\nprint(\"petclinic declared sets identical\")\nWQ=\"select u.classification, u.basis_code from unresolved_edges u join nodes s on s.node_uid=u.source_node_uid join files f on f.file_uid=s.file_uid where u.snapshot_uid=? and f.path=? and u.line_start=? and u.type=? and u.target_key=?\"\ndef witness(repo,path,line,typ,target,before,after):\n    got=[]\n    for root in (B+\"-\"+repo+\"-before\",W+\"/\"+repo+\"-after\"):\n        c,s=conn(root); r=c.execute(WQ,(s,path,line,typ,target)).fetchall()\n        assert len(r)==1,(\"witness row not unique\",root,path,line,typ,target,r); got.append(tuple(r[0]))\n    assert got==[before,after],(\"witness moved other than named\",repo,path,line,typ,target,got)\n    print(\"witness\",repo,path+\":\"+str(line),typ,target,got[0],\"->\",got[1])\nUNK=(\"unknown\",\"no_supporting_signal\"); EXT=(\"external_library_candidate\",\"callee_matches_external_import\")\nZS=\"clients/src/main/java/org/apache/kafka/common/compress/ZstdCompression.java\"; CC=\"core/src/main/java/io/grpc/internal/ClientCallImpl.java\"\nwitness(\"kafka\",ZS,29,\"IMPORTS\",\"com.github.luben.zstd.ZstdInputStreamNoFinalizer\",UNK,(\"external_library_candidate\",\"specifier_matches_package_dependency\"))\nwitness(\"kafka\",ZS,97,\"INSTANTIATES\",\"ZstdInputStreamNoFinalizer\",UNK,EXT)\nwitness(\"grpc-java\",CC,53,\"IMPORTS\",\"io.perfmark.PerfMark\",UNK,(\"external_library_candidate\",\"specifier_matches_package_dependency\"))\nwitness(\"grpc-java\",CC,182,\"CALLS\",\"PerfMark.traceTask\",UNK,(\"external_library_candidate\",\"receiver_matches_external_import\"))\nwitness(\"petclinic\",\"src/main/java/org/springframework/samples/petclinic/system/CacheConfiguration.java\",50,\"INSTANTIATES\",\"MutableConfiguration\",EXT,EXT)\nPY2\nrun(){ local root=\"$1\" dir=\"$2\"; shift 2; (cd \"$dir\" && RMAP_STATE_ROOT=\"$W/$root\" RMAP_SOCKET_PATH=\"$W/$root/d.sock\" \"$RM\" \"$@\" 2>/dev/null); }; run kafka-after \"$L/kafka\" deps list > \"$W/kafka-deps.txt\"; grep -A1 -xF \"clients  [build.gradle]\" \"$W/kafka-deps.txt\" | grep -qxF \"  used 26 · no static import found 9 · undeclared 2 (declared set incomplete) · builtins 42\"; grep -qxF \"declared set may be incomplete: 1 dependency block(s) not statically attributed (build.gradle:518) — investigate\" \"$W/kafka-deps.txt\"; if grep -q \"alias reference\" \"$W/kafka-deps.txt\"; then echo \"unexpected alias-reference line in kafka deps list\"; exit 1; fi; run grpc-java-after \"$L/grpc-java\" deps list core > \"$W/grpc-core-deps.txt\"; grep -A1 -xF \"core  [core/build.gradle]\" \"$W/grpc-core-deps.txt\" | grep -qxF \"  used 4 · no static import found 8 · undeclared 1 (declared set incomplete) · builtins 32\"; if grep -q \"alias reference\" \"$W/grpc-core-deps.txt\"; then echo \"unexpected alias-reference line in grpc-java deps list core\"; exit 1; fi; cp -R \"$B-petclinic-before\" \"$W/petclinic-stale\"; python3 - \"$W/petclinic-stale\" <<\"PY3\"\nimport json,sys,glob\nroot=sys.argv[1]; r=json.load(open(root+\"/registry.json\")); db=glob.glob(root+\"/databases/*.db\")[0]\nfor e in r[\"repos\"]: e[\"db_path\"]=db\njson.dump(r,open(root+\"/registry.json\",\"w\"),indent=2)\nPY3\nrun petclinic-stale \"$L/spring-petclinic\" deps list > \"$W/petclinic-stale.txt\"; run petclinic-after \"$L/spring-petclinic\" deps list > \"$W/petclinic-after.txt\"; diff -q \"$W/petclinic-stale.txt\" \"$W/petclinic-after.txt\"; grep -vE \"^(== |warning: --stdio)\" \"$C/dgc-petclinic-deps-list.txt\" > \"$W/petclinic-v020.txt\"; python3 - \"$W\" <<\"PY4\"\nimport sys\nW=sys.argv[1]\nold=[l.rstrip(\"\\n\") for l in open(W+\"/petclinic-v020.txt\")]; new=[l.rstrip(\"\\n\") for l in open(W+\"/petclinic-after.txt\")]\nassert len(old)==len(new),(\"line count moved\",len(old),len(new))\nr=old.index(\".  [build.gradle]\")+1\nassert old[r]==\"  used 2 · no static import found 10 · undeclared 6 · builtins 7\",old[r]\nassert new[r]==\"  used 7 · no static import found 9 · undeclared 1 · builtins 7\",new[r]\nmoved=[i for i,(o,n) in enumerate(zip(old,new)) if o!=n]\nassert r in moved and set(moved)<={r,r+1},(\"lines other than the row and its e.g. line moved\",moved,r)\nassert new[r+1].startswith(\"  e.g. used: \"),new[r+1]\nprint(\"petclinic: only the module row and its e.g. line moved\")\nPY4\npython3 - \"$W\" <<\"PY5\"\nimport os,sys\nW=sys.argv[1]\nB=\"\\n\".join([\"plugins { id \\\"java\\\" }\",\"dependencies {\",\"  implementation \\\"org.apache.commons:commons-lang3:3.14.0\\\"\",\"  implementation libs.slf\",\"  implementation libs.nope\",\"}\",\"\"])\nJ=\"package app;\\nimport org.apache.commons.lang3.StringUtils;\\nimport org.slf4j.LoggerFactory;\\npublic class A {\\n  boolean b() { LoggerFactory.getLogger(A.class); return StringUtils.isBlank(\\\"\\\"); }\\n}\\n\"\nfor fx,toml in ((\"fx-missing\",\"[libraries]\\nslf = \\\"org.slf4j:slf4j-api:2.0.9\\\"\\n\"),(\"fx-unreadable\",\"[libraries]\\nslf = { module = \\n\")):\n    d=os.path.join(W,fx); os.makedirs(d+\"/gradle\"); os.makedirs(d+\"/src/main/java/app\")\n    open(d+\"/settings.gradle\",\"w\").write(\"rootProject.name = \\\"%s\\\"\\n\"%fx)\n    open(d+\"/gradle/libs.versions.toml\",\"w\").write(toml)\n    open(d+\"/build.gradle\",\"w\").write(B)\n    open(d+\"/src/main/java/app/A.java\",\"w\").write(J)\nPY5\nidx fx-missing \"$W/fx-missing\"; idx fx-unreadable \"$W/fx-unreadable\"; for f in fx-missing fx-unreadable; do run $f-after \"$W/$f\" deps list --json > \"$W/$f.json\"; run $f-after \"$W/$f\" deps list > \"$W/$f.txt\"; done; python3 - \"$W\" <<\"PY6\"\nimport sqlite3,glob,json,sys,os\nW=sys.argv[1]\nDECL={\"declared_and_used\",\"declared_but_unobserved\",\"type_only_import\"}\ndef stored(fx):\n    dbs=glob.glob(W+\"/\"+fx+\"-after/databases/*.db\"); assert len(dbs)==1,dbs\n    wal=dbs[0]+\"-wal\"; assert not (os.path.exists(wal) and os.path.getsize(wal)>0),(\"uncheckpointed WAL\",wal)\n    c=sqlite3.connect(\"file:\"+dbs[0]+\"?immutable=1\",uri=True)\n    j=json.loads(c.execute(\"select extraction_diagnostics_json from snapshots where status=\\x27ready\\x27 order by created_at desc limit 1\").fetchone()[0])\n    recs=[m for m in j[\"deps_manifests\"] if m[\"path\"]==\"build.gradle\"]; assert len(recs)==1,j[\"deps_manifests\"]\n    return recs[0].get(\"unresolved_alias_refs\")\ndef env(fx):\n    return json.load(open(W+\"/\"+fx+\".json\"))\ndef human(fx):\n    return open(W+\"/\"+fx+\".txt\").read().splitlines()\ndef declared(e,group):\n    return any(x[\"category\"] in DECL and (x[\"package\"]==group or x[\"package\"].startswith(group+\".\")) for r in e[\"results\"] for x in r[\"entries\"])\ns=stored(\"fx-missing\"); assert s=={\"count\":1,\"first\":\"build.gradle:5 libs.nope: no catalog entry\"},(\"stored\",s)\ne=env(\"fx-missing\"); line=\"declared set may be incomplete: 1 alias reference(s) could not be resolved (build.gradle:5 libs.nope: no catalog entry) — investigate\"\nassert e.get(\"declared_unresolved_alias_refs\")==1 and e.get(\"declared_unresolved_alias_note\")==line,(e.get(\"declared_unresolved_alias_refs\"),e.get(\"declared_unresolved_alias_note\"))\nassert line in human(\"fx-missing\"),\"human line\"\nassert declared(e,\"org.apache.commons\") and declared(e,\"org.slf4j\"),\"fx-missing: a resolved alias or the literal is not declared\"\ns=stored(\"fx-unreadable\"); pre=\"build.gradle:4 libs.slf: catalog gradle/libs.versions.toml could not be read (\"\nassert s and s[\"count\"]==2 and s[\"first\"].startswith(pre) and s[\"first\"].endswith(\")\"),(\"stored\",s)\ne=env(\"fx-unreadable\"); note=e.get(\"declared_unresolved_alias_note\")\nassert e.get(\"declared_unresolved_alias_refs\")==2 and note==\"declared set may be incomplete: 2 alias reference(s) could not be resolved (\"+s[\"first\"]+\") — investigate\",note\nassert note in human(\"fx-unreadable\"),\"human line\"\nassert declared(e,\"org.apache.commons\") and not declared(e,\"org.slf4j\"),\"fx-unreadable: the literal must stay declared and no alias may bind\"\nprint(\"fixtures: stored count and first, JSON keys and the human line for both first forms; the literal declaration stays declared\")\nPY6\nfor r in kafka grpc-java petclinic; do (cd \"$B-$r-before\" && find . -type f \\( -name \"*.db\" -o -name \"*.db-wal\" -o -name registry.json \\) | sort | xargs shasum -a 256) | diff -q - \"$W/$r.orig.sha\"; done; echo DGC-B04-OK; echo \"$W\"' ",
+        "inputs": "The outward proof on three isolated fresh indexes (kafka 0dad6a7, grpc-java f430131, spring-petclinic edf4db2) against the manager's before-roots `/private/tmp/DEPS-GRADLE-CATALOG-1B-{kafka,grpc-java,petclinic}-before` (byte copies of the retained v0.20.0 stores `34f0d9bb9083641e.db` sha256 408b7801…, `25f1c9effb4fcd35.db` b8103b94…, `b7fa63af94380470.db` eb6f94f8…, one registry entry each, no WAL; durable copies `~/repo-graph-retained/DEPS-GRADLE-CATALOG-1B-before/`; never served in place — the petclinic stale text is served from a builder-owned copy with its `db_path` repointed). (i) `rg-store-diff.py --only files,nodes,edges` PASS on kafka and grpc-java and a full PASS (unresolved included) on petclinic — `rg-store-diff` compares NORMALIZED extracted fact sets (snapshot and repo ids, timestamps and extractor versions normalized; `rg-store-diff.py:80`), not database bytes — the before-stores are indexer:1.6.0; the changes since v0.20.0 (TS-ALIAS-RESOLUTION-1, IMPORTS-UNRESOLVED-REMAINDER-1) touch TypeScript resolution and rendering only, so a Java/Python repository's rows are expected identical (INFERRED from `git diff v0.20.0 HEAD -- rust`); (ii) stored unresolved rows (rg-store-diff's own normalised dump, imported): the same row keys; every row that moved keeps its category, metadata and extractor and moves to `external_library_candidate` with a declared-dependency basis (`specifier_matches_package_dependency` / `callee_matches_external_import` / `receiver_matches_external_import`) from `unknown` or from a runtime-match external — the unchanged index-time classifier (`unresolved_classifier.rs:551`, already `.`-segment) reading the larger declared sets — and at least one row of `clients/src/` (kafka) and `core/src/` (grpc-java) moved (simulated unknown → external flips: 23,811 kafka `clients` rows, 6,172 grpc-java `core` rows; admission 1's candidate moved 24,133 and 6,172, BUILDER-EXECUTED supplementary run); (iii) indexed files and stored declared sets (OC-1): the indexed Java files of kafka `clients/src/` (the `files` rows of the ready snapshot, joined through `file_versions`) are the same 1,811 before and after, and grpc-java `core/src/`'s the same 233; a `file_signals` row is written for a file that gains a declared set (1,543 → 1,811 and 219 → 233 rows; MEASURED on the before-stores 2026-10-04 and in admission 1's run), so no signal row may be lost and every indexed file must carry a row after; on that row (`package_dependencies_json` `names`) every kafka `clients/src/**/*.java` was EMPTY before (MEASURED: NULL) and declares after exactly the 18 groups of the 19 `libs.` aliases of `build.gradle:1868 project(':clients')` (`at.yawk.lz4`, `com.github.luben`, `org.slf4j`, `org.xerial.snappy`, …); every grpc-java `core/src/**/*.java` was EMPTY before and declares after exactly the 11 groups of `core/build.gradle`'s 12 distinct `libraries.` aliases; petclinic's declared sets identical file by file; (iv) the human rows, RE-SIMULATED on the before-stores with the engine's rules (section 1; the simulation reproduces the v0.20.0 captures of kafka `clients` and petclinic `.` exactly): kafka `clients  [build.gradle]` / `  used 26 · no static import found 9 · undeclared 2 (declared set incomplete) · builtins 42` (v0.20.0 capture: `used 0 · no static import found 0 · undeclared 3 (declared set incomplete) · builtins 42`); grpc-java `deps list core` → `core  [core/build.gradle]` / `  used 4 · no static import found 8 · undeclared 1 (declared set incomplete) · builtins 32` (before, simulated: `used 0 · no static import found 0 · undeclared 1 (declared set incomplete) · builtins 32`; the default view rolls `core` into `(+30 more modules …)`, so the module filter is used); the kafka undetermined line unchanged; no alias-reference line on either (every alias in a direct block resolves — MEASURED: kafka 98 of 98, `scalaLogging` by the alias-map entry rule of D-DGC1B-ARTIFACT-INTERPOLATION-1, grpc-java 71 of 71), asserted with `if grep -q …; then …; exit 1; fi` (OC-2: a negated `! grep` does not stop a `bash -e` script); (v) petclinic: the candidate's text on the stale copy equals its text on the fresh index; against the v0.20.0 capture (`dgc-petclinic-deps-list.txt`, the `== ` lines and the stderr warning removed) only the module row and its `e.g.` line move, the row from `  used 2 · no static import found 10 · undeclared 6 · builtins 7` to `  used 7 · no static import found 9 · undeclared 1 · builtins 7` (the segment rule alone: `javax.cache` matches `javax.cache.configuration` on a `.`-segment boundary, `org.springframework.boot` matches `org.springframework.boot.builder`, …); (vi) the before-roots untouched (digests); (vii) the end-to-end unresolved-alias proof (review finding F-DGC1B-02): the command writes two fixture repositories into its work directory — `fx-missing` and `fx-unreadable`, the files of DGC-B02's two end-to-end tests — indexes each with the candidate binary into its own isolated root, and asserts the STORED record (`snapshots.extraction_diagnostics_json` → `deps_manifests[]` record `build.gradle` → `unresolved_alias_refs`, the stored shape of 1A's `undetermined_blocks`, MEASURED on the kafka before-store: `{\"count\": 1, \"first\": \"build.gradle:518\"}`) — `{\"count\":1,\"first\":\"build.gradle:5 libs.nope: no catalog entry\"}` and count 2 with `first` starting `build.gradle:4 libs.slf: catalog gradle/libs.versions.toml could not be read (` — then `deps list --json`'s `declared_unresolved_alias_refs` / `declared_unresolved_alias_note` and the same line in `deps list`'s human output, and that the literal `org.apache.commons` stays under a declared category in both while `org.slf4j` is declared only where its catalog was read. (viii) the stored-row witnesses of section 6 (OC-3), each one row by file, line, type and target on both stores, classification and basis before → after: kafka `ZstdCompression.java:29` IMPORTS `com.github.luben.zstd.ZstdInputStreamNoFinalizer` `unknown`/`no_supporting_signal` → `external_library_candidate`/`specifier_matches_package_dependency` and `:97` INSTANTIATES `ZstdInputStreamNoFinalizer` → `callee_matches_external_import`; grpc-java `ClientCallImpl.java:53` IMPORTS `io.perfmark.PerfMark` → `specifier_matches_package_dependency` and `:182` CALLS `PerfMark.traceTask` → `receiver_matches_external_import`; petclinic `CacheConfiguration.java:50` INSTANTIATES `MutableConfiguration` `external_library_candidate`/`callee_matches_external_import` on both (the before values MEASURED 2026-10-04; the after values are the classifier's arms, `unresolved_classifier.rs:192-194` and `external_basis_for` :455-461, reading the larger declared set). The three row totals stay literals. The command prints the work directory last; the builder deletes it after recording the evidence (section 5)."
+      },
+      "expected": "exit 0 and DGC-B04-OK: normalized files, nodes and edges identical on all three repositories and petclinic's normalized extracted fact sets identical, unresolved rows included (no behavior change there); kafka's `clients` and grpc-java's `core` keep their indexed Java files (1,811 and 233), lose no file-signal row, and every one of those files declares exactly its catalog groups; the stored classifications move only to a declared-dependency external and the five named witnesses read as section 6 states; the two rows equal the re-simulated literals and no alias-reference line appears where every alias resolves; petclinic's text moves only in its module row and that row's `e.g.` line; on the two fixture repositories the stored build record, the `deps list` JSON keys and the human line carry the unresolved-alias count with the `no catalog entry` and the `could not be read` reason, and the literal declaration stays declared; the daemon's isolation and self-exclusion rules remain as at HEAD (RG-REQ-011-L06/L07: isolated state roots only, the operator's registry never read) and the before-roots are untouched",
+      "candidateSha256": "sha256:912ca65e5719c3202ac1c94a7d6f3ee43fbb9e6d9332c65c54633608cce0c85b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "DGC-B04-OK; CHECK_EXIT=0 (02:30:20Z → 02:33:30Z).",
+        "supportingEvidence": [
+          ".agent-manager/slices/DEPS-GRADLE-CATALOG-1B/admission-3/iter3/DGC-B04.log",
+          " .agent-manager/slices/DEPS-GRADLE-CATALOG-1B/admission-3/iter3/b04-captures/"
+        ]
+      }
+    },
+    {
+      "checkId": "DGC-B05",
+      "obligationIds": [
+        "RG-REQ-006-L13",
+        "RG-REQ-002-L11",
+        "RG-REQ-002-L01",
+        "RG-REQ-006-L07",
+        "P-DGC1B-01",
+        "P-DGC1B-02"
+      ],
+      "owner": "reviewer",
+      "method": {
+        "kind": "inspection",
+        "subject": "git diff HEAD -- the eighteen candidate paths, read on the candidate tree",
+        "criterion": "(1) ONE alias grammar: an accessor token `libs.<alias>` / `libraries.<alias>` is an alias reference only in a configuration argument position of a DIRECT `dependencies` block — outside string literals, at the block's own brace depth, in the argument list of the statement's leading word (unparenthesised, in the verb's own parentheses, or in `platform(…)` / `enforcedPlatform(…)` there), continuation lines included — mined in the same line pass that mines coordinates (`ScopeSets::mine`, config.rs:549, beside `extract_gradle_coordinates`); a token inside another call (`because(…)`, `files(…)`), inside a nested closure, inside a string, in an assigning statement or as the statement's leading word is not; counted blocks are not mined; a script or `project(':p')` block whose only facts are alias references is not empty (the `None` and `projects`-presence rules of `extract_gradle_dependencies` count alias references); the alias key is compared after `-`/`_` → `.`; the catalog sources are exactly the TOML `[libraries]` table of `<settings dir>/gradle/libs.versions.toml` (string and `module` table forms) and the `libs += [ alias: \"group:artifact…\" ]` / `libs = [ … ]` map entries of a Groovy script named by an `apply from:`, a source for the projects that statement applies to, readable only under the closed grammar of D-DGC1B-MAP-GRAMMAR-1 — every statement of that script that assigns to the map is a literal `libs = [ … ]` / `libs += [ … ]` at its top level or directly inside an unconditional top-level `ext { }`, evaluated in statement order (`=` replaces the map, `+=` adds entries, a key added again takes its later value); any other assignment form anywhere in the script makes the whole map unreadable, binds none of its entries and counts every reference that depends on it; an `apply from:` inside an applied script applies to no project (its script is read for keys only); a map entry binds to its group when the group segment (before the first `:`) passes `is_coordinate_segment` (config.rs:838) and the artifact text is non-empty, whatever interpolation the artifact or version carries; an entry whose group fails that test is no catalog entry (D-DGC1B-ARTIFACT-INTERPOLATION-1); `coordinate_group` (config.rs:825), the 1A literal-coordinate reader, is unchanged; `libraries = libs` resolves `libraries.` through `libs` for the projects it applies to; a rename or `apply from:` applies to project P only where its statement's scope reaches P — recorded per statement with its line and enclosing scope by the 1A brace walk (`ext { }` frames transparent), never a script-wide or build-wide boolean: the root script's top level or `buildscript { }` reaches the whole build; directly inside a script's top-level `allprojects` / `subprojects` / `project('<path>')` block, the projects `GradleBuild::declared_for` attributes that scope to; a non-root script's top level, its own project; anywhere else, no project (D-DGC1B-ALIAS-APPLICABILITY-1); nothing else is read (no `[bundles]`, no `[plugins]`, no `{ group, name }` tables, no custom `versionCatalogs {}` names — stated as limits; a statement at a non-root script's top level reaches its own project only, so a descendant's reference that relies on it is counted, never bound — a stated limit); the catalog reader lives in the new crate-private `repo-index/src/gradle_catalog.rs` (config.rs and manifest_deps.rs are over the 500-line guardrail); (2) ONE binding rule: a reference binds for a project P its scope reaches only when every catalog source that applies to P was read, exactly one group among them answers its accessor (a `libraries.` accessor through a rename that applies to P), every Groovy alias map that applies to P is readable under the grammar, and no `apply from:` not shown to apply to P names a script that could not be read or whose map has the accessor's key — a map the grammar cannot read has every key; every other reference is COUNTED on the build's record (a site once) and NEVER a guessed group; a source that applies to P and cannot be read counts every reference of the projects it applies to and binds none; a reference that depends on a rename or `apply from:` not shown to apply to its project, or on a map the grammar cannot read, is counted, never bound through it; an accessor two keys answer with different groups binds to neither; `first` names the first counted site by path, then line, and the predicate that failed for it in one of the five forms of section 2.2, each phrase restating the test at the binding site in `gradle_catalog.rs`; the marking is absent when zero, serialized only when present, malformed → the whole decode fails (D-DGC1B-ALIAS-MARKING-1 as corrected 2026-10-03); (3) matching for the `java` ecosystem only, at BOTH query-time sites (reconcile.rs:122 and the declared-but-unobserved loop :171-196, its test at :176): declared group == observed package OR package starts with group + `.` — the predicate the index-time classifier already applies (`unresolved_classifier.rs:575-597`); npm/python/cargo unchanged; no fuzzy rule; (4) the 1A scoping is untouched: an alias joins exactly the scope of its line (own / allprojects / subprojects / project path); blocks the index cannot evaluate stay counted, never declared; (5) `INDEXER_VERSION` moves by one minor; (6) `toml` is a direct dependency of repo-index and no new crate enters the workspace (D-DGC1B-TOML-1); no new crate boundary; the new record type `UnresolvedAliasRefs {count, first}` crosses the existing provenance channel only (re-exported through module-queries `deps/mod.rs` and `lib.rs`, the `UndeterminedBlocks` precedent); the daemon attaches the two keys inside `attach_declared_undetermined` and `dispatch.rs` is unchanged; (7) the renderer prints `declared set may be incomplete: N alias reference(s) could not be resolved (<first>) — investigate` once, after the undetermined-blocks line, and every row's words are unchanged (only counts move); (8) the contract text restates each predicate in the reader's words (D-AGENT-USEFULNESS-FRAME-1) — `used` = an observed package that a declared group matches on a `.`-segment boundary; `no static import found` = a declared group that matches no observed package; `undeclared` = an observed package that no declared group matches — names the group-is-not-a-package-prefix limit (those imports stay unclassified at index time and are not counted on the row) and the five `{first}` reasons; (9) no `unwrap_or(0)`, `.ok()` swallow or default that turns a failed catalog read into a parsed empty set.",
+        "inputs": "The candidate's diff of the eighteen paths; SLICE_DOC sections 2.1–2.3; D-GRADLE-DECLARED-1, D-DGC1B-SCOPE-1, D-DGC1B-TOML-1, D-DGC1B-ALIAS-MARKING-1, D-DGC1B-ARTIFACT-INTERPOLATION-1, D-DGC1B-ALIAS-APPLICABILITY-1, D-DGC1B-MAP-GRAMMAR-1; RG-REQ-006-L13's verification criterion."
+      },
+      "expected": "every criterion holds on the candidate; every preserved obligation this check carries is unchanged (no behavior change): scoping, attribution, the undetermined marking and every non-Java matching rule are preserved",
+      "candidateSha256": "sha256:912ca65e5719c3202ac1c94a7d6f3ee43fbb9e6d9332c65c54633608cce0c85b",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "not-run",
+        "reason": "It is the reviewer's inspection."
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "docs/cli/rmap-contracts.md",
+      "obligationIds": [
+        "RG-REQ-006-L13",
+        "RG-REQ-002-L11"
+      ],
+      "summary": "The map-grammar paragraph and description of the `alias map … is not a top-level literal assignment` form; serves RG-REQ-006-L13 and RG-REQ-002-L11."
+    },
+    {
+      "path": "rust/Cargo.lock",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/deps_coverage.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/deps_ecosystem_presence.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/deps_undetermined.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/reader_context.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/indexer/src/orchestrator.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/module-queries/src/deps/compose.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/module-queries/src/deps/mod.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/module-queries/src/deps/reconcile.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/module-queries/src/deps/types.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/module-queries/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/repo-index/Cargo.toml",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/repo-index/src/config.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/repo-index/src/gradle_catalog.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13",
+        "RG-REQ-006-L07",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L11",
+        "P-DGC1B-03"
+      ],
+      "summary": "Adds rendered_as_text and TEXT_RENDERING_CALLS, the quoted-property case in string_names_map_key, three-class doc comment and honest NotLiteral docs, and fixtures."
+    },
+    {
+      "path": "rust/crates/repo-index/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/repo-index/src/manifest_deps.rs",
+      "obligationIds": [
+        "RG-REQ-006-L13"
+      ],
+      "summary": "not stated by the builder; the report says the other 15 paths are unchanged in this revision."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/deps_list.rs",
+      "obligationIds": [
+        "RG-REQ-002-L11",
+        "P-DGC1B-03"
+      ],
+      "summary": "The end-to-end fixtures; serves RG-REQ-002-L11 and P-DGC1B-03."
+    }
+  ],
+  "completedAt": "2026-10-04T02:34:18.912Z",
+  "limitations": [
+    "Text rendering is trusted only for the script's own unqualified print / println. logger.info(libs), libs.size(), libs.each { } and a chained libs.a.b still count as uses the reader cannot determine. Those cases are left without a binding, but nothing false is reported. A script that redefines println, or builds the map name dynamically (ext[\"li\" + \"bs\"]), cannot be seen statically.",
+    "The reason wording is unchanged. If the reviewer reads `is not a top-level literal assignment` as false for a use whose effect cannot be determined, a new phrase is needed. A new phrase is outside the slice's vocabulary, so per CLAUDE.md that would be a STOP for the human, not a builder edit.",
+    "This is the fourth finding at the edge of D-DGC1B-MAP-GRAMMAR-1. The grammar itself is unchanged, but the record says a further instance of this class goes to the human.",
+    "Not run (operator's gate): cargo test --workspace and the dogfood.",
+    "The report states that cargo test --workspace and the dogfood were not run (operator's gate)."
+  ],
+  "report": "# DEPS-GRADLE-CATALOG-1B — admission 3, revision 3 (answers review-2: F2-READ and F3-QUOTED-WRITE)\n\nBoth findings are fixed, and all four builder checks pass on the final tree. I ran each one verbatim, in the foreground, in this cycle. DGC-B04 printed `DGC-B04-OK`, and the field rows are the same as in the earlier cycles. No stop condition was hit, and nothing is committed.\n\nEvidence is in `.agent-manager/slices/DEPS-GRADLE-CATALOG-1B/admission-3/iter3/`. The candidate is saved as `admission-3/candidate-iter3.patch`.\n\n## The defects and the one rule that closes the class\n\nThe class is how the reader classifies each use of the map name. F1, F2 and F2-READ/F3 were all errors at one edge of that classification.\n\n- **F2-READ:** `println libs` was counted, although it only renders the map as text.\n- **F3:** `ext.\"libs\" = …` was not seen as naming the map. An earlier admitted map then stayed readable with its old group, so the old group was reported as declared.\n\n**The rule** (`gradle_catalog.rs`, `evaluate_alias_map`). Every use of the map name is exactly one of three things:\n\n1. **An admitted literal statement.** It is evaluated in order.\n2. **Proven not to write the map.** It is ignored. There are four kinds:\n   - a key label `libs:` in another map or call;\n   - one entry read that ends the expression, behind any receiver. This now includes `ext.\"libs\".zstd`.\n   - the map rendered as text (new: `rendered_as_text`). This is the whole of a `\"${libs}\"` interpolation, a `\"$libs\"` reference, or the sole argument of the script's own unqualified `print` / `println`.\n   - a string literal `\"libs\"` that does not name the map as a property key.\n3. **Anything else** — a write, or a use whose effect the reader cannot determine — makes the whole map unreadable.\n\nA quoted property name after a navigation (`ext.\"libs\"`, `ext.'libs'`, `ext?.\"libs\"`, `ext.@'libs'`) now names the map as a property key, the same way a subscript key does (`string_names_map_key`).\n\n**The reason shown.** I kept the record's wording, `alias map in {script}:{line} is not a top-level literal assignment`. The doc comments and the CLI contract no longer say that every counted use assigns. They now say that the note names the first statement that uses the map, is not an admitted literal assignment, and is not proven not to write it. They also say explicitly that the note does not claim the statement assigns.\n\n## Tests\n\nFixtures were added to existing named tests; there are no new test names.\n\n**Reader tests (repo-index):**\n- **The kafka-shape test** adds `println libs`, `print(libs)`, `println \"${libs}\"` and `println ext.\"libs\".zstd`. It still binds `com.github.luben` and counts nothing.\n- **The \"any other statement form\" test** adds `ext.\"libs\" = […]`, `ext.'libs' = […]`, `project.ext?.\"libs\".put(…)`, `ext.\"libs\".a = …` and `ext.@'libs' = […]`. It also adds `obj.println(libs)` and `println libs, other`, to show that only the script's own `print` / `println` is trusted. Each form counts the reference, and no group (neither `com.acme` nor `com.other`) is declared.\n\n**End-to-end tests through the daemon (rgr):**\n- **`deps_list_alias_with_no_catalog_entry_…`:** the Groovy-map fixture adds `println libs` and `println \"${libs}\"`. `org.slf4j` is declared, and the only note is `build.gradle:5 libs.nope: no catalog entry`.\n- **`deps_list_alias_whose_map_is_not_a_top_level_literal_assignment_…`:** adds the `ext.\"libs\" = [ slf: \"com.other:x:1\" ]` and `ext.'libs' = …` fixtures. Neither `org.slf4j` nor `com.other` is declared, and the JSON keys and the human line name `gradle/deps.gradle:3`.\n\n**Red first (EXECUTED), before the fix:**\n- `iter3/red-repo-index.log`: the kafka-shape test fails with `left: [] right: [\"com.github.luben\"]`. The other-form test fails with `ext.\"libs\" = [ a: \"com.other:a:1\" ]: [\"com.acme\"]`.\n- `iter3/red-rgr.log`: both end-to-end tests fail.\n\n## Checks (EXECUTED; logs in `admission-3/iter3/`)\n\n| Check | Outcome | Log, and the line that proves it |\n|---|---|---|\n| DGC-B01 | **passed** | `DGC-B01.log` `CHECK_EXIT=0`. `dgc1b-01.txt`: `test result: ok. 323 passed; 0 failed`. 520 tests listed (floor 520). |\n| DGC-B02 | **passed** | `DGC-B02.log` `CHECK_EXIT=0`. module-queries: `98 passed`. daemon-runtime `--lib`: `883 passed; 0 failed; 1 ignored`. rgr `--lib`: `1473 passed`. |\n| DGC-B03 | **passed** | `DGC-B03.log` `CHECK_EXIT=0`. |\n| DGC-B04 | **passed** | `DGC-B04.log`: `DGC-B04-OK`, `CHECK_EXIT=0` (02:30:20Z → 02:33:30Z). Captures are in `iter3/b04-captures/`. |\n| DGC-B05 | not-run | It is the reviewer's inspection. |\n\n- **First DGC-B03 run failed** (`DGC-B03.run1-failed.log`): clippy flagged `doc_lazy_continuation` in my new doc comment. I fixed it with a blank doc line and re-ran B01 through B03, all passing.\n- **Commands:** I re-extracted them from the pinned slice document (sha256 `cc275e92…`) into `iter3/*.cmd`. They are byte-identical to the saved ones.\n- **Reviewed-boundary witness:** `consolidation_witness` passed (`15 passed`, `iter3/consolidation-witness.log`), and its manifest is unchanged.\n- **Release build:** `BUILD_EXIT=0` (`iter3/release-build.log`).\n\n## Field rows (EXECUTED, DGC-B04; unchanged from earlier cycles)\n\n| Row | Before | After |\n|---|---|---|\n| kafka `clients  [build.gradle]` | `used 0 · no static import found 0 · undeclared 3 (declared set incomplete) · builtins 42` | `used 26 · no static import found 9 · undeclared 2 (declared set incomplete) · builtins 42` |\n| grpc-java `core  [core/build.gradle]` (`deps list core`) | `used 0 · no static import found 0 · undeclared 1 (declared set incomplete) · builtins 32` | `used 4 · no static import found 8 · undeclared 1 (declared set incomplete) · builtins 32` |\n| petclinic `.  [build.gradle]` | `used 2 · no static import found 10 · undeclared 6 · builtins 7` | `used 7 · no static import found 9 · undeclared 1 · builtins 7` |\n\n- No alias line appears on kafka or grpc-java `core`. kafka's undetermined-blocks line (`build.gradle:518`) is unchanged.\n- Stored rows moved to a declared-dependency basis: kafka 24,133 and grpc-java 6,172.\n- The indexed Java file sets are unchanged (1,811 and 233), and every file stores exactly its 18 or 11 catalog groups.\n- The five §6 witness rows read as the slice states.\n- Both fixture `first` forms appear in storage, in the JSON and in the human line:\n  - `build.gradle:5 libs.nope: no catalog entry`\n  - `build.gradle:4 libs.slf: catalog gradle/libs.versions.toml could not be read (TOML parse error at line 2, column 18)`\n- A grep of every Gradle script in the three checkouts finds no newly counted or newly exempt form, so no field row could move.\n\n## Code under analysis (quoted from the checkouts)\n\n**kafka**\n- `build.gradle:1868 project(':clients') {` with `:1879 implementation libs.zstd`, and `gradle/dependencies.gradle:247 zstd: \"com.github.luben:zstd-jni:$versions.zstd\",`.\n- `ZstdCompression.java:29 import com.github.luben.zstd.ZstdInputStreamNoFinalizer;` moved from `unknown/no_supporting_signal` to `external_library_candidate/specifier_matches_package_dependency`.\n- `:97` (INSTANTIATES) now reads `callee_matches_external_import`.\n\n**grpc-java**\n- `core/build.gradle:28 libraries.perfmark.api` with `gradle/libs.versions.toml:129 perfmark-api = \"io.perfmark:perfmark-api:0.27.0\"`.\n- `ClientCallImpl.java:53 import io.perfmark.PerfMark;` now reads `specifier_matches_package_dependency`.\n- `:182` (CALLS) now reads `receiver_matches_external_import`.\n\n**Residual class:** `Lz4BlockOutputStream.java:22 import net.jpountz.lz4.LZ4Compressor;` stays uncounted, and `at.yawk.lz4` reads `no static import found`.\n\n## Changed paths in this revision\n\nAll are within the 18 allocated paths:\n- **`rust/crates/repo-index/src/gradle_catalog.rs`:** adds `rendered_as_text` and `TEXT_RENDERING_CALLS`, the quoted-property case in `string_names_map_key`, the three-class doc comment and the fixtures. Serves RG-REQ-006-L13 and L07, RG-REQ-002-L01 and L11, and P-DGC1B-03.\n- **`rust/crates/rgr/src/presentation/deps_list.rs`:** the end-to-end fixtures. Serves RG-REQ-002-L11 and P-DGC1B-03.\n- **`docs/cli/rmap-contracts.md`:** the map-grammar paragraph and the description of the `alias map … is not a top-level literal assignment` form. Serves RG-REQ-006-L13 and RG-REQ-002-L11.\n\nThe other 15 paths are unchanged in this revision.\n\n## Limitations\n\n- **Text rendering is trusted only for the script's own unqualified `print` / `println`.** `logger.info(libs)`, `libs.size()`, `libs.each { }` and a chained `libs.a.b` still count as uses the reader cannot determine. Those cases are left without a binding, but nothing false is reported. A script that redefines `println`, or builds the map name dynamically (`ext[\"li\" + \"bs\"]`), cannot be seen statically.\n- **The reason wording is unchanged.** If the reviewer reads `is not a top-level literal assignment` as false for a use whose effect cannot be determined, a new phrase is needed. A new phrase is outside the slice's vocabulary, so per CLAUDE.md that would be a STOP for the human, not a builder edit.\n- **This is the fourth finding at the edge of D-DGC1B-MAP-GRAMMAR-1.** The grammar itself is unchanged, but the record says a further instance of this class goes to the human.\n- **Not run (operator's gate):** `cargo test --workspace` and the dogfood.\n\n**Cleanup:** I deleted the B04 work directory `/private/tmp/DEPS-GRADLE-CATALOG-1B-run.I98ZZn`. The manager's three before-roots are still present, and B04's digest check shows them unchanged."
+}

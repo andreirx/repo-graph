@@ -718,6 +718,103 @@ different selector domain).
 Output includes `diagnostics` object reporting derivation counts so callers
 can detect degraded graphs where ownership gaps suppress violations.
 
+### `deps list` — Gradle catalog aliases and Java group matching (DEPS-GRADLE-CATALOG-1B)
+
+RG-REQ-006-L13. Index time (stored; `indexer:1.8.0` re-indexes every Gradle store):
+
+- **Alias reference.** A token `libs.<alias>` or `libraries.<alias>` is an alias reference when it
+  stands in a configuration argument position of a direct `dependencies` block: outside every
+  string literal and comment, at the block's own brace depth (never inside a closure nested in it),
+  in the argument list of the statement's leading word — unparenthesised, inside that word's own
+  parentheses, or inside `platform(…)` / `enforcedPlatform(…)` there — continuation lines included.
+  A token inside any other call (`because(…)`, `files(…)`), in a statement that assigns, or that is
+  itself the statement's leading word is not a declaration.
+- **Catalog sources of a build** (the build's directory is its settings directory, or the
+  script's directory for a single-script build): the `[libraries]` table of
+  `<build dir>/gradle/libs.versions.toml` (a string `"group:artifact[:version]"` or a table with
+  `module = "group:artifact"`), a source for the whole build; and the `libs` map of every script
+  an `apply from:` statement of the build's scripts names, a source for the projects that
+  statement applies to. A map entry `alias: "<group>:<artifact>[:…]"` binds to `<group>` when the
+  group (the text before the first `:`) is a literal coordinate segment and the artifact is
+  non-empty, whatever interpolation the artifact or version carries; an interpolated group is no
+  catalog entry. `libraries = libs` makes `libraries.` resolve through `libs` for the projects it
+  applies to. A catalog key's `-` and `_` read as `.`.
+- **Statement applicability.** A `libraries = libs` or `apply from:` statement applies to a
+  project only where its scope reaches it (`ext { }` blocks are transparent): the root script's
+  top level or `buildscript { }` → the whole build; directly inside a top-level `allprojects` /
+  `subprojects` / `project('<path>')` block → the projects that scope declares for; a non-root
+  script's top level → that script's project; anywhere else (a condition, a callback, a task or
+  any other closure) → no project.
+- **Map grammar.** A `libs` map is read only when every statement of its script that assigns to
+  it is a literal map `libs = [ … ]` or `libs += [ … ]` at the script's top level or directly
+  inside a top-level `ext { }`, evaluated in statement order (`=` replaces the map, `+=` adds
+  entries). Any other assignment to it anywhere in the script (under `if`/`else`, in a loop or any
+  other closure, a non-literal right-hand side, `libs.put(…)`, `libs[…] =`, `ext.libs =`) makes the
+  whole map unreadable. Every other use of the map name is one of two kinds. A use PROVEN NOT TO
+  WRITE the map is ignored: a map-key label `libs:` in another map or call; one entry read — one
+  member access `libs.name` or one string-keyed subscript `libs['name']` that ends the expression
+  (`implementation libs.zstd`, `v = libs['x']`, `"${libs.zstd}"`), behind any receiver
+  (`ext.libs.zstd`, `ext."libs".zstd`); the map rendered as text (`"${libs}"`, `"$libs"`, the sole
+  argument of the script's `print` / `println`); and a string literal `"libs"` that does not name
+  the map as a property key (`println "libs"`). Any OTHER use — a write, or a use whose effect on
+  the map the reader cannot determine — makes the whole map unreadable, as an assignment outside
+  the grammar does: a call or closure on the map (`libs.put(…)`, `libs?.put(…)`), a quoted or
+  chained access, the map handed to anything other than text rendering (`f(libs)`,
+  `def m = libs`), `def libs`, and `"libs"` as a property key (`ext."libs" = …`,
+  `ext["libs"] = …`, `ext.set('libs', …)`, `findProperty("libs")`). The note then names the first
+  such statement's line and states that it is not a top-level literal assignment; it does not
+  state that the statement assigns to the map.
+- **Binding.** For each project its block's scope reaches, an alias reference binds to a group
+  only when every source that applies to that project was read, every map that applies to it is
+  readable, exactly one group answers the accessor (a `libraries.` accessor through a rename that
+  applies to that project), and no `apply from:` that is not shown to apply to that project names
+  a script that could not be read, an unreadable map, or a map holding that accessor's key. The
+  group joins the declared set of the scope the reference's block declares for (own /
+  `allprojects` / `subprojects` / `project('<path>')`).
+- **Counted, never guessed.** Every other alias reference is counted once on its build's manifest
+  record (`unresolved_alias_refs {count, first}`). `first` is the counted site with the smallest
+  path, then line, and states the first test that failed for it, in this order:
+  - `<path>:<line> <accessor>: catalog <catalog path> could not be read (<error>)` — a source that
+    applies to the project did not read: the TOML catalog did not read or parse, or an applied
+    script did not read (missing, outside the repository, `not a literal path`, or a `libs` map
+    whose brackets do not close);
+  - `<path>:<line> <accessor>: alias map in <script>:<line> is not a top-level literal assignment`
+    — a map that applies to the project has a statement that uses it, is not an admitted literal
+    assignment, and is not proven not to write it (the first by line; see **Map grammar**);
+  - `<path>:<line> <accessor>: rename at <path>:<line> not shown to apply to this project` — a
+    `libraries.` accessor, the build holds a `libraries = libs` statement and none applies to the
+    project;
+  - `<path>:<line> <accessor>: map at <path>:<line> not shown to apply to this project` — an
+    `apply from:` that does not apply to the project names a script that could not be read, an
+    unreadable map, or a map holding the accessor's key;
+  - `<path>:<line> <accessor>: ambiguous accessor (<key>, <key> in <catalog path>)` — two catalog
+    keys read as that accessor and name different groups; that reference binds to neither;
+  - `<path>:<line> <accessor>: no catalog entry` — every source that applies to the project was
+    read and none has the accessor.
+
+Query time (`deps list`, Java rows):
+
+- `used` counts observed packages that a declared group matches on a `.`-segment boundary (the
+  package equals the group, or starts with the group followed by `.`: `com.github.luben` matches
+  `com.github.luben.zstd`, never `com.github.lubenx`).
+- `no static import found` counts declared groups that match no observed package.
+- `undeclared` counts observed packages that no declared group matches.
+- npm, python and cargo rows keep exact matching.
+- When an alias reference of the view's builds could not be bound, one line follows the
+  undetermined-blocks line: `declared set may be incomplete: N alias reference(s) could not be resolved (<first>) — investigate`.
+  JSON: `declared_unresolved_alias_refs` (count) and `declared_unresolved_alias_note` (the line);
+  `0` and `""` when none; both keys absent when the provenance is not tracked. The line adds no row
+  suffix.
+
+Stated limits: `[bundles]`, `[plugins]`, `{ group, name }` library tables and custom
+`versionCatalogs {}` names are not read (a reference to a `{ group, name }` entry counts as
+`no catalog entry`). A rename or `apply from:` at a non-root script's top level reaches that
+script's project only, so a descendant project's reference that relies on it is counted, never
+bound. A Maven group that is not a
+Java package prefix (`at.yawk.lz4` for `net.jpountz.lz4`, `com.google.guava` for
+`com.google.common`) reads `no static import found`, and the code that imports those packages is
+not counted on the row (its references stay unclassified at index time).
+
 ### Measurement Commands (`churn`, `hotspots`, `risk`)
 
 Query-time computation, not persistence-first.

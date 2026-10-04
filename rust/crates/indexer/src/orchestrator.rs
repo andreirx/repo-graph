@@ -70,7 +70,10 @@ const COPIED_SIGNALS_READ_CHUNK: usize = 500;
 /// inspected projects) binds STATIC to the one indexed file TypeScript's selection reaches, and the
 /// stored alias signal gains that inspected project's mapping, so IMPORTS edges, unresolved rows and
 /// `file_signals` move; every TS store re-indexes.
-pub const INDEXER_VERSION: &str = "indexer:1.7.0";
+/// 1.8.0 (DEPS-GRADLE-CATALOG-1B): a Gradle version-catalog alias binds to its Maven group, so the
+/// stored Java declared sets (`file_signals.package_dependencies_json`) and the unresolved rows the
+/// classifier matches against them move; every Gradle store re-indexes.
+pub const INDEXER_VERSION: &str = "indexer:1.8.0";
 
 // ── Error type ───────────────────────────────────────────────────
 
@@ -4412,15 +4415,15 @@ mod tests {
         };
         let (mut a, mut b, mut c) = (named("ts-core:0.2.0"), named("c-core:0.1.0"), named("z:9"));
         let ports: Vec<&mut dyn ExtractorPort> = vec![&mut c, &mut a, &mut b];
-        assert_eq!(INDEXER_VERSION, "indexer:1.7.0");
+        assert_eq!(INDEXER_VERSION, "indexer:1.8.0");
         assert_eq!(
             build_toolchain_json(&ports),
-            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.7.0"}"#
+            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.8.0"}"#
         );
         let none: Vec<&mut dyn ExtractorPort> = Vec::new();
         assert_eq!(
             build_toolchain_json(&none),
-            r#"{"extractors":[],"indexer":"indexer:1.7.0"}"#
+            r#"{"extractors":[],"indexer":"indexer:1.8.0"}"#
         );
     }
 
