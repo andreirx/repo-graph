@@ -10,3 +10,5 @@ Raised: 2026-10-04 by the requirements reviewer of HELP-SURFACE-PARITY-1-PREP (c
 - C — keep the full-L09 claim with a top-level test. Not acceptable: a false completeness claim.
 
 **Resolved: 2026-10-04 by the OPERATOR (in-place manager) as B**, the reviewer's recommendation; the human may override. The slice's acceptance boundary, §0, §7 and §9 state the residual; RG-REQ-012-L09's evidence line after the slice reads PARTIALLY MET (top-level), not MET.
+
+**Correction 1 (2026-10-04, operator; after HELP-SURFACE-PARITY-1-PREP cycle 2, author finding F3 / reviewer finding 4).** The residual inventory above is wrong in three places: `boundaries show` and `surfaces show` are ALREADY in `--help` (before capture lines 65 and 63) and are not residuals; `modules boundary` (`commands/modules/mod.rs:74`) is absent from `--help` and was missing from the list. The residual is twelve subcommands: `declare waiver|deactivate|supersede`, `deps why|drift`, `contracts show|elements|usages`, `modules show|boundary|unowned`, `boundaries links`. Option B stands.
