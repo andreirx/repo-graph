@@ -1,0 +1,12 @@
+{
+  "formatVersion": 1,
+  "kind": "requirements-baseline-approval-correction",
+  "correctionId": "RG-BOOTSTRAP-BASELINE-APPROVAL-20-correction-2",
+  "corrects": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-20/baseline-approval-correction-1.json",
+    "sha256": "sha256:04e50ac65f5be135cb98b76ed447853285059887709b7f77218bb0985a318e7c",
+    "defect": "its `rationale` repeats correction-1's overclaimed review scope, and its `decidedAt` is the correction's write time (shared with the other INPUT-17..20 corrections), not the approval's time."
+  },
+  "statement": "INPUT-20's approval rested on a pass-1 review of the re-pin diff. The whole of L14 revision 3 was reviewed independently in pass 2 (docs/assurance/RG-BOOTSTRAP-INPUT-20/requirements-review-pass2.json), which found one wording defect (F-1); the leaf was corrected and re-pinned as RG-BOOTSTRAP-INPUT-21 (adca6ef8) with its own review and approval. INPUT-20 stands as the baseline it was (document items admitted under it are not re-opened); INPUT-21 is the current bootstrap baseline.",
+  "recordedAt": "2026-10-04T16:07:46.000Z"
+}

@@ -1,0 +1,16 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review-correction",
+  "correctionId": "review-RG-BOOTSTRAP-INPUT-20-correction-2",
+  "corrects": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-20/requirements-review-correction-1.json",
+    "sha256": "sha256:5dae9deb79c46786e2b336fa6707e1883a69cecaf3eeb03df1b88556c7ada4d1",
+    "defect": "its `changeReviewed` states the pass-1 review assessed the inline-body count 457 of 5,056 and D-RSR-ENTRY-CLIMB-1; the quoted verdict assesses the re-pin diff and the historical figures 3,222 / 3,152 / 70 / 345 and never mentions 457 or D-RSR-ENTRY-CLIMB-1 (RUST-SELF-RESOLUTION-1 INPUT-2 review, cycle 11, RR-5). Its `completedAt` is the correction's write time, shared by all eight INPUT-17..20 correction records, not the review's time."
+  },
+  "accurateScope": "pass 1 (session in correction-1) verified the manifest digests, confined the change to L14, and judged the rule as the file then labelled it against D-RSR-INLINE-MODULE-1 and D-RSR-DIR-CYCLES-1 with revision 2's historical arithmetic; it did not assess the revision-3 declaration rule, D-RSR-ENTRY-CLIMB-1, or the 457 = 326 + 18 + 113 population. Those were assessed by the pass-2 review recorded beside this record.",
+  "pass2Review": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-20/requirements-review-pass2.json",
+    "sha256": "sha256:c3b9bbc402069ce8ce60eb288604f4704a71c4dc533a91e4aa05b9fcd5bb87e4"
+  },
+  "recordedAt": "2026-10-04T16:07:46.000Z"
+}

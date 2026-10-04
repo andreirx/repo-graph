@@ -1,0 +1,17 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review-correction",
+  "correctionId": "review-RG-BOOTSTRAP-INPUT-19-correction-2",
+  "corrects": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-19/requirements-review-correction-1.json",
+    "sha256": "sha256:2d21a4087c84c58f871e9a255fe544a48bb99f104b3a2d5446fa32b15a3a4409",
+    "defect": "its `changeReviewed` names revision 3's declaration rule and D-RSR-ENTRY-CLIMB-1 as the subject; the quoted verdict judges \"revision 2's title, rule, verification criterion, and evidence\" and the historical 3,222 / 70 arithmetic, and describes revision 3's totals only as INFERRED (RR-5). Its `completedAt` is the correction's write time, not the review's."
+  },
+  "accurateScope": "pass 2 of INPUT-19 verified the digests and the L14-only diff and judged the enclosing-module rule and the directory-cycle derivation against D-RSR-INLINE-MODULE-1 and D-RSR-DIR-CYCLES-1; the revision-3 declaration rule was not independently assessed in that pass.",
+  "coveredBy": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-20/requirements-review-pass2.json",
+    "sha256": "sha256:c3b9bbc402069ce8ce60eb288604f4704a71c4dc533a91e4aa05b9fcd5bb87e4",
+    "note": "the INPUT-20 pass-2 review assessed the whole of revision 3 at the INPUT-20 pin, which differs from INPUT-19's pinned leaf by one sentence of the evidence line (git diff aead0088 ad01e194 -- docs/requirements/rg-req-006-import-resolution-and-dependencies.md: 1 insertion, 1 deletion). INPUT-19 is superseded by INPUT-20 and INPUT-21; no document item is admitted under it."
+  },
+  "recordedAt": "2026-10-04T16:07:46.000Z"
+}

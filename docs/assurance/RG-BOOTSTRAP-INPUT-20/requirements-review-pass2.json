@@ -1,0 +1,30 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-20-pass2",
+  "reviewScope": "the WHOLE of RG-REQ-006-L14 revision 3 as pinned by INPUT-20 (not a re-pin diff): the declaration-evidence sibling rule, agreement with D-RSR-ENTRY-CLIMB-1 and D-RSR-INLINE-MODULE-1, implementability from the recorded rust_mod_decls fact, the evidence line's arithmetic including 457 = 326 + 18 + 113 of 5,056 and the historical 345/32 label, and the verification criterion's coverage",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-20.json",
+    "sha256": "sha256:de991e77da24317315d2eb02b20d94064f7318f0f6a6e592c35caa9b8441d0c7"
+  },
+  "reviewedPin": {
+    "path": "docs/requirements/rg-req-006-import-resolution-and-dependencies.md",
+    "sha256": "sha256:9fa6a193b5934bbddb4205c65cab7c60ae9bf90e25b47546ec045c269a28247a"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-20-pass2",
+    "session": "01a107a0-db04-73f1-b269-35a412fdd2ed"
+  },
+  "result": "refinement-required",
+  "completedAt": "2026-10-04T15:59:53.000Z",
+  "recordedAt": "2026-10-04T16:07:46.000Z",
+  "resolution": {
+    "finding": "F-1",
+    "resolvedBy": "RG-REQ-006-L14 revision 3, one sentence qualified (the #[path]/inline-target statement limited to later segments; a first-segment such module binds nothing), re-pinned as RG-BOOTSTRAP-INPUT-21, commit adca6ef8"
+  },
+  "report": "Standalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high; session 01a107a0-db04-73f1-b269-35a412fdd2ed), commissioned after RUST-SELF-RESOLUTION-1 INPUT-2 document review RR-5 found that the INPUT-19 and INPUT-20 re-pin reviews had assessed revision 2's figures and the diff, not revision 3's rule or its 457-of-5,056 population. The reviewer's verdict, verbatim:\n\nRESULT: refinement-required\nFINDINGS:\nF-1 | docs/requirements/rg-req-006-import-resolution-and-dependencies.md:163 | OBSERVED The sentence saying `#[path]` and inline target modules land on their declaring file is too broad: a sibling path whose first segment has no conventional indexed module file must bind nothing under revision 3, as D-RSR-ENTRY-CLIMB-1 also states for `#[path]` modules. | Qualify that sentence to later target segments and state the first-segment limit explicitly.\n\nREPORT: OBSERVED The file’s HEAD digest matches the committed pin, and this review assessed revision 3’s declaration rule and its stated 457-of-5,056 inline-body population, not revision 2’s figures. OBSERVED Apart from F-1, the title, status, rule, criterion and evidence agree on the enclosing-module anchor, declaration matched by `inline_path`, retained first segment, declared-crate precedence, five bind-nothing cases and accepted directory-cycle movement; the rule agrees with D-RSR-ENTRY-CLIMB-1 and D-RSR-INLINE-MODULE-1. OBSERVED The extractor records `rust_mod_decls` on FILE nodes and the storage query reads node metadata, although `ResolverNode` does not yet carry that declaration fact. INFERRED The rule is implementable by passing that existing fact to the resolver, and its declaration and first-file guards would prevent the stated `main.rs` `use std::…` false binding to `lib.rs`. OBSERVED Every requested sum holds: 5,056=3,261+1,795; 3,261=2,086+203+972; 972=863+101+8; 1,795=1,298+462+35; 35=21+14; 457=326+18+113; 379=295+84; and 400=295+96+8+1. OBSERVED The evidence assigns the 26 further declared rows outside `src/` to the 462, labels the 972 breakdown disjoint, and identifies 345/32 as revision 2’s historical measurement. OBSERVED The named test families and field literals cover positive and negative sibling declarations, declared-crate misses, inline modules, the five bind-nothing cases and the derived cycle movement. INFERRED Because the stores could not be run, the replay populations, row-level disjointness and actual cycle sets remain operator measurements; this review confirms their internal consistency, not their independent reproduction."
+}
