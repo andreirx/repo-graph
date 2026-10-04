@@ -1,0 +1,83 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DGC-ATTRIBUTION-PRECISE-1-BASELINE-APPROVAL-3",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DGC-ATTRIBUTION-PRECISE-1-INPUT-3.json",
+    "sha256": "sha256:38f658ffb1c8b5178dbfc2f775600035abf1abc59ae385a35cb9223985611fa8"
+  },
+  "review": {
+    "path": "docs/assurance/DGC-ATTRIBUTION-PRECISE-1-INPUT-3/requirements-review.json",
+    "sha256": "sha256:7a5fa6d82b21ae37c48acc07c327044f6270fa661e3afa0621a952fe3ea07ac1"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-GRADLE-DECLARED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+        "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-DGC-BOUNDARY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-BOUNDARY-1.md",
+        "sha256": "sha256:42ae2be3c2feaaee11c6ce4416c28d8449007d61291a04546690bf9d5ab8012d"
+      }
+    },
+    {
+      "id": "D-TEST-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+        "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d"
+      }
+    },
+    {
+      "id": "D-DAP-NESTED-BUILDS-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DAP-NESTED-BUILDS-1.md",
+        "sha256": "sha256:f3e1e275327ea47dc929bcfc157e86891344191b168ecf0ea806d99fee190b63"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-04T10:17:29.894Z",
+  "rationale": "INPUT-3 re-pin after admission 1: three operator oracle corrections to DAP-C05 (OC-1 population identity by module_key \u2014 compiler is a Gradle project and an inferred C++ directory group at HEAD; OC-2 cycles/stats HEAD literals; OC-3 orient method line asserted under --json) plus the reviewer's wording findings on the comparison key (canonical root path); the admission-1 candidate is unchanged; review accepted at cycle 7 (iteration 6) in a detached HEAD worktree because the bootstrap baseline pins the CLI contract the candidate edits."
+}
