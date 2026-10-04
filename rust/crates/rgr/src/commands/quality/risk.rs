@@ -33,6 +33,7 @@
 
 use std::process::ExitCode;
 
+use crate::cli::COVERAGE_USAGE;
 use crate::daemon_command::{
     execute_repo_request, output_result, print_daemon_error, EXIT_RUNTIME_ERROR, EXIT_USAGE_ERROR,
 };
@@ -119,5 +120,8 @@ pub fn run_risk(args: &[String]) -> ExitCode {
     };
 
     // Output result
-    output_result::<RiskResponse, _>(result, parsed.json_mode, |response| response.render_human())
+    // The empty-ranking hint quotes the `coverage` handler's own usage (RISK-CURSOR-1).
+    output_result::<RiskResponse, _>(result, parsed.json_mode, |response| {
+        response.render_human(COVERAGE_USAGE)
+    })
 }

@@ -33,13 +33,14 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use crate::cli::COVERAGE_USAGE;
 use crate::daemon_command::{
     execute_repo_request, output_result, print_daemon_error, EXIT_RUNTIME_ERROR, EXIT_USAGE_ERROR,
 };
 use crate::presentation::coverage::CoverageResponse;
 
 fn print_usage() {
-    eprintln!("usage: rmap coverage <report> [--json]");
+    eprintln!("usage: {}", COVERAGE_USAGE);
     eprintln!();
     eprintln!("Import Istanbul/c8 coverage report into the repository.");
     eprintln!("Repository is resolved from current working directory.");

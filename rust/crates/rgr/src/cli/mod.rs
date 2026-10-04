@@ -32,3 +32,6 @@ pub use paths::{config_dir, data_dir, ensure_dir, logs_dir, sessions_dir};
 pub use snapshot_hint::no_ready_snapshot_hint;
 pub use time::{chrono_now, utc_now_iso8601};
 pub use usage::{format_gate_error, print_usage};
+pub(crate) use usage::{
+    COVERAGE_USAGE, DECLARE_BOUNDARY_USAGE, DECLARE_QUALITY_POLICY_USAGE, DECLARE_REQUIREMENT_USAGE,
+};

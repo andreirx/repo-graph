@@ -7,7 +7,6 @@
 //! This module owns:
 //! - `run_declare_requirement` handler
 //! - requirement-specific argument parsing
-//! - `DECLARE_REQUIREMENT_USAGE` constant
 //!
 //! This module does **not** own:
 //! - shared infrastructure (lives in `crate::cli`)
@@ -17,10 +16,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use super::shared::{parse_flag_value, VALID_OPERATORS};
-use crate::cli::{open_storage, utc_now_iso8601};
-
-const DECLARE_REQUIREMENT_USAGE: &str =
-    "usage: rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]";
+use crate::cli::{open_storage, utc_now_iso8601, DECLARE_REQUIREMENT_USAGE};
 
 pub(super) fn run_declare_requirement(args: &[String]) -> ExitCode {
     let mut positional = Vec::new();
@@ -67,7 +63,7 @@ pub(super) fn run_declare_requirement(args: &[String]) -> ExitCode {
             },
             other if other.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", other);
-                eprintln!("{}", DECLARE_REQUIREMENT_USAGE);
+                eprintln!("usage: {}", DECLARE_REQUIREMENT_USAGE);
                 return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => positional.push(&args[i]),
@@ -77,7 +73,7 @@ pub(super) fn run_declare_requirement(args: &[String]) -> ExitCode {
 
     // Validate positional args: db_path, repo_uid, req_id.
     if positional.len() != 3 {
-        eprintln!("{}", DECLARE_REQUIREMENT_USAGE);
+        eprintln!("usage: {}", DECLARE_REQUIREMENT_USAGE);
         return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 

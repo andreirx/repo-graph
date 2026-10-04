@@ -1,0 +1,386 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-HELP-SURFACE-PARITY-1-2",
+  "workItemId": "HELP-SURFACE-PARITY-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/HELP-SURFACE-PARITY-1-INPUT-2.json",
+    "sha256": "sha256:926554426010a28f55cda2ffd0312f115430c9d9c6296bd350a0a78a1cbe2423"
+  },
+  "allocation": {
+    "path": "docs/slices/help-surface-parity-1.md",
+    "sha256": "sha256:3beb175a7c8f0b0645a115d81a31d0ef220985a0151c4ce3271c09c73ef4a5e0"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "371962d27dd8e11781eee1f4ab2d94212290364e",
+    "entries": [
+      {
+        "path": "docs/cli/rmap-contracts.md",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:165df714a81de27c77c3d46de282027ac2321f7cbc67536061897d2fe6e7a6b8",
+          "byteLength": 77745
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2ce2318635b61450629490c45a8293665478551d31dfb21a0f85a8bceedf7da1",
+          "byteLength": 80442
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/cli/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:24fd2f4485fa75bdd8de2595275c0469c3b947b3b14cfea3ceae56d312b39b22",
+          "byteLength": 1220
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:4706209a7f8ae51b8f319b6e6735357579af26f4d2fff41d5d7972895afc44c0",
+          "byteLength": 1348
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/cli/usage.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:ab1150b7c28f95795d28d74237cb230db7543aa903c2b773e5f97eb45ee3af69",
+          "byteLength": 8976
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ce52d9a2b4f9f13b98a64a734579c48b98a712172e346c69609b44c190a66d1a",
+          "byteLength": 20298
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/declare/boundary.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:206365788a836c5594135fee39bbf1322aaccf979629e86f68da5095f439f068",
+          "byteLength": 5105
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:73eb9be9e11d74375f70342766d5fe3cece736341fa214fb6824354c43034b6a",
+          "byteLength": 4995
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/declare/quality_policy.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:21c3c945f910e57d97ed67c1477c2ec8bf987f9f91a44958cdd6b5970ebe193d",
+          "byteLength": 11260
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:a2c4e525e7ea7a98f1f4b9caeabfcaf7515d2200f2d12e62bfe56b14e760e422",
+          "byteLength": 10965
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/declare/requirement.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:44321bcdf5d33a1e82621333eb055f435f11b9debe5f818783edc17da5d96f74",
+          "byteLength": 7839
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:55daa9a9c850377672514982895f0e6e1f92557a9c6d358852939ed77d513291",
+          "byteLength": 7603
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/quality/coverage_cmd.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:6113771644de988d46aa6a8009644da84db921506bada874ccf474c893c540c5",
+          "byteLength": 4857
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:a0a730a6a83f62ad25f298d3e9d3ff258a9523bc786f0420d01fbd5ddb9207ed",
+          "byteLength": 4876
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/quality/risk.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:fd368c348f5052e4c7d0c4a2613be0e3ef7a3b7e5c992e53a45b2bfc937f6147",
+          "byteLength": 3917
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2c7e78af0d226543a5d41a015d01fe10763ebef497ef74c78ec962146bdc0b23",
+          "byteLength": 4068
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/risk.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:958d72e41923f357236a532221ff9882a6b91e93276db54072d4b394a53ea7e5",
+          "byteLength": 12325
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:76dd0de5d8a14c04db596d1a4b82d875cce0a78fe0fd195e772310f8f82dd127",
+          "byteLength": 13173
+        }
+      }
+    ],
+    "sha256": "sha256:1bf5ea3d0e169e420cd1109e1bebac660ad85e3a5bab9f6515a92b28dbbd75e7"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-HELP-SURFACE-PARITY-1-2"
+  },
+  "checks": [
+    {
+      "checkId": "HSP-C01",
+      "obligationIds": [
+        "RG-REQ-012-L09",
+        "RG-REQ-012-L03",
+        "P-HSP-01",
+        "P-HSP-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree, built from rust/; cargo only for the commands named; no rmap store is read or written by this check",
+        "command": "echo c01-tests && ( set -o pipefail; cargo test -p repo-graph-rgr --lib 2>&1 | tee /private/tmp/HELP-SURFACE-PARITY-1-hsp-01.txt ) && grep -qE '^test result: ok\\.' /private/tmp/HELP-SURFACE-PARITY-1-hsp-01.txt && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/HELP-SURFACE-PARITY-1-hsp-01.txt && echo c01-floor && test \"$(cargo test -p repo-graph-rgr --lib -- --list 2>/dev/null | grep -c ': test$')\" -ge 1482 && grep -q 'pub fn usage_text() -> String' crates/rgr/src/cli/usage.rs && grep -q 'include_str!(\"../main.rs\")' crates/rgr/src/cli/usage.rs && echo c01-constants && grep -q 'pub(crate) const COVERAGE_USAGE' crates/rgr/src/cli/usage.rs && grep -q 'pub(crate) const DECLARE_BOUNDARY_USAGE' crates/rgr/src/cli/usage.rs && grep -q 'pub(crate) const DECLARE_REQUIREMENT_USAGE' crates/rgr/src/cli/usage.rs && grep -q 'pub(crate) const DECLARE_QUALITY_POLICY_USAGE' crates/rgr/src/cli/usage.rs && echo c01-nocopy && nprod(){ awk -v pat=\"$2\" '/#\\[cfg\\(test\\)\\]/{exit} /^[[:space:]]*\\/\\//{next} index($0,pat){c++} END{print c+0}' \"$1\"; } && for pat in 'rmap coverage <report> [--json]' 'rmap declare boundary <db_path> <repo_uid> <module_path>' 'rmap declare requirement <db_path> <repo_uid> <req_id>' 'rmap declare quality-policy <db_path> <repo_uid> <policy_id>'; do test \"$(nprod crates/rgr/src/cli/usage.rs \"$pat\")\" -eq 1 || { echo \"constant text not defined exactly once in cli/usage.rs: $pat\"; exit 1; }; for f in crates/rgr/src/commands/declare/boundary.rs crates/rgr/src/commands/declare/requirement.rs crates/rgr/src/commands/declare/quality_policy.rs crates/rgr/src/commands/quality/coverage_cmd.rs crates/rgr/src/commands/quality/risk.rs crates/rgr/src/presentation/risk.rs; do test \"$(nprod \"$f\" \"$pat\")\" -eq 0 || { echo \"production copy of a usage text in $f: $pat\"; exit 1; }; done; done && grep -q 'COVERAGE_USAGE' crates/rgr/src/commands/quality/coverage_cmd.rs && grep -q 'DECLARE_BOUNDARY_USAGE' crates/rgr/src/commands/declare/boundary.rs && grep -q 'DECLARE_REQUIREMENT_USAGE' crates/rgr/src/commands/declare/requirement.rs && grep -q 'DECLARE_QUALITY_POLICY_USAGE' crates/rgr/src/commands/declare/quality_policy.rs && grep -q 'COVERAGE_USAGE' crates/rgr/src/commands/quality/risk.rs && ! grep -q 'COVERAGE_USAGE' crates/rgr/src/presentation/risk.rs && echo c01-direction && ! grep -rqE --include='*.rs' '^[[:space:]]*(pub(\\(crate\\))?[[:space:]]+)?use[[:space:]]+crate::commands' crates/rgr/src/cli crates/rgr/src/presentation && ! grep -rqE --include='*.rs' '^[[:space:]]*(pub(\\(crate\\))?[[:space:]]+)?use[[:space:]]+crate::cli' crates/rgr/src/presentation && ! grep -rqE --include='*.rs' 'crate::(commands|cli)::' crates/rgr/src/presentation && ! grep -rqE --include='*.rs' 'crate::commands::' crates/rgr/src/cli",
+        "inputs": "rgr `--lib` (1478 listed at HEAD f01efc2e (re-counted after RUST-SELF-RESOLUTION-1 3365f866, which touched `rgr/src/presentation/imports.rs` and left the count unchanged), EXECUTED `-- --list` 2026-10-04; floor >= 1482 = 1478 + 4). NEW (4) — in `cli/usage.rs` tests: `help_lists_every_dispatched_command` (parses `include_str!(\"../main.rs\")` for the body of the top-level command match at `main.rs:84`; it locates the command match as the `match args[1].as_str() {` whose body contains the arm `\"index\" =>` — never by line number (`main.rs` also has the help/version match at :72) — tracks brace depth from that match's opening brace, and reads ONLY the arms at depth 1, the match's own arms (the `Ok(())`/`Err(e)` arms inside the `daemon` block are deeper and ignored); at depth 1 it recognises exactly two arm forms — `\"<name>\" => run_…(` and `\"<name>\" => {` — plus one trailing fallthrough (`other =>` / `_ =>`); ANY other depth-1 arm shape fails the test (fail-closed, so a future command written in a new form cannot be skipped). Each depth-1 arm LINE is consumed whole: after `\"<name>\" => run_<ident>(` the line holds the arguments, ONE closing `)` and an optional `,` and no second `=>` (the live arms read `\"index\" => run_index(&args[2..]),`); after `\"<name>\" => {` nothing; a line carrying a second `=>` (`\"a\" => run_a(), \"b\" => run_b(),`) fails the test — that counterexample is a retained test, `help_parser_rejects_two_arms_on_one_line`.; it asserts the list is non-empty and that every HEAD appears as `rmap <name>` in `usage_text()`; that is ALL it proves); `help_parser_rejects_two_arms_on_one_line` (the parser, fed a match body whose one line holds two depth-1 arms, fails — the fail-closed counterexample retained); `help_contains_each_usage_constant` (`usage_text()` contains each of the four constants' text whole — `DECLARE_QUALITY_POLICY_USAGE` is three lines; a containment check, not line equality); in `presentation/risk.rs` tests: `risk_hint_renders_the_supplied_usage` (given the plain text `rmap coverage <report> [--json]` the hint renders `Import coverage data with 'rmap coverage <report> [--json]'.`; the test names the literal — a presentation test cannot import `crate::cli`). That the COMMAND supplies `COVERAGE_USAGE` is proven by HSP-C01's grep on `commands/quality/risk.rs`, HSP-C03 step 6 and HSP-C04 (2). The constants hold the BARE command form (no `usage: ` prefix): the handlers print `usage: {CONST}` (bytes unchanged — HSP-C03 step 5), the help prints the constant as the line, the hint quotes it. Constants: the four live in `cli/usage.rs` (`pub(crate)`, re-exported by `cli/mod.rs`; D-HSP-CONST-DIRECTION A); the handlers import them from `crate::cli` and print `usage: ` + constant (bytes unchanged) — the literal strings leave `boundary.rs` (:65, :74), `requirement.rs` (:22-23), `quality_policy.rs` (:23-26) and `coverage_cmd.rs` (:42). PRESERVED by name with unchanged assertions: every other rgr unit test; the eight `render_human()` call sites in `presentation/risk.rs` tests (:231-:345) may change their CALL shape to pass the usage text (the builder chooses a `render_human` parameter or a plain-data field set by the command) — their assertions do not change; `render_empty_risk_no_coverage` still asserts `Import coverage data`. Every other help line is inspected by HSP-C04 against the handler's printed usage, not proven by test. No-copy oracle: each constant's text occurs exactly once in `cli/usage.rs`'s production region and zero times in the production region of the four handler files, `commands/quality/risk.rs` and `presentation/risk.rs` (production region = before `#[cfg(test)]`, comment lines excluded — a doc comment quoting the usage, as `coverage_cmd.rs:106` does today, is not a copy; test expectations are not copies). Direction oracle: no `use crate::commands` / `crate::commands::` under `cli/` or `presentation/` and no `use crate::cli` / `crate::cli::` under `presentation/` — imports and paths in `.rs` files only; the doc comments at `cli/mod.rs:15-17` that name `crate::commands` are not imports."
+      },
+      "expected": "exit 0: every dispatcher arm is in the help text, `usage_text()` contains each of the four usage constants (bare command form, defined once in cli/usage.rs, no production copy elsewhere; the handlers print `usage: ` + constant — bytes unchanged); the parity parser fails closed on an unrecognised arm form and on a line carrying two arms, the risk hint runs as printed; every other rgr unit test is preserved with unchanged assertions (no behavior change)",
+      "candidateSha256": "sha256:1bf5ea3d0e169e420cd1109e1bebac660ad85e3a5bab9f6515a92b28dbbd75e7",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED, exit 0. All markers printed: c01-tests, floor, constants, nocopy, direction. 1482 passed, 0 failed.",
+        "supportingEvidence": [
+          "/private/tmp/HELP-SURFACE-PARITY-1-hsp-01-a2c3.out",
+          "…-hsp-01.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "HSP-C02",
+      "obligationIds": [
+        "RG-REQ-012-L01",
+        "RG-REQ-012-L02",
+        "RG-REQ-012-L04",
+        "RG-REQ-012-L05",
+        "RG-REQ-012-L06",
+        "RG-REQ-012-L07",
+        "RG-REQ-012-L08",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L05",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L07",
+        "RG-REQ-002-L08",
+        "RG-REQ-002-L09",
+        "RG-REQ-002-L10",
+        "RG-REQ-002-L11",
+        "P-HSP-02",
+        "P-HSP-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree, built from rust/; cargo only for the commands named; no rmap store is read or written by this check",
+        "command": "echo c02-fmt && cargo fmt -p repo-graph-rgr -- --check && echo c02-clippy && ( set -o pipefail; cargo clippy -p repo-graph-rgr --all-targets -- -D warnings 2>&1 | tee /private/tmp/HELP-SURFACE-PARITY-1-hsp-02.txt ) && echo c02-paths && test -z \"$(git -C .. status --porcelain -- . ':!.agent-manager' ':!docs/assurance' | grep -vE '^( M|M |MM|A |\\?\\?) (rust/crates/rgr/src/cli/usage\\.rs|rust/crates/rgr/src/cli/mod\\.rs|rust/crates/rgr/src/commands/declare/boundary\\.rs|rust/crates/rgr/src/commands/declare/requirement\\.rs|rust/crates/rgr/src/commands/declare/quality_policy\\.rs|rust/crates/rgr/src/commands/quality/coverage_cmd\\.rs|rust/crates/rgr/src/commands/quality/risk\\.rs|rust/crates/rgr/src/presentation/risk\\.rs|docs/cli/rmap-contracts\\.md)$')\" && echo c02-direction && ! grep -rqE --include='*.rs' '^[[:space:]]*(pub(\\(crate\\))?[[:space:]]+)?use[[:space:]]+crate::commands' crates/rgr/src/cli crates/rgr/src/presentation && ! grep -rqE --include='*.rs' '^[[:space:]]*(pub(\\(crate\\))?[[:space:]]+)?use[[:space:]]+crate::cli' crates/rgr/src/presentation && ! grep -rqE --include='*.rs' 'crate::(commands|cli)::' crates/rgr/src/presentation && ! grep -rqE --include='*.rs' 'crate::commands::' crates/rgr/src/cli && echo c02-hygiene && git -C .. diff --check -- . ':!.agent-manager' && test \"$(git -C .. diff HEAD --stat -- rust/crates/rgr/src/main.rs rust/crates/daemon-runtime rust/crates/storage rust/crates/agent rust/crates/indexer | wc -l)\" -eq 0 && echo c02-suites && ( set -o pipefail; cargo test -p repo-graph-rgr --test cli_out_6_quality --test cli_out_7_governance --test risk_command --test declare_quality_policy_command 2>&1 | tee /private/tmp/HELP-SURFACE-PARITY-1-hsp-02t.txt ) && grep -qE '^test result: ok\\.' /private/tmp/HELP-SURFACE-PARITY-1-hsp-02t.txt && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/HELP-SURFACE-PARITY-1-hsp-02t.txt",
+        "inputs": "fmt and clippy -D warnings (`--all-targets`) over rgr; the worktree holds changes ONLY under the nine candidate paths; no `.rs` file under `cli/` or `presentation/` imports or paths `crate::commands`, and none under `presentation/` imports or paths `crate::cli` (D-HSP-CONST-DIRECTION; the doc comments at `cli/mod.rs:15-17` are not imports); `git diff --check`; byte-identity of `main.rs` (the dispatcher is read, never edited) and of the daemon-runtime, storage, agent and indexer crates; the integration suites that exercise `risk`, `declare quality-policy` and the quality/governance CLI output pass unchanged (EXECUTED `-- --list` 2026-10-04: `cli_out_6_quality` 23, `cli_out_7_governance` 16, `risk_command` 17, `declare_quality_policy_command` 20 — floors, no test is added or renamed there) — no handler's accepted arguments, exit codes or JSON change. The four integration suites are run for regression only: at HEAD 50 of their cases are `#[ignore]`, each group for the reason its source records — cli_out_6_quality 23 ('These tests require binaries built first', `cli_out_6_quality.rs:28-29`; its commands use the legacy direct-storage contract, `cli_out_6_quality.rs:11-12`) and cli_out_7_governance 16 ('These tests require binaries built first', `cli_out_7_governance.rs:35-36`; its commands use the REG-1 daemon contract, `cli_out_7_governance.rs:16-17`), risk_command 11 (a live daemon, `risk_command.rs:16,193`) — the listed counts are listing floors, not executed counts; the executed cases (declare_quality_policy_command 20, risk_command 6) must pass."
+      },
+      "expected": "exit 0: every file outside the nine candidate paths is byte-identical and every handler's arguments, exit codes and JSON are preserved (no behavior change); rgr is formatted and warning-free",
+      "candidateSha256": "sha256:1bf5ea3d0e169e420cd1109e1bebac660ad85e3a5bab9f6515a92b28dbbd75e7",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED, exit 0. All markers printed: fmt, clippy, paths, direction, hygiene, suites. declare_quality_policy_command 20 passed. risk_command 6 passed, 11 ignored. The two CLI-output suites ran 0 tests (23 and 16 ignored). Ignored cases are not counted as passes.",
+        "supportingEvidence": [
+          "…-hsp-02-a2c3.out",
+          "…-hsp-02.txt",
+          "…-hsp-02t.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "HSP-C03",
+      "obligationIds": [
+        "RG-REQ-012-L09",
+        "RG-REQ-012-L03",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L08",
+        "P-HSP-01",
+        "P-HSP-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree, built from rust/; `cargo build --release -p repo-graph-rgr`; EVERY rmap invocation runs under an isolated root — a unique root from `mktemp -d /private/tmp/HELP-SURFACE-PARITY-1-iso.XXXXXX` (RMAP_STATE_ROOT=<root>/state RMAP_SOCKET_PATH=<root>/rmap.sock) RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off RMAP_SEED_VECTORS=off (CLAUDE.md isolation rule; the operator's registry and the real rmapd are never touched; an EXIT trap removes the root and kills only an rmapd that did not exist before the run and holds a file under the root (`lsof -p`), never by `pkill -f` — RMAP_STATE_ROOT is environment, not argv)",
+        "command": "bash -Eeu -o pipefail -c 'cargo build --release -p repo-graph-rgr 2>&1 | tail -1; RM=\"$PWD/target/release/rmap\"; SL=\"$PWD/../.agent-manager/slices/HELP-SURFACE-PARITY-1\"; ISO=$(mktemp -d /private/tmp/HELP-SURFACE-PARITY-1-iso.XXXXXX); mkdir -p \"$SL/after\"; PIDS0=$(pgrep -x rmapd || true); cleanup(){ for p in $(pgrep -x rmapd || true); do echo \"$PIDS0\" | grep -qx \"$p\" && continue; lsof -p \"$p\" 2>/dev/null | grep -qF \"$ISO\" && kill \"$p\" || true; done; rm -rf \"$ISO\"; }; trap cleanup EXIT; export RMAP_STATE_ROOT=\"$ISO/state\" RMAP_SOCKET_PATH=\"$ISO/rmap.sock\" RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off RMAP_SEED_VECTORS=off; echo step1-help; rc=0; \"$RM\" --help > \"$SL/after/help.stdout.txt\" 2> \"$SL/after/help.stderr.txt\" || rc=$?; test \"$rc\" -eq 0; H=\"$SL/after/help.stderr.txt\"; test ! -s \"$SL/after/help.stdout.txt\"; echo step2-heads; for c in index refresh trust reliability callers callees dev path imports violations gate orient find check churn hotspots metrics coverage risk assess explain dead deps cycles stats map declare docs enrich hook inferences resource modules surfaces boundaries contracts perf policy repo doctor maintenance uninstall integrate daemon; do grep -qE \"^  rmap $c( |$)\" \"$H\" || { echo \"missing from help: $c\"; exit 1; }; done; echo step3-constants; L1=$(sed -n 1p \"$SL/before/declare-qp-usage.stderr.txt\" | sed \"s/^usage: //\"); L2=$(sed -n 2p \"$SL/before/declare-qp-usage.stderr.txt\"); L3=$(sed -n 3p \"$SL/before/declare-qp-usage.stderr.txt\"); grep -F -A2 -- \"$L1\" \"$H\" | grep -qF -- \"$L2\"; grep -F -A2 -- \"$L1\" \"$H\" | grep -qF -- \"$L3\"; grep -qF -- \"$(sed -n 1p \"$SL/before/declare-boundary-usage.stderr.txt\" | sed \"s/^usage: //\")\" \"$H\"; grep -qF -- \"$(sed -n 1p \"$SL/before/declare-req-usage.stderr.txt\" | sed \"s/^usage: //\")\" \"$H\"; grep -qF -- \"$(sed -n 2p \"$SL/before/coverage-usage.stderr.txt\" | sed \"s/^usage: //\")\" \"$H\"; echo step4-handler-forms; grep -qF \"rmap deps list [module] [--ecosystem npm|cargo|python|java] [--json]\" \"$H\"; grep -qF \"rmap enrich [options]\" \"$H\"; grep -qF \"rmap dev <livegraph-preload|livegraph-refresh|cycle-completeness-audit>\" \"$H\"; grep -qiE \"rmap daemon.*(deprecated|rmapd)\" \"$H\"; grep -qiE \"rmap dead.*disabled\" \"$H\"; grep -qF \"Declarations (positional <db_path> <repo_uid>):\" \"$H\"; ! grep -qF \"Declarations (resolve repo from cwd):\" \"$H\"; echo step5-handlers-unchanged; for pair in coverage:coverage-usage \"declare boundary:declare-boundary-usage\" \"declare quality-policy:declare-qp-usage\" \"declare requirement:declare-req-usage\"; do cmd=${pair%%:*}; f=${pair##*:}; rc=0; \"$RM\" $cmd > \"$SL/after/$f.stdout.txt\" 2> \"$SL/after/$f.stderr.txt\" || rc=$?; echo \"$rc\" > \"$SL/after/$f.exit\"; test \"$rc\" -eq \"$(cat \"$SL/before/$f.exit\")\"; cmp \"$SL/before/$f.stderr.txt\" \"$SL/after/$f.stderr.txt\"; cmp \"$SL/before/$f.stdout.txt\" \"$SL/after/$f.stdout.txt\"; done; echo step6-risk-hint; ! grep -qF \"rmap coverage <db> <repo> <report>\" crates/rgr/src/presentation/risk.rs; grep -q \"COVERAGE_USAGE\" crates/rgr/src/commands/quality/risk.rs; ! grep -q \"COVERAGE_USAGE\" crates/rgr/src/presentation/risk.rs; echo step7-diff; diff <(grep -v \"^$\" \"$SL/before/help.stderr.txt\" | sort) <(grep -v \"^$\" \"$H\" | sort) > \"$SL/after/help.diff.txt\" || true; test \"$(grep -c \"^<   rmap \" \"$SL/after/help.diff.txt\")\" -eq 4; grep -qF \"<   rmap coverage <report_path>\" \"$SL/after/help.diff.txt\"; grep -qF \"<   rmap declare boundary <module_path>\" \"$SL/after/help.diff.txt\"; grep -qF \"<   rmap declare requirement <req_id>\" \"$SL/after/help.diff.txt\"; grep -qF \"<   rmap declare quality-policy <policy_id>\" \"$SL/after/help.diff.txt\"; echo step8-cleanup-by-trap; echo HSP-C03-OK'",
+        "inputs": "The candidate release binary under the isolated root (every invocation; no store): `rmap --help` (exit 0, stderr as today; stdout stays empty — P-HSP-03) lists every one of the 44 dispatcher arms as `  rmap <name>…` (step 2); the three `declare` lines and the `coverage` line are the handlers' constants — checked line by line against the HEAD binary's own usage output captured by the operator (`before/declare-qp-usage.stderr.txt` three lines, `before/declare-boundary-usage.stderr.txt`, `before/declare-req-usage.stderr.txt`, `before/coverage-usage.stderr.txt` line 2; step 3); the `deps`, `enrich` and `dev` lines are the handlers' printed forms (`deps.rs:65`, `enrich.rs:149`, `graph.rs:289`; step 4); `daemon` is marked deprecated (use `rmapd`) and `dead` disabled; the heading `Declarations (resolve repo from cwd):` (before capture line 76) is replaced by `Declarations (positional <db_path> <repo_uid>):` because the three lines under it require the positional arguments (RG-REQ-002-L01/L08; the one heading change P-HSP-03 permits); the four handlers' no-argument usage output AND exit status are identical to the before captures (step 5 — `before/<f>.exit`, all 1; the constants move to `cli/usage.rs` and change no printed byte or status); the `risk` COMMAND (`commands/quality/risk.rs`) supplies `COVERAGE_USAGE` to the renderer, `presentation/risk.rs` names neither the constant nor the stale string (step 6); the help diff against `before/help.stderr.txt` removes EXACTLY four COMMAND lines (`  rmap …`), the ones named (`rmap coverage <report_path>` and the three cwd-form `declare` lines) — a section heading may change, a command line may not disappear otherwise — and adds the rest (step 7); the isolated root and any daemon it spawned are removed by the EXIT trap, also after a failing step (step 8). Before captures: operator, 2026-10-04, HEAD release binary (`before/help.stderr.txt` 103 lines / 61 `  rmap …` / 35 heads; usage captures exit 1)."
+      },
+      "expected": "exit 0 and HSP-C03-OK: `--help` names every dispatched top-level command with the handler's own usage (constant-backed for the four, printed form for the rest) and the status words for the deprecated shim and the disabled command; stdout stays empty, the four handlers' usage output is byte-identical and the usage errors are preserved (no behavior change) — RG-REQ-012-L09 is met on real output for TOP-LEVEL dispatch (nested subcommands are the stated residual) and the risk hint runs as printed (RG-REQ-012-L03).",
+      "candidateSha256": "sha256:1bf5ea3d0e169e420cd1109e1bebac660ad85e3a5bab9f6515a92b28dbbd75e7",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "EXECUTED, exit 0. Steps 1–8 printed, then HSP-C03-OK. The four handlers' usage output matches the before captures byte for byte, and each still exits 1.",
+        "supportingEvidence": [
+          "…-hsp-03-a2c3.out",
+          ".agent-manager/slices/HELP-SURFACE-PARITY-1/after/"
+        ]
+      }
+    },
+    {
+      "checkId": "HSP-C04",
+      "obligationIds": [
+        "RG-REQ-012-L09",
+        "RG-REQ-012-L03",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L08",
+        "P-HSP-01",
+        "P-HSP-02",
+        "P-HSP-03"
+      ],
+      "owner": "reviewer",
+      "method": {
+        "kind": "inspection",
+        "subject": "git diff HEAD -- the nine candidate paths, read on the candidate tree, with SLICE_DOC sections 2-3",
+        "criterion": "(1) `usage_text()` lists every string arm of `main.rs`'s command match — read the match yourself and tick each arm; the parity test parses the real `main.rs` — it locates the command match as the `match args[1].as_str() {` whose body contains the arm `\"index\" =>` — never by line number (`main.rs` also has the help/version match at :72) — tracks brace depth from that match's opening brace, and reads ONLY the arms at depth 1, the match's own arms (the `Ok(())`/`Err(e)` arms inside the `daemon` block are deeper and ignored); at depth 1 it recognises exactly two arm forms — `\"<name>\" => run_…(` and `\"<name>\" => {` — plus one trailing fallthrough (`other =>` / `_ =>`); ANY other depth-1 arm shape fails the test (fail-closed, so a future command written in a new form cannot be skipped); each arm line is consumed whole and a line with two depth-1 arms fails (retained counterexample test) — and an empty, partial or permissive parse cannot pass; (2) the three `declare` lines and the `coverage` line ARE the four constants defined once in `cli/usage.rs` and imported by the handlers from `crate::cli` (no copy anywhere; the handlers' printed bytes and exit codes are unchanged — HSP-C03 step 5); the `risk` command passes the coverage usage text to the renderer as plain data; every other new line equals the handler's printed usage (`deps.rs:65`, `enrich.rs:149`, `graph.rs:289`, `inferences`, `contracts`, `metrics`) — inspect each — EXCEPT `perf`: its line is the ACCEPTED form `rmap perf [--json]` (`perf.rs:110-125` parses `--json`) while the handler prints `Usage: rmap perf [OPTIONS]` (`perf.rs:180-189`) — D-HSP-PERF-USAGE A, stated as such in the contract; (3) `daemon` and `dead` carry their status words and no command is hidden; (4) the `risk` hint is the `coverage` handler's usage; (5) no handler's accepted arguments, exit codes or JSON changed; `main.rs` is byte-identical; (6) the contract states the parity rule and the two status words, RETIRES the note at `docs/cli/rmap-contracts.md:72-78` (\"Help-vs-handler mismatch … out of scope\") and corrects the `enrich` line at :83 to the handler's cwd form with the legacy positional form noted (`enrich.rs:9-14`), leaving `modules boundary` positional (`modules/boundary.rs:31,39,49`); (7) every new help line restates the handler's predicate (D-AGENT-USEFULNESS-FRAME-1) and no line asserts an argument the handler does not accept (RG-REQ-002-L01). (8) the slice states TOP-LEVEL parity only and names the nested-subcommand residual (D-HSP-L09-SCOPE B; HELP-SURFACE-PARITY-2) — no text claims RG-REQ-012-L09 fully met; (9) every rmap invocation in HSP-C03 runs under the isolated root (CLAUDE.md); (10) nothing under `cli/` or `presentation/` imports or paths `crate::commands`, `presentation/` does not import or path `crate::cli` (D-HSP-CONST-DIRECTION; imports, not comments); the `risk` command supplies the constant and the presentation test names the literal; (11) the heading `Declarations (positional <db_path> <repo_uid>):` replaces the false cwd heading and no other heading or string changes.",
+        "inputs": "The candidate's diff of the nine paths; SLICE_DOC sections 2-3; D-HSP-SCOPE-1 (with Correction 1), D-HSP-COVERAGE-CONST (with Correction 1), D-HSP-L09-SCOPE (with Correction 1), D-HSP-CONST-DIRECTION, D-AGENT-USEFULNESS-FRAME-1; RG-REQ-012-L03/L09; RC-5 and RISK-CURSOR-1 in docs/audits/2026-10-03-root-causes-v0.20.0.md."
+      },
+      "expected": "every criterion (1)–(11) holds on the candidate; every handler's arguments, exit codes and JSON and every other printed string are preserved (no behavior change)",
+      "candidateSha256": "sha256:1bf5ea3d0e169e420cd1109e1bebac660ad85e3a5bab9f6515a92b28dbbd75e7",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "not-run",
+        "reason": "the reviewer owns this inspection; the builder reports review-1 raw text says it passed by inspection"
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "docs/cli/rmap-contracts.md",
+      "obligationIds": [
+        "RG-REQ-012-L09"
+      ],
+      "summary": "The contract already states the nested-command residual at line 109; no file changed in this cycle; path justification not stated by the builder."
+    },
+    {
+      "path": "rust/crates/rgr/src/cli/mod.rs",
+      "obligationIds": [
+        "RG-REQ-012-L09"
+      ],
+      "summary": "The nine candidate paths are justified as in cycles 1 and 2; no file changed in this cycle; path-specific obligation not stated by the builder."
+    },
+    {
+      "path": "rust/crates/rgr/src/cli/usage.rs",
+      "obligationIds": [
+        "RG-REQ-012-L09"
+      ],
+      "summary": "The nine candidate paths are justified as in cycles 1 and 2; no file changed in this cycle; path-specific obligation not stated by the builder."
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/declare/boundary.rs",
+      "obligationIds": [
+        "RG-REQ-012-L09"
+      ],
+      "summary": "The nine candidate paths are justified as in cycles 1 and 2; no file changed in this cycle; path-specific obligation not stated by the builder."
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/declare/quality_policy.rs",
+      "obligationIds": [
+        "RG-REQ-012-L09"
+      ],
+      "summary": "The nine candidate paths are justified as in cycles 1 and 2; no file changed in this cycle; path-specific obligation not stated by the builder."
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/declare/requirement.rs",
+      "obligationIds": [
+        "RG-REQ-012-L09"
+      ],
+      "summary": "The nine candidate paths are justified as in cycles 1 and 2; no file changed in this cycle; path-specific obligation not stated by the builder."
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/quality/coverage_cmd.rs",
+      "obligationIds": [
+        "RG-REQ-012-L09"
+      ],
+      "summary": "The nine candidate paths are justified as in cycles 1 and 2; no file changed in this cycle; path-specific obligation not stated by the builder."
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/quality/risk.rs",
+      "obligationIds": [
+        "RG-REQ-012-L09"
+      ],
+      "summary": "The nine candidate paths are justified as in cycles 1 and 2; no file changed in this cycle; path-specific obligation not stated by the builder."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/risk.rs",
+      "obligationIds": [
+        "RG-REQ-012-L09"
+      ],
+      "summary": "The nine candidate paths are justified as in cycles 1 and 2; no file changed in this cycle; path-specific obligation not stated by the builder."
+    }
+  ],
+  "completedAt": "2026-10-04T20:43:58.536Z",
+  "limitations": [
+    "RG-REQ-012-L09 is only partly met: parity is proven for top-level commands, and nested subcommands are left for HELP-SURFACE-PARITY-2.",
+    "The workspace-wide test run and the dogfood run belong to the operator, so the builder did not run them.",
+    "The two CLI-output suites ran 0 tests (23 and 16 ignored); ignored cases are not counted as passes.",
+    "HSP-C04 is reviewer-owned and was not run by the builder.",
+    "No file changed in this cycle; the builder says the nine candidate paths are justified as in cycles 1 and 2, but provides no path-specific justifications in this report."
+  ],
+  "report": "# HELP-SURFACE-PARITY-1, admission 2, cycle 3: builder report. Stopped: neither finding can be fixed by a builder edit\n\n**Outcome:** I made no code change. The two findings in review-1's parsed record cannot be closed by a builder edit within the allocation. The raw review text they were taken from says **\"RESULT: accepted\"**, reports no finding, and states that HSP-C04 passes by inspection. On the unchanged checkpoint, all three builder checks pass again: HSP-C01, C02 and C03 each exit 0. A decision is required from the manager (below).\n\n## Why each finding is not mine to fix\n\n**F-L09-PARTIAL**\n- **What it asks:** \"complete the deferred twelve nested subcommands under HELP-SURFACE-PARITY-2.\"\n- **What the allocation says:** this is the ratified residual (D-HSP-L09-SCOPE option B). The acceptance boundary reads: \"after this slice L09 reads PARTIALLY MET (top-level), never MET\".\n- **Current state:** the contract already states the residual at `docs/cli/rmap-contracts.md:109`.\n- **Why I cannot act:** doing the nested work would edit dispatchers outside the nine candidate paths, which the HSP-C02 path filter fails. It would also go beyond the authorized scope.\n\n**F-C04-NOT-RUN**\n- **What it asks:** \"builder evidence for HSP-C04.\"\n- **What the allocation says:** HSP-C04 is `\"owner\": \"reviewer\"`, `\"kind\": \"inspection\"`. I re-extracted the allocation in this cycle and confirmed this.\n- **Why I cannot act:** I cannot produce reviewer evidence. Claiming HSP-C04 as a builder pass would be forged evidence, so I report it as not-run.\n\n## Checks on this checkpoint\n\n**Checkpoint:**\n- HEAD is `371962d2`.\n- The working tree changes exactly the nine allocated paths.\n- `git diff | shasum -a 256` gives `d543e832…`, the same before and after this cycle.\n\n**How each check ran:** I extracted each command byte for byte from the pinned slice document (sha256 `3beb175a…`). Each ran alone from `rust/` as `bash \"/private/tmp/HELP-SURFACE-PARITY-1-<id>.sh\"`, with its output sent to a log.\n\n| Check | Result | Evidence |\n|---|---|---|\n| HSP-C01 | **passed**. EXECUTED, exit 0. All markers printed: c01-tests, floor, constants, nocopy, direction. 1482 passed, 0 failed. | `/private/tmp/HELP-SURFACE-PARITY-1-hsp-01-a2c3.out`, `…-hsp-01.txt` |\n| HSP-C02 | **passed**. EXECUTED, exit 0. All markers printed: fmt, clippy, paths, direction, hygiene, suites. `declare_quality_policy_command` 20 passed. `risk_command` 6 passed, 11 ignored. The two CLI-output suites ran 0 tests (23 and 16 ignored). Ignored cases are not counted as passes. | `…-hsp-02-a2c3.out`, `…-hsp-02.txt`, `…-hsp-02t.txt` |\n| HSP-C03 | **passed**. EXECUTED, exit 0. Steps 1–8 printed, then `HSP-C03-OK`. The four handlers' usage output matches the before captures byte for byte, and each still exits 1. | `…-hsp-03-a2c3.out`, `.agent-manager/slices/HELP-SURFACE-PARITY-1/after/` |\n| HSP-C04 | **not-run**: the reviewer owns this inspection. Review-1's raw text reports it as passing. | review-1.json, raw text |\n\n**Cleanup:** no isolated root is left. The only `rmapd` running is the operator's own (PID 32224, started Oct 3), which I did not touch.\n\nThe output these checks inspect is unchanged from cycle 2, including the `declare quality-policy` help line before and after, the nine added lines, the `risk` hint before and after, and the byte-identical handler usage.\n\n```\nDECISION_REQUIRED:\n- ID: D-HSP-REVIEW1-TRANSCRIPTION\n  QUESTION: review-1's raw text says \"RESULT: accepted\" with no finding. Its parsed record says \"refinement-required\" with F-L09-PARTIAL and F-C04-NOT-RUN. Neither can be closed by a builder edit. How should review-1 be resolved?\n  OPTIONS:\n  - A: Treat the parsed record as a transcription error. Record review-1 as accepted (HSP-C04 passed by reviewer inspection, per the raw text), with L09 PARTIALLY MET as the ratified residual. Consequence: the slice goes to the operator's gate (workspace tests, dogfood, commit) with no further cycle.\n  - B: Run the reviewer again on this unchanged checkpoint and ask for a structured record that matches its verdict. Consequence: one more review cycle with no code change. The candidate is the same (diff digest d543e832…), and these logs are fresh evidence for it.\n  - C: Treat F-L09-PARTIAL as a real scope change and do the nested subcommands now. Consequence: this needs a new decision overriding D-HSP-L09-SCOPE option B, new candidate paths and a re-baselined allocation. It is not authorized under INPUT-2.\n  RECOMMENDED: A, because the raw review is the reviewer's own statement. Both parsed findings ask for things the allocation assigns elsewhere: the residual to HELP-SURFACE-PARITY-2, and HSP-C04 to the reviewer.\n  BLOCKING_REASON: Acting on the parsed findings would mean editing outside the allocated paths, or forging reviewer evidence for HSP-C04.\n```\n\n**Changes:** no file changed in this cycle; the nine candidate paths are as justified in cycles 1 and 2. **Limits:** RG-REQ-012-L09 is only partly met: parity is proven for top-level commands, and nested subcommands are left for HELP-SURFACE-PARITY-2. The workspace-wide test run and the dogfood run belong to the operator, so I did not run them."
+}

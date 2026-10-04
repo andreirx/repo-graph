@@ -69,18 +69,53 @@ rmap declare requirement    <db_path> <repo_uid> <req_id> --version <n> --obliga
 rmap declare quality-policy <db_path> <repo_uid> <policy_id> --measurement <kind> ...
 ```
 
-> **Help-vs-handler mismatch (code-level — flagged, not fixable in a docs slice).** Top-level
-> `rmap --help` lists the `declare` subcommands under "Declarations (resolve repo from cwd)" with
-> cwd-style signatures (e.g. `rmap declare boundary <module_path> --forbids …`, no
-> `<db_path> <repo_uid>`), but the handlers reject that form and require the positional form above
-> (confirmed at runtime: `rmap declare boundary` prints `usage: … <db_path> <repo_uid>
-> <module_path> …`). The handler is the shipped contract; the `rmap --help` summary lines are
-> stale. Repairing the help text is a code change, out of scope for this docs reconcile.
+#### `--help` — parity with the dispatcher (HELP-SURFACE-PARITY-1)
 
-Two more surfaces still require explicit positional paths (verified at the handler):
+`rmap --help` (also `-h`) writes the usage text to **stderr** and exits **0**; stdout stays empty.
+It lists every top-level command that the dispatcher in `rgr/src/main.rs` accepts, each on at
+least one line that starts `rmap <name>`. The lines are of four kinds:
+
+- The `coverage` line and the three `declare` lines under
+  `Declarations (positional <db_path> <repo_uid>):` print the handlers' own usage constants
+  (`COVERAGE_USAGE`, `DECLARE_BOUNDARY_USAGE`, `DECLARE_REQUIREMENT_USAGE`,
+  `DECLARE_QUALITY_POLICY_USAGE` in `rgr/src/cli/usage.rs`). Each handler prints `usage: ` + the
+  same constant, and `rmap risk` quotes `COVERAGE_USAGE` in its "Import coverage data with …" hint.
+- The lines HELP-SURFACE-PARITY-1 added for `deps`, `enrich`, `inferences`, `contracts`, `dev` and
+  `metrics` are the usage text their handlers print (`commands/deps.rs:65`, `commands/enrich.rs:149`,
+  `commands/inferences.rs:18`, `commands/contracts.rs:47`, `commands/graph.rs:289`,
+  `commands/quality/metrics.rs:50`). That equality was inspected when the lines were written; no
+  test checks it. The added `perf` line shows the accepted form `rmap perf [--json]`: the handler
+  parses `--json` (`commands/perf.rs`, `run_perf`) while its own usage prints
+  `Usage: rmap perf [OPTIONS]` (D-HSP-PERF-USAGE).
+- Every other command line is as it was before HELP-SURFACE-PARITY-1. Such a line can be shorter
+  than its handler's own usage: the help prints `rmap risk`, while the handler prints
+  `usage: rmap risk [--since <expr>] [--json]` (`commands/quality/risk.rs:43`). For these lines
+  `--help` names the command; it does not promise to list every option the handler accepts.
+- `rmap daemon` is listed as deprecated — use `rmapd` (the shim prints that warning).
+- `rmap dead` is listed as disabled (the handler prints the refusal verdict; see
+  "`dead` — DISABLED" below).
+
+The unit test `help_lists_every_dispatched_command` (`rgr/src/cli/usage.rs`) keeps the command list
+complete: it reads the arms of the dispatcher's command match from `main.rs` and fails when an arm
+has no `rmap <name>` line in the help text, or when an arm is written in a form the test does not
+recognise. It checks command names only; it does not compare a help line's arguments with the
+handler's usage text or argument parser. It reads each arm line whole: after `"<name>" => run_<ident>(` only the arguments, the
+call's closing `)` and an optional `,` may follow, and a line with a second `=>` fails
+(`help_parser_rejects_two_arms_on_one_line` keeps that counterexample).
+`help_contains_each_usage_constant` checks that the help text contains each of the four constants.
+A shared constant keeps the help line, the handler's `usage:` message and the `risk` hint as the same
+text; it does not keep that text aligned with the handler's argument parser.
+
+**Residual (HELP-SURFACE-PARITY-2):** the parity is top-level only. Nested subcommands that the
+help does not list yet: `declare waiver|deactivate|supersede`, `deps why|drift`,
+`contracts show|elements|usages`, `modules show|boundary|unowned`, `boundaries links`.
+
+`enrich` resolves the repository from the current working directory (`rmap enrich [options]`, the
+form in `--help`). The legacy positional form `rmap enrich <db_path> <repo_uid> [options]` is still
+accepted for compatibility but is not in `--help` (`commands/enrich.rs`). One more surface still
+requires explicit positional paths (verified at the handler):
 
 ```bash
-rmap enrich <db_path> <repo_uid> [options]                       # commands/enrich.rs
 rmap modules boundary <db_path> <repo_uid> <source> [options]    # commands/modules/boundary.rs
 ```
 

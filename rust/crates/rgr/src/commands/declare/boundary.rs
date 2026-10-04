@@ -15,7 +15,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::{open_storage, utc_now_iso8601};
+use crate::cli::{open_storage, utc_now_iso8601, DECLARE_BOUNDARY_USAGE};
 
 pub(super) fn run_declare_boundary(args: &[String]) -> ExitCode {
     // Parse positional args and flags.
@@ -62,7 +62,7 @@ pub(super) fn run_declare_boundary(args: &[String]) -> ExitCode {
             }
             other if other.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", other);
-                eprintln!("usage: rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]");
+                eprintln!("usage: {}", DECLARE_BOUNDARY_USAGE);
                 return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => positional.push(&args[i]),
@@ -71,7 +71,7 @@ pub(super) fn run_declare_boundary(args: &[String]) -> ExitCode {
     }
 
     if positional.len() != 3 {
-        eprintln!("usage: rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]");
+        eprintln!("usage: {}", DECLARE_BOUNDARY_USAGE);
         return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 

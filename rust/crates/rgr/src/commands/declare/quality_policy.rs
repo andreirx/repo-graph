@@ -7,7 +7,6 @@
 //! This module owns:
 //! - `run_declare_quality_policy` handler
 //! - quality-policy-specific argument parsing
-//! - `DECLARE_QUALITY_POLICY_USAGE` constant
 //!
 //! This module does **not** own:
 //! - shared infrastructure (lives in `crate::cli`)
@@ -18,12 +17,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use super::shared::{parse_flag_value, parse_repeatable_flag_value};
-use crate::cli::{open_storage, utc_now_iso8601};
-
-const DECLARE_QUALITY_POLICY_USAGE: &str =
-    "usage: rmap declare quality-policy <db_path> <repo_uid> <policy_id> \\
-  --measurement <kind> --policy-kind <kind> --threshold <n> [--version <n>] \\
-  [--severity <fail|advisory>] [--scope-clause <type>:<selector>]... [--description <text>]";
+use crate::cli::{open_storage, utc_now_iso8601, DECLARE_QUALITY_POLICY_USAGE};
 
 pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
     use repo_graph_quality_policy::{
@@ -83,7 +77,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
             }
             other if other.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", other);
-                eprintln!("{}", DECLARE_QUALITY_POLICY_USAGE);
+                eprintln!("usage: {}", DECLARE_QUALITY_POLICY_USAGE);
                 return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
             }
             _ => positional.push(&args[i]),
@@ -93,7 +87,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
 
     // Validate positional args: db_path, repo_uid, policy_id.
     if positional.len() != 3 {
-        eprintln!("{}", DECLARE_QUALITY_POLICY_USAGE);
+        eprintln!("usage: {}", DECLARE_QUALITY_POLICY_USAGE);
         return ExitCode::from(crate::daemon_command::EXIT_USAGE_ERROR);
     }
 

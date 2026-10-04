@@ -67,7 +67,11 @@ impl RiskResponse {
     ///
     /// Outputs full sorted list. No truncation. Caller can pipe to `head`.
     /// No verdict labels — numbers speak for themselves.
-    pub fn render_human(&self) -> String {
+    ///
+    /// `coverage_usage` is the `coverage` command's usage text (bare command form); the
+    /// empty-ranking hint quotes it so the printed command runs as printed. The caller
+    /// supplies it (RISK-CURSOR-1).
+    pub fn render_human(&self, coverage_usage: &str) -> String {
         let mut out = String::new();
 
         // Header with time window
@@ -114,9 +118,10 @@ impl RiskResponse {
         if self.count == 0 {
             out.push_str("\nhint: no files have both hotspot and coverage data.\n");
             if self.hotspot_files > 0 && self.coverage_files == 0 {
-                out.push_str(
-                    "      Import coverage data with 'rmap coverage <db> <repo> <report>'.\n",
-                );
+                out.push_str(&format!(
+                    "      Import coverage data with '{}'.\n",
+                    coverage_usage
+                ));
             } else if self.hotspot_files == 0 {
                 out.push_str("      No hotspot data available. Check churn and complexity.\n");
             }
@@ -228,7 +233,7 @@ mod tests {
     #[test]
     fn render_empty_risk_no_coverage() {
         let resp = make_response(vec![], 50, 0);
-        let out = resp.render_human();
+        let out = resp.render_human("rmap coverage <report> [--json]");
 
         assert!(out.contains("Risk Analysis (last 90 days)"));
         assert!(out.contains("Formula: hotspot_score * (1 - line_coverage)"));
@@ -242,7 +247,7 @@ mod tests {
     #[test]
     fn render_empty_risk_no_hotspots() {
         let resp = make_response(vec![], 0, 30);
-        let out = resp.render_human();
+        let out = resp.render_human("rmap coverage <report> [--json]");
 
         assert!(out.contains("0 files with hotspot data"));
         assert!(out.contains("30 files with coverage data"));
@@ -258,7 +263,7 @@ mod tests {
             head_commit_date: "2024-03-15".to_string(),
             suggested_since: "2024-03-15".to_string(),
         });
-        let out = resp.render_human();
+        let out = resp.render_human("rmap coverage <report> [--json]");
         assert!(out.contains("HEAD commit: 2024-03-15"), "{out}");
         assert!(out.contains("try --since 2024-03-15"), "{out}");
     }
@@ -270,7 +275,7 @@ mod tests {
             100,
             50,
         );
-        let out = resp.render_human();
+        let out = resp.render_human("rmap coverage <report> [--json]");
 
         assert!(out.contains("100 files with hotspot data"));
         assert!(out.contains("50 files with coverage data"));
@@ -292,7 +297,7 @@ mod tests {
             150,
             80,
         );
-        let out = resp.render_human();
+        let out = resp.render_human("rmap coverage <report> [--json]");
 
         assert!(out.contains("3 files with both"));
 
@@ -312,7 +317,7 @@ mod tests {
             100,
             50,
         );
-        let out = resp.render_human();
+        let out = resp.render_human("rmap coverage <report> [--json]");
 
         assert!(out.contains("Risk"));
         assert!(out.contains("Hotspot"));
@@ -327,7 +332,7 @@ mod tests {
             100,
             50,
         );
-        let out = resp.render_human();
+        let out = resp.render_human("rmap coverage <report> [--json]");
 
         assert!(out.contains("85.0%"));
     }
@@ -342,7 +347,7 @@ mod tests {
             100,
             50,
         );
-        let out = resp.render_human();
+        let out = resp.render_human("rmap coverage <report> [--json]");
 
         // Explicitly verify no verdict language (excluding file paths)
         // Split by lines and check non-path content
@@ -362,5 +367,16 @@ mod tests {
                 out
             );
         }
+    }
+
+    #[test]
+    fn risk_hint_renders_the_supplied_usage() {
+        let resp = make_response(vec![], 50, 0);
+        let out = resp.render_human("rmap coverage <report> [--json]");
+
+        assert!(
+            out.contains("Import coverage data with 'rmap coverage <report> [--json]'."),
+            "{out}"
+        );
     }
 }
