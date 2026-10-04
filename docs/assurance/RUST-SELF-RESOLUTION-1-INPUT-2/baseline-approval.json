@@ -1,0 +1,111 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "RUST-SELF-RESOLUTION-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/RUST-SELF-RESOLUTION-1-INPUT-2.json",
+    "sha256": "sha256:32041a98822ea3caedee3442763510dc4259f2792dcc042c68ef2d084a92c682"
+  },
+  "review": {
+    "path": "docs/assurance/RUST-SELF-RESOLUTION-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:f55c4caf9fd98c31715356bffd531d2e7a86f42276b16b049cb305cb161203ca"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-TEST-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+        "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d"
+      }
+    },
+    {
+      "id": "D-RSR-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-SCOPE-1.md",
+        "sha256": "sha256:64d441d4c2b4db35cca1ef7d4ff1fdb5411e38d9fb516cfe86d001c9abc9da5f"
+      }
+    },
+    {
+      "id": "D-RSR-SELF-IMPORT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-SELF-IMPORT-1.md",
+        "sha256": "sha256:b72ac006db565a9e43a7865443224a167bea8aa05dc515fffd6a1cd72e115a49"
+      }
+    },
+    {
+      "id": "D-RSR-INLINE-MODULE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-INLINE-MODULE-1.md",
+        "sha256": "sha256:fec45d6c0caf6918f4dc2b67d59f1e2b838c99b0340f6c726494523f173e518e"
+      }
+    },
+    {
+      "id": "D-RSR-DIR-CYCLES-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-DIR-CYCLES-1.md",
+        "sha256": "sha256:9f93e7f7c0c357f2285cca8284c4881fd383e4dcc8a38b02fa53be29bf924391"
+      }
+    },
+    {
+      "id": "D-RSR-ENTRY-CLIMB-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-ENTRY-CLIMB-1.md",
+        "sha256": "sha256:77c5f32e0b517ef55b542bc38c9122aa4c76c95e0f4617de44c8636feeba3d28"
+      }
+    },
+    {
+      "id": "D-AGENT-NOTES-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-NOTES-1.md",
+        "sha256": "sha256:3fb876fc9e422e27ad943699d8abb44dda6453285ce6cd38a99c1e2c69c3f988"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-04T16:36:46.915Z",
+  "rationale": "RUST-SELF-RESOLUTION-1 INPUT-2 (the implementation baseline after admission 1's D-RSR-ENTRY-CLIMB-1): accepted at document cycle 16 (relay iteration 11, review-11, codex gpt-6-sol; author claude-opus-5-5) under bootstrap INPUT-21 after 11 document cycles on this baseline (6\u201316): every finding was against the operator's text, oracles or records (RR-1..RR-5, F-1 wording, record naming), none against the rule; L14 revision 3 reviewed whole twice (INPUT-20 pass 2, INPUT-21 review-2). The operator approves on the human's standing authorization."
+}
