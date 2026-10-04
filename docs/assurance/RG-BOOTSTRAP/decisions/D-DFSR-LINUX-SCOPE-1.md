@@ -1,0 +1,12 @@
+# D-DFSR-LINUX-SCOPE-1 — DOCTOR-FALLBACK-STATE-ROOT-1's acceptance boundary is macOS; the Linux service verdict keeps today's behaviour until DFSR-LINUX-1; a failed probe is never rendered as a note on any platform
+
+Raised: 2026-10-05 by the requirements reviewer of DOCTOR-FALLBACK-STATE-ROOT-1-PREP (cycle 3, DFSR-LINUX-SCOPE).
+
+**The problem in plain words.** RG-REQ-011-L12 revision 6 says "on every platform the service probe shall be labelled by what it measures" and that, under forced stdio, an irrelevant global-service state cannot add a failure. The slice excludes the Linux adapter (`rust/crates/rgr/src/platform/linux.rs` — it cannot be compiled on the macOS build host; D-DFSR-PATHS-1). But `linux.rs:384-390` still FAILS `daemon_service` when the systemd or manual service is stopped, so on Linux a forced-stdio run with a working stdio daemon would stay UNHEALTHY — and a shared tone step keyed only on the predicate could render that failed probe as `[note]`: an unhealthy verdict with no visible failure line. The six-path allocation cannot deliver the cross-platform reading of L12.
+
+**Options (reward / risk).**
+- A — include Linux now: add `platform/linux.rs` and a Linux verification gate. Reward: the rule holds on both platforms. Risk: a gate this macOS host cannot execute; an unverified Linux edit would ship on trust.
+- B — limit this slice to macOS: L12 states the Linux verdict gap explicitly; the allocation and the contract claim macOS only; the shared tone step gains a `passed` guard so a failed probe is never rendered as a note anywhere (on Linux the stopped-service failure stays a visible, counted `[FAIL]` under forced stdio until DFSR-LINUX-1). Reward: the macOS outcome ships without a false cross-platform claim and without a display that hides a failure. Risk: Linux users keep the wrong health verdict until DFSR-LINUX-1.
+- C — defer the slice. Risk: the isolated macOS `doctor` stays misleading meanwhile.
+
+**Resolved: 2026-10-05 by the OPERATOR (in-place manager) as B**, the reviewer's recommendation, consistent with the slice's Linux-path exclusion; the human may override. RG-REQ-011-L12 revision 7 binds it: the service-label and note rules apply on macOS in this slice; on Linux the label, the note rule and the verdict follow in DFSR-LINUX-1 (both service modes, tested on a Linux host); on every platform the tone step never marks a probe whose `passed` is false as a note.
