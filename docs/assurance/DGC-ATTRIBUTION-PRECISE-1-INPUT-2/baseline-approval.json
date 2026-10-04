@@ -1,0 +1,83 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DGC-ATTRIBUTION-PRECISE-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DGC-ATTRIBUTION-PRECISE-1-INPUT-2.json",
+    "sha256": "sha256:f7203f970c940ab0b36550d50e9ee1bb81ca625a3fbed0795e12c83437cd698b"
+  },
+  "review": {
+    "path": "docs/assurance/DGC-ATTRIBUTION-PRECISE-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:dee76613cc66be2d3bccf3dd2a9d8c03f4a15c56b04681faa8540ff926e18b89"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-GRADLE-DECLARED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+        "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-DGC-BOUNDARY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-BOUNDARY-1.md",
+        "sha256": "sha256:42ae2be3c2feaaee11c6ce4416c28d8449007d61291a04546690bf9d5ab8012d"
+      }
+    },
+    {
+      "id": "D-TEST-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+        "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d"
+      }
+    },
+    {
+      "id": "D-DAP-NESTED-BUILDS-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DAP-NESTED-BUILDS-1.md",
+        "sha256": "sha256:f3e1e275327ea47dc929bcfc157e86891344191b168ecf0ea806d99fee190b63"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-04T06:44:58.061Z",
+  "rationale": "DGC-ATTRIBUTION-PRECISE-1 INPUT-2 accepted at document cycle 3 (codex gpt-6-sol review-3 accepted, no finding; claude-opus-5-5 author). Cycle 0 under INPUT-1: D-DAP-NON-JVM -> operator B (ownership per toolchain; correction appended to the human's D-DAP-NESTED-BUILDS-1 \u2014 substance unchanged) and F-DAP-CONSUMERS (cross-surface coherence oracle added to DAP-C05). Cycles 1-2: the oracle's population rule (trust vs file-owning modules incl. test-only), the cycles wording limit, worktree cleanup and failure-evidence retention. Operator approval; the human's record governs; the operator correction is overridable."
+}
