@@ -4,25 +4,86 @@
   "kind": "requirement",
   "requirementId": "RG-REQ-011",
   "sources": [
-    { "kind": "document-section", "path": "docs/VISION.md", "fragment": "operational-architecture" },
-    { "kind": "document-section", "path": "docs/VISION.md", "fragment": "the-core" },
-    { "kind": "document-section", "path": "docs/slices/state-root-separation-1.md", "fragment": "policy" },
-    { "kind": "document-section", "path": "docs/slices/snapshot-retention-1.md", "fragment": "2-contract" },
-    { "kind": "document-section", "path": "docs/slices/daemon-residuals-2.md", "fragment": "2-contract" },
-    { "kind": "document-section", "path": "docs/slices/self-pollution-1.md", "fragment": "2-contract" }
+    {
+      "kind": "document-section",
+      "path": "docs/VISION.md",
+      "fragment": "operational-architecture"
+    },
+    {
+      "kind": "document-section",
+      "path": "docs/VISION.md",
+      "fragment": "the-core"
+    },
+    {
+      "kind": "document-section",
+      "path": "docs/slices/state-root-separation-1.md",
+      "fragment": "policy"
+    },
+    {
+      "kind": "document-section",
+      "path": "docs/slices/snapshot-retention-1.md",
+      "fragment": "2-contract"
+    },
+    {
+      "kind": "document-section",
+      "path": "docs/slices/daemon-residuals-2.md",
+      "fragment": "2-contract"
+    },
+    {
+      "kind": "document-section",
+      "path": "docs/slices/self-pollution-1.md",
+      "fragment": "2-contract"
+    }
   ],
   "lowLevelRequirements": [
-    { "id": "RG-REQ-011-L01", "parentId": "RG-REQ-011" },
-    { "id": "RG-REQ-011-L02", "parentId": "RG-REQ-011" },
-    { "id": "RG-REQ-011-L03", "parentId": "RG-REQ-011" },
-    { "id": "RG-REQ-011-L04", "parentId": "RG-REQ-011" },
-    { "id": "RG-REQ-011-L05", "parentId": "RG-REQ-011" },
-    { "id": "RG-REQ-011-L06", "parentId": "RG-REQ-011" },
-    { "id": "RG-REQ-011-L07", "parentId": "RG-REQ-011" },
-    { "id": "RG-REQ-011-L08", "parentId": "RG-REQ-011" },
-    { "id": "RG-REQ-011-L09", "parentId": "RG-REQ-011" },
-    { "id": "RG-REQ-011-L10", "parentId": "RG-REQ-011" },
-    { "id": "RG-REQ-011-L11", "parentId": "RG-REQ-011" }
+    {
+      "id": "RG-REQ-011-L01",
+      "parentId": "RG-REQ-011"
+    },
+    {
+      "id": "RG-REQ-011-L02",
+      "parentId": "RG-REQ-011"
+    },
+    {
+      "id": "RG-REQ-011-L03",
+      "parentId": "RG-REQ-011"
+    },
+    {
+      "id": "RG-REQ-011-L04",
+      "parentId": "RG-REQ-011"
+    },
+    {
+      "id": "RG-REQ-011-L05",
+      "parentId": "RG-REQ-011"
+    },
+    {
+      "id": "RG-REQ-011-L06",
+      "parentId": "RG-REQ-011"
+    },
+    {
+      "id": "RG-REQ-011-L07",
+      "parentId": "RG-REQ-011"
+    },
+    {
+      "id": "RG-REQ-011-L08",
+      "parentId": "RG-REQ-011"
+    },
+    {
+      "id": "RG-REQ-011-L09",
+      "parentId": "RG-REQ-011"
+    },
+    {
+      "id": "RG-REQ-011-L10",
+      "parentId": "RG-REQ-011"
+    },
+    {
+      "id": "RG-REQ-011-L11",
+      "parentId": "RG-REQ-011"
+    },
+    {
+      "id": "RG-REQ-011-L12",
+      "parentId": "RG-REQ-011"
+    }
   ]
 }
 -->
@@ -132,6 +193,16 @@ STATUS: WITHDRAWN 2026-09-14 (human, option C — no floor): "the vision promise
 **Verification criterion:** none — withdrawn 2026-09-14. (Historical, not normative: no benchmark gate ever asserted a latency floor; the only gate is `retention_prune_benchmark_gate`.)
 
 **Evidence (v0.18.0):** WITHDRAWN — historical: measurements existed and no floor was asserted; by the human's decision no numeric bound will be authored. The text above the criterion is retained for the record and is not normative.
+
+### RG-REQ-011-L12 — `doctor` reports the probed transport and state root first, and judges the daemon it actually uses
+
+STATUS: PROPOSED 2026-10-05 (operator, from RC-4; implemented by DOCTOR-FALLBACK-STATE-ROOT-1; D-DFSR-SCOPE-1).
+
+`rmap doctor` shall print the transport mode and the state root mode it is configured with (`transport: <mode> (active: <name>)`, `state_root: global | override (<path>) | sandbox-local (<path>)`) BEFORE any socket probe, from the client configuration alone, so they appear whether or not a socket is reachable; when the transport is forced to stdio (`RMAP_TRANSPORT=stdio`) the socket probes (`daemon_socket`, `socket_file`, `socket_connect`, `socket_ping`) shall report `n/a (stdio transport)` and pass instead of diagnosing a crash; under `auto` or `socket` they keep their failure semantics; the launchd/systemd service probe shall be labelled by what it measures (`launchd service (global state root)`) and, when the probed root is an override or sandbox root, shall state that it is not the daemon serving that root. The health verdict counts the probes as labelled.
+
+**Verification criterion:** `rgr/src/platform/mod.rs` tests for `granular_socket_probes` under forced stdio (four `n/a` passes, `transport` and `state_root` present and FIRST) and under `auto` with a missing override socket (failures retained); `rgr/src/platform/macos.rs` test for the `daemon_service` label and detail under an override root; the operator's before/after captures of `rmap doctor` and `rmap doctor --json` in the normal environment (unchanged lines; probe names unchanged) and under an isolated stdio root (DFSR-C03).
+
+**Evidence (v0.20.0, 2026-10-05):** NOT MET — RC-4: under an isolated stdio root `doctor` prints the launchd daemon's pid, four socket failures, no `transport`/`state_root` line and `daemon UNHEALTHY (5/25 checks failed)` while the stdio daemon answered every daemon-backed probe; in the normal environment it prints `transport: auto (active: socket)` and `state_root: global` (captures: `.agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/before/`).
 
 ## Preservation obligations named by the ratifying specifications
 
