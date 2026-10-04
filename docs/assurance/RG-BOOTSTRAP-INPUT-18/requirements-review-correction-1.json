@@ -1,0 +1,39 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-18-pass5-corrected",
+  "corrects": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-18/requirements-review.json",
+    "sha256": "sha256:b0150d150bcfbf9060141c3bac9b5af183955415f4659a1ce0d81850e2617820",
+    "defect": "the original record's `report` field was a template sentence carried from RG-BOOTSTRAP-INPUT-16 (it named a docs/cli/rmap-contracts.md re-pin and a /private/tmp/rgbootstrap16 prompt path) and did not describe the change this review actually assessed; found by the RUST-SELF-RESOLUTION-1 INPUT-2 document review, cycle 10, finding RR-5 (2026-10-04). The original is kept unchanged; this record states the review as it happened."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-18.json",
+    "sha256": "sha256:94e09bc2398b0e357b38d6537a586e58692e5be6b8daf6091477440ead2ad3e8"
+  },
+  "changedPins": [
+    {
+      "path": "docs/requirements/rg-req-006-import-resolution-and-dependencies.md",
+      "sha256": "sha256:19f4456df3dd09f1c151292b85b30631469e4e83f6e89e938ca20f7cfa399768"
+    }
+  ],
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-18"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-18-pass5",
+    "session": "01a10716-544c-7381-8964-db4a78643833"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T15:47:38.000Z",
+  "changeReviewed": "INPUT-17 → INPUT-18: one pin changed — rg-req-006 (RG-REQ-006-L14 restated as revision 2: a use resolves against the module ENCLOSING it, D-RSR-INLINE-MODULE-1; the accepted cycles movement, D-RSR-DIR-CYCLES-1); passes 1–4 found the appended amendment contradicting the leaf's title, unreconciled counts, stale prompt provenance and a README queue line; pass 5 accepted.",
+  "report": "Standalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high; session 01a10716-544c-7381-8964-db4a78643833), pass 5, self-contained prompt naming the changed pins, their diff stat since the previous bootstrap commit, and the verbatim requirement heading(s). The reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: All 59 candidate digests match HEAD f1983080; compared with INPUT-17, only the RG-REQ-006 pin changed. OBSERVED: The 5-insertion, 5-deletion change to RG-REQ-006 is wholly inside L14; the header, L01–L13, and preservation and approval sections are unchanged. OBSERVED: Revision 2 uses the enclosing-module rule, agrees with both named decisions, and states the accepted directory-cycle movement in its rule and verification criterion; the README queue line and dated note also use the enclosing-module rule. OBSERVED: The evidence arithmetic holds: 3,222 = 3,152 + 70; 70 = 43 + 27; and 32 of the 345 inline-body rows = 15 + 17."
+}

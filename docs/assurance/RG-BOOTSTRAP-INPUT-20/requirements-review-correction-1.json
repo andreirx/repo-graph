@@ -1,0 +1,39 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-20-pass1-corrected",
+  "corrects": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-20/requirements-review.json",
+    "sha256": "sha256:36da628486f8da684026fa60833889fe0f03daf81739710babf7d85807d9d188",
+    "defect": "the original record's `report` field was a template sentence carried from RG-BOOTSTRAP-INPUT-16 (it named a docs/cli/rmap-contracts.md re-pin and a /private/tmp/rgbootstrap16 prompt path) and did not describe the change this review actually assessed; found by the RUST-SELF-RESOLUTION-1 INPUT-2 document review, cycle 10, finding RR-5 (2026-10-04). The original is kept unchanged; this record states the review as it happened."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-20.json",
+    "sha256": "sha256:de991e77da24317315d2eb02b20d94064f7318f0f6a6e592c35caa9b8441d0c7"
+  },
+  "changedPins": [
+    {
+      "path": "docs/requirements/rg-req-006-import-resolution-and-dependencies.md",
+      "sha256": "sha256:9fa6a193b5934bbddb4205c65cab7c60ae9bf90e25b47546ec045c269a28247a"
+    }
+  ],
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-20"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-20-pass1",
+    "session": "01a1078d-8282-76b1-8eaa-a7961529f371"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T15:47:38.000Z",
+  "changeReviewed": "INPUT-19 → INPUT-20: one pin changed — rg-req-006 (RG-REQ-006-L14 revision 3's evidence line: the inline-body count is 457 of the 5,056 replayed rows; 345/32 labelled revision 2's measurement); pass 1 accepted.",
+  "report": "Standalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high; session 01a1078d-8282-76b1-8eaa-a7961529f371), pass 1, self-contained prompt naming the changed pins, their diff stat since the previous bootstrap commit, and the verbatim requirement heading(s). The reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED all 59 candidate digests match HEAD ad01e194; RG-REQ-006 is the only pin changed from INPUT-19, and all other pins remain as in INPUT-17. OBSERVED every edit to RG-REQ-006 since 3e6136a9 is within L14; its header, L01–L13, preservation obligations, and approval section are unchanged. OBSERVED revision 2’s enclosing-module title, rule, verification criterion, and evidence are internally consistent with D-RSR-INLINE-MODULE-1 and the accepted directory-cycle movement in D-RSR-DIR-CYCLES-1; its counts satisfy 3,222 = 3,152 + 70, 70 = 43 + 27, and 32 = 15 + 17 within the 345 inline rows. OBSERVED the README’s dated note and queue line both state the enclosing-module rule. OBSERVED one correction to the supplied comparison instruction: aead0088→HEAD changes one line, but cc776ead→HEAD changes four lines, all within L14."
+}

@@ -1,0 +1,43 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-17-pass2-corrected",
+  "corrects": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-17/requirements-review.json",
+    "sha256": "sha256:b63406953feea7e671f484f5c9d5524d232739a80e91ba0bd0f952e5d9441ce0",
+    "defect": "the original record's `report` field was a template sentence carried from RG-BOOTSTRAP-INPUT-16 (it named a docs/cli/rmap-contracts.md re-pin and a /private/tmp/rgbootstrap16 prompt path) and did not describe the change this review actually assessed; found by the RUST-SELF-RESOLUTION-1 INPUT-2 document review, cycle 10, finding RR-5 (2026-10-04). The original is kept unchanged; this record states the review as it happened."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-17.json",
+    "sha256": "sha256:3a469d6574ae3482fb6aeb8a9a89a03871703c51dd0a14f94c37bde31241ad3c"
+  },
+  "changedPins": [
+    {
+      "path": "docs/cli/rmap-contracts.md",
+      "sha256": "sha256:62df8dd3a049dfa384ceb33c82d22a71222060097582b85050e11714b35d2483"
+    },
+    {
+      "path": "docs/requirements/rg-req-006-import-resolution-and-dependencies.md",
+      "sha256": "sha256:5a1609c4833f42c808552222ca5bc31a012613a4b7604642df77af0d76c03d87"
+    }
+  ],
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-17"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-17-pass2",
+    "session": "01a106be-b081-74e3-8749-fab0c832669c"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T15:47:38.000Z",
+  "changeReviewed": "INPUT-16 → INPUT-17: two pins changed — docs/cli/rmap-contracts.md (DGC-ATTRIBUTION-PRECISE-1's nested-Gradle-builds subsection with the Java-only indexed-source limit) and docs/requirements/rg-req-006-import-resolution-and-dependencies.md (RG-REQ-006-L14 PROPOSED, revision 1); pass 1 found the catalog README's stale 'No L remains PROPOSED' statement (fixed 07b22b01); pass 2 accepted.",
+  "report": "Standalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high; session 01a106be-b081-74e3-8749-fab0c832669c), pass 2, self-contained prompt naming the changed pins, their diff stat since the previous bootstrap commit, and the verbatim requirement heading(s). The reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: At HEAD 07b22b01, both changed pins in the INPUT-17 candidate match the SHA-256 digests of their HEAD files; the diff over all pinned paths shows only those two files changed since INPUT-16. OBSERVED: The CLI diff only adds the DGC-ATTRIBUTION-PRECISE-1 subsection, including the Java-only indexed-source limit; no existing contract sentence changed. OBSERVED: RG-REQ-006-L14 is listed in `lowLevelRequirements` and has a PROPOSED status, statement, verification criterion with test families and field literals, and evidence; L01–L13 are unchanged. OBSERVED: CC-23 is appended without earlier edits, and the README changes are limited to the named row, queue paragraph, and dated note, with no stale current-status claim about L14. OBSERVED: INPUT-17 itself is untracked in this checkout; this review accepts its candidate contents against the HEAD inputs, not a committed manifest."
+}
