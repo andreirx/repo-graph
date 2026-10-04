@@ -17,7 +17,7 @@
 //!   - IMPLEMENTS: name lookup filtered to INTERFACE subtype
 //!   - Other: unfiltered name lookup
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use repo_graph_classification::canonicalize_cargo_package_name;
 use repo_graph_classification::types::{
@@ -181,6 +181,54 @@ pub fn metadata_forward_decl(metadata_json: Option<&str>) -> bool {
         ForwardDeclRead::Definition => false,
         ForwardDeclRead::Unreadable => true,
     }
+}
+
+/// RUST-SELF-RESOLUTION-1 (D-RSR-ENTRY-CLIMB-1): one external `mod <name>;` declaration a Rust
+/// FILE node records under `metadata_json.rust_mod_decls` (written by the Rust extractor's
+/// `mod_decls.rs`): the module `name` and the `inline_path` — the names of the inline
+/// `mod <x> { }` bodies the declaration is written in, outermost first, empty at the file's top
+/// level. Stage 3.6 reads it as the declaration evidence a sibling path needs.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RustModDeclaration {
+    pub name: String,
+    pub inline_path: Vec<String>,
+}
+
+/// RUST-SELF-RESOLUTION-1: each Rust FILE node's declarations ([`RustModDeclaration`]), keyed by
+/// the FILE node's file uid (`<repo_uid>:<path>`). Built by the orchestrator from the stored FILE
+/// nodes through [`rust_mod_decls_from_metadata`]; a file absent from the map declares nothing.
+pub type RustModDeclsByFile = HashMap<String, HashSet<RustModDeclaration>>;
+
+/// RUST-SELF-RESOLUTION-1: read a FILE node's `metadata_json.rust_mod_decls`. No carrier, no key,
+/// a carrier that is not JSON, or a key that is not a list → no declarations; an entry without a
+/// string `name`, or whose `inline_path` is present but not a list of strings, is skipped. The
+/// value only GATES stage 3.6's sibling reading, so an unreadable fact can only leave a row
+/// unresolved with its classification (the state it had before this slice), never bind it.
+pub fn rust_mod_decls_from_metadata(metadata_json: Option<&str>) -> HashSet<RustModDeclaration> {
+    let Some(raw) = metadata_json else {
+        return HashSet::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return HashSet::new();
+    };
+    let Some(entries) = value.get("rust_mod_decls").and_then(|v| v.as_array()) else {
+        return HashSet::new();
+    };
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let name = entry.get("name")?.as_str()?.to_string();
+            let inline_path = match entry.get("inline_path") {
+                None => Vec::new(),
+                Some(list) => list
+                    .as_array()?
+                    .iter()
+                    .map(|v| v.as_str().map(str::to_string))
+                    .collect::<Option<Vec<String>>>()?,
+            };
+            Some(RustModDeclaration { name, inline_path })
+        })
+        .collect()
 }
 
 /// PYTHON-SELF-BINDING-1 (RG-REQ-005-L03): parse a Python CLASS node's base-class SIMPLE names
@@ -538,12 +586,31 @@ pub fn resolve_edges(
     index: &ResolverIndex,
     import_bindings_by_file: Option<&HashMap<String, Vec<ImportBinding>>>,
 ) -> ResolutionResult {
+    resolve_edges_with_rust_mod_decls(
+        edges,
+        index,
+        import_bindings_by_file,
+        &RustModDeclsByFile::new(),
+    )
+}
+
+/// [`resolve_edges`] with each Rust FILE node's `mod` declarations (RUST-SELF-RESOLUTION-1,
+/// D-RSR-ENTRY-CLIMB-1): stage 3.6 binds a sibling path only when the importing file declares its
+/// first segment. The orchestrator calls this form; [`resolve_edges`] passes no declarations, so
+/// under it no sibling path binds.
+pub fn resolve_edges_with_rust_mod_decls(
+    edges: &[ExtractedEdge],
+    index: &ResolverIndex,
+    import_bindings_by_file: Option<&HashMap<String, Vec<ImportBinding>>>,
+    rust_mod_decls: &RustModDeclsByFile,
+) -> ResolutionResult {
     let mut resolved = Vec::new();
     let mut still_unresolved = Vec::new();
     let mut resolved_import_pairs = Vec::new();
 
     for edge in edges {
-        let resolution_outcome = resolve_target(edge, index, import_bindings_by_file);
+        let resolution_outcome =
+            resolve_target(edge, index, import_bindings_by_file, rust_mod_decls);
 
         match resolution_outcome {
             TargetResolution::Resolved(uid) => {
@@ -855,6 +922,7 @@ fn resolve_target(
     edge: &ExtractedEdge,
     index: &ResolverIndex,
     import_bindings_by_file: Option<&HashMap<String, Vec<ImportBinding>>>,
+    rust_mod_decls: &RustModDeclsByFile,
 ) -> TargetResolution {
     match edge.edge_type {
         EdgeType::Imports => {
@@ -870,7 +938,7 @@ fn resolve_target(
                     return inferred;
                 }
             }
-            resolve_import_ladder(edge, index)
+            resolve_import_ladder(edge, index, rust_mod_decls)
         }
         EdgeType::Calls => resolve_call_target(
             &edge.target_key,
@@ -949,7 +1017,11 @@ fn resolve_target(
 /// crate, repo-prefix), then the declared-Java suffix stage. Extracted unchanged from
 /// `resolve_target`'s Imports arm so the Python submodule stage can run ahead of it and fall back
 /// to it unchanged on a miss.
-fn resolve_import_ladder(edge: &ExtractedEdge, index: &ResolverIndex) -> TargetResolution {
+fn resolve_import_ladder(
+    edge: &ExtractedEdge,
+    index: &ResolverIndex,
+    rust_mod_decls: &RustModDeclsByFile,
+) -> TargetResolution {
     let source_file_uid = index.node_uid_to_file_uid.get(&edge.source_node_uid);
 
     // v1.1: Try new include resolver first for C/C++ includes.
@@ -991,6 +1063,17 @@ fn resolve_import_ladder(edge: &ExtractedEdge, index: &ResolverIndex) -> TargetR
     // violating the frozen byte-stability invariant. `ExtractedEdge.extractor`
     // is the existing provenance fact; the Rust family is `rust-core:<ver>`.
     let is_rust_import = edge.extractor.starts_with(RUST_EXTRACTOR_PREFIX);
+    // Stage 3.6's input (RUST-SELF-RESOLUTION-1): the importing file's repo-relative path, the
+    // inline `mod` names enclosing the `use`, and the file's `mod` declarations. Built for Rust
+    // edges only.
+    let rust_use_site = if is_rust_import {
+        source_file_uid.and_then(|fuid| {
+            let source_path = fuid.split_once(':').map(|(_, path)| path)?;
+            RustUseSite::from_edge(source_path, edge, rust_mod_decls.get(fuid))
+        })
+    } else {
+        None
+    };
     match resolve_import_target(
         &edge.target_key,
         &index.nodes_by_stable_key,
@@ -999,6 +1082,7 @@ fn resolve_import_ladder(edge: &ExtractedEdge, index: &ResolverIndex) -> TargetR
         tu_includes,
         &index.rust_crate_roots,
         is_rust_import,
+        rust_use_site.as_ref(),
     ) {
         Some(uid) => TargetResolution::Resolved(uid),
         // Stage 5 (IMPORT-RESOLUTION-JAVA-1 §2.1): declared Java FQN import. Runs ONLY
@@ -1269,6 +1353,7 @@ fn option_to_resolution(opt: Option<String>) -> TargetResolution {
 
 // ── IMPORTS resolution ───────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)] // the ladder's stage inputs, threaded from the index
 fn resolve_import_target(
     target_key: &str,
     nodes_by_stable_key: &HashMap<String, ResolverNode>,
@@ -1277,6 +1362,7 @@ fn resolve_import_target(
     tu_include_resolution: Option<&HashMap<String, String>>,
     rust_crate_roots: &HashMap<String, String>,
     is_rust_import: bool,
+    rust_use_site: Option<&RustUseSite>,
 ) -> Option<String> {
     // Stage 1: direct stable-key lookup.
     if let Some(node) = nodes_by_stable_key.get(target_key) {
@@ -1318,6 +1404,24 @@ fn resolve_import_target(
         }
     }
 
+    // Stage 3.6 (RUST-SELF-RESOLUTION-1, RG-REQ-006-L14): a Rust `use` whose head is
+    // `crate`/`super`/`self`, or whose first segment named no declared crate (stage 3.5 missed:
+    // a sibling module path), resolves against the module that encloses the `use`. Runs only for
+    // Rust-extractor edges (`rust_use_site` is built for them alone) and only after 1–3.5 miss.
+    if let Some(site) = rust_use_site {
+        if let Some(resolved_key) = resolve_rust_enclosing_module_import(
+            target_key,
+            site,
+            rust_crate_roots,
+            file_resolution,
+            repo_uid,
+        ) {
+            if let Some(node) = nodes_by_stable_key.get(&resolved_key) {
+                return Some(node.node_uid.clone());
+            }
+        }
+    }
+
     // Stage 4: repo-prefix fallback for bare header names.
     if !target_key.contains(':') {
         let constructed_key = format!("{}:{}:FILE", repo_uid, target_key);
@@ -1347,8 +1451,9 @@ fn resolve_import_target(
 /// `<crate_root>/src/` in this order — `<segs>.rs`, `<segs>/mod.rs`, then the last segment
 /// is dropped and the pair repeats, ending at the crate entrypoint `src/lib.rs` (a bin-only
 /// crate has no `lib.rs`, so `src/main.rs` is tried next). The FIRST candidate present in
-/// the file set wins. The crate's own `crate::`/`super::`/`self::` paths are relative and
-/// were already turned into `:FILE` keys by the extractor — they never reach here.
+/// the file set wins. The crate's own `crate`/`super`/`self` paths, and a sibling module path
+/// whose first segment names no declared crate, miss here and go to stage 3.6
+/// ([`resolve_rust_enclosing_module_import`]) through the same ladder ([`rust_module_ladder`]).
 fn resolve_rust_crate_import(
     target_key: &str,
     rust_crate_roots: &HashMap<String, String>,
@@ -1366,20 +1471,40 @@ fn resolve_rust_crate_import(
     let canonical = canonicalize_cargo_package_name(first);
     let crate_root = rust_crate_roots.get(&canonical)?;
 
-    // `<crate_root>/src`, collapsing a "." (or empty) root crate to a bare `src`.
-    let src_prefix = if crate_root == "." || crate_root.is_empty() {
+    let rest: Vec<&str> = segs.collect();
+    rust_module_ladder(
+        &rust_src_prefix(crate_root),
+        &rest,
+        file_resolution,
+        repo_uid,
+    )
+}
+
+/// `<crate_root>/src`, collapsing a "." (or empty) root crate to a bare `src`.
+fn rust_src_prefix(crate_root: &str) -> String {
+    if crate_root == "." || crate_root.is_empty() {
         "src".to_string()
     } else {
         format!("{}/src", crate_root)
-    };
+    }
+}
 
+/// The Rust module ladder (RG-REQ-006-L01, shared by stages 3.5 and 3.6): for the module
+/// segments `segs` under `src_prefix`, probe `<segs>.rs`, then `<segs>/mod.rs`, then drop the
+/// last segment and repeat, ending at the crate entry point `src/lib.rs` then `src/main.rs`.
+/// Returns the FIRST FILE stable key present in `file_resolution` (identity entries). PURE.
+fn rust_module_ladder(
+    src_prefix: &str,
+    segs: &[&str],
+    file_resolution: &HashMap<String, String>,
+    repo_uid: &str,
+) -> Option<String> {
     let probe = |rel_path: &str| -> Option<String> {
         let key = format!("{}:{}:FILE", repo_uid, rel_path);
         file_resolution.get(&key).cloned()
     };
 
-    let rest: Vec<&str> = segs.collect();
-    let mut remaining = rest.as_slice();
+    let mut remaining = segs;
     loop {
         if remaining.is_empty() {
             // Crate entrypoint: lib.rs (library) then main.rs (bin-only).
@@ -1399,6 +1524,154 @@ fn resolve_rust_crate_import(
         }
         remaining = &remaining[..remaining.len() - 1];
     }
+}
+
+/// Stage 3.6's view of a Rust `use` site: the importing file's repo-relative path and the names
+/// of the inline `mod` bodies that enclose the `use`, outermost first (the extractor's
+/// `inlineModulePath` key; absent for a top-level `use`).
+struct RustUseSite<'a> {
+    source_path: &'a str,
+    inline_module_path: Vec<String>,
+    /// The importing FILE node's `mod <name>;` declarations (D-RSR-ENTRY-CLIMB-1); `None` when
+    /// the file declares none.
+    declared_modules: Option<&'a HashSet<RustModDeclaration>>,
+}
+
+impl<'a> RustUseSite<'a> {
+    /// `None` when the edge's carrier is present but unreadable, or its `inlineModulePath` is not
+    /// a list of strings: the enclosing module is then unknown and stage 3.6 binds nothing.
+    fn from_edge(
+        source_path: &'a str,
+        edge: &ExtractedEdge,
+        declared_modules: Option<&'a HashSet<RustModDeclaration>>,
+    ) -> Option<Self> {
+        let inline_module_path = match edge.metadata_json.as_deref() {
+            None => Vec::new(),
+            Some(raw) => {
+                let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+                match value.as_object()?.get("inlineModulePath") {
+                    None => Vec::new(),
+                    Some(list) => list
+                        .as_array()?
+                        .iter()
+                        .map(|v| v.as_str().map(str::to_string))
+                        .collect::<Option<Vec<String>>>()?,
+                }
+            }
+        };
+        Some(Self {
+            source_path,
+            inline_module_path,
+            declared_modules,
+        })
+    }
+}
+
+/// RUST-SELF-RESOLUTION-1 (RG-REQ-006-L14): resolve a Rust `use` against the module that encloses
+/// it. PURE: `(target_key, use site, declared crate roots, file set, repo_uid) → Option<FILE
+/// stable key>`.
+///
+/// 1. Crate root: the longest declared root that is `.`/empty or a `/`-terminated prefix of the
+///    source path; none → `None`.
+/// 2. The source must lie under `<root>/src/`, not under `<root>/src/bin/`, and end in `.rs`.
+/// 3. The file's module path: `src/a/b.rs` → `a::b`, `src/a/mod.rs` → `a`, `src/lib.rs` and
+///    `src/main.rs` → the crate root; then the `inlineModulePath` names are appended.
+/// 4. Head: `crate` → the remaining segments from the root; `self` → module + remaining; each
+///    leading `super` pops one segment (more pops than segments → `None`); any other first segment
+///    is a sibling path (D-RSR-ENTRY-CLIMB-1): a declared crate name → `None` (a stage-3.5 miss
+///    never becomes a sibling reading); otherwise it binds only when the use site's FILE node
+///    declares `mod <first>;` with `inline_path` equal to the use's `inlineModulePath` AND
+///    `<enclosing>/<first>.rs` or `<enclosing>/<first>/mod.rs` is indexed → module + every segment;
+///    else `None`.
+/// 5. [`rust_module_ladder`]; a hit equal to the source file binds nothing (D-RSR-SELF-IMPORT-1).
+///    For a sibling path the first-segment file is indexed, so the ladder stops at it at the
+///    latest: it never shortens past the first segment.
+fn resolve_rust_enclosing_module_import(
+    target_key: &str,
+    site: &RustUseSite,
+    rust_crate_roots: &HashMap<String, String>,
+    file_resolution: &HashMap<String, String>,
+    repo_uid: &str,
+) -> Option<String> {
+    let source_path = site.source_path;
+    let crate_root = rust_crate_roots
+        .values()
+        .filter(|root| {
+            root.as_str() == "." || root.is_empty() || source_path.starts_with(&format!("{root}/"))
+        })
+        .max_by_key(|root| if root.as_str() == "." { 0 } else { root.len() })?;
+    let src_prefix = rust_src_prefix(crate_root);
+    let rel = source_path.strip_prefix(&format!("{src_prefix}/"))?;
+    if rel.starts_with("bin/") {
+        return None;
+    }
+    let rel = rel.strip_suffix(".rs")?;
+    let file_segs: Vec<&str> = rel.split('/').collect();
+    let mut module: Vec<&str> = match file_segs.as_slice() {
+        ["lib"] | ["main"] => Vec::new(),
+        [dirs @ .., "mod"] => dirs.to_vec(),
+        all => all.to_vec(),
+    };
+    module.extend(site.inline_module_path.iter().map(String::as_str));
+
+    let parts: Vec<&str> = target_key.split("::").collect();
+    let segs: Vec<&str> = match parts[0] {
+        "crate" => parts[1..].to_vec(),
+        "self" => module
+            .iter()
+            .copied()
+            .chain(parts[1..].iter().copied())
+            .collect(),
+        "super" => {
+            let pops = parts.iter().take_while(|p| **p == "super").count();
+            if pops > module.len() {
+                return None;
+            }
+            module[..module.len() - pops]
+                .iter()
+                .copied()
+                .chain(parts[pops..].iter().copied())
+                .collect()
+        }
+        "" => return None,
+        first => {
+            if rust_crate_roots.contains_key(&canonicalize_cargo_package_name(first)) {
+                return None;
+            }
+            let declared = site.declared_modules.is_some_and(|decls| {
+                decls.iter().any(|d| {
+                    d.name == first
+                        && d.inline_path.as_slice() == site.inline_module_path.as_slice()
+                })
+            });
+            if !declared {
+                return None;
+            }
+            let first_dir = module
+                .iter()
+                .copied()
+                .chain(std::iter::once(first))
+                .collect::<Vec<&str>>()
+                .join("/");
+            let indexed = |rel_path: String| {
+                file_resolution.contains_key(&format!("{repo_uid}:{src_prefix}/{rel_path}:FILE"))
+            };
+            if !indexed(format!("{first_dir}.rs")) && !indexed(format!("{first_dir}/mod.rs")) {
+                return None;
+            }
+            module
+                .iter()
+                .copied()
+                .chain(parts.iter().copied())
+                .collect()
+        }
+    };
+
+    let hit = rust_module_ladder(&src_prefix, &segs, file_resolution, repo_uid)?;
+    if hit == format!("{repo_uid}:{source_path}:FILE") {
+        return None;
+    }
+    Some(hit)
 }
 
 // ── Python package-submodule import inference (PYTHON-SUBMODULE-IMPORT-1) ──
@@ -5178,7 +5451,7 @@ mod tests {
         // Non-Rust edge (is_rust_import = false): stage 3.5 does not run → unresolved,
         // even though the crate + candidate file exist.
         assert_eq!(
-            resolve_import_target("b::util", &nodes, &files, "r1", None, &roots, false),
+            resolve_import_target("b::util", &nodes, &files, "r1", None, &roots, false, None),
             None,
             "a non-Rust IMPORTS edge must not resolve via the declared-Rust-crate stage"
         );
@@ -5186,9 +5459,480 @@ mod tests {
         // Control: the SAME inputs from a Rust edge (is_rust_import = true) DO resolve —
         // proving the None above is the gate, not a missing fixture.
         assert_eq!(
-            resolve_import_target("b::util", &nodes, &files, "r1", None, &roots, true),
+            resolve_import_target("b::util", &nodes, &files, "r1", None, &roots, true, None),
             Some("uid::r1:b/src/util.rs:FILE".to_string()),
             "the identical Rust IMPORTS edge must resolve to the defining file"
+        );
+    }
+
+    // ── Rust enclosing-module import stage 3.6 (RUST-SELF-RESOLUTION-1, RG-REQ-006-L14) ──
+
+    const RUST_EXTRACTOR: &str = "rust-core:0.3.0";
+
+    /// A resolver index over `paths` (FILE nodes `n:<path>`) with the declared Cargo crates
+    /// `roots` (`name → root`), as the orchestrator builds `rust_crate_roots`.
+    fn rust_index(paths: &[&str], roots: &[(&str, &str)]) -> ResolverIndex {
+        let mut index = c_include_index(paths);
+        index.rust_crate_roots = crate_roots(roots);
+        index
+    }
+
+    /// A Rust `use` IMPORTS edge from the FILE node of `source_path` whose target key is the
+    /// recorded specifier, with the extractor's carrier keys.
+    fn rust_edge(source_path: &str, specifier: &str) -> ExtractedEdge {
+        let mut e = make_edge("e-rust", specifier, EdgeType::Imports);
+        e.source_node_uid = format!("n:{source_path}");
+        e.extractor = RUST_EXTRACTOR.into();
+        e.metadata_json =
+            Some(serde_json::json!({"specifier": specifier, "identifier": "X"}).to_string());
+        e
+    }
+
+    /// `rust_edge` written inside the inline `mod` bodies `inline` (outermost first).
+    fn rust_edge_inline(source_path: &str, specifier: &str, inline: &[&str]) -> ExtractedEdge {
+        let mut e = rust_edge(source_path, specifier);
+        e.metadata_json = Some(
+            serde_json::json!({"specifier": specifier, "identifier": "X", "inlineModulePath": inline})
+                .to_string(),
+        );
+        e
+    }
+
+    /// The bound target path, or None when the row stays unresolved. An unresolved row keeps its
+    /// recorded specifier as its target key and its carrier unchanged.
+    fn rust_bind(index: &ResolverIndex, e: &ExtractedEdge) -> Option<String> {
+        rust_bind_declared(index, &RustModDeclsByFile::new(), e)
+    }
+
+    /// The FILE node of `path` (file uid `r1:<path>`) with `rust_mod_decls` naming `names` at
+    /// the file's top level, as the Rust extractor writes the key, read back through
+    /// [`rust_mod_decls_from_metadata`] — the one reader the orchestrator uses.
+    fn file_with_mod_decls(path: &str, names: &[&str]) -> (String, HashSet<RustModDeclaration>) {
+        let decls: Vec<serde_json::Value> = names
+            .iter()
+            .map(|n| serde_json::json!({"name": n, "cfg_test": false}))
+            .collect();
+        file_with_raw_mod_decls(path, serde_json::json!({ "rust_mod_decls": decls }))
+    }
+
+    /// `file_with_mod_decls` from a raw FILE-node metadata object.
+    fn file_with_raw_mod_decls(
+        path: &str,
+        metadata: serde_json::Value,
+    ) -> (String, HashSet<RustModDeclaration>) {
+        (
+            format!("r1:{path}"),
+            rust_mod_decls_from_metadata(Some(&metadata.to_string())),
+        )
+    }
+
+    /// `rust_bind` with the FILE nodes' `rust_mod_decls` (D-RSR-ENTRY-CLIMB-1's declaration
+    /// evidence), as the orchestrator passes them to the resolver.
+    fn rust_bind_declared(
+        index: &ResolverIndex,
+        decls: &RustModDeclsByFile,
+        e: &ExtractedEdge,
+    ) -> Option<String> {
+        let result = resolve_edges_with_rust_mod_decls(std::slice::from_ref(e), index, None, decls);
+        if let Some(r) = result.resolved.first() {
+            assert_eq!(r.resolution, Resolution::Static);
+            assert_eq!(
+                r.metadata_json, e.metadata_json,
+                "no basis carrier is added"
+            );
+            return Some(r.target_node_uid.trim_start_matches("n:").to_string());
+        }
+        assert_eq!(result.still_unresolved.len(), 1);
+        let u = &result.still_unresolved[0];
+        assert_eq!(u.edge.target_key, e.target_key);
+        assert_eq!(u.edge.metadata_json, e.metadata_json);
+        assert_eq!(u.category, UnresolvedEdgeCategory::ImportsFileNotFound);
+        None
+    }
+
+    #[test]
+    fn rust_module_path_crate_head_from_leaf_file() {
+        let index = rust_index(
+            &[
+                "b/src/lib.rs",
+                "b/src/aggregators/trust.rs",
+                "b/src/dto/signal.rs",
+            ],
+            &[("b", "b")],
+        );
+        let e = rust_edge("b/src/aggregators/trust.rs", "crate::dto::signal");
+        assert_eq!(
+            rust_bind(&index, &e).as_deref(),
+            Some("b/src/dto/signal.rs")
+        );
+    }
+
+    #[test]
+    fn rust_module_path_crate_head_shortens_to_parent_module() {
+        let index = rust_index(
+            &["b/src/lib.rs", "b/src/x.rs", "b/src/crud/mod.rs"],
+            &[("b", "b")],
+        );
+        let e = rust_edge("b/src/x.rs", "crate::crud::test_helpers");
+        assert_eq!(rust_bind(&index, &e).as_deref(), Some("b/src/crud/mod.rs"));
+    }
+
+    #[test]
+    fn rust_module_path_bare_crate_binds_the_entry_point() {
+        let index = rust_index(
+            &["b/src/lib.rs", "b/src/main.rs", "b/src/a.rs"],
+            &[("b", "b")],
+        );
+        assert_eq!(
+            rust_bind(&index, &rust_edge("b/src/a.rs", "crate")).as_deref(),
+            Some("b/src/lib.rs")
+        );
+        let index = rust_index(&["b/src/main.rs", "b/src/a.rs"], &[("b", "b")]);
+        assert_eq!(
+            rust_bind(&index, &rust_edge("b/src/a.rs", "crate")).as_deref(),
+            Some("b/src/main.rs")
+        );
+    }
+
+    #[test]
+    fn rust_module_path_super_from_leaf_file() {
+        let index = rust_index(
+            &[
+                "b/src/lib.rs",
+                "b/src/handlers/quality/tests.rs",
+                "b/src/handlers/quality/support.rs",
+                "b/src/handlers/support.rs",
+            ],
+            &[("b", "b")],
+        );
+        let src = "b/src/handlers/quality/tests.rs";
+        assert_eq!(
+            rust_bind(&index, &rust_edge(src, "super::support")).as_deref(),
+            Some("b/src/handlers/quality/support.rs")
+        );
+        assert_eq!(
+            rust_bind(&index, &rust_edge(src, "super::super::support")).as_deref(),
+            Some("b/src/handlers/support.rs")
+        );
+    }
+
+    #[test]
+    fn rust_module_path_super_from_mod_rs() {
+        let index = rust_index(
+            &[
+                "b/src/lib.rs",
+                "b/src/a/mod.rs",
+                "b/src/x.rs",
+                "b/src/a/x.rs",
+            ],
+            &[("b", "b")],
+        );
+        assert_eq!(
+            rust_bind(&index, &rust_edge("b/src/a/mod.rs", "super::x")).as_deref(),
+            Some("b/src/x.rs")
+        );
+    }
+
+    #[test]
+    fn rust_module_path_bare_super_binds_the_parent_module_file() {
+        let index = rust_index(
+            &["b/src/lib.rs", "b/src/a.rs", "b/src/a/b.rs"],
+            &[("b", "b")],
+        );
+        assert_eq!(
+            rust_bind(&index, &rust_edge("b/src/a/b.rs", "super")).as_deref(),
+            Some("b/src/a.rs")
+        );
+        let index = rust_index(
+            &["b/src/lib.rs", "b/src/a/mod.rs", "b/src/a/b.rs"],
+            &[("b", "b")],
+        );
+        assert_eq!(
+            rust_bind(&index, &rust_edge("b/src/a/b.rs", "super")).as_deref(),
+            Some("b/src/a/mod.rs")
+        );
+    }
+
+    #[test]
+    fn rust_module_path_self_head_from_mod_rs_and_leaf() {
+        let index = rust_index(
+            &[
+                "b/src/lib.rs",
+                "b/src/a/mod.rs",
+                "b/src/a/x.rs",
+                "b/src/a/b.rs",
+                "b/src/a/b/x.rs",
+            ],
+            &[("b", "b")],
+        );
+        assert_eq!(
+            rust_bind(&index, &rust_edge("b/src/a/mod.rs", "self::x")).as_deref(),
+            Some("b/src/a/x.rs")
+        );
+        assert_eq!(
+            rust_bind(&index, &rust_edge("b/src/a/b.rs", "self::x")).as_deref(),
+            Some("b/src/a/b/x.rs")
+        );
+    }
+
+    #[test]
+    fn rust_module_path_sibling_path_reads_as_self_after_declared_crate_miss() {
+        let index = rust_index(
+            &[
+                "b/src/lib.rs",
+                "b/src/cli/mod.rs",
+                "b/src/cli/context.rs",
+                "b/src/context.rs",
+            ],
+            &[("b", "b")],
+        );
+        // The FILE node `b/src/cli/mod.rs` declares `mod context;` (D-RSR-ENTRY-CLIMB-1).
+        let decls =
+            RustModDeclsByFile::from([file_with_mod_decls("b/src/cli/mod.rs", &["context"])]);
+        assert_eq!(
+            rust_bind_declared(
+                &index,
+                &decls,
+                &rust_edge("b/src/cli/mod.rs", "context::open_storage")
+            )
+            .as_deref(),
+            Some("b/src/cli/context.rs")
+        );
+    }
+
+    #[test]
+    fn rust_module_path_declared_crate_name_wins_over_a_sibling_module() {
+        let index = rust_index(
+            &[
+                "b/src/lib.rs",
+                "b/src/git.rs",
+                "git/src/lib.rs",
+                "git/src/x.rs",
+            ],
+            &[("b", "b"), ("git", "git")],
+        );
+        // `b/src/lib.rs` also declares `mod git;` and `b/src/git.rs` exists: the sibling reading
+        // is available, and stage 3.5's declared crate still wins.
+        let decls = RustModDeclsByFile::from([file_with_mod_decls("b/src/lib.rs", &["git"])]);
+        assert_eq!(
+            rust_bind_declared(&index, &decls, &rust_edge("b/src/lib.rs", "git::x")).as_deref(),
+            Some("git/src/x.rs")
+        );
+    }
+
+    #[test]
+    fn rust_module_path_target_equal_to_source_binds_nothing() {
+        // D-RSR-SELF-IMPORT-1: a ladder hit equal to the source file binds nothing.
+        let index = rust_index(&["b/src/lib.rs", "b/src/livegraph_feed.rs"], &[("b", "b")]);
+        assert_eq!(
+            rust_bind(
+                &index,
+                &rust_edge("b/src/livegraph_feed.rs", "crate::livegraph_feed")
+            ),
+            None
+        );
+        // `commands` from the entry file with no `commands.rs` (vscode `cli/src/lib.rs`): the
+        // file-list ladder would shorten to `lib.rs`, the source. Under L14 revision 3 a sibling
+        // path never shortens past its first segment, so the row binds nothing even when
+        // `lib.rs` declares `mod commands;`.
+        let decls = RustModDeclsByFile::from([file_with_mod_decls("b/src/lib.rs", &["commands"])]);
+        assert_eq!(
+            rust_bind_declared(&index, &decls, &rust_edge("b/src/lib.rs", "commands")),
+            None
+        );
+    }
+
+    #[test]
+    fn rust_module_path_source_outside_src_or_under_bin_binds_nothing() {
+        let index = rust_index(
+            &[
+                "b/src/lib.rs",
+                "b/src/util.rs",
+                "b/tests/pipeline.rs",
+                "b/src/bin/tool.rs",
+                "b/benches/x.rs",
+            ],
+            &[("b", "b")],
+        );
+        for src in ["b/tests/pipeline.rs", "b/src/bin/tool.rs", "b/benches/x.rs"] {
+            for spec in ["crate::util", "util", "self::util"] {
+                assert_eq!(
+                    rust_bind(&index, &rust_edge(src, spec)),
+                    None,
+                    "{src} {spec}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rust_module_path_super_above_root_and_no_crate_root_bind_nothing() {
+        let index = rust_index(
+            &[
+                "b/src/lib.rs",
+                "b/src/a.rs",
+                "b/src/x.rs",
+                "fixtures/torture.rs",
+                "src/x.rs",
+            ],
+            &[("b", "b")],
+        );
+        assert_eq!(
+            rust_bind(&index, &rust_edge("b/src/a.rs", "super::super::x")),
+            None
+        );
+        for spec in ["crate::x", "super::x", "self::x", "x"] {
+            assert_eq!(
+                rust_bind(&index, &rust_edge("fixtures/torture.rs", spec)),
+                None,
+                "{spec}"
+            );
+        }
+    }
+
+    #[test]
+    fn rust_module_path_non_rust_edge_never_enters() {
+        let index = rust_index(
+            &["b/src/lib.rs", "b/src/x.rs", "b/src/app.ts"],
+            &[("b", "b")],
+        );
+        let mut e = rust_edge("b/src/app.ts", "crate::x");
+        e.extractor = "ts-core:0.2.0".into();
+        let result = resolve_edges(std::slice::from_ref(&e), &index, None);
+        assert!(result.resolved.is_empty());
+        assert_eq!(result.still_unresolved.len(), 1);
+    }
+
+    #[test]
+    fn rust_module_path_inline_module_super_resolves_from_the_enclosing_module() {
+        let index = rust_index(
+            &[
+                "b/src/lib.rs",
+                "b/src/a/b.rs",
+                "b/src/a/b/sibling.rs",
+                "b/src/a/sibling.rs",
+            ],
+            &[("b", "b")],
+        );
+        let e = rust_edge_inline("b/src/a/b.rs", "super::sibling", &["tests"]);
+        assert_eq!(
+            rust_bind(&index, &e).as_deref(),
+            Some("b/src/a/b/sibling.rs")
+        );
+    }
+
+    #[test]
+    fn rust_module_path_inline_module_super_to_own_file_binds_nothing() {
+        // D-RSR-INLINE-MODULE-1: inside `mod tests { use super::…; }` in `a/b.rs`, `super` is
+        // `a::b` — the source file — not `a` (which the file-only reading would bind).
+        let index = rust_index(
+            &["b/src/lib.rs", "b/src/a.rs", "b/src/a/b.rs"],
+            &[("b", "b")],
+        );
+        let e = rust_edge_inline("b/src/a/b.rs", "super", &["tests"]);
+        assert_eq!(rust_bind(&index, &e), None);
+    }
+
+    #[test]
+    fn rust_module_path_sibling_binds_only_with_a_mod_declaration() {
+        // D-RSR-ENTRY-CLIMB-1: a sibling path binds only when the enclosing module declares
+        // `mod <first>;` — the FILE node's `rust_mod_decls` entry whose `inline_path` equals the
+        // `use`'s `inlineModulePath`.
+        let index = rust_index(
+            &[
+                "b/src/lib.rs",
+                "b/src/cli/mod.rs",
+                "b/src/cli/context.rs",
+                "b/src/cli/inner/context.rs",
+            ],
+            &[("b", "b")],
+        );
+        let declared =
+            RustModDeclsByFile::from([file_with_mod_decls("b/src/cli/mod.rs", &["context"])]);
+        let e = rust_edge("b/src/cli/mod.rs", "context::open_storage");
+        assert_eq!(
+            rust_bind_declared(&index, &declared, &e).as_deref(),
+            Some("b/src/cli/context.rs")
+        );
+        // The same path from a file that does NOT declare `context`: nothing, though
+        // `b/src/cli/context.rs` exists.
+        assert_eq!(rust_bind(&index, &e), None);
+        let other = RustModDeclsByFile::from([file_with_mod_decls("b/src/cli/mod.rs", &["other"])]);
+        assert_eq!(rust_bind_declared(&index, &other, &e), None);
+        // A declaration written inside `mod inner { mod context; }` is matched on `inline_path`:
+        // it serves a `use` inside `mod inner`, never a top-level `use`.
+        let inner = RustModDeclsByFile::from([file_with_raw_mod_decls(
+            "b/src/cli/mod.rs",
+            serde_json::json!({"rust_mod_decls": [
+                {"name": "context", "cfg_test": false, "inline_path": ["inner"]}
+            ]}),
+        )]);
+        let nested = rust_edge_inline("b/src/cli/mod.rs", "context::open_storage", &["inner"]);
+        assert_eq!(
+            rust_bind_declared(&index, &inner, &nested).as_deref(),
+            Some("b/src/cli/inner/context.rs")
+        );
+        assert_eq!(rust_bind_declared(&index, &inner, &e), None);
+    }
+
+    #[test]
+    fn rust_module_path_external_crate_name_from_main_rs_binds_nothing() {
+        // Admission 1's six false rows (`rust/tools/xpart-probe/src/main.rs:22`
+        // `use std::collections::{BTreeMap, BTreeSet, HashMap};`): an undeclared first segment
+        // from a `main.rs` beside a `lib.rs` never climbs to `lib.rs`.
+        let index = rust_index(
+            &["b/src/lib.rs", "b/src/main.rs", "b/src/cli.rs"],
+            &[("b", "b")],
+        );
+        let e = rust_edge("b/src/main.rs", "std::collections");
+        assert_eq!(rust_bind(&index, &e), None);
+        // Declaring other modules does not change it.
+        let decls = RustModDeclsByFile::from([file_with_mod_decls("b/src/main.rs", &["cli"])]);
+        assert_eq!(rust_bind_declared(&index, &decls, &e), None);
+    }
+
+    #[test]
+    fn rust_module_path_declared_crate_miss_never_falls_to_a_sibling_reading() {
+        // `git` is a declared crate whose `git/src/x.rs` and `git/src/lib.rs` are NOT indexed;
+        // `b/src/git.rs` exists and `b/src/lib.rs` declares `mod git;`. Stage 3.5 missed; a
+        // declared crate name never enters the sibling reading of stage 3.6.
+        let files = ["b/src/lib.rs", "b/src/git.rs"];
+        let decls = RustModDeclsByFile::from([file_with_mod_decls("b/src/lib.rs", &["git"])]);
+        let e = rust_edge("b/src/lib.rs", "git::x");
+        let index = rust_index(&files, &[("b", "b"), ("git", "git")]);
+        assert_eq!(rust_bind_declared(&index, &decls, &e), None);
+        // Control: when `git` is not a declared crate, the same row is a sibling reading.
+        let index = rust_index(&files, &[("b", "b")]);
+        assert_eq!(
+            rust_bind_declared(&index, &decls, &e).as_deref(),
+            Some("b/src/git.rs")
+        );
+    }
+
+    #[test]
+    fn rust_module_path_declared_first_segment_without_a_module_file_binds_nothing() {
+        // L14 revision 3: `mod support;` is declared, but neither `<enclosing>/support.rs` nor
+        // `<enclosing>/support/mod.rs` is indexed (an inline body or a `#[path]` module). The
+        // declaration guard passes, the first-segment-file guard fails: nothing binds — the
+        // ladder would otherwise shorten past the first segment.
+        //
+        // The slice's named shape: from `b/src/a/mod.rs`. `b/src/a.rs` is indexed too so the
+        // unguarded ladder would land on a file other than the source.
+        let index = rust_index(
+            &["b/src/lib.rs", "b/src/a/mod.rs", "b/src/a.rs"],
+            &[("b", "b")],
+        );
+        let decls = RustModDeclsByFile::from([file_with_mod_decls("b/src/a/mod.rs", &["support"])]);
+        assert_eq!(
+            rust_bind_declared(&index, &decls, &rust_edge("b/src/a/mod.rs", "support::x")),
+            None
+        );
+        // From a `main.rs` beside a `lib.rs`: the unguarded ladder would end at `lib.rs`.
+        let index = rust_index(&["b/src/lib.rs", "b/src/main.rs"], &[("b", "b")]);
+        let decls = RustModDeclsByFile::from([file_with_mod_decls("b/src/main.rs", &["support"])]);
+        assert_eq!(
+            rust_bind_declared(&index, &decls, &rust_edge("b/src/main.rs", "support::x")),
+            None
         );
     }
 
@@ -5848,7 +6592,7 @@ mod tests {
 
             // A miss (a symbol import) takes the old ladder unchanged, whatever Stage 2 picks.
             let sym = py_from_import("e2", "pkg", "pkg", "Thing");
-            let ladder = resolve_import_ladder(&sym, &index);
+            let ladder = resolve_import_ladder(&sym, &index, &RustModDeclsByFile::new());
             let result = resolve_edges(
                 std::slice::from_ref(&sym),
                 &index,
@@ -5883,7 +6627,7 @@ mod tests {
                 let probe = py_from_import("e0", "pkg", "pkg", "Thing");
                 assert!(
                     matches!(
-                        resolve_import_ladder(&probe, &index),
+                        resolve_import_ladder(&probe, &index, &RustModDeclsByFile::new()),
                         TargetResolution::Resolved(ref uid) if uid == "n:pkg.py"
                     ),
                     "the ladder picks the module file in order {order:?}"

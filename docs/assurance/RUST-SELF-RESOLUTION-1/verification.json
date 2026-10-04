@@ -1,0 +1,390 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-RUST-SELF-RESOLUTION-1-2",
+  "workItemId": "RUST-SELF-RESOLUTION-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/RUST-SELF-RESOLUTION-1-INPUT-2.json",
+    "sha256": "sha256:32041a98822ea3caedee3442763510dc4259f2792dcc042c68ef2d084a92c682"
+  },
+  "allocation": {
+    "path": "docs/slices/rust-self-resolution-1.md",
+    "sha256": "sha256:ca613d618c8908e20146d74d76d096cd0794065808d96f04fa4c564b342033ce"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "047f01d8fc812a39f42d0699a8bbd79e3f6fca16",
+    "entries": [
+      {
+        "path": "docs/cli/rmap-contracts.md",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:62df8dd3a049dfa384ceb33c82d22a71222060097582b85050e11714b35d2483",
+          "byteLength": 72929
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:165df714a81de27c77c3d46de282027ac2321f7cbc67536061897d2fe6e7a6b8",
+          "byteLength": 77745
+        }
+      },
+      {
+        "path": "rust/crates/classification/src/unresolved_classifier.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:34ea5e59609c8fda8cf70009f8384d53718a83781d79945baa004beb2ac677ae",
+          "byteLength": 66124
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:a28681a1d5242de036f3b4815e23aa3002075fd01d4ec491945841d4ae08f441",
+          "byteLength": 71098
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/orchestrator.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:358bd11339d895a7b021502e94f51ffbbf720edb800d588fd65e692ec6789995",
+          "byteLength": 192392
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:6ec7a0376bb5dc7cb0620cf4179ad37c1ac6e593bb5d6c9c87c63e738c4ca243",
+          "byteLength": 193969
+        }
+      },
+      {
+        "path": "rust/crates/indexer/src/resolver.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:6ad242ed96ce5f7ebebc9d881a3559240cf44ae2157eecce7467edf0786318fd",
+          "byteLength": 313766
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f9a12794d985364cd6168ba420a4e7808a7ddcb434ba3bbd16c59bc4f2644504",
+          "byteLength": 343971
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/imports.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:0cb6a7290bc547fd493385a5b063812c66183803e5cf0d91f7abfcf753ca50f4",
+          "byteLength": 137961
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:4f9aa9cc8f87c5cac454119cc73c8ba4cc41765c610fef2a50d9996ab4d9e114",
+          "byteLength": 138017
+        }
+      },
+      {
+        "path": "rust/crates/rust-extractor/src/extractor.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:2554e38855f52189b92e843f7f65c910e89d3f5e75492ed9fbdf43d21e6b76bb",
+          "byteLength": 45838
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:ff97fe9e8794e8e2fa9f93697ce311ba82853da62cdafae75ed062976ff6e5d1",
+          "byteLength": 49778
+        }
+      }
+    ],
+    "sha256": "sha256:88a6d68e3a35b9160036025da3294ffa28956c4a71d242a4b2f21fbac0d8b184"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-RUST-SELF-RESOLUTION-1-2"
+  },
+  "checks": [
+    {
+      "checkId": "RSR-C01",
+      "obligationIds": [
+        "RG-REQ-006-L14",
+        "RG-REQ-001-L02",
+        "RG-REQ-001-L03",
+        "RG-REQ-001-L06",
+        "P-RSR-01",
+        "P-RSR-06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree, built from rust/; cargo only for the commands named; isolated rmap only (RSR-C05: RMAP_STATE_ROOT/RMAP_SOCKET_PATH under /private/tmp/RUST-SELF-RESOLUTION-1-run.*, RMAP_TRANSPORT=stdio, RMAP_AUTO_ENRICH=off, RMAP_AUTO_REINDEX=off, RMAP_AUTO_RETENTION=off, RMAP_SEED_VECTORS=off); the operator's registry and the real rmapd are never touched",
+        "command": "( set -o pipefail; cargo test -p repo-graph-rust-extractor 2>&1 | tee /private/tmp/RUST-SELF-RESOLUTION-1-rsr-01.txt ) && grep -qE '^test result: ok\\.' /private/tmp/RUST-SELF-RESOLUTION-1-rsr-01.txt && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/RUST-SELF-RESOLUTION-1-rsr-01.txt && test \"$(cargo test -p repo-graph-rust-extractor -- --list 2>/dev/null | grep -c ': test$')\" -ge 68 && test \"$(grep -c 'rust_module_to_path' crates/rust-extractor/src/extractor.rs)\" -eq 0 && grep -q 'const EXTRACTOR_NAME: &str = \"rust-core:0.3.0\";' crates/rust-extractor/src/extractor.rs",
+        "inputs": "The WHOLE rust-extractor suite (61 listed at HEAD f91162f7, EXECUTED `-- --list` 2026-10-04; floor >= 68 = 61 + 7). NEW (7) in extractor.rs tests, each extracting as `src/lib.rs` through the existing `extract_test`: `relative_use_target_key_is_the_specifier` (`use crate::module::Type;` → the IMPORTS edge's `target_key` is `crate::module`, no `:FILE`, `is_relative`); `super_path_use_is_relative` (`use super::support::f;` → `super::support`, relative); `self_path_use_is_relative` (`use self::a::B;` → `self::a`); `bare_super_use_is_relative` (`use super::f;` → specifier and target_key `super`, `is_relative` TRUE — the extractor defect of RC-13); `bare_crate_use_is_relative` (`use crate::X;` → `crate`); `bare_self_use_is_relative` (`use self::X;` → `self`); `use_inside_inline_mod_carries_inline_module_path` (`mod tests { mod inner { use super::helper::f; } }` → the IMPORTS edge's metadata has `inlineModulePath: [\"tests\", \"inner\"]`; a top-level `use` carries no such key, and `fn f() { use std::fmt; }` emits no IMPORTS edge at all — today's behaviour, preserved: the extractor visits `use` only at the top level and in inline `mod` bodies, `extractor.rs:220-232, :821-832` — D-RSR-INLINE-MODULE-1). MODIFIED, name kept because its claim still holds: `extracts_crate_relative_import` gains the assertion that the edge's `target_key` equals the binding's specifier. PRESERVED by name with unchanged assertions: `extracts_use_imports_edge` (`std::collections` stays the target key), `extracts_import_binding`, `extracts_grouped_use`, `extracts_use_with_alias`, `wildcard_use_no_binding`, every mod_decls/builtins/metrics test. `rust_module_to_path` is deleted (its only caller was the FILE-key construction); `EXTRACTOR_NAME` is `rust-core:0.3.0` (RG-REQ-001-L06: a changed extractor is a toolchain change)."
+      },
+      "expected": "exit 0: every Rust `use` records its specifier as the target key and every head `crate`/`super`/`self` (bare or with `::`) is relative; the non-relative `use` edge, the bindings, aliases, groups and wildcards are preserved by the named tests with unchanged assertions (no behavior change); the dead mapper is gone and the extractor version is bumped",
+      "candidateSha256": "sha256:88a6d68e3a35b9160036025da3294ffa28956c4a71d242a4b2f21fbac0d8b184",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Exit 0; test floors held: 63 passed and 5 passed.",
+        "supportingEvidence": [
+          "/private/tmp/RUST-SELF-RESOLUTION-1-rsr-01.txt (20:15)"
+        ]
+      }
+    },
+    {
+      "checkId": "RSR-C02",
+      "obligationIds": [
+        "RG-REQ-006-L14",
+        "RG-REQ-006-L01",
+        "RG-REQ-006-L02",
+        "RG-REQ-006-L03",
+        "RG-REQ-006-L04",
+        "RG-REQ-006-L11",
+        "RG-REQ-001-L06",
+        "P-RSR-01",
+        "P-RSR-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree, built from rust/; cargo only for the commands named; isolated rmap only (RSR-C05: RMAP_STATE_ROOT/RMAP_SOCKET_PATH under /private/tmp/RUST-SELF-RESOLUTION-1-run.*, RMAP_TRANSPORT=stdio, RMAP_AUTO_ENRICH=off, RMAP_AUTO_REINDEX=off, RMAP_AUTO_RETENTION=off, RMAP_SEED_VECTORS=off); the operator's registry and the real rmapd are never touched",
+        "command": "( set -o pipefail; cargo test -p repo-graph-indexer 2>&1 | tee /private/tmp/RUST-SELF-RESOLUTION-1-rsr-02.txt ) && grep -qE '^test result: ok\\.' /private/tmp/RUST-SELF-RESOLUTION-1-rsr-02.txt && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/RUST-SELF-RESOLUTION-1-rsr-02.txt && test \"$(cargo test -p repo-graph-indexer -- --list 2>/dev/null | grep -c ': test$')\" -ge 569 && test \"$(grep -c 'fn rust_crate_import_' crates/indexer/src/resolver.rs)\" -ge 11 && grep -q 'INDEXER_VERSION: &str = \"indexer:1.10.0\"' crates/indexer/src/orchestrator.rs && test \"$(grep -c 'they never reach here' crates/indexer/src/resolver.rs)\" -eq 0",
+        "inputs": "The WHOLE indexer suite (550 listed at HEAD f91162f7, EXECUTED `-- --list` 2026-10-04 — DGC-ATTRIBUTION-PRECISE-1's five settings tests included; floor >= 569 = 550 + 19). NEW (19) in resolver.rs tests, built on the existing `file_set` / `crate_roots` fixtures and a `rust_edge(source_path, specifier)` helper whose `extractor` is `rust-core:0.3.0`, and a `file_with_mod_decls(path, &[\"context\"])` helper that puts `rust_mod_decls` on the fixture's FILE node: `rust_module_path_crate_head_from_leaf_file` (`crate::dto::signal` from `b/src/aggregators/trust.rs` → `b/src/dto/signal.rs`); `rust_module_path_crate_head_shortens_to_parent_module` (`crate::crud::test_helpers` with only `b/src/crud/mod.rs` present → `mod.rs`); `rust_module_path_bare_crate_binds_the_entry_point` (`crate` → `lib.rs`, `main.rs` when no `lib.rs`); `rust_module_path_super_from_leaf_file` (`super::support` from `b/src/handlers/quality/tests.rs`... one `super` → `b/src/handlers/quality/support.rs`; two → `b/src/handlers/support.rs`); `rust_module_path_super_from_mod_rs` (`super::x` from `b/src/a/mod.rs` → `b/src/x.rs`); `rust_module_path_bare_super_binds_the_parent_module_file` (`super` from `b/src/a/b.rs` → `b/src/a.rs`, else `b/src/a/mod.rs`); `rust_module_path_self_head_from_mod_rs_and_leaf` (`self::x` from `b/src/a/mod.rs` → `b/src/a/x.rs`; from `b/src/a/b.rs` → `b/src/a/b/x.rs`); `rust_module_path_sibling_path_reads_as_self_after_declared_crate_miss` (`context::open_storage` from `b/src/cli/mod.rs` whose FILE node declares `mod context;` (no `inline_path`) → `b/src/cli/context.rs`, after stage 3.5 found no crate named `context`); `rust_module_path_declared_crate_name_wins_over_a_sibling_module` (`git::x` when `git` is a declared crate AND `b/src/git.rs` exists → the crate's `git/src/x.rs`, stage 3.5 unchanged); `rust_module_path_target_equal_to_source_binds_nothing` (D-RSR-SELF-IMPORT-1: `crate::livegraph_feed` from `b/src/livegraph_feed.rs`; `commands` from `b/src/lib.rs` with no `commands.rs` → None, not `lib.rs`); `rust_module_path_source_outside_src_or_under_bin_binds_nothing` (`b/tests/pipeline.rs`, `b/src/bin/tool.rs`, `b/benches/x.rs`); `rust_module_path_super_above_root_and_no_crate_root_bind_nothing` (`super::super::x` from `b/src/a.rs`; any head from `fixtures/torture.rs` under no declared root); `rust_module_path_non_rust_edge_never_enters` (a `ts-core:0.2.0` edge with target `crate::x` from a `.ts` source resolves nothing); `rust_module_path_inline_module_super_resolves_from_the_enclosing_module` (`super::sibling` with `inlineModulePath: [\"tests\"]` from `b/src/a/b.rs` → `b/src/a/b/sibling.rs`, not `b/src/a/sibling.rs`); `rust_module_path_inline_module_super_to_own_file_binds_nothing` (`super` with `inlineModulePath: [\"tests\"]` from `b/src/a/b.rs` → the source file → None — D-RSR-INLINE-MODULE-1); `rust_module_path_sibling_binds_only_with_a_mod_declaration` (`context::open_storage` from `b/src/cli/mod.rs` whose FILE node declares `mod context;` → `b/src/cli/context.rs`; the same path from a file that does NOT declare `context` → None even though the file exists — D-RSR-ENTRY-CLIMB-1); `rust_module_path_external_crate_name_from_main_rs_binds_nothing` (`std::collections` from `b/src/main.rs` beside `b/src/lib.rs`, undeclared → None, never `lib.rs` — the six false rows of admission 1); `rust_module_path_declared_crate_miss_never_falls_to_a_sibling_reading` (`git::x` with `git` a declared crate whose `git/src/x.rs` and `git/src/lib.rs` are NOT indexed, and a `b/src/git.rs` that exists and is declared → None: stage 3.5 missed, 3.6 is not entered for a declared crate name); `rust_module_path_declared_first_segment_without_a_module_file_binds_nothing` (`support::x` from `b/src/a/mod.rs` whose FILE node declares `mod support;` while neither `b/src/a/support.rs` nor `b/src/a/support/mod.rs` is indexed — an inline body or a `#[path]` module — → None: the declaration guard passes, the first-segment-file guard fails; L14 revision 3's first-segment limit, INPUT-20 pass-2 review F-1). PRESERVED by name with unchanged assertions: the `rust_crate_import_*` family (11 at HEAD f91162f7, `grep -c 'fn rust_crate_import_'`, EXECUTED 2026-10-04; RG-REQ-006-L01), the Java suffix, C/C++ include, Python submodule and tsconfig-paths families, `non_c_family_import_never_reaches_the_suffix_or_basename_stage`. The ladder loop of `resolve_rust_crate_import` is factored into one function with two callers (3.5 and 3.6); the comment at resolver.rs:1350-1351 (\"never reach here\") is replaced by the true statement (CC-23). `INDEXER_VERSION` 1.9.0 → 1.10.0 (orchestrator.rs:80 and its test literals at :4422-:4430)."
+      },
+      "expected": "exit 0: each written form binds against the module that encloses the `use` (the file's module extended by its `inlineModulePath`) through the one ladder, the declared-crate stage keeps every binding it makes today — preserved (no behavior change), the five bind-nothing cases bind nothing, a non-Rust edge never enters, and the indexer version is bumped",
+      "candidateSha256": "sha256:88a6d68e3a35b9160036025da3294ffa28956c4a71d242a4b2f21fbac0d8b184",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Exit 0; 561 passed, plus 1 passed, 1 passed, and 4 passed; 2 ignored.",
+        "supportingEvidence": [
+          "/private/tmp/RUST-SELF-RESOLUTION-1-rsr-02.txt (20:15)"
+        ]
+      }
+    },
+    {
+      "checkId": "RSR-C03",
+      "obligationIds": [
+        "RG-REQ-006-L14",
+        "RG-REQ-006-L05",
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L08",
+        "RG-REQ-002-L11",
+        "P-RSR-03",
+        "P-RSR-04"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree, built from rust/; cargo only for the commands named; isolated rmap only (RSR-C05: RMAP_STATE_ROOT/RMAP_SOCKET_PATH under /private/tmp/RUST-SELF-RESOLUTION-1-run.*, RMAP_TRANSPORT=stdio, RMAP_AUTO_ENRICH=off, RMAP_AUTO_REINDEX=off, RMAP_AUTO_RETENTION=off, RMAP_SEED_VECTORS=off); the operator's registry and the real rmapd are never touched",
+        "command": "( set -o pipefail; cargo test -p repo-graph-classification 2>&1 | tee /private/tmp/RUST-SELF-RESOLUTION-1-rsr-03cl.txt ) && grep -qE '^test result: ok\\.' /private/tmp/RUST-SELF-RESOLUTION-1-rsr-03cl.txt && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/RUST-SELF-RESOLUTION-1-rsr-03cl.txt && test \"$(cargo test -p repo-graph-classification -- --list 2>/dev/null | grep -c ': test$')\" -ge 325 && ( set -o pipefail; cargo test -p repo-graph-rgr --lib 2>&1 | tee /private/tmp/RUST-SELF-RESOLUTION-1-rsr-03rgr.txt ) && grep -qE '^test result: ok\\.' /private/tmp/RUST-SELF-RESOLUTION-1-rsr-03rgr.txt && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/RUST-SELF-RESOLUTION-1-rsr-03rgr.txt && test \"$(cargo test -p repo-graph-rgr --lib -- --list 2>/dev/null | grep -c ': test$')\" -ge 1478 && grep -qF 'recorded specifier is crate, super or self, or starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE' crates/rgr/src/presentation/imports.rs",
+        "inputs": "The WHOLE classification suite (322 listed at HEAD f91162f7, EXECUTED `-- --list` 2026-10-04; floor >= 325 = 322 + 3) and rgr `--lib` (1478 at HEAD f91162f7, EXECUTED; floor >= 1478; the phrase constant changes, no test is added or renamed). NEW (3) in unresolved_classifier.rs tests: `parse_import_specifier_treats_bare_crate_super_self_as_relative` (metadata `{\"specifier\":\"super\"}` → relative; `crate`, `self` likewise; `supercalifragilistic` and `crate_utils` NOT relative) and `bare_super_use_import_classifies_relative_not_heuristic` (an unresolved IMPORTS row with specifier `super` → `internal_candidate` / `relative_import_target_unresolved`, no longer `rust_crate_internal_module_heuristic`); `python_import_named_crate_keeps_its_classification` (a `python-core` IMPORTS row with metadata `{\"specifier\":\"crate\"}` and `crate` a declared dependency stays `external_library_candidate` / `specifier_matches_package_dependency` — F-RSR-PYTHON-REGRESSION, P-RSR-04). PRESERVED by name: every existing `parse_import_specifier` / relative-import test for TS `rawPath` (`.`-prefix) and Python (`.`-prefix target key), the `rust_crate_internal_module_heuristic` tests (a sibling path that stays unresolved keeps that basis), the CALLS rules 5a–5d tests. In rgr `imports.rs` the ONE basis phrase for `relative_import_target_unresolved` (:694 and the test constant `RELATIVE` at :2440, used by `imports_renders_unresolved_rows_with_their_category_classification_and_basis`) becomes the predicate at its new site: `recorded specifier is crate, super or self, or starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE` (D-AGENT-USEFULNESS-FRAME-1); every other phrase byte-identical."
+      },
+      "expected": "exit 0: a bare `crate`/`super`/`self` specifier is relative for IMPORTS classification and for the CALLS rules that read `is_relative`; the TS and Python relativity rules and every other basis phrase are preserved (no behavior change) by the named tests; the `imports` phrase restates the new predicate",
+      "candidateSha256": "sha256:88a6d68e3a35b9160036025da3294ffa28956c4a71d242a4b2f21fbac0d8b184",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Exit 0; 322 classification tests passed and 1478 rgr tests passed.",
+        "supportingEvidence": [
+          "…-rsr-03cl.txt",
+          "…-rsr-03rgr.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "RSR-C04",
+      "obligationIds": [
+        "RG-REQ-006-L06",
+        "RG-REQ-006-L07",
+        "RG-REQ-006-L08",
+        "RG-REQ-006-L09",
+        "RG-REQ-006-L10",
+        "RG-REQ-006-L13",
+        "RG-REQ-002-L05",
+        "RG-REQ-002-L09",
+        "RG-REQ-001-L01",
+        "RG-REQ-001-L04",
+        "RG-REQ-001-L05",
+        "RG-REQ-001-L07",
+        "RG-REQ-001-L08",
+        "RG-REQ-001-L10",
+        "RG-REQ-004-L01",
+        "RG-REQ-004-L02",
+        "P-RSR-02",
+        "P-RSR-05",
+        "P-RSR-06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree, built from rust/; cargo only for the commands named; isolated rmap only (RSR-C05: RMAP_STATE_ROOT/RMAP_SOCKET_PATH under /private/tmp/RUST-SELF-RESOLUTION-1-run.*, RMAP_TRANSPORT=stdio, RMAP_AUTO_ENRICH=off, RMAP_AUTO_REINDEX=off, RMAP_AUTO_RETENTION=off, RMAP_SEED_VECTORS=off); the operator's registry and the real rmapd are never touched",
+        "command": "cargo fmt -p repo-graph-rust-extractor -p repo-graph-indexer -p repo-graph-classification -p repo-graph-rgr -- --check && ( set -o pipefail; cargo clippy -p repo-graph-rust-extractor -p repo-graph-indexer -p repo-graph-classification -p repo-graph-rgr --all-targets -- -D warnings 2>&1 | tee /private/tmp/RUST-SELF-RESOLUTION-1-rsr-04.txt ) && test -z \"$(git -C .. status --porcelain -- . ':!.agent-manager' ':!docs/assurance' | grep -vE '^( M|M |MM|A |\\?\\?) (rust/crates/rust-extractor/src/extractor\\.rs|rust/crates/indexer/src/resolver\\.rs|rust/crates/indexer/src/orchestrator\\.rs|rust/crates/classification/src/unresolved_classifier\\.rs|rust/crates/rgr/src/presentation/imports\\.rs|docs/cli/rmap-contracts\\.md)$')\" && git -C .. diff --check -- . ':!.agent-manager' && test \"$(git -C .. diff HEAD --stat -- rust/crates/storage rust/crates/daemon-runtime rust/crates/module-queries rust/crates/agent rust/crates/repo-index rust/crates/ts-extractor rust/crates/python-extractor rust/crates/java-extractor rust/crates/c-extractor rust/crates/cpp-extractor rust/crates/repo-graph-import-resolver rust/crates/repo-graph-trust-model | wc -l)\" -eq 0",
+        "inputs": "fmt and clippy -D warnings (`--all-targets`) over the four touched crates; the worktree holds changes ONLY under the six candidate paths; `git diff --check`; byte-identity (empty `diff --stat`) of the storage, daemon-runtime, module-queries, agent, repo-index, every other language extractor, the import-resolver and the trust-model crates — the module-edge derivation (RG-REQ-004-L01/L02), cycles, trust, the deps attribution and the storage schema are untouched; the resolver's other stages are preserved by RSR-C02's named families."
+      },
+      "expected": "exit 0: every file outside the six candidate paths is byte-identical — the CODE of the module-edge derivation, cycles, trust, the dependency rows, the other extractors, the storage schema and the wire shapes is preserved (no behavior change); what those surfaces print over the new edges is RSR-C05's subject (section 3); the four touched crates are formatted and warning-free",
+      "candidateSha256": "sha256:88a6d68e3a35b9160036025da3294ffa28956c4a71d242a4b2f21fbac0d8b184",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Exit 0; fmt, clippy, six-path scope check, diff --check, and byte-identity of the other crates held.",
+        "supportingEvidence": [
+          "…-rsr-04.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "RSR-C05",
+      "obligationIds": [
+        "RG-REQ-006-L14",
+        "RG-REQ-006-L05",
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L07",
+        "RG-REQ-002-L10",
+        "RG-REQ-001-L06",
+        "RG-REQ-001-L09",
+        "RG-REQ-004-L01",
+        "RG-REQ-004-L02",
+        "P-RSR-01",
+        "P-RSR-02",
+        "P-RSR-03",
+        "P-RSR-05",
+        "P-RSR-06"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree, built from rust/; cargo only for the commands named; isolated rmap only (RSR-C05: RMAP_STATE_ROOT/RMAP_SOCKET_PATH under /private/tmp/RUST-SELF-RESOLUTION-1-run.*, RMAP_TRANSPORT=stdio, RMAP_AUTO_ENRICH=off, RMAP_AUTO_REINDEX=off, RMAP_AUTO_RETENTION=off, RMAP_SEED_VECTORS=off); the operator's registry and the real rmapd are never touched",
+        "command": "bash -Eeu -o pipefail -c 'cleanup(){ rc=$?; trap - EXIT ERR; if [ \"$rc\" -ne 0 ]; then echo \"RSR-C05 FAILED (exit $rc): run directory RETAINED for inspection: $W; record the cause, copy the captures the run record needs, then from rust/: rm -rf $W\" >&2; exit \"$rc\"; fi; rm -rf \"$W\" || { echo \"CLEANUP FAILED: $W not removed\" >&2; exit 1; }; exit 0; }\nexport RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off RMAP_SEED_VECTORS=off\nAM=\"/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager\"; B=/private/tmp/RUST-SELF-RESOLUTION-1; SL=\"$PWD/../.agent-manager/slices/RUST-SELF-RESOLUTION-1\"\nW=$(mktemp -d \"$B-run.XXXXXX\"); trap cleanup EXIT; trap \"echo RSR-C05 FAILED at script line \\$LINENO: \\$BASH_COMMAND >&2\" ERR\ntest -s \"$SL/before/corpus-commits.txt\"; cat > \"$W/replay.py\" <<\"PY\"\n\"\"\"RSR-1 replay oracle (RSR-C05 step v). Usage: replay.py <before-root> <after-root> <name>.\nReplays SLICE_DOC section 2.1 over the BEFORE store (declared Cargo roots = module_candidates cargo rows, the same\nrows the indexer turns into rust_crate_roots; file list; unresolved rust-core IMPORTS rows) and asserts the AFTER store\nmoved exactly that way. Exit 0 iff every assertion holds; prints the counts the slice states.\"\"\"\nimport sqlite3, sys, json, glob, collections\nbef, aft, name = sys.argv[1:4]; corpus = sys.argv[4] if len(sys.argv) > 4 else None\ndef opn(root):\n    dbs = glob.glob(root + \"/databases/*.db\"); assert len(dbs) == 1, (\"one database expected under\", root, dbs)\n    c = sqlite3.connect(\"file:\" + dbs[0] + \"?immutable=1\", uri=True)\n    snap, repo = c.execute(\"select snapshot_uid, repo_uid from snapshots where status=\\\"ready\\\" order by created_at desc limit 1\").fetchone()\n    return c, snap, repo\ncb, sb, rb = opn(bef); ca, sa, ra = opn(aft)\nfiles = set(r[0] for r in cb.execute(\"select path from files where repo_uid=?\", (rb,)))\nassert files == set(r[0] for r in ca.execute(\"select path from files where repo_uid=?\", (ra,))), \"file lists differ\"\nroots = sorted(r[0] for r in cb.execute(\"select canonical_root_path from module_candidates where snapshot_uid=? and module_key like \\\"cargo:%\\\"\", (sb,)))\ncargo_names = set((n or \"\").replace(\"_\", \"-\") for (n,) in cb.execute(\"select display_name from module_candidates where snapshot_uid=? and module_key like \\\"cargo:%\\\"\", (sb,)))\nmod_decls = {}  # source path -> set of (name, tuple(inline_path)) from the FILE node rust_mod_decls (D-RSR-ENTRY-CLIMB-1: declaration evidence)\nfor p_, m_ in cb.execute(\"select f.path, n.metadata_json from nodes n join files f on f.file_uid=n.file_uid where n.snapshot_uid=? and n.kind=\\\"FILE\\\" and n.metadata_json like \\\"%rust_mod_decls%\\\"\", (sb,)):\n    try: ds = json.loads(m_).get(\"rust_mod_decls\", [])\n    except Exception: ds = []\n    mod_decls[p_] = {(d.get(\"name\"), tuple(d.get(\"inline_path\") or [])) for d in ds if isinstance(d, dict)}\ndef crate_root(p):\n    best = None\n    for r in roots:\n        pre = \"\" if r in (\".\", \"\") else r\n        if pre == \"\" or p.startswith(pre + \"/\"):\n            if best is None or len(pre) > len(best): best = pre\n    return best\ndef probe(sp, segs):\n    rem = list(segs)\n    while True:\n        if not rem:\n            for e in (\"lib.rs\", \"main.rs\"):\n                if sp + \"/\" + e in files: return sp + \"/\" + e\n            return None\n        j = \"/\".join(rem)\n        for k in (sp + \"/\" + j + \".rs\", sp + \"/\" + j + \"/mod.rs\"):\n            if k in files: return k\n        rem = rem[:-1]\n\nSQ = chr(39)\ndef inline_mods_at(path, line):\n    \"\"\"Names of the inline `mod <name> {` bodies that enclose `line` (1-based) in the corpus file, outermost first.\n    Brace-depth scan that skips line comments, block comments, string and char literals; independent of the extractor.\"\"\"\n    if corpus is None: return []\n    try: src = open(corpus + \"/\" + path, encoding=\"utf-8\", errors=\"replace\").read()\n    except OSError: return []\n    import re as _re\n    stack = []  # (name, depth_at_open)\n    depth = 0; i = 0; n = len(src); ln = 1; pending = None; result = None\n    mod_re = _re.compile(r\"\\bmod\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*$\")\n    while i < n:\n        ch = src[i]\n        if ch == \"\\n\":\n            ln += 1\n            if ln == line: result = [nm for nm, d in stack]\n            i += 1; continue\n        if src.startswith(\"//\", i):\n            j = src.find(\"\\n\", i); i = n if j < 0 else j; continue\n        if src.startswith(\"/*\", i):\n            j = src.find(\"*/\", i + 2); seg = src[i:(n if j < 0 else j + 2)]; ln += seg.count(\"\\n\"); i = n if j < 0 else j + 2; continue\n        if ch == \"\\\"\":\n            j = i + 1\n            while j < n and src[j] != \"\\\"\":\n                if src[j] == \"\\\\\": j += 1\n                j += 1\n            ln += src[i:j].count(\"\\n\"); i = j + 1; continue\n        if ch == SQ and i + 2 < n and (src[i + 2] == SQ or (src[i + 1] == \"\\\\\" and i + 3 < n and src[i + 3] == SQ)):\n            i = i + 3 if src[i + 2] == SQ else i + 4; continue\n        if ch == \"{\":\n            head = src[max(0, src.rfind(\"\\n\", 0, i) + 1):i].strip()\n            m = mod_re.search(head)\n            if m: stack.append((m.group(1), depth))\n            depth += 1; i += 1; continue\n        if ch == \"}\":\n            depth -= 1\n            if stack and stack[-1][1] == depth: stack.pop()\n            i += 1; continue\n        i += 1\n    if line == 1: result = []\n    return result if result is not None else []\n\nQ_UNRES = \"\"\"select f.path, u.target_key, u.line_start, u.metadata_json, u.basis_code, u.classification, u.type\n  from unresolved_edges u join nodes n on n.node_uid=u.source_node_uid join files f on f.file_uid=n.file_uid\n  where u.snapshot_uid=? and u.extractor like \\\"rust-core%\\\"\"\"\"\nQ_EDGES = \"\"\"select s.path, t.path, e.type, e.line_start, e.metadata_json from edges e\n  join nodes a on a.node_uid=e.source_node_uid join files s on s.file_uid=a.file_uid\n  join nodes b on b.node_uid=e.target_node_uid join files t on t.file_uid=b.file_uid where e.snapshot_uid=? and e.extractor like \\\"rust-core%\\\"\"\"\"\n\ndef owners_of(c, snap):\n    return {t: s for s, t in c.execute(\"\"\"select m.stable_key, f.path from edges e join nodes m on m.node_uid=e.source_node_uid join nodes fn on fn.node_uid=e.target_node_uid join files f on f.file_uid=fn.file_uid where e.snapshot_uid=? and e.type=\\\"OWNS\\\" and m.kind=\\\"MODULE\\\"\"\"\", (snap,))}\ndef dir_sccs(file_edges, owners, is_test):\n    \"\"\"SCCs (size>=2) of the directory graph of the default view: certain file imports whose importer is not a test file, mapped to owning directory modules; sorted member tuples.\"\"\"\n    adj = collections.defaultdict(set)\n    for s, t in file_edges:\n        if is_test.get(s): continue\n        a, b = owners.get(s), owners.get(t)\n        if a is None or b is None or a == b: continue\n        adj[a].add(b)\n    index = {}; low = {}; on = set(); st = []; out = []; counter = [0]\n    sys.setrecursionlimit(100000)\n    def strong(v):\n        index[v] = low[v] = counter[0]; counter[0] += 1; st.append(v); on.add(v)\n        for w in adj.get(v, ()):\n            if w not in index: strong(w); low[v] = min(low[v], low[w])\n            elif w in on: low[v] = min(low[v], index[w])\n        if low[v] == index[v]:\n            comp = []\n            while True:\n                w = st.pop(); on.discard(w); comp.append(w)\n                if w == v: break\n            if len(comp) > 1: out.append(tuple(sorted(x.split(\":\", 1)[1].rsplit(\":\", 1)[0] for x in comp)))\n    for v in list(adj): \n        if v not in index: strong(v)\n    return sorted(out)\n\nub = cb.execute(Q_UNRES, (sb,)).fetchall(); ua = ca.execute(Q_UNRES, (sa,)).fetchall()\neb = cb.execute(Q_EDGES, (sb,)).fetchall(); ea = ca.execute(Q_EDGES, (sa,)).fetchall()\ndef spec_of(md):\n    try: v = json.loads(md).get(\"specifier\") if md else None\n    except Exception: v = None\n    return v if isinstance(v, str) else None\nbind = collections.Counter(); stay = collections.Counter(); inline_rows = collections.Counter(); expected_add = collections.Counter(); bound_keys = []; replayed = 0\nfor path, tk, line, md, basis, cls, typ in ub:\n    if typ != \"IMPORTS\": continue\n    spec = spec_of(md)\n    if spec is None: continue\n    parts = spec.split(\"::\"); head = parts[0]\n    if head in (\"crate\", \"super\", \"self\"): form = \"relative-head\" if \"::\" in spec else \"bare-head\"\n    elif head.replace(\"_\", \"-\") in cargo_names: continue  # a declared crate name: stage 3.5 territory, unchanged by this slice\n    else: form = \"sibling-path\"  # L14: every other first segment is a sibling reading, whatever the classifier called it\n    replayed += 1\n    r = crate_root(path)\n    if r is None: stay[(form, \"no declared Cargo root prefixes the source\")] += 1; continue\n    sp = \"src\" if r == \"\" else r + \"/src\"\n    if not path.startswith(sp + \"/\"): stay[(form, \"source outside <root>/src\")] += 1; continue\n    rel = path[len(sp) + 1:]\n    if not rel.endswith(\".rs\"): stay[(form, \"source not a .rs file\")] += 1; continue\n    rel = rel[:-3].split(\"/\")\n    if rel[0] == \"bin\" and len(rel) > 1: stay[(form, \"source under src/bin/\")] += 1; continue\n    mod = [] if rel in ([\"lib\"], [\"main\"]) else rel[:-1] if rel[-1] == \"mod\" else rel\n    inl = inline_mods_at(path, line or 0)\n    if inl: inline_rows[form] += 1\n    mod = mod + inl\n    if head == \"crate\": segs = parts[1:]\n    elif head == \"self\": segs = mod + parts[1:]\n    elif head == \"super\":\n        n = 0\n        while n < len(parts) and parts[n] == \"super\": n += 1\n        if n > len(mod): stay[(form, \"super climbs above the crate root\")] += 1; continue\n        segs = mod[:len(mod) - n] + parts[n:]\n    else:\n        if (head, tuple(inl)) not in mod_decls.get(path, set()): stay[(form, \"first segment not declared as mod <name>; by the enclosing module (D-RSR-ENTRY-CLIMB-1)\")] += 1; continue\n        first_dir = \"/\".join(mod + [head])\n        if sp + \"/\" + first_dir + \".rs\" not in files and sp + \"/\" + first_dir + \"/mod.rs\" not in files: stay[(form, \"declared module has no file on the ladder\")] += 1; continue\n        segs = mod + parts\n    hit = probe(sp, segs)\n    if hit is None: stay[(form, \"no file on the ladder\")] += 1; continue\n    if form == \"sibling-path\" and not (hit.startswith(sp + \"/\" + \"/\".join(mod + [head]) + \".rs\") or hit.startswith(sp + \"/\" + \"/\".join(mod + [head]) + \"/\")): stay[(form, \"ladder shortened past the first segment\")] += 1; continue\n    if hit == path: stay[(form, \"target is the source file (D-RSR-SELF-IMPORT-1)\")] += 1; continue\n    bind[form] += 1; expected_add[(path, hit, line)] += 1; bound_keys.append((path, spec, line, tk))  # F-001: a list keeps every duplicate row\nimp_b = collections.Counter((s, t, l) for s, t, typ, l, md in eb if typ == \"IMPORTS\"); imp_a = collections.Counter((s, t, l) for s, t, typ, l, md in ea if typ == \"IMPORTS\")\nadded = imp_a - imp_b; removed = imp_b - imp_a\nerrors = []\nif removed: errors.append((\"resolved IMPORTS edges REMOVED\", len(removed), list(removed.items())[:8]))\nif added != expected_add:\n    extra = added - expected_add; missing = expected_add - added\n    errors.append((\"added edges not predicted\", sum(extra.values()), list(extra.items())[:8]))\n    errors.append((\"predicted edges not added\", sum(missing.values()), list(missing.items())[:8]))\noth_b = collections.Counter((s, t, typ, l) for s, t, typ, l, md in eb if typ != \"IMPORTS\"); oth_a = collections.Counter((s, t, typ, l) for s, t, typ, l, md in ea if typ != \"IMPORTS\")\nif oth_b != oth_a: errors.append((\"non-IMPORTS edge rows changed\", sum((oth_a - oth_b).values()) + sum((oth_b - oth_a).values()), list((oth_a - oth_b).items())[:4] + list((oth_b - oth_a).items())[:4]))\n# unresolved IMPORTS rows: after == before minus bound; still-unresolved heads keep spec as target_key and the relative basis\nkb = collections.Counter((p, spec_of(md), l, tk if spec_of(md) is None or spec_of(md).split(\"::\")[0] not in (\"crate\", \"super\", \"self\") else spec_of(md)) for p, tk, l, md, b, c, typ in ub if typ == \"IMPORTS\")\nka = collections.Counter((p, spec_of(md), l, tk) for p, tk, l, md, b, c, typ in ua if typ == \"IMPORTS\")\nbound_c = collections.Counter((p, s, l, s if s.split(\"::\")[0] in (\"crate\", \"super\", \"self\") else tk) for p, s, l, tk in bound_keys)\nexp_after = kb - bound_c\nif ka != exp_after: errors.append((\"unresolved IMPORTS rows after != before minus bound\", sum((ka - exp_after).values()) + sum((exp_after - ka).values()), list((ka - exp_after).items())[:6] + list((exp_after - ka).items())[:6]))\nbad_rel = [(p, tk, b) for p, tk, l, md, b, c, typ in ua if typ == \"IMPORTS\" and spec_of(md) and spec_of(md).split(\"::\")[0] in (\"crate\", \"super\", \"self\") and (tk != spec_of(md) or b != \"relative_import_target_unresolved\")]\nif bad_rel: errors.append((\"still-unresolved relative rows with a decoded key or another basis\", len(bad_rel), bad_rel[:8]))\n# CALLS (and any other type) unresolved rows: same keys; a changed classification must be the internal-import repair\ndef km(rows): return collections.Counter(((p, tk, l, typ), (c, b)) for p, tk, l, md, b, c, typ in rows if typ != \"IMPORTS\")  # F-001: multiset, duplicates kept\nmb, ma = km(ub), km(ua)\nkeys_b = collections.Counter(k for (k, v) in mb.elements()); keys_a = collections.Counter(k for (k, v) in ma.elements())\nif keys_b != keys_a: errors.append((\"non-IMPORTS unresolved rows added or removed\", sum((keys_a - keys_b).values()) + sum((keys_b - keys_a).values()), list((keys_a - keys_b).items())[:4] + list((keys_b - keys_a).items())[:4]))\ngone = mb - ma; came = ma - mb  # the same row key appears in gone with its old (class, basis) and in came with its new one\nmoved = collections.Counter(); badmove = []; moved_rows = sum(came.values())\nby_key_gone = collections.defaultdict(list); by_key_came = collections.defaultdict(list)\nfor (k, v), n in gone.items(): by_key_gone[k].extend([v] * n)\nfor (k, v), n in came.items(): by_key_came[k].extend([v] * n)\nfor k in set(by_key_gone) | set(by_key_came):\n    olds = by_key_gone.get(k, []); news = by_key_came.get(k, [])\n    for i in range(max(len(olds), len(news))):\n        o = olds[i] if i < len(olds) else (\"-\", \"-\"); w = news[i] if i < len(news) else (\"-\", \"-\")\n        moved[(k[3], o[1], w[1])] += 1\n        if w != (\"-\", \"-\") and w not in ((\"internal_candidate\", \"callee_matches_internal_import\"), (\"internal_candidate\", \"receiver_matches_internal_import\")): badmove.append((k, o, w))\nif badmove: errors.append((\"unresolved rows moved to a class other than the internal-import repair\", len(badmove), badmove[:8]))\n\nis_test = {r[0]: bool(r[1]) for r in cb.execute(\"select path, is_test from files where repo_uid=?\", (rb,))}\nowners = owners_of(cb, sb)\ncertain_b = [(s, t) for s, t, typ, l, md in eb if typ == \"IMPORTS\"]  # all rust-core resolved imports are certain (static); add every language below\nall_b = [(s, t) for s, t in cb.execute(\"\"\"select fs.path, ft.path from edges e join nodes a on a.node_uid=e.source_node_uid join files fs on fs.file_uid=a.file_uid join nodes b on b.node_uid=e.target_node_uid join files ft on ft.file_uid=b.file_uid where e.snapshot_uid=? and e.type=\\\"IMPORTS\\\" and e.resolution in (\\\"static\\\",\\\"dynamic\\\")\"\"\", (sb,))]\nsccs_before = dir_sccs(all_b, owners, is_test)\nsccs_after = dir_sccs(all_b + [(s, t) for (s, t, l) in expected_add.elements()], owners, is_test)\nprint(\"RSR-DIRCYCLES \" + name + \": before \" + str(len(sccs_before)) + \" \" + json.dumps(sccs_before) + \" | predicted after \" + str(len(sccs_after)) + \" \" + json.dumps(sccs_after))\nprint(\"RSR-INLINE \" + name + \": rows inside inline mod bodies \" + json.dumps(dict(inline_rows)))\nimport os\ncyj = os.environ.get(\"RSR_AFTER_CYCLES_JSON\")\nif cyj:\n    d = json.load(open(cyj)); got = sorted(tuple(sorted(n[\"qualified_name\"] for n in c[\"nodes\"])) for c in d[\"cycles\"])\n    if got != sccs_after: errors.append((\"after cycles member sets differ from the predicted directory SCCs\", len(got), {\"got\": got[:6], \"predicted\": sccs_after[:6]}))\n    else: print(\"RSR-DIRCYCLES \" + name + \": after cycles == predicted (\" + str(len(got)) + \")\")\n\ndef inline_key(md):\n    try: v = json.loads(md).get(\"inlineModulePath\") if md else None\n    except Exception: v = \"unreadable\"\n    return tuple(v) if isinstance(v, list) else (None if v is None else \"unreadable\")\nmism = collections.Counter(); checked = 0; keyed = 0\nfor row in [(s_, typ, l, md) for s_, t_, typ, l, md in ea] + [(p_, typ, l, md) for p_, tk, l, md, b, c, typ in ua]:\n    s_, typ, l, md = row\n    if typ != \"IMPORTS\": continue\n    scan = tuple(inline_mods_at(s_, l or 0)); have = inline_key(md); checked += 1; keyed += bool(have)\n    if (scan if scan else None) != have: mism[(s_, l, str(have), \"/\".join(scan))] += 1\nprint(\"RSR-INLINE-KEY \" + name + \": rust-core IMPORTS rows checked \" + str(checked) + \"; carrying inlineModulePath \" + str(keyed) + \"; disagreements with the independent scan \" + str(sum(mism.values())))\nif mism and bef != aft: errors.append((\"inlineModulePath disagrees with the independent inline-module scan on a row (stop condition f)\", sum(mism.values()), list(mism.items())[:8]))\nprint(\"RSR-REPLAY \" + name + \": replayed \" + str(replayed) + \"; bind \" + str(sum(bind.values())) + \" \" + json.dumps(dict(bind)) + \"; stay \" + str(sum(stay.values())) + \" \" + json.dumps({a + \" / \" + b: v for (a, b), v in stay.items()}) + \"; distinct new file pairs \" + str(len({(s, t) for s, t, l in expected_add})) + \"; added IMPORTS edges \" + str(sum(added.values())) + \"; CALLS/other rows re-classified \" + str(moved_rows) + \" \" + json.dumps({a + \": \" + b + \" -> \" + c: v for (a, b, c), v in moved.items()}))\nfor e in errors: print(\"RSR-REPLAY \" + name + \" FAIL: \" + e[0] + \" (\" + str(e[1]) + \"): \" + repr(e[2]))\nsys.exit(1 if errors else 0)\nPY\ntest -s \"$W/replay.py\"\ncorpus_dir(){ grep \"^$1|\" \"$SL/before/corpus-commits.txt\" | cut -d\"|\" -f3; }\nwhile IFS=\"|\" read -r r sha dir; do test \"$(git -C \"$dir\" rev-parse --short=7 HEAD)\" = \"$sha\"; test -z \"$(git -C \"$dir\" status --porcelain)\"; done < \"$SL/before/corpus-commits.txt\"\nfor r in repo-graph zap-engine codegraph hexmanos; do test -d \"$B-$r-before/databases\"; (cd \"$B-$r-before\" && find . -type f -name \"*.db\" | sort | xargs shasum -a 256) | diff -q - \"$SL/before/$r.db.sha\"; done\ncargo build --release -p repo-graph-rgr -p rmapd 2>&1 | tail -1; RM=\"$PWD/target/release/rmap\"\nidx(){ local root=\"$1\" src=\"$2\"; mkdir -p \"$root\"; (cd \"$src\" && RMAP_STATE_ROOT=\"$root\" RMAP_SOCKET_PATH=\"$root/d.sock\" \"$RM\" index \"$src\" > \"$root.index.out\" 2>&1); }\nfor r in repo-graph zap-engine codegraph hexmanos; do idx \"$W/$r-after\" \"$(corpus_dir \"$r\")\"; done\npython3 \"$AM/scripts/rg-store-diff.py\" \"$B-hexmanos-before\" \"$W/hexmanos-after\" --only files,nodes,edges,unresolved > \"$W/hexmanos.store-diff.txt\" 2>&1 || true; grep -qx \"RG-STORE-DIFF PASS\" \"$W/hexmanos.store-diff.txt\"\nrunr(){ local r=\"$1\"; shift; local dir; dir=\"$(corpus_dir \"$r\")\"; (cd \"$dir\" && RMAP_STATE_ROOT=\"$W/$r-after\" RMAP_SOCKET_PATH=\"$W/$r-after/d.sock\" \"$RM\" \"$@\" 2>/dev/null); }\nfor r in repo-graph zap-engine codegraph; do python3 \"$AM/scripts/rg-store-diff.py\" \"$B-$r-before\" \"$W/$r-after\" --only files,nodes > \"$W/$r.store-diff-files-nodes.txt\" 2>&1 || true; grep -qx \"RG-STORE-DIFF PASS\" \"$W/$r.store-diff-files-nodes.txt\"; runr \"$r\" cycles --json > \"$W/$r-cycles-after.json\"; runr \"$r\" cycles | grep -v \"^Snapshot\" > \"$W/$r-cycles-after.txt\"; RSR_AFTER_CYCLES_JSON=\"$W/$r-cycles-after.json\" python3 \"$W/replay.py\" \"$B-$r-before\" \"$W/$r-after\" \"$r\" \"$(corpus_dir \"$r\")\" > \"$W/$r.replay.txt\"; cat \"$W/$r.replay.txt\"; done\nRGC=\"$(corpus_dir repo-graph)\"; run(){ local r=\"$1\" dir=\"$2\"; shift 2; (cd \"$dir\" && RMAP_STATE_ROOT=\"$W/$r-after\" RMAP_SOCKET_PATH=\"$W/$r-after/d.sock\" \"$RM\" \"$@\" 2>/dev/null); }\nrun repo-graph \"$RGC\" imports rust/crates/agent/src/aggregators/trust.rs > \"$W/rg-imports-trust.txt\"; T=\"$W/rg-imports-trust.txt\"\ngrep -qxF \"10 imports\" \"$T\"; grep -qxF \"0 imports without a confirmed target\" \"$T\"\ntest \"$(grep -cxF \"  rust/crates/agent/src/aggregators/mod.rs  depth=1  static\" \"$T\")\" -eq 1; test \"$(grep -cxF \"  rust/crates/agent/src/dto/signal.rs  depth=1  static\" \"$T\")\" -eq 4; test \"$(grep -cxF \"  rust/crates/agent/src/errors.rs  depth=1  static\" \"$T\")\" -eq 1; test \"$(grep -cxF \"  rust/crates/agent/src/reliability.rs  depth=1  static\" \"$T\")\" -eq 1; test \"$(grep -cxF \"  rust/crates/agent/src/storage_port.rs  depth=1  static\" \"$T\")\" -eq 3\nrun repo-graph \"$RGC\" imports rust/crates/daemon-runtime/src/seed_pass.rs > \"$W/rg-imports-seed_pass.txt\"; S=\"$W/rg-imports-seed_pass.txt\"\ngrep -qxF \"11 imports\" \"$S\"; grep -qxF \"8 imports without a confirmed target:\" \"$S\"; test \"$(grep -cxF \"  rust/crates/repo-graph-seed/src/lib.rs  depth=1  static\" \"$S\")\" -eq 1; test \"$(grep -cxF \"  rust/crates/repo-graph-seed/src/pass.rs  depth=1  static\" \"$S\")\" -eq 3; test \"$(grep -cxF \"  rust/crates/daemon-runtime/src/seed/mod.rs  depth=1  static\" \"$S\")\" -eq 5; test \"$(grep -cxF \"  rust/crates/daemon-runtime/src/cancel.rs  depth=1  static\" \"$S\")\" -eq 1; test \"$(grep -cxF \"  rust/crates/daemon-runtime/src/state.rs  depth=1  static\" \"$S\")\" -eq 1\nrun repo-graph \"$RGC\" explain rust/crates/agent/src/storage_port.rs > \"$W/rg-explain-storage_port.txt\"; grep -qxF \"Imports (4)\" \"$W/rg-explain-storage_port.txt\"; ! grep -qF \"imports without a confirmed target\" \"$W/rg-explain-storage_port.txt\"\nfor r in repo-graph zap-engine codegraph; do runr \"$r\" modules list > \"$W/$r-modules-list.txt\"; runr \"$r\" modules deps > \"$W/$r-modules-deps.txt\"; runr \"$r\" trust --json > \"$W/$r-trust.json\"\nBOUND=$(sed -nE \"s/^RSR-REPLAY $r: replayed [0-9]+; bind ([0-9]+) .*/\\1/p\" \"$W/$r.replay.txt\"); test -n \"$BOUND\"\npython3 - \"$SL/before/$r-modules-list.txt\" \"$W/$r-modules-list.txt\" \"$SL/before/$r-modules-deps.txt\" \"$W/$r-modules-deps.txt\" \"$SL/before/$r-trust.json\" \"$W/$r-trust.json\" \"$BOUND\" \"$r\" <<\"PY\"\nimport json,re,sys\nmlb,mla,mdb,mda,tb,ta,bound,r=sys.argv[1:9]; bound=int(bound)\ndef cross(f): m=re.search(r\"^\\s*(\\d+) cross-module dependencies\", open(f).read(), re.M); return int(m.group(1)) if m else (0 if \"No cross-module dependencies detected\" in open(f).read() else None)\ndef unres(f):\n    s=open(f).read(); m=re.search(r\"\\((\\d+) imports unresolved\\)\", s) or re.search(r\"but (\\d+) imports did not resolve to a file\", s); return int(m.group(1)) if m else None\nassert cross(mlb) is not None and cross(mlb)==cross(mla), (r, \"modules list cross-module count moved\", cross(mlb), cross(mla))\nassert unres(mlb) is not None and unres(mla)==unres(mlb)-bound, (r, \"modules list unresolved imports\", unres(mlb), unres(mla), bound)\nassert cross(mdb) is not None and cross(mdb)==cross(mda), (r, \"modules deps repo-wide cross-module count moved\", cross(mdb), cross(mda))\nrows=lambda f: sorted((m[\"qualified_name\"], m[\"fan_in\"], m[\"fan_out\"]) for m in json.load(open(f))[\"value\"][\"modules\"][\"value\"])\nb,a=rows(tb),rows(ta); assert a==b, (r, \"trust module rows moved\", [x for x in a if x not in b][:5], [x for x in b if x not in a][:5])\nprint(r + \": cross-module \" + str(cross(mla)) + \" unchanged; unresolved imports \" + str(unres(mlb)) + \" -> \" + str(unres(mla)) + \" (= before - \" + str(bound) + \" bound); modules deps cross-module \" + str(cross(mda)) + \" unchanged; trust module rows unchanged: \" + str(len(a)))\nPY\ndone\ncp -R \"$B-repo-graph-before\" \"$W/rg-before-copy\"; python3 - \"$W/rg-before-copy\" <<\"PY\"\nimport json,sys,glob; R=sys.argv[1]; p=R+\"/registry.json\"; d=json.load(open(p)); db=glob.glob(R+\"/databases/*.db\")[0]\nfor e in d[\"repos\"]: e[\"db_path\"]=db\njson.dump(d,open(p,\"w\"),indent=2)\nPY\n(cd \"$RGC\" && RMAP_STATE_ROOT=\"$W/rg-before-copy\" RMAP_SOCKET_PATH=\"$W/rg-before-copy/d.sock\" \"$RM\" check > \"$W/rg-check-before-copy.txt\" 2>/dev/null) || true; grep -qF \"index toolchain differs from running rmap\" \"$W/rg-check-before-copy.txt\"; grep -qF \"rust-core 0.2.0 → 0.3.0\" \"$W/rg-check-before-copy.txt\"\nmkdir -p \"$SL/after\"; cp \"$W\"/*.txt \"$W\"/*.out \"$SL/after/\"; echo RSR-C05-OK'",
+        "inputs": "The command (inline; its replay oracle is written to the run directory as `replay.py` by the command itself). It (i) asserts the corpora (`before/corpus-commits.txt`: name|commit|path): the pinned detached worktrees `/private/tmp/RUST-SELF-RESOLUTION-1-corpus/{repo-graph,zap-engine,hexmanos}` and codegraph in place — each clean at its commit (the operator's hexmanos checkout holds the human's unrelated MAP.md edits and is not the corpus); (ii) asserts the operator's HEAD-built before-roots `/private/tmp/RUST-SELF-RESOLUTION-1-{repo-graph,zap-engine,codegraph,hexmanos}-before` by database sha256 (`before/<corpus>.db.sha`) and never serves them in place; (iii) builds the candidate `rmap`/`rmapd` (release) and indexes the four corpora into fresh after-roots under `mktemp -d /private/tmp/RUST-SELF-RESOLUTION-1-run.XXXX`; (iv) hexmanos: `rg-store-diff.py before after` exits 0 with every table at 0 differences (P-RSR-02); (v) each Rust corpus: `rg-store-diff.py --only files,nodes` at 0, then the embedded replay (SLICE_DOC section 3's predicate over the BEFORE store's file list and unresolved rows) asserts that the rust-core IMPORTS edges ADDED equal, as a multiset keyed (source path, target path, line), exactly the rows the replay binds; that the unresolved rust-core IMPORTS rows REMOVED are exactly those (the replay selects sibling rows by the CONTRACT's predicate — first segment not `crate`/`super`/`self` and not a declared Cargo name — never by the old classifier basis, and binds them only with the stored `rust_mod_decls` evidence and a first-segment module file, D-RSR-ENTRY-CLIMB-1; `src/bin/` is excluded as a directory only); that every remaining relative-head row has `target_key` == its recorded specifier and basis `relative_import_target_unresolved`; that no non-IMPORTS edge row changed; that every unresolved CALLS row whose classification changed moved to `internal_candidate` with basis `callee_matches_internal_import` or `receiver_matches_internal_import` (the bare-head `is_relative` repair; the count is STATED, not predicted); every comparison keeps occurrence counts (a `use crate::dto::signal::{A, B, C, D}` is four rows at one line; multisets, never sets); and that on EVERY rust-core IMPORTS row of the after store — resolved and still unresolved — the extractor's `inlineModulePath` key equals the replay's independent brace-depth scan of the corpus source (absent when the `use` is top-level), with multiplicity (stop condition (f)); (vi) repo-graph captures on the after-root, compared with the operator's before captures in `before/`: `imports rust/crates/agent/src/aggregators/trust.rs` prints `10 imports`, the ten rows `rust/crates/agent/src/aggregators/mod.rs` ×1, `rust/crates/agent/src/dto/signal.rs` ×4, `rust/crates/agent/src/errors.rs` ×1, `rust/crates/agent/src/reliability.rs` ×1, `rust/crates/agent/src/storage_port.rs` ×3, each `depth=1  static`, and `0 imports without a confirmed target`; `imports rust/crates/daemon-runtime/src/seed_pass.rs` prints `11 imports` — the seven bound rows `rust/crates/daemon-runtime/src/cancel.rs` ×1, `rust/crates/daemon-runtime/src/seed/mod.rs` ×5, `rust/crates/daemon-runtime/src/state.rs` ×1 added to the four rows the before capture already holds and that stage 3.5 keeps (`rust/crates/repo-graph-seed/src/lib.rs` ×1, `rust/crates/repo-graph-seed/src/pass.rs` ×3, each `depth=1  static`; P-RSR-01 on real output) — and `8 imports without a confirmed target:`; `explain rust/crates/agent/src/storage_port.rs` prints `Imports (N)` with N = its bound rows and no `+… imports without a confirmed target` line when none remains; on EACH Rust corpus (repo-graph, zap-engine, codegraph), compared with the operator's before captures `before/<corpus>-modules-list.txt`, `-modules-deps.txt`, `-trust.json`: `modules list`'s `N cross-module dependencies` figure equals the before capture's and its `(M imports unresolved)` equals before minus the rows the replay bound; `modules deps` (repo-wide) keeps the before `cross-module dependencies` figure; `trust --json`'s module rows (`qualified_name`, `fan_in`, `fan_out`) equal the before rows exactly (P-RSR-05 on every corpus); (vii) a COPY of the repo-graph before-root served by the candidate binary: `check` prints the line `index toolchain differs from running rmap (…)` whose difference list contains `rust-core 0.2.0 → 0.3.0` (and the indexer bump; RG-REQ-001-L06); (viii) copies every capture to `.agent-manager/slices/RUST-SELF-RESOLUTION-1/after/`, prints the per-corpus counts (bound by form, stayed by reason, CALLS rows moved) and `RSR-C05-OK`. A failure retains the run directory and names it."
+      },
+      "expected": "exit 0 and RSR-C05-OK: on three Rust corpora every intra-crate `use` the ladder reaches is a static file edge and nothing else among the rust-core edge and unresolved rows moved except the stated CALLS classifications (not compared, and expected to move with the bound edges: the indexer-stamped MODULE→MODULE IMPORTS edges `orchestrator.rs` derives from file imports, and the bare-head bindings' `isRelative` in `file_signals`); the non-Rust witness is byte-identical; the Cargo-module cross-module graph and trust's module connectivity are preserved unchanged (no behavior change); `cycles` moves by exactly the predicted directory SCCs — the bound edges and nothing else (D-RSR-DIR-CYCLES-1); the staleness surface names the extractor change",
+      "candidateSha256": "sha256:88a6d68e3a35b9160036025da3294ffa28956c4a71d242a4b2f21fbac0d8b184",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Exit 0; last line RSR-C05-OK, with refreshed captures.",
+        "supportingEvidence": [
+          "…-rsr-05.txt (20:15:27–20:17:18)",
+          ".agent-manager/slices/RUST-SELF-RESOLUTION-1/after/"
+        ]
+      }
+    },
+    {
+      "checkId": "RSR-C06",
+      "obligationIds": [
+        "RG-REQ-006-L14",
+        "RG-REQ-006-L01",
+        "RG-REQ-006-L05",
+        "RG-REQ-006-L12",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L08",
+        "RG-REQ-002-L11",
+        "RG-REQ-001-L03",
+        "RG-REQ-001-L06",
+        "P-RSR-01",
+        "P-RSR-03",
+        "P-RSR-04",
+        "P-RSR-05"
+      ],
+      "owner": "reviewer",
+      "method": {
+        "kind": "inspection",
+        "subject": "git diff HEAD -- the six candidate paths, read on the candidate tree, with SLICE_DOC sections 2-3",
+        "criterion": "(1) the extractor records the specifier as `target_key` for every `use` and computes `is_relative` from the head alone (bare or `::`-suffixed `crate`/`super`/`self`); no `:FILE` key is built and `rust_module_to_path` is gone; (2) the resolver's new arm runs ONLY after stages 1–3.5 miss and ONLY for a `rust-core:` edge, derives the crate root as the longest declared Cargo root prefixing the SOURCE path and the module path by the rules of section 2.1 — the file's path extended by the edge's `inlineModulePath` names (D-RSR-INLINE-MODULE-1) —, walks the SAME ladder function the declared-crate stage walks (one function, two callers), returns nothing when the hit is the source file, when a sibling first segment is not declared by the enclosing module (`rust_mod_decls` matched on `inline_path`) or has no first-segment module file, when a declared crate name missed stage 3.5, when the source lies outside `<root>/src/` or under `src/bin/`, when `super` climbs above the root, or when no declared root prefixes the source; stage 3.5 and every other stage are byte-identical in behaviour; the false comment is replaced; (3) the classifier's bare-head relativity is the same predicate the rgr phrase states, word for word at the two sites; (4) the contract subsection states the ladder, the precedence of a declared crate name, the bind-nothing cases with their corpus counts, the self-import rule (D-RSR-SELF-IMPORT-1) and the version bumps; (5) no reader phrase asserts a binding the store does not hold (RG-REQ-002-L01) and no still-unresolved row loses its classification (RG-REQ-001-L03); (6) `INDEXER_VERSION` and `EXTRACTOR_NAME` are bumped exactly once each.",
+        "inputs": "The candidate's diff of the six paths; SLICE_DOC sections 2-3; D-RSR-SCOPE-1, D-RSR-SELF-IMPORT-1, D-RSR-INLINE-MODULE-1, D-RSR-DIR-CYCLES-1, D-RSR-ENTRY-CLIMB-1, D-AGENT-USEFULNESS-FRAME-1; RG-REQ-006-L01/L05/L12/L14; CC-23."
+      },
+      "expected": "every criterion holds on the candidate; the declared-crate stage, the other resolver stages, the TS/Python relativity rules and every other reader phrase are preserved (no behavior change)",
+      "candidateSha256": "sha256:88a6d68e3a35b9160036025da3294ffa28956c4a71d242a4b2f21fbac0d8b184",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "not-run",
+        "reason": "the reviewer's inspection"
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "docs/cli/rmap-contracts.md",
+      "obligationIds": [
+        "RG-REQ-006-L14"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/classification/src/unresolved_classifier.rs",
+      "obligationIds": [
+        "RG-REQ-006-L01"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/indexer/src/orchestrator.rs",
+      "obligationIds": [
+        "RG-REQ-006-L02"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/indexer/src/resolver.rs",
+      "obligationIds": [
+        "RG-REQ-006-L03"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/imports.rs",
+      "obligationIds": [
+        "RG-REQ-006-L04"
+      ],
+      "summary": "not stated by the builder"
+    },
+    {
+      "path": "rust/crates/rust-extractor/src/extractor.rs",
+      "obligationIds": [
+        "RG-REQ-006-L05"
+      ],
+      "summary": "not stated by the builder"
+    }
+  ],
+  "completedAt": "2026-10-04T17:17:40.499Z",
+  "limitations": [
+    "The builder did not run the whole-workspace test suite or the dogfood; those are the operator's gate."
+  ],
+  "report": "I reran all five builder checks on the unchanged candidate, and all five passed, with logs produced at this checkpoint. I edited no file. The working tree is still the six allocated paths at HEAD 047f01d8, and the diff hash (`5c22cf13…`) is the same before and after the runs. The commands were copied again, byte-for-byte, from the allocation block of SLICE_DOC (sha256 `ca613d61…`, which matches its pin).\n\n## Checks (EXECUTED 2026-10-04 20:15–20:17, run with `bash` from `rust/`)\n\n| Check | Outcome | Log and proving line |\n|---|---|---|\n| RSR-C01 | passed, exit 0 | `/private/tmp/RUST-SELF-RESOLUTION-1-rsr-01.txt` (20:15): `test result: ok. 63 passed` and `test result: ok. 5 passed` |\n| RSR-C02 | passed, exit 0 | `…-rsr-02.txt` (20:15): `test result: ok. 561 passed`, plus `1 passed`, `1 passed`, and `4 passed; 2 ignored` |\n| RSR-C03 | passed, exit 0 | `…-rsr-03cl.txt`: `test result: ok. 322 passed`; `…-rsr-03rgr.txt`: `test result: ok. 1478 passed` |\n| RSR-C04 | passed, exit 0 | `…-rsr-04.txt` ends `Finished`; fmt, clippy, the six-path scope check, `diff --check` and the byte-identity of the other crates all held |\n| RSR-C05 | passed, exit 0 | `…-rsr-05.txt` (20:15:27–20:17:18), last line `RSR-C05-OK`; captures refreshed in `.agent-manager/slices/RUST-SELF-RESOLUTION-1/after/`; the run directory was removed by the check itself |\n| RSR-C06 | — | the reviewer's inspection |\n\nRSR-C01–C03 enforce their test-count floors (68, 569, 325 and 1478) inside the commands, so exit 0 means each floor held.\n\n## Counts printed by RSR-C05 (identical to cycle 1 and to SLICE_DOC §3)\n\n| | repo-graph | zap-engine | codegraph |\n|---|---|---|---|\n| Rows replayed | 5,056 | 379 | 400 |\n| Bound: relative / bare / sibling | 2,086 / 203 / 972 | 174 / 2 / 119 | 254 / 41 / 0 |\n| Stayed unresolved, by reason | 1,298 undeclared first segment; 462 source outside `src/`; 21 + 14 self-import | 84 undeclared | 96 undeclared; 3 + 5 under no Cargo root; 1 self-import |\n| CALLS rows reclassified | 123 (76 receiver, 47 callee, all to an internal-import basis) | 0 | 107 (105, 2) |\n| `cycles` after | 9, equals prediction | 2, equals prediction | 3, equals prediction |\n| `inlineModulePath` mismatches with the independent scan | 0 of 8,107 rows | 0 of 486 | 0 of 400 |\n\n- On all three corpora, the Cargo-module counts and trust's module rows did not change.\n- Unresolved imports fell by exactly the bound rows: 5183 → 1922, 434 → 139 and 1623 → 1328.\n- The non-Rust witness, hexmanos, is byte-identical: `RG-STORE-DIFF PASS`.\n\n## What the product now answers (from the refreshed captures)\n\n- `trust.rs:18`, `use super::AggregatorOutput;`, now resolves to `rust/crates/agent/src/aggregators/mod.rs  depth=1  static`.\n- `trust.rs:24`, `use crate::storage_port::{AgentStorageRead, AgentTrustSummary, EnrichmentState};`, now resolves to `rust/crates/agent/src/storage_port.rs  depth=1  static`, three times. The file now shows `10 imports`.\n- `seed_pass.rs:25`, `use crate::seed::{…};`, now resolves to `rust/crates/daemon-runtime/src/seed/mod.rs`, five times. The file now shows `11 imports`.\n- The staleness line on the copy of the before-root reads: `index toolchain differs from running rmap (rust-core 0.2.0 → 0.3.0, indexer 1.9.0 → 1.10.0) — run rmap repo rebuild …`.\n\nPer-path justifications and limitations are unchanged from the earlier hand-off; the reviewer's finding F-1 is closed. Progress is recorded in `.agent-manager/slices/RUST-SELF-RESOLUTION-1/build-progress.md`. I did not run the whole-workspace test suite or the dogfood, because those are the operator's gate. No stop condition was hit and no decision is needed."
+}

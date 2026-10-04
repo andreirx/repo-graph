@@ -178,7 +178,7 @@ fn classify_unresolved_import(
     // Read the specifier + relativity exactly as before (metadata rawPath/specifier,
     // target_key fallback) — extracted to `parse_import_specifier` so
     // `resolve_external_dependency_name` (ATTRIBUTION-1) reads the specifier the same way.
-    let (specifier, is_relative) = parse_import_specifier(edge);
+    let (specifier, is_relative) = parse_import_specifier(edge, &file_signals.import_bindings);
 
     // Relative → internal.
     if is_relative {
@@ -496,7 +496,16 @@ fn find_binding_for_identifier<'a>(
 /// Rust, `target_key` fallback; relative iff `.`/`crate::`/`super::`/`self::`). Extracted
 /// verbatim so both the classifier and [`resolve_external_dependency_name`] read the
 /// specifier identically.
-fn parse_import_specifier(edge: &ClassifierEdgeInput) -> (String, bool) {
+///
+/// RUST-SELF-RESOLUTION-1: a BARE `crate`, `super` or `self` specifier (`use super::f;` records
+/// `super`) is relative too, but only when the file's `import_bindings` hold a binding of that
+/// specifier marked relative — the mark the Rust extractor sets for those heads. The Python
+/// extractor writes the same `specifier` key and never marks a bare word relative, so a Python
+/// `import crate` keeps its classification (F-RSR-PYTHON-REGRESSION, P-RSR-04).
+fn parse_import_specifier(
+    edge: &ClassifierEdgeInput,
+    import_bindings: &[ImportBinding],
+) -> (String, bool) {
     let mut specifier = edge.target_key.clone();
     let mut is_relative = false;
     if let Some(ref meta_str) = edge.metadata_json {
@@ -511,7 +520,11 @@ fn parse_import_specifier(edge: &ClassifierEdgeInput) -> (String, bool) {
                 specifier = spec.to_string();
                 is_relative = specifier.starts_with("crate::")
                     || specifier.starts_with("super::")
-                    || specifier.starts_with("self::");
+                    || specifier.starts_with("self::")
+                    || (matches!(specifier.as_str(), "crate" | "super" | "self")
+                        && import_bindings
+                            .iter()
+                            .any(|b| b.is_relative && b.specifier == specifier));
             }
         }
     }
@@ -640,7 +653,7 @@ pub fn resolve_external_dependency_name(
     use UnresolvedEdgeBasisCode as B;
     match basis_code {
         B::SpecifierMatchesPackageDependency => {
-            let (specifier, _is_relative) = parse_import_specifier(edge);
+            let (specifier, _is_relative) = parse_import_specifier(edge, import_bindings);
             resolve_declared_dependency(&specifier, declared)
         }
         B::ReceiverMatchesExternalImport | B::CalleeMatchesExternalImport => {
@@ -1023,6 +1036,115 @@ mod tests {
         assert_eq!(
             v.basis_code,
             UnresolvedEdgeBasisCode::RustCrateInternalModuleHeuristic
+        );
+    }
+
+    /// A Rust-extractor binding of `identifier` from `specifier`, marked relative as the Rust
+    /// extractor marks a `crate`/`super`/`self` head.
+    fn rust_relative_binding(identifier: &str, specifier: &str) -> ImportBinding {
+        ImportBinding {
+            is_relative: true,
+            ..binding(identifier, specifier)
+        }
+    }
+
+    #[test]
+    fn parse_import_specifier_treats_bare_crate_super_self_as_relative() {
+        // A bare head (`use super::X;` records the specifier `super`) is relative when the file's
+        // binding for it is marked relative — the Rust extractor's mark (F-RSR-PYTHON-REGRESSION:
+        // the gate is the binding's `is_relative`, never the specifier shape alone).
+        for spec in ["crate", "super", "self"] {
+            let e = edge_with_meta(
+                spec,
+                &format!(r#"{{"specifier":"{spec}","identifier":"X"}}"#),
+            );
+            let bindings = [rust_relative_binding("X", spec)];
+            assert_eq!(
+                parse_import_specifier(&e, &bindings),
+                (spec.to_string(), true),
+                "{spec}"
+            );
+        }
+        // `::`-prefixed heads are relative by the specifier alone, as before.
+        for spec in ["crate::a", "super::a", "self::a"] {
+            let e = edge_with_meta(spec, &format!(r#"{{"specifier":"{spec}"}}"#));
+            assert_eq!(
+                parse_import_specifier(&e, &[]),
+                (spec.to_string(), true),
+                "{spec}"
+            );
+        }
+        for spec in [
+            "supercalifragilistic",
+            "crate_utils",
+            "selfish",
+            "crates::a",
+        ] {
+            let e = edge_with_meta(spec, &format!(r#"{{"specifier":"{spec}"}}"#));
+            let bindings = [rust_relative_binding("X", spec)];
+            assert_eq!(
+                parse_import_specifier(&e, &bindings),
+                (spec.to_string(), false),
+                "{spec}"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_super_use_import_classifies_relative_not_heuristic() {
+        let e = edge_with_meta("super", r#"{"specifier":"super","identifier":"X"}"#);
+        let mut file = empty_file();
+        file.import_bindings = vec![rust_relative_binding("X", "super")];
+        let v = classify_unresolved_edge(
+            &e,
+            UnresolvedEdgeCategory::ImportsFileNotFound,
+            &empty_snapshot(),
+            &file,
+        );
+        assert_eq!(
+            v.classification,
+            UnresolvedEdgeClassification::InternalCandidate
+        );
+        assert_eq!(
+            v.basis_code,
+            UnresolvedEdgeBasisCode::RelativeImportTargetUnresolved
+        );
+    }
+
+    #[test]
+    fn python_import_named_crate_keeps_its_classification() {
+        // F-RSR-PYTHON-REGRESSION (P-RSR-04): the Python extractor writes the same `specifier`
+        // key (`python-extractor/src/extractor.rs:651`). `import crate` with `crate` a declared
+        // dependency stays an external library candidate: its binding is not relative.
+        let e = edge_with_meta("crate", r#"{"specifier":"crate","identifier":"crate"}"#);
+        let mut file = empty_file();
+        file.import_bindings = vec![binding("crate", "crate")];
+        file.package_dependencies = deps(&["crate"]);
+        let v = classify_unresolved_edge(
+            &e,
+            UnresolvedEdgeCategory::ImportsFileNotFound,
+            &empty_snapshot(),
+            &file,
+        );
+        assert_eq!(
+            v.classification,
+            UnresolvedEdgeClassification::ExternalLibraryCandidate
+        );
+        assert_eq!(
+            v.basis_code,
+            UnresolvedEdgeBasisCode::SpecifierMatchesPackageDependency
+        );
+        // With no binding row at all the bare word is not relative either.
+        file.import_bindings.clear();
+        let v = classify_unresolved_edge(
+            &e,
+            UnresolvedEdgeCategory::ImportsFileNotFound,
+            &empty_snapshot(),
+            &file,
+        );
+        assert_eq!(
+            v.basis_code,
+            UnresolvedEdgeBasisCode::SpecifierMatchesPackageDependency
         );
     }
 

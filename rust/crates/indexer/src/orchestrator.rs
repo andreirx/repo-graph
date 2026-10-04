@@ -36,8 +36,9 @@ use crate::extractor_port::{ExtractorError, ExtractorPort};
 use crate::include_resolver::{build_include_resolution_map, IncludeResolverConfig};
 use crate::language_sniff::classify_file_language;
 use crate::resolver::{
-    build_file_resolution_map, build_per_file_include_resolution, get_module_path, resolve_edges,
-    ResolverIndex,
+    build_file_resolution_map, build_per_file_include_resolution, get_module_path,
+    resolve_edges_with_rust_mod_decls, rust_mod_decls_from_metadata, ResolverIndex,
+    RustModDeclsByFile,
 };
 use crate::routing::{self, detect_language, is_test_file, MAX_FILE_SIZE_BYTES};
 use crate::storage_port::{
@@ -77,7 +78,10 @@ const COPIED_SIGNALS_READ_CHUNK: usize = 500;
 /// scanned tree defines a Gradle build whose projects are declared module candidates, so stored
 /// module candidates, their evidence and the ownership of indexed JVM files (today `.java`) move;
 /// every Gradle store re-indexes.
-pub const INDEXER_VERSION: &str = "indexer:1.9.0";
+/// 1.10.0 (RUST-SELF-RESOLUTION-1): a Rust `use` inside a crate (`crate`/`super`/`self` heads and
+/// sibling module paths) binds against the module that encloses it, so Rust IMPORTS edges and
+/// unresolved rows move; every Rust store re-indexes.
+pub const INDEXER_VERSION: &str = "indexer:1.10.0";
 
 // ── Error type ───────────────────────────────────────────────────
 
@@ -1069,6 +1073,29 @@ fn run_pipeline<S: IndexerStoragePort>(
             .map(|n| n.stable_key.clone()),
     );
 
+    // RUST-SELF-RESOLUTION-1 (D-RSR-ENTRY-CLIMB-1): each Rust FILE node's `mod <name>;`
+    // declarations (`metadata_json.rust_mod_decls`), the evidence stage 3.6 needs to read a `use`
+    // whose first segment is a sibling module. Read once from this snapshot's stored nodes (fresh
+    // and copied-forward alike) with the existing snapshot node read — the read
+    // `repo-index::rust_test_reclassify` uses for the same key. Skipped when no Cargo crate is
+    // declared: stage 3.6 then binds nothing, so a repository without Rust crates reads nothing.
+    let rust_mod_decls_by_file: RustModDeclsByFile = if index.rust_crate_roots.is_empty() {
+        RustModDeclsByFile::new()
+    } else {
+        storage
+            .query_all_nodes(snap_uid)?
+            .into_iter()
+            .filter(|n| n.kind == NodeKind::File)
+            .filter_map(|n| {
+                let decls = rust_mod_decls_from_metadata(n.metadata_json.as_deref());
+                if decls.is_empty() {
+                    return None;
+                }
+                n.file_uid.map(|file_uid| (file_uid, decls))
+            })
+            .collect()
+    };
+
     loop {
         let batch =
             storage.query_extraction_edges_batch(snap_uid, batch_size, cursor.as_deref())?;
@@ -1099,7 +1126,12 @@ fn run_pipeline<S: IndexerStoragePort>(
             })
             .collect();
 
-        let result = resolve_edges(&extracted_edges, &index, Some(&import_bindings_by_file));
+        let result = resolve_edges_with_rust_mod_decls(
+            &extracted_edges,
+            &index,
+            Some(&import_bindings_by_file),
+            &rust_mod_decls_by_file,
+        );
 
         // Full-stream CALLS tally (M-3b): counted on the resolver output,
         // BEFORE the storage handoff below.
@@ -4419,15 +4451,15 @@ mod tests {
         };
         let (mut a, mut b, mut c) = (named("ts-core:0.2.0"), named("c-core:0.1.0"), named("z:9"));
         let ports: Vec<&mut dyn ExtractorPort> = vec![&mut c, &mut a, &mut b];
-        assert_eq!(INDEXER_VERSION, "indexer:1.9.0");
+        assert_eq!(INDEXER_VERSION, "indexer:1.10.0");
         assert_eq!(
             build_toolchain_json(&ports),
-            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.9.0"}"#
+            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.10.0"}"#
         );
         let none: Vec<&mut dyn ExtractorPort> = Vec::new();
         assert_eq!(
             build_toolchain_json(&none),
-            r#"{"extractors":[],"indexer":"indexer:1.9.0"}"#
+            r#"{"extractors":[],"indexer":"indexer:1.10.0"}"#
         );
     }
 

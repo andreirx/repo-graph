@@ -235,7 +235,7 @@ source of `unresolved`/`unresolved_count`. The human render shows neither routin
   `this repository?` | `framework boundary?` | `unknown` |
   `{verbatim} (no phrase for this classification in this build)`.
 - Basis phrases: `relative_import_target_unresolved` →
-  `recorded specifier starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE`;
+  `recorded specifier is crate, super or self, or starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE`;
   `specifier_matches_package_dependency` → `specifier matches a dependency declared in the manifest`;
   `specifier_matches_runtime_module` →
   `specifier or its part before :: is on the runtime-module list of this build`;
@@ -339,6 +339,63 @@ bare as the first part; these extend the reason and candidate clauses above):
   `1 candidate: {path}`.
 
 Example: `  @/x  line 1  the tsconfig paths that apply to this file reach 2 indexed files — 2 candidates: lib/x.ts, lib/x/index.ts · this repository? (specifier matches a tsconfig paths alias)`.
+
+### `imports <file>` — Rust intra-crate `use` (RUST-SELF-RESOLUTION-1)
+
+RG-REQ-006-L14 (revision 3), as ruled by D-RSR-SCOPE-1, D-RSR-SELF-IMPORT-1, D-RSR-INLINE-MODULE-1
+and D-RSR-ENTRY-CLIMB-1. Every Rust `use` records its specifier as the IMPORTS target key
+(`use crate::dto::signal::X;` → `crate::dto::signal`; `use super::f;` → `super`); a specifier whose
+head is `crate`, `super` or `self`, bare or followed by `::`, is relative. A `use` written inside
+inline `mod <name> { }` bodies records their names, outermost first, as the additive edge key
+`inlineModulePath` (absent for a top-level `use`; a `use` inside a function body yields no IMPORTS
+edge). After the stable-key, extensionless, per-TU include and declared-crate stages miss, the
+resolver binds a Rust `use` against the module that ENCLOSES it:
+
+- (a) crate root: the longest declared Cargo root that is `.` or a `/`-terminated prefix of the
+  importing file's path; no such root → no binding;
+- (b) the importing file must lie under `<root>/src/` and not in the directory `<root>/src/bin/`
+  (a file `src/bin.rs` is an ordinary module);
+- (c) module path: `src/a/b.rs` → `a::b`, `src/a/mod.rs` → `a`, `src/lib.rs` and `src/main.rs` → the
+  crate root; then the `inlineModulePath` names are appended (inside `mod tests { use super::X; }` in
+  `src/a/b.rs`, `super` is `a::b`);
+- (d) head: `crate` → the remaining segments from the root; `self` → the enclosing module plus the
+  remaining segments; each leading `super` removes one segment (more than the module has → no
+  binding); any other first segment is a sibling path (Rust 2018 paths) and binds only with
+  declaration evidence: the importing FILE node's `rust_mod_decls` holds `mod <first>;` written in
+  the same inline module as the `use` (`inline_path` equal to `inlineModulePath`), and
+  `<enclosing>/<first>.rs` or `<enclosing>/<first>/mod.rs` is indexed → the enclosing module plus
+  every segment; otherwise no binding (`use std::collections::…`, a dependency, a name brought in by
+  `use`). A declared Cargo package name always wins over a sibling reading (RG-REQ-006-L01), and a
+  declared package name whose files are not indexed is a miss that never becomes a sibling reading;
+- (e) the L01 ladder: `<root>/src/<segs>.rs` → `<root>/src/<segs>/mod.rs` → drop the last segment and
+  repeat → `src/lib.rs` → `src/main.rs`; the first indexed file wins; a sibling path never shortens
+  past its first segment;
+- (f) a ladder hit that is the importing file itself binds nothing (D-RSR-SELF-IMPORT-1).
+
+A bound row renders as every static import: `  {file}  depth=1  static`. A row that binds nothing
+stays without a confirmed target, keeps its classification, and prints its recorded specifier as its
+target (`crate::dto::signal`, `super`), never a decoded path. A bare `crate`/`super`/`self` row is
+classified relative (`relative_import_target_unresolved`) only when the file's import binding of that
+specifier is marked relative, as the Rust extractor marks it; a Python `import crate` keeps its
+classification. Not parsed: a `#[path = "…"]` module and a module whose body is inline at the target
+side — as a later segment, or any segment under a `crate`, `super` or `self` head, the ladder shortens
+and lands on the file that declares it; as the FIRST segment of a sibling path no
+`<enclosing>/<first>.rs` or `<enclosing>/<first>/mod.rs` is indexed and the path binds nothing;
+`[lib] path` and `[[bin]] path` as RG-REQ-006-L01. Bind-nothing cases measured by the slice's replay,
+counted in unresolved Rust IMPORTS rows (one row per imported name; several rows can share one file
+and one line), on the repo-graph store at 3e6136a9 (RUST-SELF-RESOLUTION-1 §3): 1,298 import rows
+whose sibling first segment the enclosing module does not declare, 462 import rows whose source is
+outside `src/`, 35 import rows whose ladder hit is the source file (21 relative-head, 14 bare-head),
+0 import rows whose `super` climbs above the crate root; zap-engine: 84 import rows with an undeclared
+first segment; codegraph: 96 import rows with an undeclared first segment, 8 import rows whose source
+is under no declared Cargo root, 1 import row whose ladder hit is the source file.
+Versions: `rust-core:0.3.0`, `indexer:1.10.0` — an existing store's differing stamp queues a
+background full index on first use unless re-indexing is disabled (RG-REQ-001-L06).
+
+Source: `rust-extractor/src/extractor.rs` `extract_use_declaration`, `is_relative_use_specifier`;
+`indexer/src/resolver.rs` `resolve_rust_enclosing_module_import`, `rust_module_ladder`,
+`rust_mod_decls_from_metadata`; `indexer/src/orchestrator.rs` (the FILE nodes' declarations read
+once per index); `classification/src/unresolved_classifier.rs` `parse_import_specifier`.
 
 ### `stats` — `--engine`
 

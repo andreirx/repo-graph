@@ -690,8 +690,8 @@ mod unresolved {
     /// `classification/src/unresolved_classifier.rs`.
     fn basis_phrase(basis_code: &str) -> String {
         match basis_code {
-            // :185 `is_relative` (:499-522) and :214 (`:FILE` in the specifier or the target key).
-            "relative_import_target_unresolved" => "recorded specifier starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE".to_string(),
+            // :185 `is_relative` (:500-528) and :214 (`:FILE` in the specifier or the target key).
+            "relative_import_target_unresolved" => "recorded specifier is crate, super or self, or starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE".to_string(),
             // :193 `resolve_declared_dependency`.
             "specifier_matches_package_dependency" => {
                 "specifier matches a dependency declared in the manifest".to_string()
@@ -2437,7 +2437,7 @@ mod tests {
 
     const TS_LIMIT: &str = "listing limit: this listing omits type-only imports and re-exports from a specifier without a leading dot, dynamic import() and require() calls, import … = require(…) statements or import statements below the top level — open the file for those";
     const JS_LIMIT: &str = "listing limit: this listing omits re-exports from a specifier without a leading dot or dynamic import() and require() calls — open the file for those";
-    const RELATIVE: &str = "recorded specifier starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE";
+    const RELATIVE: &str = "recorded specifier is crate, super or self, or starts with ., crate::, super:: or self::, or the specifier or target key contains :FILE";
 
     fn lines_starting(out: &str, prefix: &str) -> usize {
         out.lines().filter(|l| l.starts_with(prefix)).count()

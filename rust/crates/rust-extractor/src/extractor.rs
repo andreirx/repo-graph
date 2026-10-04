@@ -15,9 +15,10 @@ use tree_sitter::{Node, Parser};
 use crate::builtins::rust_runtime_builtins;
 use crate::metrics::compute_function_metrics;
 
-/// Extractor name and version. Inherited from the retired TS prototype's
-/// `EXTRACTOR_VERSIONS.rust` (kept stable for snapshot comparability).
-const EXTRACTOR_NAME: &str = "rust-core:0.2.0";
+/// Extractor name and version. 0.3.0 (RUST-SELF-RESOLUTION-1): every `use` IMPORTS edge carries
+/// its specifier as the target key, a bare `crate`/`super`/`self` head is relative, and a `use`
+/// inside inline `mod` bodies records `inlineModulePath`.
+const EXTRACTOR_NAME: &str = "rust-core:0.3.0";
 
 /// The language identifier this extractor handles.
 const LANGUAGES: &[&str] = &["rust"];
@@ -58,6 +59,9 @@ struct ExtractionCtx<'a> {
     metrics: BTreeMap<String, ExtractedMetrics>,
     /// Stable keys already emitted. Used for #[cfg] deduplication.
     emitted_stable_keys: HashSet<String>,
+    /// Names of the inline `mod <name> { }` bodies enclosing the item being visited, outermost
+    /// first. Empty at the file's top level.
+    inline_module_path: Vec<String>,
 }
 
 /// Concrete `ExtractorPort` adapter for Rust source files.
@@ -182,6 +186,7 @@ impl ExtractorPort for RustExtractor {
             import_bindings: Vec::new(),
             metrics: BTreeMap::new(),
             emitted_stable_keys: HashSet::new(),
+            inline_module_path: Vec::new(),
         };
 
         // -- Walk top-level statements --
@@ -240,9 +245,7 @@ fn extract_use_declaration(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
     let bindings = collect_use_bindings(node, source);
 
     for binding in bindings {
-        let is_relative = binding.specifier.starts_with("crate::")
-            || binding.specifier.starts_with("super::")
-            || binding.specifier.starts_with("self::");
+        let is_relative = is_relative_use_specifier(&binding.specifier);
 
         // ImportBinding record
         ctx.import_bindings.push(ImportBinding {
@@ -255,15 +258,21 @@ fn extract_use_declaration(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
             kind: ImportKind::Named, // Rust `use` is always named import semantics
         });
 
-        // IMPORTS edge
-        let target_key = if is_relative {
-            format!(
-                "{}:{}:FILE",
-                ctx.repo_uid,
-                rust_module_to_path(&binding.specifier)
-            )
+        // IMPORTS edge. The target key is the recorded specifier for every `use` (RUST-SELF-
+        // RESOLUTION-1): the resolver binds a relative or sibling path against the module that
+        // encloses the `use` (the source file's module path plus `inlineModulePath`).
+        let target_key = binding.specifier.clone();
+        let metadata = if ctx.inline_module_path.is_empty() {
+            serde_json::json!({
+                "specifier": binding.specifier,
+                "identifier": binding.identifier
+            })
         } else {
-            binding.specifier.clone()
+            serde_json::json!({
+                "specifier": binding.specifier,
+                "identifier": binding.identifier,
+                "inlineModulePath": ctx.inline_module_path
+            })
         };
 
         ctx.edges.push(ExtractedEdge {
@@ -276,15 +285,16 @@ fn extract_use_declaration(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
             resolution: Resolution::Static,
             extractor: EXTRACTOR_NAME.into(),
             location: Some(location),
-            metadata_json: Some(
-                serde_json::json!({
-                    "specifier": binding.specifier,
-                    "identifier": binding.identifier
-                })
-                .to_string(),
-            ),
+            metadata_json: Some(metadata.to_string()),
         });
     }
+}
+
+/// True iff the `use` specifier's head segment is `crate`, `super` or `self` — bare (`use
+/// super::f;` records the specifier `super`) or followed by `::`.
+fn is_relative_use_specifier(specifier: &str) -> bool {
+    let head = specifier.split("::").next().unwrap_or("");
+    matches!(head, "crate" | "super" | "self")
 }
 
 /// A use binding: identifier, module specifier, and original imported name.
@@ -401,19 +411,6 @@ fn walk_use_tree(node: &Node, source: &str, path_prefix: &[&str], results: &mut 
             }
             _ => {}
         }
-    }
-}
-
-/// Convert a Rust module path to a file-system-like path.
-/// `crate::module::sub` -> `src/module/sub`
-fn rust_module_to_path(specifier: &str) -> String {
-    let parts: Vec<&str> = specifier.split("::").collect();
-    if parts.first() == Some(&"crate") {
-        let mut result = vec!["src"];
-        result.extend(&parts[1..]);
-        result.join("/")
-    } else {
-        parts.join("/")
     }
 }
 
@@ -824,10 +821,19 @@ fn extract_mod_item(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
         return; // `mod foo;` -- external module, skip
     };
 
-    // Recurse into inline module body
+    // Recurse into inline module body, recording its name for the `use` items inside it.
+    let name = node
+        .child_by_field_name("name")
+        .map(|n| node_text(&n, source).to_string());
+    if let Some(ref n) = name {
+        ctx.inline_module_path.push(n.clone());
+    }
     let mut cursor = body.walk();
     for child in body.children(&mut cursor) {
         visit_top_level(&child, source, ctx);
+    }
+    if name.is_some() {
+        ctx.inline_module_path.pop();
     }
 }
 
@@ -1382,6 +1388,101 @@ impl Foo {
         let binding = &result.import_bindings[0];
         assert!(binding.is_relative);
         assert_eq!(binding.specifier, "crate::module");
+        assert_eq!(only_imports_edge(&result).target_key, binding.specifier);
+    }
+
+    // -- RUST-SELF-RESOLUTION-1: the specifier is the target key; bare heads are relative --
+
+    /// The single IMPORTS edge of a one-binding fixture.
+    fn only_imports_edge(result: &ExtractionResult) -> &ExtractedEdge {
+        let imports: Vec<&ExtractedEdge> = result
+            .edges
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Imports)
+            .collect();
+        assert_eq!(imports.len(), 1, "expected exactly one IMPORTS edge");
+        imports[0]
+    }
+
+    /// Assert the one binding and its IMPORTS edge carry `specifier`, relative, and the edge's
+    /// target key is the specifier verbatim (no `:FILE` key).
+    fn assert_relative_specifier_target(source: &str, specifier: &str) {
+        let result = extract_test(source);
+        assert_eq!(result.import_bindings.len(), 1);
+        let binding = &result.import_bindings[0];
+        assert_eq!(binding.specifier, specifier);
+        assert!(binding.is_relative, "{source}: binding must be relative");
+        let edge = only_imports_edge(&result);
+        assert_eq!(edge.target_key, specifier);
+        assert!(!edge.target_key.contains(":FILE"));
+    }
+
+    #[test]
+    fn relative_use_target_key_is_the_specifier() {
+        assert_relative_specifier_target("use crate::module::Type;", "crate::module");
+    }
+
+    #[test]
+    fn super_path_use_is_relative() {
+        assert_relative_specifier_target("use super::support::f;", "super::support");
+    }
+
+    #[test]
+    fn self_path_use_is_relative() {
+        assert_relative_specifier_target("use self::a::B;", "self::a");
+    }
+
+    #[test]
+    fn bare_super_use_is_relative() {
+        assert_relative_specifier_target("use super::f;", "super");
+    }
+
+    #[test]
+    fn bare_crate_use_is_relative() {
+        assert_relative_specifier_target("use crate::X;", "crate");
+    }
+
+    #[test]
+    fn bare_self_use_is_relative() {
+        assert_relative_specifier_target("use self::X;", "self");
+    }
+
+    #[test]
+    fn use_inside_inline_mod_carries_inline_module_path() {
+        let result = extract_test(
+            r#"
+use std::fmt;
+mod tests {
+    mod inner {
+        use super::helper::f;
+    }
+}
+fn g() {
+    use std::io;
+}
+"#,
+        );
+        let imports: Vec<&ExtractedEdge> = result
+            .edges
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Imports)
+            .collect();
+        // The function-body `use std::io;` emits no IMPORTS edge (visited only at the top level
+        // and in inline `mod` bodies).
+        assert_eq!(imports.len(), 2);
+        let meta = |e: &ExtractedEdge| -> serde_json::Value {
+            serde_json::from_str(e.metadata_json.as_deref().unwrap()).unwrap()
+        };
+        let top = imports.iter().find(|e| e.target_key == "std").unwrap();
+        assert!(meta(top).get("inlineModulePath").is_none());
+        let nested = imports
+            .iter()
+            .find(|e| e.target_key == "super::helper")
+            .unwrap();
+        assert_eq!(
+            meta(nested)["inlineModulePath"],
+            serde_json::json!(["tests", "inner"])
+        );
     }
 
     // -- Trait impl extraction --
