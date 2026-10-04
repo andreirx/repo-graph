@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-28-pass2",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-28.json",
+    "sha256": "sha256:c320072ac8c5fbf127ced75806e733557173dae66a382267fe0798a9098703a0"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-28"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-28-pass2"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T23:54:32.000Z",
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin(s): docs/requirements/rg-req-011-daemon-and-store-lifecycle.md (sha256:208f833b610106dddae9cc4d8bd8cbc214b386c5fc955fbec12fcdf85070f9b6). Codex session 01a10952-b02c-7cd1-9e26-b8bb35304bc9. Record written 2026-10-04T23:55:16.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-27 → INPUT-28: one pin changed — docs/requirements/rg-req-011-daemon-and-store-lifecycle.md: RG-REQ-011-L12 revision 9 (DOCTOR-FALLBACK-STATE-ROOT-1 document review cycle 6 → D-DFSR-NONUTF8-ROOT-1 D): the state root is read with the client's own predicate (std::env::var); present and UTF-8 → override (<path>), absent → global, present but not UTF-8 → a failed state_root probe naming the fact (the client ignores the value). Also changed but NOT a bootstrap pin: D-DFSR-NONUTF8-ROOT-1.md (new; pinned by the slice manifest). Pass 2 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high), pass 2, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended text.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: The untracked INPUT-28 manifest has 59 pins; its RG-REQ-011 digest matches the file at HEAD a09b68fa, and every other pin equals INPUT-27. OBSERVED: The diff from d981dbc1 changes only RG-REQ-011-L06 and L12, with four insertions and four deletions. OBSERVED: The client treats a valid UTF-8 value as an override and an absent or non-UTF-8 value as unset; after an `auto` permission-denied fallback, it can prepare a sandbox-local root. INFERRED: Revision 10’s failed-probe text correctly states that the client *ignores* the non-UTF-8 value, without claiming it always uses the global root. OBSERVED: The leaf’s conditions and stated Linux and fallback limits remain consistent with the named decisions and L06/L08/L09 and RG-REQ-002-L02/L04/L08."
+}
