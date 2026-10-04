@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-22-pass1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-22.json",
+    "sha256": "sha256:57988fda6eea79eec251fb0620a2b46b6f1e3509cfe1373ac953dc67067dbde7"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-22"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-22-pass1"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T17:50:12.000Z",
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin(s): docs/cli/rmap-contracts.md (sha256:165df714a81de27c77c3d46de282027ac2321f7cbc67536061897d2fe6e7a6b8). Codex session 01a10806-36fb-7331-bf9d-4db72699d451. Record written 2026-10-04T17:50:34.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-21 → INPUT-22: one pin changed — docs/cli/rmap-contracts.md, rewritten by the shipped, implementation-reviewed, gate-green RUST-SELF-RESOLUTION-1 (3365f866): the new subsection 'imports <file> — Rust intra-crate use' stating RG-REQ-006-L14 revision 3 (enclosing-module resolution, the sibling rule's declaration and first-segment-file guards, declared-crate precedence, the bind-nothing cases, replay figures as import-row counts) and the updated relative-key phrase. No requirement, governance file or decision record changed. Pass 1 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high), pass 1, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended text.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: The candidate has 59 pins; its `rmap-contracts.md` digest matches HEAD f01efc2e, and every other pin matches INPUT-21. OBSERVED: The full diff since adca6ef8 changes only the relative-key phrase and adds the Rust subsection. OBSERVED: The subsection matches RG-REQ-006-L14 revision 3 and D-RSR-ENTRY-CLIMB-1 on enclosing-module resolution, both sibling guards, first-segment retention, declared-crate precedence, bind-nothing cases, and replay counts stated as import rows. INFERRED: It adds no unsupported resolution claim; its function-body extraction limit is corroborated by the extractor and slice record."
+}
