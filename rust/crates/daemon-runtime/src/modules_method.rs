@@ -34,9 +34,14 @@ use std::collections::BTreeMap;
 /// evidence READ FAILURE never reaches this DTO — the caller
 /// (`build_modules_method_json`) degrades to `{unavailable}` at the storage boundary,
 /// keeping IO failure (Unavailable) distinct from insufficient facts (NotRecorded).
+///
+/// `settings_gradle_paths` (DGC-ATTRIBUTION-PRECISE-1) holds the `source_path` of every
+/// evidence row of the module whose `source_type` is `settings_gradle` — the settings files
+/// that declare it, read in the same evidence read as `source_type`. Empty for other families.
 pub(crate) struct ModuleMethodInput<'a> {
     pub module_kind: &'a str,
     pub source_type: Option<&'a str>,
+    pub settings_gradle_paths: &'a [String],
 }
 
 /// Per-repo diagnostics that augment the method line (spec §2.1: "with the existing
@@ -126,9 +131,19 @@ pub(crate) fn compute_method(modules: &[ModuleMethodInput<'_>]) -> MethodComputa
     // means the method is not fully recorded (§2.3), never a fabricated family.
     let mut by_family: BTreeMap<String, u64> = BTreeMap::new();
     let mut unnameable: u64 = 0;
+    // DGC-ATTRIBUTION-PRECISE-1: the distinct settings files the Gradle family's evidence
+    // names (K in "N Gradle projects from K settings.gradle files").
+    let mut gradle_settings_files: std::collections::BTreeSet<&str> =
+        std::collections::BTreeSet::new();
     for m in modules {
         match resolve_family(m.module_kind, m.source_type) {
-            Some(family) => *by_family.entry(family).or_insert(0) += 1,
+            Some(family) => {
+                if family == "settings.gradle" {
+                    gradle_settings_files
+                        .extend(m.settings_gradle_paths.iter().map(String::as_str));
+                }
+                *by_family.entry(family).or_insert(0) += 1
+            }
             None => unnameable += 1,
         }
     }
@@ -144,7 +159,7 @@ pub(crate) fn compute_method(modules: &[ModuleMethodInput<'_>]) -> MethodComputa
     let mut entries: Vec<MethodEntry> = by_family
         .into_iter()
         .map(|(family, count)| {
-            let label = method_label(&family, count);
+            let label = method_label(&family, count, gradle_settings_files.len());
             MethodEntry {
                 family,
                 count,
@@ -199,16 +214,23 @@ fn resolve_family(module_kind: &str, source_type: Option<&str>) -> Option<String
 ///
 /// The labels match the spec §2.1 examples:
 ///   - `Cargo.toml` → "N declared in Cargo.toml (workspace members)"
-///   - `settings.gradle` → "N Gradle projects from settings.gradle"
+///   - `settings.gradle` → "N Gradle projects from settings.gradle", or, when the Gradle
+///     family's evidence names K > 1 distinct settings files (DGC-ATTRIBUTION-PRECISE-1),
+///     "N Gradle projects from K settings.gradle files"
 ///   - `package.json` → "N npm workspaces from package.json"
 ///   - `pyproject.toml` → "N declared in pyproject.toml"
 ///   - `inferred` → "N inferred from top-level directories"
 ///   - anything else → "N from <family>"
-fn method_label(family: &str, count: u64) -> String {
+fn method_label(family: &str, count: u64, gradle_settings_file_count: usize) -> String {
     let s = if count == 1 { "" } else { "s" };
     match family {
         "Cargo.toml" => {
             format!("{count} declared in Cargo.toml (workspace member{s})")
+        }
+        "settings.gradle" if gradle_settings_file_count > 1 => {
+            format!(
+                "{count} Gradle project{s} from {gradle_settings_file_count} settings.gradle files"
+            )
         }
         "settings.gradle" => {
             format!("{count} Gradle project{s} from settings.gradle")
@@ -540,6 +562,7 @@ mod tests {
             .map(|_| ModuleMethodInput {
                 module_kind: "declared",
                 source_type: Some("cargo_toml"),
+                settings_gradle_paths: &[],
             })
             .collect();
         let computation = compute_method(&modules);
@@ -560,6 +583,7 @@ mod tests {
             .map(|_| ModuleMethodInput {
                 module_kind: "declared",
                 source_type: Some("settings_gradle"),
+                settings_gradle_paths: &[],
             })
             .collect();
         let computation = compute_method(&modules);
@@ -576,6 +600,7 @@ mod tests {
             .map(|_| ModuleMethodInput {
                 module_kind: "declared",
                 source_type: Some("package_json"),
+                settings_gradle_paths: &[],
             })
             .collect();
         let computation = compute_method(&modules);
@@ -590,6 +615,7 @@ mod tests {
         let modules = vec![ModuleMethodInput {
             module_kind: "declared",
             source_type: Some("pnpm_workspace_yaml"),
+            settings_gradle_paths: &[],
         }];
         let computation = compute_method(&modules);
         assert_eq!(named(&computation)[0].family, "package.json");
@@ -600,6 +626,7 @@ mod tests {
         let modules = vec![ModuleMethodInput {
             module_kind: "declared",
             source_type: Some("pyproject_toml"),
+            settings_gradle_paths: &[],
         }];
         let computation = compute_method(&modules);
         assert_eq!(
@@ -614,6 +641,7 @@ mod tests {
             .map(|_| ModuleMethodInput {
                 module_kind: "inferred",
                 source_type: Some("directory_heuristic"),
+                settings_gradle_paths: &[],
             })
             .collect();
         let computation = compute_method(&modules);
@@ -632,6 +660,7 @@ mod tests {
         let modules = vec![ModuleMethodInput {
             module_kind: "directory",
             source_type: None, // legacy fallback has no evidence
+            settings_gradle_paths: &[],
         }];
         let computation = compute_method(&modules);
         assert_eq!(named(&computation)[0].family, "inferred");
@@ -646,6 +675,7 @@ mod tests {
         let modules = vec![ModuleMethodInput {
             module_kind: "declared",
             source_type: Some("directory_heuristic"),
+            settings_gradle_paths: &[],
         }];
         let computation = compute_method(&modules);
         assert_eq!(named(&computation)[0].family, "inferred");
@@ -661,6 +691,7 @@ mod tests {
         let modules = vec![ModuleMethodInput {
             module_kind: "declared",
             source_type: None,
+            settings_gradle_paths: &[],
         }];
         let computation = compute_method(&modules);
         match &computation {
@@ -695,10 +726,12 @@ mod tests {
             ModuleMethodInput {
                 module_kind: "declared",
                 source_type: Some("cargo_toml"),
+                settings_gradle_paths: &[],
             },
             ModuleMethodInput {
                 module_kind: "declared",
                 source_type: None, // unnameable
+                settings_gradle_paths: &[],
             },
         ];
         let computation = compute_method(&modules);
@@ -714,14 +747,17 @@ mod tests {
             ModuleMethodInput {
                 module_kind: "declared",
                 source_type: Some("cargo_toml"),
+                settings_gradle_paths: &[],
             },
             ModuleMethodInput {
                 module_kind: "declared",
                 source_type: Some("cargo_toml"),
+                settings_gradle_paths: &[],
             },
             ModuleMethodInput {
                 module_kind: "inferred",
                 source_type: Some("directory_heuristic"),
+                settings_gradle_paths: &[],
             },
         ];
         let computation = compute_method(&modules);
@@ -749,6 +785,7 @@ mod tests {
         let modules = vec![ModuleMethodInput {
             module_kind: "declared",
             source_type: Some("bazel_build"),
+            settings_gradle_paths: &[],
         }];
         let computation = compute_method(&modules);
         let entries = named(&computation);
@@ -762,10 +799,12 @@ mod tests {
             ModuleMethodInput {
                 module_kind: "declared",
                 source_type: Some("cargo_toml"),
+                settings_gradle_paths: &[],
             },
             ModuleMethodInput {
                 module_kind: "inferred",
                 source_type: Some("directory_heuristic"),
+                settings_gradle_paths: &[],
             },
         ];
         let computation = compute_method(&modules);
@@ -781,6 +820,7 @@ mod tests {
         let computation = compute_method(&[ModuleMethodInput {
             module_kind: "declared",
             source_type: Some("settings_gradle"),
+            settings_gradle_paths: &[],
         }]);
         let diag = MethodDiagnostics {
             gradle_projectdir_unhandled: Ok(Some(3)),
@@ -798,6 +838,7 @@ mod tests {
         let computation = compute_method(&[ModuleMethodInput {
             module_kind: "declared",
             source_type: Some("settings_gradle"),
+            settings_gradle_paths: &[],
         }]);
         let diag = MethodDiagnostics {
             gradle_projectdir_unhandled: Err("extraction diagnostics unreadable".to_string()),
@@ -824,6 +865,7 @@ mod tests {
         let computation = compute_method(&[ModuleMethodInput {
             module_kind: "declared",
             source_type: Some("settings_gradle"),
+            settings_gradle_paths: &[],
         }]);
         let diag = MethodDiagnostics {
             gradle_projectdir_unhandled: Ok(None),
@@ -846,6 +888,7 @@ mod tests {
         let computation = compute_method(&[ModuleMethodInput {
             module_kind: "declared",
             source_type: Some("cargo_toml"),
+            settings_gradle_paths: &[],
         }]);
         let diag = MethodDiagnostics {
             gradle_projectdir_unhandled: Ok(Some(0)),
@@ -858,6 +901,124 @@ mod tests {
             .unwrap_or(false));
     }
 
+    // ── DGC-ATTRIBUTION-PRECISE-1: the Gradle label counts its settings files ──
+
+    #[test]
+    fn method_label_counts_settings_files_when_more_than_one() {
+        // rabbitmq-tutorials' shape: three Gradle projects, each from its own settings file,
+        // beside three Cargo members and 13 inferred directories.
+        let paths: Vec<Vec<String>> = vec![
+            vec!["java-gradle/settings.gradle".to_string()],
+            vec!["kotlin/settings.gradle.kts".to_string()],
+            vec!["kotlin-java-client/settings.gradle".to_string()],
+        ];
+        let mut modules: Vec<ModuleMethodInput> = paths
+            .iter()
+            .map(|p| ModuleMethodInput {
+                module_kind: "declared",
+                source_type: Some("settings_gradle"),
+                settings_gradle_paths: p,
+            })
+            .collect();
+        modules.extend((0..3).map(|_| ModuleMethodInput {
+            module_kind: "declared",
+            source_type: Some("cargo_toml"),
+            settings_gradle_paths: &[],
+        }));
+        modules.extend((0..13).map(|_| ModuleMethodInput {
+            module_kind: "inferred",
+            source_type: Some("directory_heuristic"),
+            settings_gradle_paths: &[],
+        }));
+        let computation = compute_method(&modules);
+        assert_eq!(
+            render_method_line(&computation),
+            "Modules: 13 inferred from top-level directories · 3 declared in Cargo.toml \
+             (workspace members) · 3 Gradle projects from 3 settings.gradle files"
+        );
+        // One project declared by two settings files: the project count stays singular.
+        let both = vec![
+            "a/settings.gradle".to_string(),
+            "settings.gradle".to_string(),
+        ];
+        let one = [ModuleMethodInput {
+            module_kind: "declared",
+            source_type: Some("settings_gradle"),
+            settings_gradle_paths: &both,
+        }];
+        assert_eq!(
+            named(&compute_method(&one))[0].label,
+            "1 Gradle project from 2 settings.gradle files"
+        );
+    }
+
+    #[test]
+    fn method_label_names_one_settings_file_without_a_count() {
+        let root = vec!["settings.gradle".to_string()];
+        let modules: Vec<ModuleMethodInput> = (0..42)
+            .map(|_| ModuleMethodInput {
+                module_kind: "declared",
+                source_type: Some("settings_gradle"),
+                settings_gradle_paths: &root,
+            })
+            .collect();
+        assert_eq!(
+            named(&compute_method(&modules))[0].label,
+            "42 Gradle projects from settings.gradle"
+        );
+        // hexmanos' shape: one nested build, one project, beside three inferred directories.
+        let backend = vec!["backend/settings.gradle".to_string()];
+        let mut hex = vec![ModuleMethodInput {
+            module_kind: "declared",
+            source_type: Some("settings_gradle"),
+            settings_gradle_paths: &backend,
+        }];
+        hex.extend((0..3).map(|_| ModuleMethodInput {
+            module_kind: "inferred",
+            source_type: Some("directory_heuristic"),
+            settings_gradle_paths: &[],
+        }));
+        assert_eq!(
+            render_method_line(&compute_method(&hex)),
+            "Modules: 3 inferred from top-level directories · 1 Gradle project from settings.gradle"
+        );
+    }
+
+    #[test]
+    fn method_settings_file_count_is_distinct_evidence_paths_not_modules() {
+        // grpc-java's shape: 66 Gradle projects whose evidence names 21 distinct settings
+        // files (42 from the root file, the rest from 20 nested builds); one module carries a
+        // repeated path (evidence rows of an older snapshot) that must not count twice.
+        let paths: Vec<Vec<String>> = (0..66)
+            .map(|i| {
+                let p = if i < 42 {
+                    "settings.gradle".to_string()
+                } else {
+                    format!("examples/b{}/settings.gradle", (i - 42) % 20)
+                };
+                if i == 0 {
+                    vec![p.clone(), p]
+                } else {
+                    vec![p]
+                }
+            })
+            .collect();
+        let modules: Vec<ModuleMethodInput> = paths
+            .iter()
+            .map(|p| ModuleMethodInput {
+                module_kind: "declared",
+                source_type: Some("settings_gradle"),
+                settings_gradle_paths: p,
+            })
+            .collect();
+        let entries = named(&compute_method(&modules)).to_vec();
+        assert_eq!(entries[0].count, 66);
+        assert_eq!(
+            entries[0].label,
+            "66 Gradle projects from 21 settings.gradle files"
+        );
+    }
+
     // ── Inequality property: no two repos render the same method line ──
 
     #[test]
@@ -866,6 +1027,7 @@ mod tests {
             .map(|_| ModuleMethodInput {
                 module_kind: "declared",
                 source_type: Some("cargo_toml"),
+                settings_gradle_paths: &[],
             })
             .collect();
 
@@ -873,6 +1035,7 @@ mod tests {
             .map(|_| ModuleMethodInput {
                 module_kind: "declared",
                 source_type: Some("settings_gradle"),
+                settings_gradle_paths: &[],
             })
             .collect();
 
@@ -880,6 +1043,7 @@ mod tests {
             .map(|_| ModuleMethodInput {
                 module_kind: "declared",
                 source_type: Some("package_json"),
+                settings_gradle_paths: &[],
             })
             .collect();
 
@@ -887,6 +1051,7 @@ mod tests {
             .map(|_| ModuleMethodInput {
                 module_kind: "inferred",
                 source_type: Some("directory_heuristic"),
+                settings_gradle_paths: &[],
             })
             .collect();
 

@@ -1,0 +1,776 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-DGC-ATTRIBUTION-PRECISE-1-0",
+  "workItemId": "DGC-ATTRIBUTION-PRECISE-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/DGC-ATTRIBUTION-PRECISE-1-INPUT-4.json",
+    "sha256": "sha256:4c747e924bb36b098456b4678240a4755074cc548220c805132dbcf2c6eb73be"
+  },
+  "allocation": {
+    "path": "docs/slices/dgc-attribution-precise-1.md",
+    "sha256": "sha256:2c5ca8f720fc6b701f911125f3d6653ce720bfac11f0da06933980f551f45d39"
+  },
+  "subject": {
+    "candidateSha256": "sha256:8830c277bd18593cd9d3237fda4decdc629f46c41740fcaa6b37ac72d63c5123",
+    "verification": {
+      "path": "docs/assurance/DGC-ATTRIBUTION-PRECISE-1/verification.json",
+      "sha256": "sha256:c4674c19f06c3cdd40045f688fc31ae4e32f84f7c7f4b14ade87da689f76bf14"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-DGC-ATTRIBUTION-PRECISE-1-0"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/DGC-ATTRIBUTION-PRECISE-1-INPUT-4.json",
+      "sha256": "sha256:4c747e924bb36b098456b4678240a4755074cc548220c805132dbcf2c6eb73be"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:b2effee57f0033adfec8929c441c40ba0a0f5d00b9d508ce77a39a762efe8a9f",
+        "byteLength": 28968
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/DGC-ATTRIBUTION-PRECISE-1-INPUT-4.json",
+        "sha256": "sha256:4c747e924bb36b098456b4678240a4755074cc548220c805132dbcf2c6eb73be",
+        "byteLength": 6400
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-004-module-model-and-cycles.md",
+        "sha256": "sha256:520e75b678ca756027e5a765d5621747b7c5f6075912488bcce97c484df3cb0b",
+        "byteLength": 17948
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-006-import-resolution-and-dependencies.md",
+        "sha256": "sha256:4af3ed115ff1c6edd7bd8ef2b8ce308a3417e796c4d70e59b6029c649f1d39d5",
+        "byteLength": 22192
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+        "sha256": "sha256:8f2da793ee99d9f756ec48b66c133b49716db1d079686e2b90d5fce2cc88c68b",
+        "byteLength": 17414
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:84a7d22ba3684b06d5914b3c46ae3cce9f1b3bb274f207f5128704e0261dad37",
+        "byteLength": 21622,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/modules-method-1.md",
+        "sha256": "sha256:8c5c41ca832099568431228145556caae17d35c0dc3bc093f3b202311971820e",
+        "byteLength": 5226,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cycle-honesty-1.md",
+        "sha256": "sha256:c7ffd289adc43fe6e6c0d89d8313028b909b1045da1701e6e700950ec9e99bfe",
+        "byteLength": 6001,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/coherence-3.md",
+        "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36",
+        "byteLength": 3408,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/import-resolution-rust-1.md",
+        "sha256": "sha256:0e4e22bd8d833396c337443d02e44439a1670809937d5fb1956d64c726a26731",
+        "byteLength": 9053,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/import-resolution-java-1.md",
+        "sha256": "sha256:64643bf118f5cc89db6bdcd23abcc89c8933a38f6b088f4dca85637b3eebaff0",
+        "byteLength": 6166,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/deps-classifier-1.md",
+        "sha256": "sha256:27b4fa517231cd6bec8063bbc0e463f8cdc5d3998e1c8511a1d54ea1bbad4082",
+        "byteLength": 8808,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/honesty-gate-1.md",
+        "sha256": "sha256:99605ec1f96c75b88a16bda7db349b029cf0048211118e28eeb7776d5d8642d8",
+        "byteLength": 5162,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/honesty-gate-2.md",
+        "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed",
+        "byteLength": 5569,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/headline-truth-1.md",
+        "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351",
+        "byteLength": 8211,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/find-facts-1.md",
+        "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3",
+        "byteLength": 8017,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:6bafbfb4a000ae346b79ae396adbd7564f268437a511fd556e89cde2ecda1c47",
+        "byteLength": 13830
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:30a113d5cc92684d246cf7b4e004866c9839688ee5aca878403a0c860d5c068a",
+        "byteLength": 11784
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072",
+        "byteLength": 7615
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27",
+        "byteLength": 3147
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+        "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b",
+        "byteLength": 2343
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996",
+        "byteLength": 3584
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-BOUNDARY-1.md",
+        "sha256": "sha256:42ae2be3c2feaaee11c6ce4416c28d8449007d61291a04546690bf9d5ab8012d",
+        "byteLength": 4671
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+        "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d",
+        "byteLength": 1283
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DAP-NESTED-BUILDS-1.md",
+        "sha256": "sha256:bbf8c3f13d1c2137b1ee37df30cd57891ecfaf110fa21c327522a6558e2c9d08",
+        "byteLength": 7075
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DAP-JVM-COVERAGE-1.md",
+        "sha256": "sha256:b41c5e69abde3a1fa957ab8119020d5d7c48ffb7d87aa8b2d46c28ff54da6fcd",
+        "byteLength": 2990
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/dgc-attribution-precise-1.md",
+        "sha256": "sha256:2c5ca8f720fc6b701f911125f3d6653ce720bfac11f0da06933980f551f45d39",
+        "byteLength": 97977
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/DGC-ATTRIBUTION-PRECISE-1-INPUT-4/requirements-review.json",
+        "sha256": "sha256:9e3243f13dfa87887b940939ffdec364469cc7ea658e817933b713350619ace1",
+        "byteLength": 67534
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/DGC-ATTRIBUTION-PRECISE-1-INPUT-4/baseline-approval.json",
+        "sha256": "sha256:d16cd373b8b92e2d6e62bafecc8d07b8a19d95d0c7b5e9b836f817cd960afd7b",
+        "byteLength": 3723
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:e4e9c5944a15f5fe4b7cdbfb4483a1bf5436cf18aa6c608452c30419abeedd55",
+        "byteLength": 7940
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/DGC-ATTRIBUTION-PRECISE-1/selection.md",
+        "sha256": "sha256:6622f443c2b010d066e2ddf9dc5c4d4fdea0017b750f7aaa88625fc64ff99098",
+        "byteLength": 6452
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-0",
+        "sha256": "sha256:64648cfbb68175ffed51abe9df387248a588db34a4c3e7d9d475f684f5bda3b6",
+        "byteLength": 8936
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-0",
+        "sha256": "sha256:19c05f12fb8cf785303666c141f4f5f951344c0602164611dc71c5dba37a28a6",
+        "byteLength": 2548
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review-subject",
+        "path": ".agent-manager/slices/DGC-ATTRIBUTION-PRECISE-1/verification-draft-0.json",
+        "sha256": "sha256:c4674c19f06c3cdd40045f688fc31ae4e32f84f7c7f4b14ade87da689f76bf14",
+        "byteLength": 65918,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-command-0",
+        "sha256": "sha256:e35b02a7bc202f2a07eb8c50fb460bd596decfba42cd04edb414b3ef1d1fa5fb",
+        "byteLength": 1165
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:69cfb9d66622deccce344d654e09be282ac80e3929a39c125ad855913ac60db0",
+        "byteLength": 17900
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:b2effee57f0033adfec8929c441c40ba0a0f5d00b9d508ce77a39a762efe8a9f",
+        "byteLength": 28968
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:9faeec966acd0509e24fd8469ff2e1461d3b7210a09d8c13bef6d9c4978328ec",
+        "byteLength": 350514
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-004-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L11",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L12",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L11",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L12",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-006-L13",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L11",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DAP-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DAP-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DAP-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DAP-04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DAP-05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DAP-06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DAP-07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "DAP-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Relied on the supplied logs, which report exit 0 and the named tests or field assertions; not independently rerun."
+      }
+    },
+    {
+      "checkId": "DAP-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Relied on the supplied logs, which report exit 0 and the named tests or field assertions; not independently rerun."
+      }
+    },
+    {
+      "checkId": "DAP-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Relied on the supplied logs, which report exit 0 and the named tests or field assertions; not independently rerun."
+      }
+    },
+    {
+      "checkId": "DAP-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Relied on builder-executed fmt, clippy, and scope checks; independently executed git diff --check with exit 0."
+      }
+    },
+    {
+      "checkId": "DAP-C05",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Relied on the supplied log reaching DAP-C05-OK; not independently rerun."
+      }
+    },
+    {
+      "checkId": "DAP-C06",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "DAP-C06 OBSERVED PASS by source inspection of the six-path diff, the scanner admission rule and the ownership filter (reviewer, read-only sandbox).",
+          "supportingEvidence": [
+            "DAP-C06 is OBSERVED PASS by source inspection of the six-path diff, the scanner admission rule and the ownership filter.",
+            "`rmap-contracts.md` states the behavior and the Java-only indexed-source limit.",
+            "`compose.rs` collects eligible nested settings files, selects one settings file per directory, deduplicates candidates by project directory, and assigns indexed Java files through the existing per-toolchain ownership path."
+          ]
+        }
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "docs/cli/rmap-contracts.md",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/modules_method.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_additive_fields.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/indexer/src/orchestrator.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/indexer/src/settings_gradle.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/repo-index/src/compose.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-10-04T11:27:52.761Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nRESULT: accepted\n\n**OBSERVED — candidate identity and scope.** HEAD is `a6ceb65a6682ac0048a6c20ae8e8ebc63f05306d`. `git status`, the staged and unstaged diffs, and file hashes match the delivered checkpoint: only the six allocated paths changed. `git diff --check` passed. This is acceptance of the slice candidate, not acceptance of the full requirements catalog.\n\n**Obligation assessment**\n- **RG-REQ-004:** RG-REQ-004-L03 meets this slice’s approved change: nested Gradle settings files produce declared module candidates, and the method label counts distinct settings-file evidence paths. RG-REQ-004-L01, RG-REQ-004-L02, RG-REQ-004-L04, RG-REQ-004-L05, RG-REQ-004-L06, RG-REQ-004-L07, RG-REQ-004-L08, RG-REQ-004-L09, RG-REQ-004-L10, RG-REQ-004-L11 and RG-REQ-004-L12 are preserved within the stated checks; the pre-existing `cycles`/`stats` population difference remains.\n- **RG-REQ-006:** RG-REQ-006-L01, RG-REQ-006-L02, RG-REQ-006-L03, RG-REQ-006-L04, RG-REQ-006-L05, RG-REQ-006-L06, RG-REQ-006-L07, RG-REQ-006-L08, RG-REQ-006-L09, RG-REQ-006-L10, RG-REQ-006-L11, RG-REQ-006-L12 and RG-REQ-006-L13 are preserved, not newly implemented by this slice.\n- **RG-REQ-002:** RG-REQ-002-L01, RG-REQ-002-L02, RG-REQ-002-L03, RG-REQ-002-L04, RG-REQ-002-L05, RG-REQ-002-L06, RG-REQ-002-L07, RG-REQ-002-L08, RG-REQ-002-L09, RG-REQ-002-L10 and RG-REQ-002-L11 are preserved within the bounded evidence, not claimed globally complete.\n- **P-DAP-01:** the old settings-relative parser remains unchanged. **P-DAP-02:** captured HEAD/candidate store diffs preserve files, nodes, edges and unresolved rows on hexmanos and rabbitmq-tutorials. **P-DAP-03:** the ownership test keeps a C file in its inferred group beside Java owned by a nested Gradle project. **P-DAP-04:** only the multi-settings Gradle method label changes. **P-DAP-05:** source inspection and the grpc-java capture support the stated path-keyed consumer relations. **P-DAP-06:** the 1A attribution reader is unchanged; example builds cite their own manifests. **P-DAP-07:** the builder’s digest check and cleanup report support isolation; I did not independently serve the before-roots.\n\n**Checks.** DAP-C01, DAP-C02, DAP-C03 and DAP-C05 are **BUILDER-EXECUTED**, not independently rerun here: their supplied logs report exit 0 and the named tests or field assertions. DAP-C04 is **BUILDER-EXECUTED** for fmt, clippy and scope checks; I independently **EXECUTED** `git diff --check` with exit 0. DAP-C06 is **OBSERVED PASS by source inspection** of the six-path diff, the scanner admission rule and the ownership filter. The read-only sandbox prevented an independent Cargo or isolated `rmap` run.\n\nThe field evidence reaches the user outcome. I **OBSERVED** `examples/example-tls/build.gradle:28` declare `implementation \"io.grpc:grpc-protobuf:${grpcVersion}\"`; the captured answer now assigns its manifest to `examples/example-tls`, not the root’s declared set. The captured hexmanos row changes from `backend … inferred (0.7)` to `hexmanos-engine … declared`. I also **OBSERVED** the stated residual: grpc-java’s root human row still says `manifest governed by 57 nested java manifests`; its JSON declared-manifest list is empty. That residual is disclosed in the approved slice, not silently treated as closed.\n\n**Changed paths and mechanism.** `settings_gradle.rs` adds a repository-rooted parse while retaining the parser used by 1A. `compose.rs` collects eligible nested settings files, selects one settings file per directory, deduplicates candidates by project directory, and assigns indexed Java files through the existing per-toolchain ownership path. `orchestrator.rs` bumps the indexer version so existing stores re-index. `orient_additive_fields.rs` reads settings-file evidence into a raw value; `modules_method.rs` uses it to count distinct files for the label. `rmap-contracts.md` states the behavior and the Java-only indexed-source limit. These are direct additions to the existing slice, not new component boundaries. They serve the VISION’s primary orientation question: which modules exist and what they own.\n\n**Limitations.** Kotlin and Scala source is not indexed; `cycles` and `stats` still use different directory-group populations; the relocated-project count is not rendered. The builder reported running DAP-C05 as a monitored background task despite the packet’s foreground instruction. Its log reaches `DAP-C05-OK`, and the builder reports the owned run directory and worktree removed; I record the process deviation rather than presenting it as an independent run.\n\nManager interpretation by manager-claude-fable-5-1: Bookkeeper attempts 1 and 2 (identical) transcribed the reviewer-owned DAP-C06 as relied-on-builder-evidence, which the owner-aware rule (TD-026) refuses for an accepted reviewer-owned inspection check. The reviewer's raw report states the inspection itself: \"DAP-C06 is OBSERVED PASS by source inspection of the six-path diff, the scanner admission rule and the ownership filter.\" Mechanical repair of that one field to the verification kind the report states (reproduced, passed, the report's sentences as supporting evidence) — the same repair as IUR-C07, TSA-C05, DGC-B05 and MDSS-C05; every other assessment, the result (accepted), the zero findings, the zero decisions and the report are the bookkeeper's transcription of the reviewer's output, unchanged. No conversion of meaning. Source provider run review-DGC-ATTRIBUTION-PRECISE-1-0; retained output .agent-manager/slices/DGC-ATTRIBUTION-PRECISE-1/review-0.json sha256:1e137c3214fb0012f8e2a57a3f93c98aef4e8c150eb2e14d789108eef08de95a. The provider remains the performer; this interpretation is not independent execution evidence."
+}

@@ -40,6 +40,8 @@
 //! - `settings.gradle.kts` parsing (Kotlin DSL) — best effort
 //! - Root project detection
 //! - Subproject detection from `include` statements
+//! - Nested builds (DGC-ATTRIBUTION-PRECISE-1): every settings file defines a build;
+//!   [`parse_settings_gradle_rooted`] roots its projects at the settings file's directory
 //! - Project rename detection
 //!
 //! Not in scope:
@@ -183,6 +185,49 @@ pub fn parse_settings_gradle(content: &str, settings_path: &str) -> SettingsGrad
         subprojects,
         unhandled_project_dirs,
     }
+}
+
+/// DGC-ATTRIBUTION-PRECISE-1 (D-DAP-NESTED-BUILDS-1): parse a settings file as the build it
+/// defines, with every `project_root` relative to the REPOSITORY root.
+///
+/// The grammar is [`parse_settings_gradle`]'s, unchanged; this function joins the settings
+/// file's directory onto each project root that parse returns (those roots are relative to the
+/// settings file's directory — the contract 1A's declared-set reader consumes). So:
+/// - the build's root project → the settings file's directory (`.` at the repository root);
+/// - `include ':a:b'` → `<dir>/a/b`;
+/// - a handled `projectDir = "$rootDir/<path>"` → `<dir>/<path>` (`$rootDir` is this build's
+///   root, the settings file's directory).
+///
+/// A nested build's root project with no `rootProject.name` is named by its directory's
+/// basename (Gradle's own default root-project name); the repository root keeps `root`,
+/// because its directory name belongs to the checkout, not to the repository. At the
+/// repository root the result equals [`parse_settings_gradle`]'s field for field.
+pub fn parse_settings_gradle_rooted(
+    content: &str,
+    settings_path: &str,
+) -> SettingsGradleParseResult {
+    let mut parsed = parse_settings_gradle(content, settings_path);
+    let settings_dir = match settings_path.rsplit_once('/') {
+        Some((dir, _)) => dir,
+        None => return parsed, // the repository root: roots are already repo-relative
+    };
+    let join = |root: &str| {
+        if root == "." || root.is_empty() {
+            settings_dir.to_string()
+        } else {
+            format!("{settings_dir}/{root}")
+        }
+    };
+    if let Some(root_project) = parsed.root_project.as_mut() {
+        root_project.project_root = join(&root_project.project_root);
+        if extract_root_project_name(content).is_none() {
+            root_project.display_name = directory_basename(settings_dir);
+        }
+    }
+    for project in parsed.subprojects.iter_mut() {
+        project.project_root = join(&project.project_root);
+    }
+    parsed
 }
 
 /// Extract root project name from `rootProject.name = 'name'` or `rootProject.name = "name"`.
@@ -767,6 +812,99 @@ project(':api').projectDir = "$rootDir/relocated" + suffix
             .find(|p| p.display_name == "a")
             .expect("module :a present");
         assert_eq!(a.project_root, "a");
+    }
+
+    // ── DGC-ATTRIBUTION-PRECISE-1: a nested settings file defines a build rooted at its directory ──
+
+    #[test]
+    fn rooted_parse_places_a_nested_include_under_the_settings_directory() {
+        let content = "include ':app'\n";
+        let result =
+            parse_settings_gradle_rooted(content, "examples/android/clientcache/settings.gradle");
+        assert_eq!(result.subprojects.len(), 1);
+        let app = &result.subprojects[0];
+        assert_eq!(app.project_root, "examples/android/clientcache/app");
+        // Rooting moves `project_root` only; the Gradle path is the unchanged parser's.
+        let plain = parse_settings_gradle(content, "examples/android/clientcache/settings.gradle");
+        assert_eq!(app.gradle_path, plain.subprojects[0].gradle_path);
+        assert_eq!(app.display_name, "app");
+        assert_eq!(
+            app.settings_path,
+            "examples/android/clientcache/settings.gradle"
+        );
+        assert!(!app.is_root);
+    }
+
+    #[test]
+    fn rooted_parse_makes_a_nested_root_project_its_directory_never_the_repo_root() {
+        let content = "rootProject.name = 'examples'\n";
+        let result = parse_settings_gradle_rooted(content, "examples/settings.gradle");
+        let root = result
+            .root_project
+            .expect("a settings file always has a root project");
+        assert_eq!(root.project_root, "examples");
+        assert_ne!(root.project_root, ".");
+        assert_eq!(root.gradle_path, ":");
+        assert_eq!(root.display_name, "examples");
+        assert_eq!(root.settings_path, "examples/settings.gradle");
+        assert!(root.is_root, "the build's own root project");
+    }
+
+    #[test]
+    fn rooted_parse_resolves_a_nested_projectdir_relocation_against_its_own_directory() {
+        let content = "include ':grpc-x'\nproject(':grpc-x').projectDir = \"$rootDir/x\" as File\n";
+        let result = parse_settings_gradle_rooted(content, "nested/build/settings.gradle");
+        assert_eq!(result.unhandled_project_dirs, 0);
+        let x = &result.subprojects[0];
+        assert_eq!(
+            x.project_root, "nested/build/x",
+            "`$rootDir` is the nested build's root, the settings file's directory"
+        );
+        assert_eq!(x.display_name, "grpc-x");
+    }
+
+    #[test]
+    fn rooted_parse_names_a_nested_root_without_root_project_name_by_its_directory() {
+        let content = "include ':app'\n";
+        let result = parse_settings_gradle_rooted(content, "examples/example-alts/settings.gradle");
+        let root = result.root_project.expect("root project");
+        assert_eq!(root.project_root, "examples/example-alts");
+        assert_eq!(
+            root.display_name, "example-alts",
+            "Gradle's default root-project name is the settings directory's name"
+        );
+        // A Kotlin-DSL settings file is rooted the same way.
+        let kts = parse_settings_gradle_rooted("", "kotlin/settings.gradle.kts");
+        let kts_root = kts.root_project.expect("root project");
+        assert_eq!(kts_root.project_root, "kotlin");
+        assert_eq!(kts_root.display_name, "kotlin");
+    }
+
+    #[test]
+    fn rooted_parse_at_the_repo_root_equals_parse_settings_gradle() {
+        let content = r#"
+include ':a', ':b:c'
+project(':a').projectDir = "$rootDir/relocated" as File
+project(':b:c').name = 'renamed'
+"#;
+        for path in ["settings.gradle", "settings.gradle.kts"] {
+            let plain = parse_settings_gradle(content, path);
+            let rooted = parse_settings_gradle_rooted(content, path);
+            assert_eq!(rooted.root_project, plain.root_project, "{path}");
+            assert_eq!(rooted.subprojects, plain.subprojects, "{path}");
+            assert_eq!(
+                rooted.unhandled_project_dirs, plain.unhandled_project_dirs,
+                "{path}"
+            );
+            assert_eq!(
+                rooted
+                    .root_project
+                    .as_ref()
+                    .map(|r| r.display_name.as_str()),
+                Some("root"),
+                "the repository root keeps `root` when `rootProject.name` is absent"
+            );
+        }
     }
 
     #[test]

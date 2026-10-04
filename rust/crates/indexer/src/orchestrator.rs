@@ -73,7 +73,11 @@ const COPIED_SIGNALS_READ_CHUNK: usize = 500;
 /// 1.8.0 (DEPS-GRADLE-CATALOG-1B): a Gradle version-catalog alias binds to its Maven group, so the
 /// stored Java declared sets (`file_signals.package_dependencies_json`) and the unresolved rows the
 /// classifier matches against them move; every Gradle store re-indexes.
-pub const INDEXER_VERSION: &str = "indexer:1.8.0";
+/// 1.9.0 (DGC-ATTRIBUTION-PRECISE-1): every `settings.gradle` / `settings.gradle.kts` in the
+/// scanned tree defines a Gradle build whose projects are declared module candidates, so stored
+/// module candidates, their evidence and the ownership of indexed JVM files (today `.java`) move;
+/// every Gradle store re-indexes.
+pub const INDEXER_VERSION: &str = "indexer:1.9.0";
 
 // ── Error type ───────────────────────────────────────────────────
 
@@ -4415,15 +4419,15 @@ mod tests {
         };
         let (mut a, mut b, mut c) = (named("ts-core:0.2.0"), named("c-core:0.1.0"), named("z:9"));
         let ports: Vec<&mut dyn ExtractorPort> = vec![&mut c, &mut a, &mut b];
-        assert_eq!(INDEXER_VERSION, "indexer:1.8.0");
+        assert_eq!(INDEXER_VERSION, "indexer:1.9.0");
         assert_eq!(
             build_toolchain_json(&ports),
-            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.8.0"}"#
+            r#"{"extractors":["z:9","ts-core:0.2.0","c-core:0.1.0"],"indexer":"indexer:1.9.0"}"#
         );
         let none: Vec<&mut dyn ExtractorPort> = Vec::new();
         assert_eq!(
             build_toolchain_json(&none),
-            r#"{"extractors":[],"indexer":"indexer:1.8.0"}"#
+            r#"{"extractors":[],"indexer":"indexer:1.9.0"}"#
         );
     }
 

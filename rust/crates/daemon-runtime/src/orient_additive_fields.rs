@@ -256,14 +256,15 @@ pub(crate) fn build_modules_method_json(
     diagnostics: &crate::modules_method::MethodDiagnostics,
 ) -> Value {
     let uids: Vec<&str> = modules.iter().map(|(uid, _)| *uid).collect();
-    match load_module_source_types(storage, &uids) {
-        Ok(source_types) => {
+    match load_module_method_evidence(storage, &uids) {
+        Ok(evidence) => {
             let inputs: Vec<crate::modules_method::ModuleMethodInput> = modules
                 .iter()
-                .zip(source_types.iter())
-                .map(|((_, kind), st)| crate::modules_method::ModuleMethodInput {
+                .zip(evidence.iter())
+                .map(|((_, kind), ev)| crate::modules_method::ModuleMethodInput {
                     module_kind: kind,
-                    source_type: st.as_deref(),
+                    source_type: ev.source_type.as_deref(),
+                    settings_gradle_paths: &ev.settings_gradle_paths,
                 })
                 .collect();
             let entries = crate::modules_method::compute_method(&inputs);
@@ -273,24 +274,45 @@ pub(crate) fn build_modules_method_json(
     }
 }
 
-/// Load each module's manifest `source_type` from `module_candidate_evidence`,
+/// The evidence facts the method line reads for one module (raw DTO, no behavior).
+struct ModuleMethodEvidence {
+    /// The lexicographically smallest evidence `source_type`; `None` = zero evidence rows.
+    source_type: Option<String>,
+    /// DGC-ATTRIBUTION-PRECISE-1: the `source_path` of each evidence row whose
+    /// `source_type` is `settings_gradle` (the settings files that declare the module).
+    settings_gradle_paths: Vec<String>,
+}
+
+/// Load each module's manifest `source_type`, and the `source_path` of its
+/// `settings_gradle` evidence rows, from `module_candidate_evidence` in ONE read per module,
 /// PROPAGATING read failures (review-2 #1 — never `.ok()`). One FAILED read aborts the
 /// whole load with the reason, so `build_modules_method_json` degrades the block rather
-/// than fabricating a family from unread evidence.
+/// than fabricating a family (or a settings-file count) from unread evidence.
 ///
 /// Deterministic multi-row rule (review-2 #1): the evidence query has no `ORDER BY`, so
 /// `.next()` had no defined contract. When a module has multiple evidence rows we take
 /// the lexicographically smallest `source_type` — a total, stable choice independent of
 /// row order. `None` = the read succeeded with ZERO rows (genuinely absent evidence — a
 /// legacy MODULE-node fallback), which is honest, distinct from a failed read.
-fn load_module_source_types(
+fn load_module_method_evidence(
     storage: &StorageConnection,
     module_uids: &[&str],
-) -> Result<Vec<Option<String>>, String> {
+) -> Result<Vec<ModuleMethodEvidence>, String> {
     let mut out = Vec::with_capacity(module_uids.len());
     for uid in module_uids {
         match storage.get_module_candidate_evidence(uid) {
-            Ok(evs) => out.push(evs.into_iter().map(|e| e.source_type).min()),
+            Ok(evs) => {
+                let settings_gradle_paths = evs
+                    .iter()
+                    .filter(|e| e.source_type == "settings_gradle")
+                    .map(|e| e.source_path.clone())
+                    .collect();
+                let source_type = evs.into_iter().map(|e| e.source_type).min();
+                out.push(ModuleMethodEvidence {
+                    source_type,
+                    settings_gradle_paths,
+                });
+            }
             Err(e) => return Err(format!("module evidence read failed for {uid}: {e}")),
         }
     }

@@ -694,6 +694,46 @@ When policy parsing fails:
 
 Deliberate: orientation surfaces must survive policy corruption.
 
+### `modules list` — nested Gradle builds (DGC-ATTRIBUTION-PRECISE-1)
+
+RG-REQ-004-L03, under the human's ruling D-DAP-NESTED-BUILDS-1 (with its 2026-10-04
+correction: ownership stays per toolchain). Index-time; existing stores re-index
+(`indexer:1.9.0`).
+
+- **Every settings file defines a build.** Every `settings.gradle` / `settings.gradle.kts` the
+  scanner admits defines a Gradle build, unless one of its directory segments is an
+  always-excluded name (`node_modules`, `build`, `dist`, `out`, `.next`, `.nuxt`, `coverage`,
+  `.turbo`, `.cache`, `venv`, `.venv`, `__pycache__`, `cdk.out`). Where one directory holds
+  both forms, `settings.gradle` is read. A repository with no root settings file still gets
+  the builds below its root.
+- **Declared modules, keyed by directory.** A build's root project (the settings file's
+  directory) and its `include`d projects (resolved against that directory, with its
+  `projectDir = "$rootDir/<path>"` relocations) are declared module candidates. Each module is
+  keyed by its directory, so two nested root projects (both Gradle path `:`) are two modules.
+  A nested root project with no `rootProject.name` is named by its directory's name; the
+  repository root keeps `root`. When two builds name one directory, it is one module: the
+  build whose settings file is deepest supplies its name, and each settings file is one
+  evidence row (`source_type: settings_gradle`, `source_path`: that file).
+- **Ownership is per toolchain.** The indexed JVM files (today `.java` only) and the Gradle
+  manifests under a nested build belong to that build's modules (longest prefix, the
+  repository root last), never to the repository root. Kotlin and Scala sources are not
+  indexed in this build, so a Kotlin-only or Scala-only nested build is a declared module with
+  `0 owned files` (a stated limit; D-DAP-JVM-COVERAGE-1). A non-JVM file under a nested build
+  keeps its own toolchain's rule: a C/C++ file stays in its inferred directory group. Inferred
+  detection skips only the indexed JVM files (today `.java`) under a nested build's
+  directories.
+- **Method line.** `N Gradle projects from K settings.gradle files`, where N is the number of
+  declared modules whose evidence `source_type` is `settings_gradle` and K is the number of
+  distinct `source_path` values of that evidence, when K > 1 (a `settings.gradle.kts` file
+  counts as a settings.gradle file). When K ≤ 1 the words are unchanged:
+  `N Gradle project(s) from settings.gradle`. K appears in the label only; the
+  `modules_method` JSON shape is unchanged.
+- **Limits (unchanged).** Maven manifests are not parsed. Only the `"$rootDir/<path>"`
+  `projectDir` form is resolved; other forms are counted. `includeBuild` composite builds are
+  not read. The `(M relocated via projectDir)` count is not rendered. `cycles` and `stats` read
+  the directory-group population, not module candidates, so nested modules do not appear
+  there (RG-REQ-004-L11).
+
 ### `modules show` — Briefing Shape
 
 This is a briefing, not a list. Envelope differs from QueryResult:

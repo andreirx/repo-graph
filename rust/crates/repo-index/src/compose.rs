@@ -337,22 +337,29 @@ pub struct PyprojectExtractionResult {
 /// Extracted Gradle module with provenance info (rust-module-parity Phase 2b).
 #[derive(Debug, Clone)]
 pub struct ExtractedGradleModule {
-    /// The extracted module data
+    /// The extracted module data — from the deepest settings directory that names this
+    /// project directory (DGC-ATTRIBUTION-PRECISE-1), which supplies the Gradle path and
+    /// display name.
     pub module: GradleModule,
+    /// The same project directory as declared by OTHER builds' settings files (zero in the
+    /// corpus). One candidate per directory; each of these becomes one more evidence row of
+    /// that candidate, keyed by its own settings file.
+    pub also_declared_by: Vec<GradleModule>,
 }
 
 /// Result of settings.gradle extraction for a repo.
 #[derive(Debug, Clone, Default)]
 pub struct GradleExtractionResult {
-    /// Extracted modules (root + subprojects)
+    /// Extracted modules (every build's root project + subprojects, one per directory)
     pub modules: Vec<ExtractedGradleModule>,
     /// Whether the repo root has a settings.gradle
     pub has_root_settings: bool,
     /// IMPORT-RESOLUTION-JAVA-1 §2.2 / STANDING HONESTY RULE 3: count of
     /// `project(...).projectDir = <rhs>` assignments in an UNhandled RHS form (anything but
-    /// `"$rootDir/<path>"`). Surfaced in the extraction-diagnostics blob (key
-    /// `gradle_projectdir_unhandled`) when > 0 so a repo using an unhandled form shows the
-    /// limitation rather than silently receiving include-derived (possibly wrong) ownership.
+    /// `"$rootDir/<path>"`), summed over every build's settings file. Surfaced in the
+    /// extraction-diagnostics blob (key `gradle_projectdir_unhandled`) when > 0 so a repo using
+    /// an unhandled form shows the limitation rather than silently receiving include-derived
+    /// (possibly wrong) ownership.
     pub unhandled_project_dirs: usize,
 }
 
@@ -587,7 +594,9 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
                         pyproject_toml_files.insert(ok.rel_path.clone(), ok.content.clone());
                     }
                     // Collect settings.gradle content for Gradle module extraction (Phase 2b).
-                    if ok.rel_path == "settings.gradle" || ok.rel_path == "settings.gradle.kts" {
+                    // DGC-ATTRIBUTION-PRECISE-1: every settings file the scanner admits defines a
+                    // build, except one under an always-excluded directory segment.
+                    if is_gradle_build_settings_file(&ok.rel_path) {
                         settings_gradle_files.insert(ok.rel_path.clone(), ok.content.clone());
                     }
                     config_file_inputs.push(ConfigFileInput {
@@ -1108,50 +1117,103 @@ fn extract_pyproject_modules(
 
 // ── Gradle module extraction (rust-module-parity Phase 2b) ────────
 
-/// Extract Gradle modules from settings.gradle files.
+/// DGC-ATTRIBUTION-PRECISE-1 (D-DAP-NESTED-BUILDS-1): whether `rel_path` is a settings file
+/// that defines a Gradle build — its file name is `settings.gradle` or `settings.gradle.kts`
+/// and none of its DIRECTORY segments is a name [`routing::is_always_excluded_dir`] lists
+/// (`node_modules`, `build`, `dist`, …). The scanner prunes those names at the repository root
+/// only, so a nested `web/node_modules/**/settings.gradle` is scanned; this rule keeps it from
+/// defining a build without changing what the scanner indexes.
+fn is_gradle_build_settings_file(rel_path: &str) -> bool {
+    let (dirs, file_name) = match rel_path.rsplit_once('/') {
+        Some((dirs, name)) => (Some(dirs), name),
+        None => (None, rel_path),
+    };
+    if file_name != "settings.gradle" && file_name != "settings.gradle.kts" {
+        return false;
+    }
+    !dirs.is_some_and(|d| d.split('/').any(routing::is_always_excluded_dir))
+}
+
+/// The directory of a settings file (`""` at the repository root).
+fn settings_file_dir(settings_path: &str) -> &str {
+    settings_path.rsplit_once('/').map_or("", |(dir, _)| dir)
+}
+
+/// Directory depth of a settings file's build root (0 at the repository root).
+fn settings_dir_depth(settings_path: &str) -> usize {
+    let dir = settings_file_dir(settings_path);
+    if dir.is_empty() {
+        0
+    } else {
+        dir.split('/').count()
+    }
+}
+
+/// Extract Gradle modules from every collected settings file (DGC-ATTRIBUTION-PRECISE-1).
 ///
-/// Parses settings.gradle (Groovy DSL) or settings.gradle.kts (Kotlin DSL)
-/// for `include` statements and project renames. Extracts root project
-/// and all declared subprojects.
+/// Each directory's settings file (`settings.gradle`, else `settings.gradle.kts` — Groovy is
+/// preferred where both exist) defines a build. Each build is parsed with
+/// [`settings_gradle::parse_settings_gradle_rooted`], in settings-path order, and its root
+/// project and `include`d projects are concatenated. One module per `project_root`: when two
+/// builds name one directory, the build whose settings directory is deepest supplies the
+/// module; the other declarations are kept in `also_declared_by` (one evidence row each).
 fn extract_gradle_modules(
     settings_gradle_files: &std::collections::HashMap<String, String>,
 ) -> GradleExtractionResult {
     let mut result = GradleExtractionResult::default();
 
-    // Check for root settings.gradle (prefer Groovy over Kotlin)
-    let settings_path = if settings_gradle_files.contains_key("settings.gradle") {
-        "settings.gradle"
-    } else if settings_gradle_files.contains_key("settings.gradle.kts") {
-        "settings.gradle.kts"
-    } else {
-        return result; // No settings.gradle at root
-    };
-
-    let settings_content = match settings_gradle_files.get(settings_path) {
-        Some(content) => content,
-        None => return result,
-    };
-
-    result.has_root_settings = true;
-
-    // Parse settings file
-    let parsed = settings_gradle::parse_settings_gradle(settings_content, settings_path);
-
-    // Carry the unhandled-`projectDir`-form count for honest degradation reporting (§2.2).
-    result.unhandled_project_dirs = parsed.unhandled_project_dirs;
-
-    // Add root project
-    if let Some(root_module) = parsed.root_project {
-        result.modules.push(ExtractedGradleModule {
-            module: root_module,
-        });
+    // One settings file per directory, Groovy preferred over Kotlin.
+    let mut by_dir: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+    for path in settings_gradle_files.keys() {
+        let dir = settings_file_dir(path);
+        let groovy = path.ends_with("settings.gradle");
+        match by_dir.get(dir) {
+            Some(existing) if existing.ends_with("settings.gradle") || !groovy => {}
+            _ => {
+                by_dir.insert(dir, path.as_str());
+            }
+        }
     }
+    let mut settings_paths: Vec<&str> = by_dir.into_values().collect();
+    settings_paths.sort_unstable();
 
-    // Add subprojects
-    for subproject in parsed.subprojects {
-        result
-            .modules
-            .push(ExtractedGradleModule { module: subproject });
+    let mut index_by_root: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for settings_path in settings_paths {
+        let content = match settings_gradle_files.get(settings_path) {
+            Some(content) => content,
+            None => continue,
+        };
+        if settings_file_dir(settings_path).is_empty() {
+            result.has_root_settings = true;
+        }
+        let parsed = settings_gradle::parse_settings_gradle_rooted(content, settings_path);
+
+        // Carry the unhandled-`projectDir`-form count for honest degradation reporting (§2.2).
+        result.unhandled_project_dirs += parsed.unhandled_project_dirs;
+
+        for module in parsed.root_project.into_iter().chain(parsed.subprojects) {
+            match index_by_root.get(&module.project_root) {
+                None => {
+                    index_by_root.insert(module.project_root.clone(), result.modules.len());
+                    result.modules.push(ExtractedGradleModule {
+                        module,
+                        also_declared_by: Vec::new(),
+                    });
+                }
+                Some(&i) => {
+                    let existing = &mut result.modules[i];
+                    if settings_dir_depth(&module.settings_path)
+                        > settings_dir_depth(&existing.module.settings_path)
+                    {
+                        let shallower = std::mem::replace(&mut existing.module, module);
+                        existing.also_declared_by.push(shallower);
+                    } else {
+                        existing.also_declared_by.push(module);
+                    }
+                }
+            }
+        }
     }
 
     result
@@ -3207,8 +3269,12 @@ fn persist_pyproject_modules(
 /// Persist settings.gradle-derived module candidates, evidence, and file ownership.
 ///
 /// Phase 2b: persists module rows and ownership assignments for Gradle projects.
-/// - Root project and subprojects from settings.gradle
-/// - File ownership via longest-prefix-match (.java, .kt, .scala files only)
+/// - Every build's root project and subprojects (DGC-ATTRIBUTION-PRECISE-1: one build per
+///   settings file in the scanned tree)
+/// - File ownership via longest-prefix-match over the indexed JVM files (today `.java` only:
+///   the filter below also names `kotlin`/`scala`, values `routing::detect_language` never
+///   returns, because `.kt`/`.scala` are not source extensions the scanner admits;
+///   D-DAP-JVM-COVERAGE-1)
 fn persist_gradle_modules(
     storage: &mut StorageConnection,
     repo_uid: &str,
@@ -3229,6 +3295,12 @@ fn persist_gradle_modules(
             settings_gradle::to_storage_inputs(&extracted.module, repo_uid, snapshot_uid);
         candidates.push(candidate);
         evidence.push(ev);
+        // DGC-ATTRIBUTION-PRECISE-1: the same directory named by another build's settings
+        // file — one more evidence row of this candidate (same module uid, its own file).
+        for other in &extracted.also_declared_by {
+            let (_, other_ev) = settings_gradle::to_storage_inputs(other, repo_uid, snapshot_uid);
+            evidence.push(other_ev);
+        }
     }
 
     // Persist using the storage port (same methods as Cargo/npm/pyproject).
@@ -3240,7 +3312,9 @@ fn persist_gradle_modules(
         .map_err(ComposeError::Storage)?;
 
     // Compute and persist file ownership.
-    // Only for JVM files — .java, .kt, .scala
+    // Only for the indexed JVM files — today `.java`: `detect_language` returns `java` for
+    // `.java`; the `kotlin`/`scala` arms are unreachable because the scanner does not admit
+    // `.kt`/`.scala` (`routing::is_source_extension`; D-DAP-JVM-COVERAGE-1).
     let jvm_files: Vec<_> = file_inputs
         .iter()
         .filter(|f| {
@@ -6344,5 +6418,568 @@ public class AppConfig {
                  (candidates given with `{first}` first)"
             );
         }
+    }
+
+    // ── DGC-ATTRIBUTION-PRECISE-1: every settings file defines a Gradle build ──────────────
+    //
+    // D-DAP-NESTED-BUILDS-1 (the HUMAN's ruling, option A) with its 2026-10-04 correction:
+    // a nested settings file's root project and `include`d projects are declared modules keyed
+    // by directory; the indexed JVM files (today `.java`) under them are owned by those
+    // modules, never by the repository root; a non-JVM file keeps its own toolchain's owner.
+
+    fn put_file(root: &Path, rel: &str, content: &str) {
+        let path = root.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+
+    /// grpc-java's shape, reduced: a root build with one project, an `examples` build with no
+    /// `include`, an Android build with `include ':app'`, a build with no `rootProject.name`,
+    /// a Kotlin-DSL build and one directory holding both settings forms.
+    fn make_nested_gradle_fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put_file(
+            root,
+            "settings.gradle",
+            "rootProject.name = 'top'\ninclude 'lib'\n",
+        );
+        put_file(
+            root,
+            "lib/src/main/java/top/Lib.java",
+            "package top;\npublic class Lib {}\n",
+        );
+        put_file(
+            root,
+            "buildSrc/src/main/java/b/B.java",
+            "package b;\npublic class B {}\n",
+        );
+        put_file(
+            root,
+            "examples/settings.gradle",
+            "rootProject.name = 'examples'\n",
+        );
+        put_file(
+            root,
+            "examples/src/main/java/ex/Ex.java",
+            "package ex;\npublic class Ex {}\n",
+        );
+        put_file(
+            root,
+            "examples/android/clientcache/settings.gradle",
+            "include 'app'\n",
+        );
+        put_file(
+            root,
+            "examples/android/clientcache/app/src/main/java/cc/App.java",
+            "package cc;\npublic class App {}\n",
+        );
+        put_file(
+            root,
+            "examples/example-alts/settings.gradle",
+            "// no name\n",
+        );
+        put_file(
+            root,
+            "examples/example-alts/src/main/java/alts/Alts.java",
+            "package alts;\npublic class Alts {}\n",
+        );
+        put_file(
+            root,
+            "kotlin/settings.gradle.kts",
+            "rootProject.name = \"kt\"\n",
+        );
+        put_file(
+            root,
+            "both/settings.gradle",
+            "rootProject.name = 'groovy'\n",
+        );
+        put_file(
+            root,
+            "both/settings.gradle.kts",
+            "rootProject.name = \"kts\"\n",
+        );
+        dir
+    }
+
+    /// `canonical_root_path` by module uid, for the Gradle candidates of a snapshot.
+    fn gradle_roots_by_uid(
+        storage: &StorageConnection,
+        snapshot_uid: &str,
+    ) -> std::collections::BTreeMap<String, String> {
+        storage
+            .get_module_candidates_for_snapshot(snapshot_uid)
+            .unwrap()
+            .into_iter()
+            .map(|m| (m.module_candidate_uid, m.canonical_root_path))
+            .collect()
+    }
+
+    /// file uid → (owning candidate's `canonical_root_path`, its `module_kind`).
+    fn owners(
+        storage: &StorageConnection,
+        snapshot_uid: &str,
+    ) -> std::collections::BTreeMap<String, Vec<(String, String)>> {
+        let cands: std::collections::BTreeMap<String, (String, String)> = storage
+            .get_module_candidates_for_snapshot(snapshot_uid)
+            .unwrap()
+            .into_iter()
+            .map(|m| {
+                (
+                    m.module_candidate_uid,
+                    (m.canonical_root_path, m.module_kind),
+                )
+            })
+            .collect();
+        let mut out: std::collections::BTreeMap<String, Vec<(String, String)>> =
+            std::collections::BTreeMap::new();
+        for o in storage
+            .get_file_ownership_for_snapshot(snapshot_uid)
+            .unwrap()
+        {
+            out.entry(o.file_uid)
+                .or_default()
+                .push(cands[&o.module_candidate_uid].clone());
+        }
+        out
+    }
+
+    #[test]
+    fn every_settings_gradle_file_in_the_scanned_tree_defines_a_gradle_build() {
+        let fixture = make_nested_gradle_fixture();
+        let prepared = prepare_repo_inputs(fixture.path()).unwrap();
+        let got: Vec<(String, String, String, String)> = prepared
+            .gradle_modules
+            .modules
+            .iter()
+            .map(|m| {
+                (
+                    m.module.project_root.clone(),
+                    m.module.gradle_path.clone(),
+                    m.module.display_name.clone(),
+                    m.module.settings_path.clone(),
+                )
+            })
+            .collect();
+        let row = |r: &str, g: &str, d: &str, s: &str| {
+            (r.to_string(), g.to_string(), d.to_string(), s.to_string())
+        };
+        let mut expected = vec![
+            row(".", ":", "top", "settings.gradle"),
+            row("lib", ":lib", "lib", "settings.gradle"),
+            row("examples", ":", "examples", "examples/settings.gradle"),
+            row(
+                "examples/android/clientcache",
+                ":",
+                "clientcache",
+                "examples/android/clientcache/settings.gradle",
+            ),
+            row(
+                "examples/android/clientcache/app",
+                ":app",
+                "app",
+                "examples/android/clientcache/settings.gradle",
+            ),
+            row(
+                "examples/example-alts",
+                ":",
+                "example-alts",
+                "examples/example-alts/settings.gradle",
+            ),
+            row("kotlin", ":", "kt", "kotlin/settings.gradle.kts"),
+            // One directory holding both forms: Groovy is preferred, as for the root.
+            row("both", ":", "groovy", "both/settings.gradle"),
+        ];
+        let mut got_sorted = got.clone();
+        got_sorted.sort();
+        expected.sort();
+        assert_eq!(
+            got_sorted, expected,
+            "every admitted settings file is a build; got {got:?}"
+        );
+        assert!(prepared.gradle_modules.has_root_settings);
+        assert!(prepared
+            .gradle_modules
+            .modules
+            .iter()
+            .all(|m| m.also_declared_by.is_empty()));
+    }
+
+    #[test]
+    fn nested_build_modules_carry_their_settings_file_as_evidence_source_path() {
+        let fixture = make_nested_gradle_fixture();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let mut evidence: Vec<(String, String, String)> = Vec::new();
+        for (uid, root) in gradle_roots_by_uid(&storage, &result.snapshot_uid) {
+            for ev in storage.get_module_candidate_evidence(&uid).unwrap() {
+                if ev.source_type == "settings_gradle" {
+                    evidence.push((root.clone(), ev.source_type, ev.source_path));
+                }
+            }
+        }
+        evidence.sort();
+        let e = |r: &str, s: &str| (r.to_string(), "settings_gradle".to_string(), s.to_string());
+        assert_eq!(
+            evidence,
+            vec![
+                e(".", "settings.gradle"),
+                e("both", "both/settings.gradle"),
+                e("examples", "examples/settings.gradle"),
+                e(
+                    "examples/android/clientcache",
+                    "examples/android/clientcache/settings.gradle"
+                ),
+                e(
+                    "examples/android/clientcache/app",
+                    "examples/android/clientcache/settings.gradle"
+                ),
+                e(
+                    "examples/example-alts",
+                    "examples/example-alts/settings.gradle"
+                ),
+                e("kotlin", "kotlin/settings.gradle.kts"),
+                e("lib", "settings.gradle"),
+            ]
+        );
+    }
+
+    #[test]
+    fn indexed_java_files_under_a_nested_build_are_owned_by_its_modules_never_by_the_repo_root() {
+        let fixture = make_nested_gradle_fixture();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let got = owners(&storage, &result.snapshot_uid);
+        let d = |root: &str| vec![(root.to_string(), "declared".to_string())];
+        let expected: std::collections::BTreeMap<String, Vec<(String, String)>> = [
+            ("r1:lib/src/main/java/top/Lib.java", d("lib")),
+            ("r1:buildSrc/src/main/java/b/B.java", d(".")),
+            ("r1:examples/src/main/java/ex/Ex.java", d("examples")),
+            (
+                "r1:examples/android/clientcache/app/src/main/java/cc/App.java",
+                d("examples/android/clientcache/app"),
+            ),
+            (
+                "r1:examples/example-alts/src/main/java/alts/Alts.java",
+                d("examples/example-alts"),
+            ),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+        assert_eq!(
+            got, expected,
+            "one owner per indexed JVM file (today `.java`), the nested build's module"
+        );
+    }
+
+    /// gstreamer's shape: a nested Android build whose project holds a JNI C file beside its
+    /// Java file, and no root settings file.
+    fn make_nested_build_with_native_sources_fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put_file(
+            root,
+            "native/android/settings.gradle",
+            "include ':tutorial-1'\n",
+        );
+        put_file(
+            root,
+            "native/android/tutorial-1/jni/tutorial-1.c",
+            "int gst_native_get_info(void) { return 0; }\n",
+        );
+        put_file(
+            root,
+            "native/android/tutorial-1/src/main/java/t/Tutorial1.java",
+            "package t;\npublic class Tutorial1 {}\n",
+        );
+        put_file(root, "native/core/core.c", "int core(void) { return 1; }\n");
+        put_file(root, "web/main.c", "int main(void) { return 0; }\n");
+        put_file(
+            root,
+            "backend/settings.gradle",
+            "rootProject.name = 'engine'\n",
+        );
+        put_file(
+            root,
+            "backend/src/main/java/e/Engine.java",
+            "package e;\npublic class Engine {}\n",
+        );
+        dir
+    }
+
+    #[test]
+    fn non_jvm_files_under_a_nested_gradle_build_keep_their_own_toolchains_ownership() {
+        let fixture = make_nested_build_with_native_sources_fixture();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let got = owners(&storage, &result.snapshot_uid);
+        assert_eq!(
+            got["r1:native/android/tutorial-1/jni/tutorial-1.c"],
+            vec![("native".to_string(), "inferred".to_string())],
+            "a C file under a nested Gradle project keeps its inferred directory group"
+        );
+        assert_eq!(
+            got["r1:native/android/tutorial-1/src/main/java/t/Tutorial1.java"],
+            vec![(
+                "native/android/tutorial-1".to_string(),
+                "declared".to_string()
+            )],
+            "the Java file beside it is owned by the nested Gradle project"
+        );
+        assert_eq!(
+            got["r1:native/core/core.c"],
+            vec![("native".to_string(), "inferred".to_string())]
+        );
+    }
+
+    #[test]
+    fn nested_build_roots_are_declared_coverage_so_inferred_detection_skips_their_indexed_java_files(
+    ) {
+        let fixture = make_nested_build_with_native_sources_fixture();
+        let prepared = prepare_repo_inputs(fixture.path()).unwrap();
+        let mut inferred: Vec<String> = prepared
+            .inferred_modules
+            .modules
+            .iter()
+            .map(|m| m.module.directory_path.clone())
+            .collect();
+        inferred.sort();
+        assert_eq!(
+            inferred,
+            vec!["native".to_string(), "web".to_string()],
+            "`backend` holds only indexed JVM files (today `.java`) under a declared nested \
+             root, so it is not inferred; `native` is still inferred from its C files"
+        );
+    }
+
+    #[test]
+    fn a_repo_without_a_root_settings_file_still_gets_its_nested_gradle_builds() {
+        let fixture = make_nested_build_with_native_sources_fixture();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let prepared = prepare_repo_inputs(fixture.path()).unwrap();
+        assert!(!prepared.gradle_modules.has_root_settings);
+        let declared: Vec<(String, String)> = storage
+            .get_module_candidates_for_snapshot(&result.snapshot_uid)
+            .unwrap()
+            .into_iter()
+            .filter(|m| m.module_kind == "declared")
+            .map(|m| (m.canonical_root_path, m.display_name.unwrap_or_default()))
+            .collect();
+        assert_eq!(
+            declared,
+            vec![
+                ("backend".to_string(), "engine".to_string()),
+                ("native/android".to_string(), "android".to_string()),
+                (
+                    "native/android/tutorial-1".to_string(),
+                    "tutorial-1".to_string()
+                ),
+            ]
+        );
+        let got = owners(&storage, &result.snapshot_uid);
+        assert_eq!(
+            got["r1:backend/src/main/java/e/Engine.java"],
+            vec![("backend".to_string(), "declared".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_directory_declared_by_two_gradle_builds_is_one_module_with_both_settings_files_as_evidence(
+    ) {
+        // Pure extraction, both path orders: the deepest settings directory supplies the
+        // Gradle path and display name, whichever file is read first.
+        for nested in ["ex", "zz"] {
+            let mut files = std::collections::HashMap::new();
+            files.insert(
+                "settings.gradle".to_string(),
+                format!("include '{nested}:app'\nproject(':{nested}:app').name = 'outer-app'\n"),
+            );
+            files.insert(
+                format!("{nested}/settings.gradle"),
+                format!("rootProject.name = '{nested}'\ninclude 'app'\n"),
+            );
+            let result = extract_gradle_modules(&files);
+            let app_root = format!("{nested}/app");
+            let apps: Vec<&ExtractedGradleModule> = result
+                .modules
+                .iter()
+                .filter(|m| m.module.project_root == app_root)
+                .collect();
+            assert_eq!(apps.len(), 1, "{nested}: one candidate per directory");
+            assert_eq!(apps[0].module.gradle_path, ":app", "{nested}");
+            assert_eq!(apps[0].module.display_name, "app", "{nested}");
+            assert_eq!(
+                apps[0].module.settings_path,
+                format!("{nested}/settings.gradle"),
+                "{nested}"
+            );
+            let also: Vec<(&str, &str)> = apps[0]
+                .also_declared_by
+                .iter()
+                .map(|m| (m.settings_path.as_str(), m.gradle_path.as_str()))
+                .collect();
+            let outer_path = format!(":{nested}:app");
+            assert_eq!(
+                also,
+                vec![("settings.gradle", outer_path.as_str())],
+                "{nested}"
+            );
+        }
+
+        // Storage: one candidate row, two evidence rows (one per settings file).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put_file(root, "settings.gradle", "include ':ex:app'\n");
+        put_file(root, "ex/settings.gradle", "include ':app'\n");
+        put_file(
+            root,
+            "ex/app/src/main/java/a/A.java",
+            "package a;\npublic class A {}\n",
+        );
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let result =
+            index_into_storage(root, &mut storage, "r1", &ComposeOptions::default()).unwrap();
+        let cands: Vec<_> = storage
+            .get_module_candidates_for_snapshot(&result.snapshot_uid)
+            .unwrap()
+            .into_iter()
+            .filter(|m| m.canonical_root_path == "ex/app")
+            .collect();
+        assert_eq!(cands.len(), 1);
+        let mut sources: Vec<String> = storage
+            .get_module_candidate_evidence(&cands[0].module_candidate_uid)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.source_path)
+            .collect();
+        sources.sort();
+        assert_eq!(sources, vec!["ex/settings.gradle", "settings.gradle"]);
+        let got = owners(&storage, &result.snapshot_uid);
+        assert_eq!(
+            got["r1:ex/app/src/main/java/a/A.java"],
+            vec![("ex/app".to_string(), "declared".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_settings_file_under_an_always_excluded_directory_defines_no_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put_file(
+            root,
+            "tools/settings.gradle",
+            "rootProject.name = 'tools'\n",
+        );
+        put_file(
+            root,
+            "web/node_modules/pkg/android/settings.gradle",
+            "rootProject.name = 'pkg'\n",
+        );
+        put_file(root, "tools/build/gen/settings.gradle", "include ':gen'\n");
+        let prepared = prepare_repo_inputs(root).unwrap();
+        let admitted: Vec<&str> = prepared
+            .config_file_inputs
+            .iter()
+            .map(|c| c.rel_path.as_str())
+            .collect();
+        assert!(
+            admitted.contains(&"web/node_modules/pkg/android/settings.gradle")
+                && admitted.contains(&"tools/build/gen/settings.gradle"),
+            "the scanner admits both nested files (it prunes those names at the root only), so \
+             the collection rule is what excludes them; admitted = {admitted:?}"
+        );
+        let roots: Vec<&str> = prepared
+            .gradle_modules
+            .modules
+            .iter()
+            .map(|m| m.module.project_root.as_str())
+            .collect();
+        assert_eq!(roots, vec!["tools"]);
+    }
+
+    #[test]
+    fn nested_gradle_build_modules_are_recomputed_by_refresh() {
+        let fixture = make_nested_gradle_fixture();
+        let mut storage = StorageConnection::open_in_memory().unwrap();
+        let first = index_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        let keys = |snap: &str, storage: &StorageConnection| -> Vec<String> {
+            storage
+                .get_module_candidates_for_snapshot(snap)
+                .unwrap()
+                .into_iter()
+                .map(|m| m.module_key)
+                .collect()
+        };
+        let keys1 = keys(&first.snapshot_uid, &storage);
+        let owners1 = owners(&storage, &first.snapshot_uid);
+
+        let second = refresh_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(keys(&second.snapshot_uid, &storage), keys1);
+        assert_eq!(owners(&storage, &second.snapshot_uid), owners1);
+
+        // A new nested build appears on the next refresh, and owns its Java file.
+        put_file(
+            fixture.path(),
+            "examples/example-tls/settings.gradle",
+            "rootProject.name = 'example-tls'\n",
+        );
+        put_file(
+            fixture.path(),
+            "examples/example-tls/src/main/java/tls/Tls.java",
+            "package tls;\npublic class Tls {}\n",
+        );
+        let third = refresh_into_storage(
+            fixture.path(),
+            &mut storage,
+            "r1",
+            &ComposeOptions::default(),
+        )
+        .unwrap();
+        assert!(keys(&third.snapshot_uid, &storage)
+            .iter()
+            .any(|k| k == "gradle:r1:examples/example-tls"));
+        assert_eq!(
+            owners(&storage, &third.snapshot_uid)
+                ["r1:examples/example-tls/src/main/java/tls/Tls.java"],
+            vec![("examples/example-tls".to_string(), "declared".to_string())]
+        );
     }
 }
