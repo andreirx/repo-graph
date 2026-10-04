@@ -23,7 +23,7 @@ Fourteen slices shipped between v0.17.0 and v0.18.0; one of them regressed the C
 | [RG-REQ-009](rg-req-009-quality-signals-trust-reliability.md) | Quality signals, trust and reliability tell the agent where the risk is now, with their basis | 11 | 8 met · 3 unmet |
 | [RG-REQ-010](rg-req-010-semantic-seeding.md) | Semantic seeds are labeled guesses beneath the facts, never the answer | 11 | 8 met · 3 unmet |
 | [RG-REQ-011](rg-req-011-daemon-and-store-lifecycle.md) | The daemon serves in milliseconds, never hangs, never serves a broken store, never touches foreign state | 11 | 8 met · 2 partial · 1 unknown |
-| [RG-REQ-012](rg-req-012-cli-protocol-surface.md) | rmap is a machine-readable protocol: names, exit codes, cursors, budgets, JSON | 9 | 7 met · 1 unmet · 1 unknown |
+| [RG-REQ-012](rg-req-012-cli-protocol-surface.md) | rmap is a machine-readable protocol: names, exit codes, cursors, budgets, JSON | 9 | 7 met · 1 partially met (L09: top-level help parity shipped 2026-10-04, nested subcommands open) · 1 unknown |
 | [RG-REQ-013](rg-req-013-governance-and-enforcement.md) | Governance is frozen: maintained, never extended, never erases a measurement | 7 | 6 met · 1 unknown |
 | [RG-REQ-014](rg-req-014-distribution-and-host-integration.md) | Installing, running and integrating rmap is binary-first, reversible, honest about platforms | 9 | 8 met · 1 unknown |
 | [RG-REQ-015](rg-req-015-indexing-maps-contracts-enrichment.md) | Indexing, maps, contracts and enrichment are explicit operations with stated outcomes | 11 | 9 met · 2 partial |
