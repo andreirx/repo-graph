@@ -1,0 +1,138 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-manifest",
+  "baselineId": "MODULES-DEPS-SUMMARY-SCOPE-1-INPUT-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "requirements": [
+    {
+      "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+      "sha256": "sha256:8f2da793ee99d9f756ec48b66c133b49716db1d079686e2b90d5fce2cc88c68b"
+    },
+    {
+      "path": "docs/requirements/rg-req-004-module-model-and-cycles.md",
+      "sha256": "sha256:520e75b678ca756027e5a765d5621747b7c5f6075912488bcce97c484df3cb0b"
+    }
+  ],
+  "dependencies": [
+    {
+      "role": "source",
+      "path": "docs/VISION.md",
+      "sha256": "sha256:84a7d22ba3684b06d5914b3c46ae3cce9f1b3bb274f207f5128704e0261dad37"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/honesty-gate-2.md",
+      "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/coherence-3.md",
+      "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/headline-truth-1.md",
+      "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/find-facts-1.md",
+      "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/modules-method-1.md",
+      "sha256": "sha256:8c5c41ca832099568431228145556caae17d35c0dc3bc093f3b202311971820e"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/cycle-honesty-1.md",
+      "sha256": "sha256:c7ffd289adc43fe6e6c0d89d8313028b909b1045da1701e6e700950ec9e99bfe"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/import-resolution-rust-1.md",
+      "sha256": "sha256:0e4e22bd8d833396c337443d02e44439a1670809937d5fb1956d64c726a26731"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+      "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+    },
+    {
+      "role": "governance",
+      "path": "docs/slices/rg-requirements-bootstrap-1.md",
+      "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b"
+    },
+    {
+      "role": "governance",
+      "path": "docs/requirements/README.md",
+      "sha256": "sha256:6bafbfb4a000ae346b79ae396adbd7564f268437a511fd556e89cde2ecda1c47"
+    },
+    {
+      "role": "governance",
+      "path": "CLAUDE.md",
+      "sha256": "sha256:30a113d5cc92684d246cf7b4e004866c9839688ee5aca878403a0c860d5c068a"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+      "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+      "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-MDSS-SCOPE-1.md",
+      "sha256": "sha256:51b7730b8b332171c366ffdc669060c377d6bc0b791849005af627e742b64269"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+      "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d"
+    },
+    {
+      "role": "allocation",
+      "path": "docs/slices/modules-deps-summary-scope-1.md",
+      "sha256": "sha256:e1e9796c464937a033b61bc25ebd0a41febafaf7e59e18403db022a087ddcfba"
+    }
+  ],
+  "reviewObligationIds": [
+    "RG-REQ-002",
+    "RG-REQ-004",
+    "RG-REQ-002-L01",
+    "RG-REQ-002-L02",
+    "RG-REQ-002-L03",
+    "RG-REQ-002-L04",
+    "RG-REQ-002-L05",
+    "RG-REQ-002-L06",
+    "RG-REQ-002-L07",
+    "RG-REQ-002-L08",
+    "RG-REQ-002-L09",
+    "RG-REQ-002-L10",
+    "RG-REQ-002-L11",
+    "RG-REQ-004-L01",
+    "RG-REQ-004-L02",
+    "RG-REQ-004-L03",
+    "RG-REQ-004-L04",
+    "RG-REQ-004-L05",
+    "RG-REQ-004-L06",
+    "RG-REQ-004-L07",
+    "RG-REQ-004-L08",
+    "RG-REQ-004-L09",
+    "RG-REQ-004-L10",
+    "RG-REQ-004-L11"
+  ],
+  "requiredDecisionIds": [
+    "D-AGENT-USEFULNESS-FRAME-1",
+    "D-CERTAINTY-MARK-1",
+    "D-MDSS-SCOPE-1",
+    "D-TEST-SCOPE-1"
+  ]
+}

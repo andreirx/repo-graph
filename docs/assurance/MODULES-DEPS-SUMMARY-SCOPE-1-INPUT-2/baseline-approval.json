@@ -1,0 +1,62 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "MODULES-DEPS-SUMMARY-SCOPE-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/MODULES-DEPS-SUMMARY-SCOPE-1-INPUT-2.json",
+    "sha256": "sha256:8a5222f5ee6c9291a3417541f393d914d16a44a1b0490ae539808cb1baab7a0c"
+  },
+  "review": {
+    "path": "docs/assurance/MODULES-DEPS-SUMMARY-SCOPE-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:249e4989930249b09fc5e9676109bdb7e1596ff55dfe589a02fa161633d6d284"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-TEST-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+        "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d"
+      }
+    },
+    {
+      "id": "D-MDSS-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-MDSS-SCOPE-1.md",
+        "sha256": "sha256:51b7730b8b332171c366ffdc669060c377d6bc0b791849005af627e742b64269"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-04T04:57:37.752Z",
+  "rationale": "MODULES-DEPS-SUMMARY-SCOPE-1 INPUT-2 accepted at document cycle 5 (codex gpt-6-sol review-5 accepted; claude-opus-5-5 author). Cycles 0-2 under INPUT-1: legacy-response cases, consumer before/candidate comparison, worktree cleanup (author); the missing RG-REQ-004-L12 trace was the manager's packet error (decision MDSS-L12-TRACE, A) -> INPUT-2 adds L12 everywhere and pins D-TEST-SCOPE-1. Cycles 3-4: the per-module map's meaning and the remainder's first-applicable-group rule stated precisely. Operator approval; D-MDSS-SCOPE-1 (operator A) remains overridable by the human."
+}
