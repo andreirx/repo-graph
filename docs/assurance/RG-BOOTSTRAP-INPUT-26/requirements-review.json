@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-26-pass1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-26.json",
+    "sha256": "sha256:4c0f08fa1b31cbb5e95176cf1ae7ba7f069bcfbd7fd3591eaef4467434a4db5d"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-26"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-26-pass1"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T22:56:24.000Z",
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin(s): docs/requirements/rg-req-011-daemon-and-store-lifecycle.md (sha256:08c82d21a621164bacbc029102bb9937786015f2cee15785c19d88c3fc94dc5c). Codex session 01a10920-92c4-7230-9d55-84a1ce184164. Record written 2026-10-04T22:58:12.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-25 → INPUT-26: one pin changed — docs/requirements/rg-req-011-daemon-and-store-lifecycle.md: RG-REQ-011-L12 revision 7 (DOCTOR-FALLBACK-STATE-ROOT-1 document review cycle 3, DFSR-LINUX-SCOPE → D-DFSR-LINUX-SCOPE-1 B): the platform scope stated — the slice delivers the service label/note/verdict rule on macOS, Linux keeps today's counted pass/fail until DFSR-LINUX-1 — and on every platform a failed probe is never rendered as a note. Also changed but NOT a bootstrap pin: docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-LINUX-SCOPE-1.md (pinned by the slice manifest). Pass 1 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high), pass 1, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended text.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: Against HEAD c3f38efd, INPUT-26 pins the current RG-REQ-011 digest; its other 58 pins match INPUT-25. OBSERVED: The diff since 62b9cc8d changes only L12’s revision label, platform-scope text, and verification criterion. OBSERVED: Revision 7 states that Linux keeps its current service-probe text and counted pass/fail until DFSR-LINUX-1; a stopped service therefore remains a visible failure and makes a forced-stdio run UNHEALTHY. OBSERVED: `summary.rs` owns probe tones, so a test there can check that `passed = false` never becomes `[note]`, although the current tone helpers still need that guard. INFERRED: The explicit macOS delivery boundary and Linux residual reconcile L12 with the named leaves and decisions without a false cross-platform acceptance claim."
+}
