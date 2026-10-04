@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-24-pass5",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-24.json",
+    "sha256": "sha256:96fae42bcf0d595537ad03f2703c08ddb1596d39d87d2d8c12622520c4925b77"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-24"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-24-pass5"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T21:28:42.000Z",
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin(s): docs/requirements/rg-req-011-daemon-and-store-lifecycle.md (sha256:d7aeb5e751b71bed0fbec0333fe9882e06ffe23f226e35eda1d129cedbf07d0f). Codex session 01a108cf-8c16-7653-8cf0-e2081e235852. Record written 2026-10-04T21:29:21.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-23 → INPUT-24: one pin changed — docs/requirements/rg-req-011-daemon-and-store-lifecycle.md: the PROPOSED leaf RG-REQ-011-L12 (doctor reports the probed transport and state root first under forced stdio, makes the five socket-related probes n/a, reports the global service probe as a note under an override/sandbox root, and leaves the auto/socket path unchanged; RC-4 verified live 2026-10-05; revision 2 after this review's pass 1: configured vs active transport, the unrelated probes' effect on the verdict, the Linux adapter as the DFSR-LINUX-1 residual). Also changed but NOT bootstrap pins: docs/requirements/README.md (RG-REQ-011 row: 12 leaves) and the new record docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-SCOPE-1.md (pinned by the slice manifest). Pass 5 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high), pass 5, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended text.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: The candidate has 59 pins; its RG-REQ-011 digest matches HEAD, and the other 58 pins match INPUT-23. OBSERVED: The diff from f5f06e21 changes only the header’s formatting and L12 entry, plus the new L12 section; the earlier leaf text and preservation obligations are unchanged. OBSERVED: L12 specifies checkable output, ordering, five forced-stdio socket passes, service-note conditions, and the unchanged `passed`-based verdict; its test sites and operator-capture criterion are named, and its evidence is attributed to the operator rather than claimed as this review’s run. INFERRED: The client’s configured transport and override root are available before connection, so the rule is implementable; it is consistent with L06/L08/L09, RG-REQ-002-L02/L08, and D-DFSR-SCOPE-1 Correction 1’s three changes."
+}
