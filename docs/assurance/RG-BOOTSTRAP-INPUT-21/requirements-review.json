@@ -2,17 +2,10 @@
   "formatVersion": 1,
   "kind": "manual-requirements-review",
   "reviewId": "review-RG-BOOTSTRAP-INPUT-21-pass1",
-  "reviewScope": "the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states",
   "subject": {
     "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-21.json",
     "sha256": "sha256:b026dc204663380cfd2de9c7cdbf0cae41f82ec71ff1781b7a603b653715b6bf"
   },
-  "changedPins": [
-    {
-      "path": "docs/requirements/rg-req-006-import-resolution-and-dependencies.md",
-      "sha256": "sha256:65f5a44b74d545068e3604025f131547c884f8bb8a10fcb6d610cd12dc2c025a"
-    }
-  ],
   "author": {
     "role": "builder",
     "provider": "claude",
@@ -25,12 +18,9 @@
     "provider": "codex",
     "model": "gpt-6-sol",
     "effort": "high",
-    "runId": "review-RG-BOOTSTRAP-INPUT-21-pass1",
-    "session": "01a107a9-84de-7cc0-b12b-709f80e10972"
+    "runId": "review-RG-BOOTSTRAP-INPUT-21-pass1"
   },
   "result": "accepted",
   "completedAt": "2026-10-04T16:07:16.000Z",
-  "recordedAt": "2026-10-04T16:07:46.000Z",
-  "changeReviewed": "Bootstrap re-pin INPUT-20 → INPUT-21: one pin changed — rg-req-006 (RG-REQ-006-L14 revision 3, one sentence): the statement that #[path] and inline TARGET modules land on their declaring file is qualified to later path segments and to segments under a crate/super/self head; a sibling path whose FIRST segment is such a module has no first-segment file and binds nothing. Found by the second independent INPUT-20 review (pass 2, session 01a107a0-db04-73f1-b269-35a412fdd2ed, finding F-1), which assessed the whole of revision 3 after RUST-SELF-RESOLUTION-1 INPUT-2 review RR-5. Pass 1 accepted.",
-  "report": "Standalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high; session 01a107a9-84de-7cc0-b12b-709f80e10972), pass 1, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended sentence. Subject: Bootstrap re-pin INPUT-20 → INPUT-21: one pin changed — rg-req-006 (RG-REQ-006-L14 revision 3, one sentence): the statement that #[path] and inline TARGET modules land on their declaring file is qualified to later path segments and to segments under a crate/super/self head; a sibling path whose FIRST segment is such a module has no first-segment file and binds nothing. Found by the second independent INPUT-20 review (pass 2, session 01a107a0-db04-73f1-b269-35a412fdd2ed, finding F-1), which assessed the whole of revision 3 after RUST-SELF-RESOLUTION-1 INPUT-2 review RR-5. Pass 1 accepted.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: At HEAD 1f031228, the candidate’s RG-REQ-006 digest matches the file, and all other 58 pin digests equal INPUT-20’s. OBSERVED: The diff from 07f6dd25 changes only L14’s rule and verification lines; Git reports **2 insertions and 2 deletions**, not the stated 1 and 1. OBSERVED: Edit 1 now preserves the sibling first-segment file guard and agrees with D-RSR-ENTRY-CLIMB-1; edit 2 names a test for a declared first segment with no indexed first-segment file. INFERRED: No other L14 sentence contradicts that limit. OBSERVED: The evidence line is unchanged: 457 = 326 + 18 + 113 of 5,056, with 345 and 32 explicitly labelled as revision 2 figures."
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin: docs/requirements/rg-req-006-import-resolution-and-dependencies.md (sha256:65f5a44b74d545068e3604025f131547c884f8bb8a10fcb6d610cd12dc2c025a). Codex session 01a107a9-84de-7cc0-b12b-709f80e10972. Record written 2026-10-04T16:07:46.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-20 → INPUT-21: one pin changed — rg-req-006 (RG-REQ-006-L14 revision 3, one sentence): the statement that #[path] and inline TARGET modules land on their declaring file is qualified to later path segments and to segments under a crate/super/self head; a sibling path whose FIRST segment is such a module has no first-segment file and binds nothing. Found by the second independent INPUT-20 review (pass 2, session 01a107a0-db04-73f1-b269-35a412fdd2ed, finding F-1), which assessed the whole of revision 3 after RUST-SELF-RESOLUTION-1 INPUT-2 review RR-5. Pass 1 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high; session 01a107a9-84de-7cc0-b12b-709f80e10972), pass 1, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended sentence. Subject: Bootstrap re-pin INPUT-20 → INPUT-21: one pin changed — rg-req-006 (RG-REQ-006-L14 revision 3, one sentence): the statement that #[path] and inline TARGET modules land on their declaring file is qualified to later path segments and to segments under a crate/super/self head; a sibling path whose FIRST segment is such a module has no first-segment file and binds nothing. Found by the second independent INPUT-20 review (pass 2, session 01a107a0-db04-73f1-b269-35a412fdd2ed, finding F-1), which assessed the whole of revision 3 after RUST-SELF-RESOLUTION-1 INPUT-2 review RR-5. Pass 1 accepted.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: At HEAD 1f031228, the candidate’s RG-REQ-006 digest matches the file, and all other 58 pin digests equal INPUT-20’s. OBSERVED: The diff from 07f6dd25 changes only L14’s rule and verification lines; Git reports **2 insertions and 2 deletions**, not the stated 1 and 1. OBSERVED: Edit 1 now preserves the sibling first-segment file guard and agrees with D-RSR-ENTRY-CLIMB-1; edit 2 names a test for a declared first segment with no indexed first-segment file. INFERRED: No other L14 sentence contradicts that limit. OBSERVED: The evidence line is unchanged: 457 = 326 + 18 + 113 of 5,056, with 345 and 32 explicitly labelled as revision 2 figures."
 }

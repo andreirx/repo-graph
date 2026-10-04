@@ -8,7 +8,7 @@
   },
   "review": {
     "path": "docs/assurance/RG-BOOTSTRAP-INPUT-21/requirements-review.json",
-    "sha256": "sha256:410ce24a06d553c4527cbc78c6f00d56ef481337cc1d8564ac7adb046b28e541"
+    "sha256": "sha256:c8cfc440ff39fc51c3e43d16e2b46c9c58182918d33db47e5b6303004c98bdd5"
   },
   "decision": "approved",
   "approvedBy": {
@@ -102,6 +102,6 @@
       }
     }
   ],
-  "decidedAt": "2026-10-04T16:07:46.000Z",
+  "decidedAt": "2026-10-04T16:09:11.000Z",
   "rationale": "Bootstrap re-pin INPUT-20 → INPUT-21: one pin changed — rg-req-006 (RG-REQ-006-L14 revision 3, one sentence): the statement that #[path] and inline TARGET modules land on their declaring file is qualified to later path segments and to segments under a crate/super/self head; a sibling path whose FIRST segment is such a module has no first-segment file and binds nothing. Found by the second independent INPUT-20 review (pass 2, session 01a107a0-db04-73f1-b269-35a412fdd2ed, finding F-1), which assessed the whole of revision 3 after RUST-SELF-RESOLUTION-1 INPUT-2 review RR-5. Pass 1 accepted."
 }
