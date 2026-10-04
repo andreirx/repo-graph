@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-19-2",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-19.json",
+    "sha256": "sha256:0de43adf15f82d651eed57da5feb0f5a18a405479457a25e5c443c74105007fd"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-19"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-19-2"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T15:05:01.000Z",
+  "report": "Standalone read-only review (codex exec --sandbox read-only, gpt-6-sol, high; session 01a1076f-0766-7251-9f6e-4a160d08297a), pass 2, self-contained prompt with the one diff inlined (/private/tmp/rgbootstrap16/review.txt). Subject = INPUT-18 + the re-pin of docs/cli/rmap-contracts.md (changed by the shipped, implementation-reviewed, gate-green MODULES-DEPS-SUMMARY-SCOPE-1, b5c67086: the modules deps module-scoped Summary text). No requirement, governance file or decision record changed.\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: All 59 candidate digests match HEAD 30f204b9; only RG-REQ-006 differs from INPUT-17 and INPUT-18. OBSERVED: The diff from 3e6136a9 is confined to L14, and revision 2\u2019s title, rule, verification criterion, and evidence state the enclosing-module rule and the accepted directory-cycle derivation in the two decision records. OBSERVED: The README\u2019s dated note and queue line state the enclosing-module rule. OBSERVED: Revision 2\u2019s historical evidence has an arithmetic defect: 3,222 = 3,152 + 70 and 32 = 15 + 17, but its listed 43 + 3 + 27 bind-nothing cases total 73, not 70. INFERRED: That superseded line does not block this re-pin because revision 3 replaces it, and revision 3\u2019s evidence totals reconcile.\n"
+}
