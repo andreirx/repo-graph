@@ -1,0 +1,104 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "RUST-SELF-RESOLUTION-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/RUST-SELF-RESOLUTION-1-INPUT-1.json",
+    "sha256": "sha256:14915bfe91086e88c42501519c313ede71306b07c32ef82412d7dbbeced7e09d"
+  },
+  "review": {
+    "path": "docs/assurance/RUST-SELF-RESOLUTION-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:5ed3693ef48d57770f47bb973808815847fbb465576ec9afb23ef8640b3d05ff"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-TEST-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+        "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d"
+      }
+    },
+    {
+      "id": "D-RSR-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-SCOPE-1.md",
+        "sha256": "sha256:64d441d4c2b4db35cca1ef7d4ff1fdb5411e38d9fb516cfe86d001c9abc9da5f"
+      }
+    },
+    {
+      "id": "D-RSR-SELF-IMPORT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-SELF-IMPORT-1.md",
+        "sha256": "sha256:b72ac006db565a9e43a7865443224a167bea8aa05dc515fffd6a1cd72e115a49"
+      }
+    },
+    {
+      "id": "D-RSR-INLINE-MODULE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-INLINE-MODULE-1.md",
+        "sha256": "sha256:fec45d6c0caf6918f4dc2b67d59f1e2b838c99b0340f6c726494523f173e518e"
+      }
+    },
+    {
+      "id": "D-RSR-DIR-CYCLES-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-DIR-CYCLES-1.md",
+        "sha256": "sha256:9f93e7f7c0c357f2285cca8284c4881fd383e4dcc8a38b02fa53be29bf924391"
+      }
+    },
+    {
+      "id": "D-AGENT-NOTES-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-NOTES-1.md",
+        "sha256": "sha256:3fb876fc9e422e27ad943699d8abb44dda6453285ce6cd38a99c1e2c69c3f988"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-04T14:06:50.602Z",
+  "rationale": "First admission baseline for RUST-SELF-RESOLUTION-1 (RC-13; the human's ruling of 2026-10-04 'rust self resolution slice'): accepted at document cycle 5 (iteration 2). Cycle 1 raised two correct DECISION_REQUIRED items resolved by the operator (D-RSR-INLINE-MODULE-1, D-RSR-DIR-CYCLES-1; RG-REQ-006-L14 restated as revision 2; bootstrap re-pinned to INPUT-18); cycle 2 was blocked by the review baseline's allocation pin after the author's edits (TD-031); cycles 3 and 4 found six defects in the operator's oracle and wording (duplicate rows collapsed, inline key unverified, preservation checked on one corpus, staleness wording, a report crash on changed rows, the inline-key population), all applied; cycle 5 accepted with no findings. The runtime's own review record is kept beside as requirements-review.runtime.json."
+}

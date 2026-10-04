@@ -1,0 +1,229 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-manifest",
+  "baselineId": "RUST-SELF-RESOLUTION-1-INPUT-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "requirements": [
+    {
+      "path": "docs/requirements/rg-req-006-import-resolution-and-dependencies.md",
+      "sha256": "sha256:19f4456df3dd09f1c151292b85b30631469e4e83f6e89e938ca20f7cfa399768"
+    },
+    {
+      "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+      "sha256": "sha256:8f2da793ee99d9f756ec48b66c133b49716db1d079686e2b90d5fce2cc88c68b"
+    },
+    {
+      "path": "docs/requirements/rg-req-001-deterministic-extraction-and-identity.md",
+      "sha256": "sha256:ffed1773d34fee9d22329d932711828715f28e47693e3ae42b9a424da27da342"
+    },
+    {
+      "path": "docs/requirements/rg-req-004-module-model-and-cycles.md",
+      "sha256": "sha256:520e75b678ca756027e5a765d5621747b7c5f6075912488bcce97c484df3cb0b"
+    }
+  ],
+  "dependencies": [
+    {
+      "role": "source",
+      "path": "docs/VISION.md",
+      "sha256": "sha256:84a7d22ba3684b06d5914b3c46ae3cce9f1b3bb274f207f5128704e0261dad37"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/import-resolution-rust-1.md",
+      "sha256": "sha256:0e4e22bd8d833396c337443d02e44439a1670809937d5fb1956d64c726a26731"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/import-resolution-java-1.md",
+      "sha256": "sha256:64643bf118f5cc89db6bdcd23abcc89c8933a38f6b088f4dca85637b3eebaff0"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/deps-classifier-1.md",
+      "sha256": "sha256:27b4fa517231cd6bec8063bbc0e463f8cdc5d3998e1c8511a1d54ea1bbad4082"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/honesty-gate-1.md",
+      "sha256": "sha256:99605ec1f96c75b88a16bda7db349b029cf0048211118e28eeb7776d5d8642d8"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/honesty-gate-2.md",
+      "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/coherence-3.md",
+      "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/headline-truth-1.md",
+      "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/find-facts-1.md",
+      "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3"
+    },
+    {
+      "role": "source",
+      "path": "docs/architecture/artifact-contract-model.md",
+      "sha256": "sha256:acde7231a15e30f99eb5eca5f0a1765c9aa979bb980bcc6c2f459051544dd332"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/symbol-identity-1.md",
+      "sha256": "sha256:0c5960434f1e4f9689069fd1a2b2abdcd997b519841a3bb6d0114434d0f1f647"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/cpp-declarators-1.md",
+      "sha256": "sha256:e882b256aab71af8d5dc7c0961b5dc5774503a563b8f68fdab3064192be8a408"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/modules-method-1.md",
+      "sha256": "sha256:8c5c41ca832099568431228145556caae17d35c0dc3bc093f3b202311971820e"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/cycle-honesty-1.md",
+      "sha256": "sha256:c7ffd289adc43fe6e6c0d89d8313028b909b1045da1701e6e700950ec9e99bfe"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+      "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+    },
+    {
+      "role": "governance",
+      "path": "docs/slices/rg-requirements-bootstrap-1.md",
+      "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b"
+    },
+    {
+      "role": "governance",
+      "path": "docs/requirements/README.md",
+      "sha256": "sha256:94bb90a4551aa20dce17841db600820e0fdd68534637d117435e87678d828638"
+    },
+    {
+      "role": "governance",
+      "path": "CLAUDE.md",
+      "sha256": "sha256:30a113d5cc92684d246cf7b4e004866c9839688ee5aca878403a0c860d5c068a"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+      "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+      "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+      "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+      "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+      "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-SCOPE-1.md",
+      "sha256": "sha256:64d441d4c2b4db35cca1ef7d4ff1fdb5411e38d9fb516cfe86d001c9abc9da5f"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-SELF-IMPORT-1.md",
+      "sha256": "sha256:b72ac006db565a9e43a7865443224a167bea8aa05dc515fffd6a1cd72e115a49"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-INLINE-MODULE-1.md",
+      "sha256": "sha256:fec45d6c0caf6918f4dc2b67d59f1e2b838c99b0340f6c726494523f173e518e"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-RSR-DIR-CYCLES-1.md",
+      "sha256": "sha256:9f93e7f7c0c357f2285cca8284c4881fd383e4dcc8a38b02fa53be29bf924391"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-NOTES-1.md",
+      "sha256": "sha256:3fb876fc9e422e27ad943699d8abb44dda6453285ce6cd38a99c1e2c69c3f988"
+    },
+    {
+      "role": "allocation",
+      "path": "docs/slices/rust-self-resolution-1.md",
+      "sha256": "sha256:4a7b82f80121dd77c700afda8f04a75de77413b4880d7496d067711d2f6c50b5"
+    }
+  ],
+  "reviewObligationIds": [
+    "RG-REQ-006",
+    "RG-REQ-002",
+    "RG-REQ-001",
+    "RG-REQ-004",
+    "RG-REQ-006-L01",
+    "RG-REQ-006-L02",
+    "RG-REQ-006-L03",
+    "RG-REQ-006-L04",
+    "RG-REQ-006-L05",
+    "RG-REQ-006-L06",
+    "RG-REQ-006-L07",
+    "RG-REQ-006-L08",
+    "RG-REQ-006-L09",
+    "RG-REQ-006-L10",
+    "RG-REQ-006-L11",
+    "RG-REQ-006-L12",
+    "RG-REQ-006-L13",
+    "RG-REQ-006-L14",
+    "RG-REQ-002-L01",
+    "RG-REQ-002-L02",
+    "RG-REQ-002-L03",
+    "RG-REQ-002-L04",
+    "RG-REQ-002-L05",
+    "RG-REQ-002-L06",
+    "RG-REQ-002-L07",
+    "RG-REQ-002-L08",
+    "RG-REQ-002-L09",
+    "RG-REQ-002-L10",
+    "RG-REQ-002-L11",
+    "RG-REQ-001-L01",
+    "RG-REQ-001-L02",
+    "RG-REQ-001-L03",
+    "RG-REQ-001-L04",
+    "RG-REQ-001-L05",
+    "RG-REQ-001-L06",
+    "RG-REQ-001-L07",
+    "RG-REQ-001-L08",
+    "RG-REQ-001-L09",
+    "RG-REQ-001-L10",
+    "RG-REQ-004-L01",
+    "RG-REQ-004-L02"
+  ],
+  "requiredDecisionIds": [
+    "D-AGENT-USEFULNESS-FRAME-1",
+    "D-CERTAINTY-MARK-1",
+    "D-REFRESH-STALE-1",
+    "D-STALE-SIGNAL-1",
+    "D-TEST-SCOPE-1",
+    "D-RSR-SCOPE-1",
+    "D-RSR-SELF-IMPORT-1",
+    "D-RSR-INLINE-MODULE-1",
+    "D-RSR-DIR-CYCLES-1",
+    "D-AGENT-NOTES-1"
+  ]
+}
