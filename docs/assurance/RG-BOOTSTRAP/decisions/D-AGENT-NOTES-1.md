@@ -1,0 +1,16 @@
+# D-AGENT-NOTES-1 — every crate carries a short AGENT-NOTES.md in simple English (ASD-STE100), curated by the manager at each closeout from review findings; rmap's own Rust resolution becomes a slice (RUST-SELF-RESOLUTION-1)
+
+Raised: 2026-10-04 by the human, after the manager's development-speed report: "I think the development speed has gotten slow recently — is it because the agents don't remember the repo-graph project structure and work to re-discover it? … would it be easier for agents to write down an agent memory file in each module?"
+
+**The problem in plain words.** Every author, builder and reviewer cycle is a fresh process. Its only memory is the packet and the repository. The manager measured the last four slices: about 40 % of the review cycles corrected facts about repo-graph's internals that the manager did not know when writing the packet (the index-time classifier already matched Java packages by segment; `file_signals` rows appear when a file gains a declared set; `trust` omits modules that own no files; test files are a separate counter; RG-REQ-004 has an L12). The same classes recurred across slices. rmap itself, run on an isolated copy of its own v0.20.0 store, could not answer the questions that cost cycles: `callers ModuleEdgeDiagnostics` → 0 callers; `explain module_edges.rs` → `Imports (0)`, 10 unresolved; `find owned_test_file_count` → no facts.
+
+**Options presented (reward / risk).** A — per-crate AGENT-NOTES.md, tracked, manager-curated at closeout, anchored facts; B — make rmap the structural memory (fix Rust self-resolution); C — both; D — nothing.
+
+Resolved: 2026-10-04 by the HUMAN: **"per-crate even per-module agent notes in short ASD-STE 100 simple English and rust self resolution slice — eating our own dog food was on the menu and we forgot about it"** — option C.
+
+## What this record rules
+- Every crate under `rust/crates/` carries `AGENT-NOTES.md`. A large module may carry its own section or its own file beside the module. The notes are written in ASD-STE100 simple English: short sentences, one fact each, active voice, present tense.
+- Each note states one fact an agent needs and the code it rests on: `<fact>. (<file>:<line>, as of <commit>; source: <slice or review id>)`. A note is a fact about the code as it is, not a rule for agents (rules live in CLAUDE.md and the role prompts).
+- The MANAGER writes and corrects the notes at each slice closeout, from the review findings and the facts it verified; builders and reviewers read them and may challenge them against the code. An agent that finds a note false reports it as a finding; the manager corrects the note with a dated line. A note is never a substitute for reading the code the packet cites.
+- The notes are tracked files, not pinned by any baseline (TD-030 class), and every packet names the crate notes of its candidate paths among the reads.
+- RUST-SELF-RESOLUTION-1 enters the round-eight queue: the slice that makes `callers`, `explain`, `impact` and `find` answer on repo-graph's own Rust code; its packet starts with a root cause measured on the self store (which references are unresolved and why; whether struct fields and type references are indexed as symbols).

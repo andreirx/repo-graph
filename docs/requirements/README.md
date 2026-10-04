@@ -17,7 +17,7 @@ Fourteen slices shipped between v0.17.0 and v0.18.0; one of them regressed the C
 | [RG-REQ-003](rg-req-003-orientation-surfaces.md) | The first sixty seconds: orient, check, explain point the agent at the right places | 10 | 8 met · 1 partial · 1 unmet |
 | [RG-REQ-004](rg-req-004-module-model-and-cycles.md) | Modules found by a stated method, related by resolved imports, agreeing across every surface | 11 | 9 met · 2 unmet |
 | [RG-REQ-005](rg-req-005-symbol-relationship-discovery.md) | A symbol's relationships are discovered, never invented | 10 | 4 met · 3 partial · 3 unmet |
-| [RG-REQ-006](rg-req-006-import-resolution-and-dependencies.md) | Imports resolve to the defining file; a dependency is "used" only on evidence | 12 | 7 met · 5 unmet |
+| [RG-REQ-006](rg-req-006-import-resolution-and-dependencies.md) | Imports resolve to the defining file; a dependency is "used" only on evidence | 14 | 7 met · 7 unmet (per the leaves' evidence lines, last read at v0.18.0–v0.20.0; L03/L08/L09/L11/L12/L13 shipped since and await re-reading; L14 PROPOSED 2026-10-04) |
 | [RG-REQ-007](rg-req-007-boundaries-surfaces-resources-inferences.md) | Boundaries, surfaces, resources and inferences are evidence tracks, labeled as such | 11 | 10 met · 1 unmet |
 | [RG-REQ-008](rg-req-008-documentation-inventory.md) | Documentation found where the authors put it, classified by decidable rules, never authored | 9 | 5 met · 2 partial · 2 unmet |
 | [RG-REQ-009](rg-req-009-quality-signals-trust-reliability.md) | Quality signals, trust and reliability tell the agent where the risk is now, with their basis | 11 | 8 met · 3 unmet |
