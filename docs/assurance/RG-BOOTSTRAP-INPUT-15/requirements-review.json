@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-15-1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-15.json",
+    "sha256": "sha256:82e9e61ace04fb0fee97842cfa3556cbe290155405054f6b970c2a92902e1591"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-15"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-15-1"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T04:03:03.000Z",
+  "report": "Standalone read-only review (codex exec --sandbox read-only, gpt-6-sol, high; session 01a10513-3b71-7cb1-b667-931b5c1e31c0), pass 1, self-contained prompt with the one diff inlined (/private/tmp/rgbootstrap15/review.txt). Subject = INPUT-14 + the re-pin of docs/cli/rmap-contracts.md (changed by the shipped, implementation-reviewed, gate-green DEPS-GRADLE-CATALOG-1B, f69759f4: the deps list catalog-alias and segment-matching text). No requirement, governance file or decision record changed.\n\nRESULT: accepted\n\nThe changes are consistent with RG-REQ-006-L13, RG-REQ-002-L11, and the governance decisions as described inline. Alias resolution is bounded; unresolved references are counted and marked for investigation, not guessed or dropped. The Java group match uses a `.`-segment boundary. The new marking line preserves the existing `deps list` distinction between a determined declaration set and a potentially incomplete one.\n\nHighest-priority recommendation: accept the re-pin, subject to the normal mechanical check that the manifest digest matches the shipped contract file. This verdict does not independently verify the digest or implementation.\n"
+}
