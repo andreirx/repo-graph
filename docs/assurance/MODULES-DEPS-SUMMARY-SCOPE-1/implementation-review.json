@@ -1,0 +1,596 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-MODULES-DEPS-SUMMARY-SCOPE-1-0",
+  "workItemId": "MODULES-DEPS-SUMMARY-SCOPE-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/MODULES-DEPS-SUMMARY-SCOPE-1-INPUT-2.json",
+    "sha256": "sha256:8a5222f5ee6c9291a3417541f393d914d16a44a1b0490ae539808cb1baab7a0c"
+  },
+  "allocation": {
+    "path": "docs/slices/modules-deps-summary-scope-1.md",
+    "sha256": "sha256:8508eba403694ad6ed693d3f4acb6c6cf0251ac909953365f0e4acac71aef8ba"
+  },
+  "subject": {
+    "candidateSha256": "sha256:ad837934b4e08a24534b6dd2ae909199a58de331a2af4240eef6d38b67b4198c",
+    "verification": {
+      "path": "docs/assurance/MODULES-DEPS-SUMMARY-SCOPE-1/verification.json",
+      "sha256": "sha256:528230ea3440372022fc88a1d415730e582633bc492920b1f28cb5604219de72"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-MODULES-DEPS-SUMMARY-SCOPE-1-0"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/MODULES-DEPS-SUMMARY-SCOPE-1-INPUT-2.json",
+      "sha256": "sha256:8a5222f5ee6c9291a3417541f393d914d16a44a1b0490ae539808cb1baab7a0c"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:b2effee57f0033adfec8929c441c40ba0a0f5d00b9d508ce77a39a762efe8a9f",
+        "byteLength": 28968
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/MODULES-DEPS-SUMMARY-SCOPE-1-INPUT-2.json",
+        "sha256": "sha256:8a5222f5ee6c9291a3417541f393d914d16a44a1b0490ae539808cb1baab7a0c",
+        "byteLength": 4430
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+        "sha256": "sha256:8f2da793ee99d9f756ec48b66c133b49716db1d079686e2b90d5fce2cc88c68b",
+        "byteLength": 17414
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-004-module-model-and-cycles.md",
+        "sha256": "sha256:520e75b678ca756027e5a765d5621747b7c5f6075912488bcce97c484df3cb0b",
+        "byteLength": 17948
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:84a7d22ba3684b06d5914b3c46ae3cce9f1b3bb274f207f5128704e0261dad37",
+        "byteLength": 21622,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/honesty-gate-2.md",
+        "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed",
+        "byteLength": 5569,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/coherence-3.md",
+        "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36",
+        "byteLength": 3408,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/headline-truth-1.md",
+        "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351",
+        "byteLength": 8211,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/find-facts-1.md",
+        "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3",
+        "byteLength": 8017,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/modules-method-1.md",
+        "sha256": "sha256:8c5c41ca832099568431228145556caae17d35c0dc3bc093f3b202311971820e",
+        "byteLength": 5226,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cycle-honesty-1.md",
+        "sha256": "sha256:c7ffd289adc43fe6e6c0d89d8313028b909b1045da1701e6e700950ec9e99bfe",
+        "byteLength": 6001,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/import-resolution-rust-1.md",
+        "sha256": "sha256:0e4e22bd8d833396c337443d02e44439a1670809937d5fb1956d64c726a26731",
+        "byteLength": 9053,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:6bafbfb4a000ae346b79ae396adbd7564f268437a511fd556e89cde2ecda1c47",
+        "byteLength": 13830
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:30a113d5cc92684d246cf7b4e004866c9839688ee5aca878403a0c860d5c068a",
+        "byteLength": 11784
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072",
+        "byteLength": 7615
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27",
+        "byteLength": 3147
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-TEST-SCOPE-1.md",
+        "sha256": "sha256:00f93e13b2f61e0b4c8a15ca2a1bdea1432c773cd1000012e5372fd53f33051d",
+        "byteLength": 1283
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-MDSS-SCOPE-1.md",
+        "sha256": "sha256:51b7730b8b332171c366ffdc669060c377d6bc0b791849005af627e742b64269",
+        "byteLength": 3749
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/modules-deps-summary-scope-1.md",
+        "sha256": "sha256:8508eba403694ad6ed693d3f4acb6c6cf0251ac909953365f0e4acac71aef8ba",
+        "byteLength": 78397
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/MODULES-DEPS-SUMMARY-SCOPE-1-INPUT-2/requirements-review.json",
+        "sha256": "sha256:249e4989930249b09fc5e9676109bdb7e1596ff55dfe589a02fa161633d6d284",
+        "byteLength": 57442
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/MODULES-DEPS-SUMMARY-SCOPE-1-INPUT-2/baseline-approval.json",
+        "sha256": "sha256:8ef19a0d7a70a84b46c322d71f2b90729cf01b7a158878dfbb833958588969c0",
+        "byteLength": 2618
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:e4e9c5944a15f5fe4b7cdbfb4483a1bf5436cf18aa6c608452c30419abeedd55",
+        "byteLength": 7940
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/selection.md",
+        "sha256": "sha256:b74834d5e7c057097ec8f8dfd0e465e78e521c9728f7a43af1ff9edef17ac8ac",
+        "byteLength": 3060
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-0",
+        "sha256": "sha256:7159b39b28700334795255eb30c56cff4da77ea756b496452cbe033ad08e9908",
+        "byteLength": 7327
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-0",
+        "sha256": "sha256:4f71cf94e24ec0eb24cd4b053da7810f80a135d7215b64da9a635901f04923c6",
+        "byteLength": 2169
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review-subject",
+        "path": ".agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/verification-draft-0.json",
+        "sha256": "sha256:528230ea3440372022fc88a1d415730e582633bc492920b1f28cb5604219de72",
+        "byteLength": 56300,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-command-0",
+        "sha256": "sha256:f9d8c9c80f5e11f390383e01d05fface2bea187476aa94f691a31ca6cf6789bc",
+        "byteLength": 1127
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:b7da3eed9e10b866e438f2422f7ea3ec812015c3130574eb460c20b80d02ac42",
+        "byteLength": 12899
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:b2effee57f0033adfec8929c441c40ba0a0f5d00b9d508ce77a39a762efe8a9f",
+        "byteLength": 28968
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:441d109d1abf4b374ff6cdfcb194acc5f79c13cd23bae1629e084c21607565b8",
+        "byteLength": 265962
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-002-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L11",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L11",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-004-L12",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-MDSS-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-MDSS-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-MDSS-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-MDSS-04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-MDSS-05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "MDSS-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "MDSS-C01 passed in builder execution; reviewer inspected its logs, captured answers, and code but did not rerun Cargo or live rmap."
+      }
+    },
+    {
+      "checkId": "MDSS-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "MDSS-C02 passed in builder execution; reviewer inspected its logs, captured answers, and code but did not rerun Cargo or live rmap."
+      }
+    },
+    {
+      "checkId": "MDSS-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "MDSS-C03 passed in builder execution; reviewer inspected its logs, captured answers, and code but did not rerun Cargo or live rmap."
+      }
+    },
+    {
+      "checkId": "MDSS-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "MDSS-C04 passed in builder execution; reviewer inspected its logs, captured answers, and code but did not rerun Cargo or live rmap."
+      }
+    },
+    {
+      "checkId": "MDSS-C05",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "MDSS-C05 passes by source inspection: the shared derivation adds per-module counts without changing its edge and remainder calculations; the daemon applies the module and direction predicates; the renderer distinguishes all five specified scope cases.",
+          "supportingEvidence": [
+            "MDSS-C05 passes by source inspection: the shared derivation adds per-module counts without changing its edge and remainder calculations; the daemon applies the module and direction predicates; the renderer distinguishes all five specified scope cases."
+          ]
+        }
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "docs/cli/rmap-contracts.md",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/classification/src/module_edges.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/import_partition_view.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/modules_deps.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-10-04T05:18:11.906Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nRESULT: accepted\n\n**OBSERVED:** The five changed paths match checkpoint `ad837934…` at base revision `f4b6a52a`. The diff stays within the approved slice. MDSS-C05 passes by source inspection: the shared derivation adds per-module counts without changing its edge and remainder calculations; the daemon applies the module and direction predicates; the renderer distinguishes all five specified scope cases. No new module or dependency edge is introduced.\n\n**BUILDER-EXECUTED, not independently rerun:** MDSS-C01–C04 passed. I inspected their logs, the captured answers, and the code. I independently compared both unfiltered captures with `cmp`; both are byte-identical. The changed leveldb answer shows `Summary (module table, all directions):` with **46 / 19 / 0**, instead of the former repo-wide **185 / 140 / 18**. Its four edge rows still sum to 46. Poco `Foundation` shows **1653 / 1751 / 27**. As a residual witness, `Foundation/src/NumericString.cpp:27` in the analyzed checkout is `#include \"bignum-dtoa.cc\"`; the captured JSON shows the unowned-target count rising **15 → 31** only with `--include-inferred`.\n\n**Obligation assessment:** RG-REQ-002 and RG-REQ-004 are supported within this slice. RG-REQ-002-L03 is met for the changed Summary. RG-REQ-002-L01, L02, and L04–L11; RG-REQ-004-L01–L12; and P-MDSS-01–05 are preserved by the inspected code, named tests, and bounded before/after evidence. MDSS-C01–C04 rely on builder execution; MDSS-C05 is my inspection. The five paths each serve the allocation: `module_edges.rs` computes the counts, `dispatch.rs` scopes them, `import_partition_view.rs` tests dispatch, `modules_deps.rs` renders the scope, and `rmap-contracts.md` states the CLI contract.\n\n**Limitations:** My read-only environment did not rerun Cargo or live `rmap`. The operator’s workspace and dogfood gates remain pending. The retained label “cross-module dependencies” counts imports, not distinct dependency edges; the approved slice preserves that wording and records its correction as a follow-up.\n\nManager interpretation by manager-claude-fable-5-1: Bookkeeper attempt 1 transcribed MDSS-C05's verification as relied-on-builder-evidence, which the owner-aware rule (TD-026) refuses for a reviewer-owned inspection check. The reviewer's raw report states the inspection itself: \"MDSS-C05 passes by source inspection: the shared derivation adds per-module counts without changing its edge and remainder calculations; the daemon applies the module and direction predicates; the renderer distinguishes all five specified scope cases.\" Mechanical repair of that one field to the verification kind the report states (reproduced, passed, the report sentence as supporting evidence) — the same repair as IUR-C07, TSA-C05 and DGC-B05; every other assessment, the result (accepted), the zero findings and the report are the bookkeeper's transcription of the reviewer's output, unchanged. No conversion of meaning. Source provider run review-MODULES-DEPS-SUMMARY-SCOPE-1-0; retained output .agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/review-0.json sha256:43f52fa144ada515012f15e9876738e9b73e2a715b9c6dc0fba446c874af7f97. The provider remains the performer; this interpretation is not independent execution evidence."
+}

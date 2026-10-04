@@ -998,6 +998,189 @@ mod tests {
         );
     }
 
+    // ── modules deps Summary scope (MODULES-DEPS-SUMMARY-SCOPE-1) ──
+
+    /// `mini_leveldb` extended with intra-module imports and unowned files (`tools/`,
+    /// `third_party/` are owned by no module candidate): `table/block.cc` → `table/table.cc`
+    /// (intra, production), `table/table_test.cc` → `table/table.cc` (intra, test),
+    /// `tools/bench.cc` → `table/table.cc` (unowned source into table), `table/table.cc` →
+    /// `third_party/zlib.h` (table into an unowned target), `tools/bench.cc` →
+    /// `third_party/zlib.h` (both unowned), `db/db.cc` → `db/db_impl.cc` (intra db),
+    /// `table/table.cc` → `util/util.cc` (cross, production).
+    ///
+    /// Default view, module `table`, by hand: cross all 2 (db→table 1, table→util 1), outbound 1,
+    /// inbound 1; intra 1 (the test import is excluded); unowned source into table 1; table into
+    /// unowned target 1. Repo-wide default: total 8, cross 3, intra 2, source unowned 2, target
+    /// unowned 1.
+    fn mini_leveldb_with_intra_and_unowned_imports() -> Fx {
+        fixture(
+            &[
+                ("db/db.cc", false),
+                ("db/db_impl.cc", false),
+                ("db/db_test.cc", true),
+                ("table/table.cc", false),
+                ("table/block.cc", false),
+                ("table/table_test.cc", true),
+                ("util/util.cc", false),
+                ("util/testutil.cc", false),
+                ("tools/bench.cc", false),
+                ("third_party/zlib.h", false),
+            ],
+            &[("db", &["db"]), ("table", &["table"]), ("util", &["util"])],
+            &[
+                ("db/db.cc", "table/table.cc", "static"),
+                ("db/db_test.cc", "table/table.cc", "static"),
+                ("table/table_test.cc", "db/db.cc", "static"),
+                ("util/testutil.cc", "db/db.cc", "static"),
+                ("db/db.cc", "util/util.cc", "inferred"),
+                ("table/block.cc", "table/table.cc", "static"),
+                ("table/table_test.cc", "table/table.cc", "static"),
+                ("tools/bench.cc", "table/table.cc", "static"),
+                ("table/table.cc", "third_party/zlib.h", "static"),
+                ("tools/bench.cc", "third_party/zlib.h", "static"),
+                ("db/db.cc", "db/db_impl.cc", "static"),
+                ("table/table.cc", "util/util.cc", "static"),
+            ],
+        )
+    }
+
+    fn diag(total: u64, cross: u64, intra: u64, src_unowned: u64, tgt_unowned: u64) -> Value {
+        json!({
+            "imports_total": total,
+            "imports_cross_module": cross,
+            "imports_intra_module": intra,
+            "imports_source_unowned": src_unowned,
+            "imports_target_unowned": tgt_unowned,
+        })
+    }
+
+    fn edge_sum(v: &Value) -> u64 {
+        v["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["import_count"].as_u64().unwrap())
+            .sum()
+    }
+
+    #[test]
+    fn modules_deps_with_a_module_emits_that_modules_counters_with_scope_module() {
+        let fx = mini_leveldb_with_intra_and_unowned_imports();
+        let v = fx.ok("modules_deps", json!({"module": "table"}));
+        assert_eq!(v["module"], "table");
+        assert_eq!(v["diagnostics_scope"], "module");
+        assert_eq!(v["diagnostics"], diag(5, 2, 1, 1, 1));
+        let d = &v["diagnostics"];
+        assert_eq!(
+            d["imports_total"].as_u64().unwrap(),
+            [
+                "imports_cross_module",
+                "imports_intra_module",
+                "imports_source_unowned",
+                "imports_target_unowned"
+            ]
+            .iter()
+            .map(|k| d[*k].as_u64().unwrap())
+            .sum::<u64>()
+        );
+        // With --include-tests the module's intra-module test import is admitted.
+        let t = fx.ok(
+            "modules_deps",
+            json!({"module": "table", "include_tests": true}),
+        );
+        assert_eq!(t["diagnostics_scope"], "module");
+        // cross: db→table 2, table→db 1, table→util 1; intra: block + table_test.
+        assert_eq!(t["diagnostics"], diag(8, 4, 2, 1, 1));
+        // A module whose only admitted imports are cross-module answers measured zeros for the
+        // three map counters (util: util→db and table→util), never null.
+        let u = fx.ok("modules_deps", json!({"module": "util"}));
+        assert_eq!(u["diagnostics_scope"], "module");
+        assert_eq!(u["diagnostics"], diag(2, 2, 0, 0, 0));
+    }
+
+    #[test]
+    fn modules_deps_module_cross_module_figure_equals_the_sum_of_the_filtered_edges_under_each_direction(
+    ) {
+        let fx = mini_leveldb_with_intra_and_unowned_imports();
+        for (direction, want) in [("all", 2), ("outbound", 1), ("inbound", 1)] {
+            for extra in [
+                json!({}),
+                json!({"include_tests": true, "include_inferred": true}),
+            ] {
+                let mut params = json!({"module": "table", "direction": direction});
+                params
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(extra.as_object().unwrap().clone());
+                let v = fx.ok("modules_deps", params);
+                assert_eq!(
+                    v["diagnostics"]["imports_cross_module"].as_u64().unwrap(),
+                    edge_sum(&v),
+                    "{direction} {extra}"
+                );
+                if extra == json!({}) {
+                    assert_eq!(edge_sum(&v), want, "{direction}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn modules_deps_module_counters_count_only_the_imports_the_direction_selects() {
+        let fx = mini_leveldb_with_intra_and_unowned_imports();
+        let out = fx.ok(
+            "modules_deps",
+            json!({"module": "table", "direction": "outbound"}),
+        );
+        assert_eq!(out["diagnostics_scope"], "module");
+        assert_eq!(out["diagnostics"], diag(3, 1, 1, 0, 1));
+        let inb = fx.ok(
+            "modules_deps",
+            json!({"module": "table", "direction": "inbound"}),
+        );
+        assert_eq!(inb["diagnostics_scope"], "module");
+        assert_eq!(inb["diagnostics"], diag(3, 1, 1, 1, 0));
+        let all = fx.ok(
+            "modules_deps",
+            json!({"module": "table", "direction": "all"}),
+        );
+        for v in [&out, &inb, &all] {
+            assert_eq!(v["diagnostics"]["imports_intra_module"], 1);
+        }
+    }
+
+    #[test]
+    fn modules_deps_without_a_module_emits_todays_repo_wide_counters_with_scope_repo() {
+        let fx = mini_leveldb_with_intra_and_unowned_imports();
+        let v = fx.ok("modules_deps", json!({}));
+        assert_eq!(v["diagnostics_scope"], "repo");
+        assert!(v.get("module").is_none());
+        assert_eq!(v["diagnostics"], diag(8, 3, 2, 2, 1));
+        let t = fx.ok("modules_deps", json!({"include_tests": true}));
+        assert_eq!(t["diagnostics_scope"], "repo");
+        assert_eq!(t["diagnostics"], diag(11, 5, 3, 2, 1));
+    }
+
+    #[test]
+    fn modules_violations_diagnostics_are_unchanged() {
+        let fx = mini_leveldb_with_intra_and_unowned_imports();
+        let v = fx.ok("modules_violations", json!({}));
+        // The governance population (certain imports of every test status), repo-wide.
+        assert_eq!(
+            v["diagnostics"],
+            json!({
+                "imports_edges_total": 11,
+                "imports_source_no_file": 0,
+                "imports_target_no_file": 0,
+                "imports_source_no_module": 2,
+                "imports_target_no_module": 1,
+                "imports_intra_module": 3,
+                "imports_cross_module": 5,
+            })
+        );
+        assert!(v.get("diagnostics_scope").is_none());
+    }
+
     fn member_sets(v: &Value) -> Vec<Vec<String>> {
         let mut out: Vec<Vec<String>> = v["cycles"]
             .as_array()

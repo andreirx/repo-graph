@@ -1,0 +1,342 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-MODULES-DEPS-SUMMARY-SCOPE-1-0",
+  "workItemId": "MODULES-DEPS-SUMMARY-SCOPE-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/MODULES-DEPS-SUMMARY-SCOPE-1-INPUT-2.json",
+    "sha256": "sha256:8a5222f5ee6c9291a3417541f393d914d16a44a1b0490ae539808cb1baab7a0c"
+  },
+  "allocation": {
+    "path": "docs/slices/modules-deps-summary-scope-1.md",
+    "sha256": "sha256:8508eba403694ad6ed693d3f4acb6c6cf0251ac909953365f0e4acac71aef8ba"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "f4b6a52a2e5155f5d87d3bf92c3d4402450a1a6f",
+    "entries": [
+      {
+        "path": "docs/cli/rmap-contracts.md",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:bc4e533e56c8ce560085f313d53e7a94194e1bf16e1ce53e649e6ecb183bdf53",
+          "byteLength": 67903
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:6f6850a593bdbf375b28c18c097dbfe508cc891ab682c7b7bba632bb58460493",
+          "byteLength": 69966
+        }
+      },
+      {
+        "path": "rust/crates/classification/src/module_edges.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:05e7ec3a8f7a607defa49c975058c59f730b16a86ca8b6814f4b7ca43208d921",
+          "byteLength": 30959
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:5a2f6dea9c4d1bf6e00b78dac109710e8270db243000e60a0a2b8dd7b260e1ed",
+          "byteLength": 43163
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:578bdeb324a477c8ac825583d319c737e26b9cc7cfe27d5094377642301fb4e8",
+          "byteLength": 500120
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:2039b713f9fe4cddc04f7a1a39de3b8e0c5e94ddc0f66f96983d128a0179a014",
+          "byteLength": 502159
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/import_partition_view.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:9397d6b5b87c32314d6f77dc36cd849cf7d34bc03a21bf381aa84ebe2b9f5a9e",
+          "byteLength": 93770
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:662f7111b31dfffe5f345696571700b0264c677eaee44b6932cc7a662c953e3a",
+          "byteLength": 101577
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/modules_deps.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:b3a67f9fce00ccc738d7b85f4667a19893596279dee0d9be5449f0bb87021ed4",
+          "byteLength": 12923
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:d112525a2ebc54dcd8c6873ccbd185ad2c4a17bd3fc67b9013ba633f37877d17",
+          "byteLength": 20035
+        }
+      }
+    ],
+    "sha256": "sha256:ad837934b4e08a24534b6dd2ae909199a58de331a2af4240eef6d38b67b4198c"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-MODULES-DEPS-SUMMARY-SCOPE-1-0"
+  },
+  "checks": [
+    {
+      "checkId": "MDSS-C01",
+      "obligationIds": [
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L11",
+        "RG-REQ-004-L01",
+        "RG-REQ-004-L02",
+        "RG-REQ-004-L07",
+        "P-MDSS-01",
+        "P-MDSS-03",
+        "P-MDSS-04",
+        "RG-REQ-004-L12"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree; no index run — the slice is query-time only (no INDEXER_VERSION change); isolated rmap only (RMAP_STATE_ROOT/RMAP_SOCKET_PATH under the builder's own /private/tmp/MODULES-DEPS-SUMMARY-SCOPE-1-run.* directory, RMAP_TRANSPORT=stdio, every background pass off) serving COPIES of the manager's before-roots, which are read-only; logs and captures under .agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/{logs,after}/",
+        "command": "G=../.agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/logs && mkdir -p $G && ( set -o pipefail; cargo test -p repo-graph-classification 2>&1 | tee $G/mdss-01.txt ) && grep -qE '^test result: ok\\.' $G/mdss-01.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' $G/mdss-01.txt && for t in per_module_counters_count_intra_module_imports_per_module per_module_counters_count_unowned_source_imports_by_target_module per_module_counters_count_unowned_target_imports_by_source_module derivation_outputs_other_than_per_module_equal_their_literals_in_every_view per_module_counters_count_only_the_imports_the_view_admits module_edge_carries_its_four_partition_counts_and_the_unknown_tally a_relation_in_two_partitions_counts_each_import_in_its_own_partition view_edge_counts_only_admitted_imports_and_their_source_files a_relation_only_through_excluded_imports_leaves_the_view_and_is_counted_in_the_remainder partitions_of_a_pair_outside_the_result_is_absent_never_zero; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" $G/mdss-01.txt || grep -qE \"^test $t \\.\\.\\. ok$\" $G/mdss-01.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-classification -- --list 2>/dev/null | grep -c ': test$')\" -ge 322 && test \"$(git -C .. diff -U0 HEAD -- rust/crates/classification/src/module_edges.rs | grep -cE '^-\\s*fn [a-z_0-9]+\\(')\" -eq 0",
+        "inputs": "The WHOLE classification suite (317 listed at HEAD f69759f4 and at 4e7bd983, EXECUTED `-- --list` 2026-10-04; floor >= 322 = 317 + 5). NEW (5) in module_edges.rs, each through `derive_module_dependency_edges_in_view`. Fixture F4 has two owned modules A and X and one unowned file, and carries one import in EACH of the four partitions (production certain, test certain, production inferred, test inferred) for each shape: cross-module A→X and X→A, intra-module X→X, unowned source into X, X into an unowned target, and unowned to unowned. `per_module_counters_count_intra_module_imports_per_module` (an import whose source and target are owned by X counts in X's `intra_module` and in no other module's entry; module A, whose imports in F4 are all cross-module, has NO map entry under any view, because the map records only intra-module and unowned-endpoint imports and a missing entry means those three counters are zero, not that A has no imports — A's cross-module count stays on the edges' `import_count`); `per_module_counters_count_unowned_source_imports_by_target_module` (an unowned source into a file owned by X counts in X's `source_unowned_into`; an import with BOTH files unowned counts in no module's entry); `per_module_counters_count_unowned_target_imports_by_source_module` (a source owned by X into an unowned target counts in X's `target_unowned_from`); `derivation_outputs_other_than_per_module_equal_their_literals_in_every_view` (on F4 under each of `ImportView::DEFAULT`, `CERTAIN_WITH_TESTS`, `WITH_INFERRED` and `ALL`: the edges with `import_count` and `source_file_count`, `edge_partitions`, the remainder and the five repo-wide counters equal literals written by hand from F4's definition, not computed by the code under test — the outputs that `modules list`, `modules show`, `cycles`, trust, orient and `modules violations` consume); `per_module_counters_count_only_the_imports_the_view_admits` (on F4 under each of the four views, X's three counters include exactly the admitted partitions: production certain always; test certain only with include_tests; production inferred only with include_inferred — the RG-REQ-002-L11 inferred partition tested on its own; test inferred only under ALL). Keyed by canonical path, which is the key the handler's edge filter compares (dispatch.rs:8472-8486). No existing test function is deleted (the `git diff -U0` assertion), and every existing module_edges test keeps its assertions. RG-REQ-004-L12 (preserved, ratified by D-TEST-SCOPE-1): the import view the derivation partitions by is unchanged, held by the excluded-import rule of SLICE_DOC 2.1 item 1 (`module_edges.rs:218-268`, `import_partition.rs:420-439`): an import the view does not admit adds to no diagnostics counter (repo-wide or per-module) and to no edge's `import_count` or `source_file_count`; an excluded CROSS-MODULE import (both files owned, by different modules) is still counted in its relation's partition cell, which `edge_partitions` carries when the relation has at least one admitted import, and adds to the `imports` count of its partition's remainder group (the group whose flags would show it); a relation with no admitted import adds one to the `edges` count of exactly one group, the first group in the order tests, inferred, tests-and-inferred in which the relation has an excluded import (`import_partition.rs:429-436`), so a relation whose excluded imports fall in two groups (for example one test certain and one production inferred import) adds to both groups' `imports` and only to the tests group's `edges`; an excluded intra-module import or an excluded import with an unowned endpoint is in no partition cell and in no remainder. NEW: `per_module_counters_count_only_the_imports_the_view_admits` asserts that under `ImportView::DEFAULT` X's three counters count only the production certain imports; that `CERTAIN_WITH_TESTS` (`--include-tests`) adds exactly the test certain imports; that `WITH_INFERRED` (`--include-inferred`) adds exactly the production inferred imports; and that `ALL` adds all four partitions. `derivation_outputs_other_than_per_module_equal_their_literals_in_every_view` asserts, under all four views, that the edges, `edge_partitions` and the remainder equal hand-written literals that follow the rule: on F4 the relations A→X and X→A carry all four of their partition cells in `edge_partitions` in every view (each has an admitted production certain import), the remainder's `imports` count only the excluded imports of those two relations, with `edges` 0, and the excluded intra-module (X→X) and unowned-endpoint imports appear in no edge, no partition cell and no remainder group. EXISTING (TEST-EDGE-SCOPE-1B, present verbatim at HEAD 4e7bd983, each run by name in the command and kept with unchanged assertions): `module_edge_carries_its_four_partition_counts_and_the_unknown_tally`, `a_relation_in_two_partitions_counts_each_import_in_its_own_partition`, `view_edge_counts_only_admitted_imports_and_their_source_files`, `a_relation_only_through_excluded_imports_leaves_the_view_and_is_counted_in_the_remainder`, `partitions_of_a_pair_outside_the_result_is_absent_never_zero`. Between them they pin: an in-view edge keeps its excluded imports in `edge_partitions` while its `import_count` counts only the admitted ones, with the unknown-test-status tally (an import whose test status is unknown is admitted with production); the excluded imports of an in-view relation count in the remainder's `imports` with `edges` 0; an edge's `import_count`, `source_file_count` and the diagnostics count only admitted imports; a relation reachable only through excluded imports leaves the view, counts in the remainder's `imports` of each group its excluded imports fall in, and adds one to the `edges` of only the first such group in the order tests, inferred, tests-and-inferred; and a pair outside the view has no partition record (never a zero)."
+      },
+      "expected": "exit 0: the derivation returns, beside the five repo-wide counters it returns today, a per-module entry for exactly the modules to which an admitted intra-module or unowned-endpoint import adds, counting exactly the partitions the view admits (a module whose admitted imports are all cross-module has no entry; its cross-module figure stays on the edges); every preserved obligation this check carries is unchanged (no behavior change): the edges, `edge_partitions`, the remainder and the five repo-wide counter values equal their hand-written literals in all four views, and every existing module_edges test is preserved by name with unchanged assertions; the partition behaviour of RG-REQ-004-L12 is unchanged and follows the excluded-import rule of SLICE_DOC 2.1 item 1 (`module_edges.rs:218-268`, `import_partition.rs:420-439`): an import the view does not admit adds to no diagnostics counter (repo-wide or per-module) and to no edge's `import_count` or `source_file_count`; an excluded CROSS-MODULE import (both files owned, by different modules) is still counted in its relation's partition cell, which `edge_partitions` carries when the relation has at least one admitted import, and adds to the `imports` count of its partition's remainder group (the group whose flags would show it); a relation with no admitted import adds one to the `edges` count of exactly one group, the first group in the order tests, inferred, tests-and-inferred in which the relation has an excluded import (`import_partition.rs:429-436`), so a relation whose excluded imports fall in two groups (for example one test certain and one production inferred import) adds to both groups' `imports` and only to the tests group's `edges`; an excluded intra-module import or an excluded import with an unowned endpoint is in no partition cell and in no remainder; the five TEST-EDGE-SCOPE-1B partition tests pass by name with unchanged assertions",
+      "candidateSha256": "sha256:ad837934b4e08a24534b6dd2ae909199a58de331a2af4240eef6d38b67b4198c",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Passed, exit 0: 319 passed; 0 failed. All 10 named tests passed; --list counts 322 (floor 322). No test function was removed.",
+        "supportingEvidence": [
+          ".agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/logs/mdss-01.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "MDSS-C02",
+      "obligationIds": [
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L04",
+        "RG-REQ-004-L01",
+        "RG-REQ-004-L10",
+        "P-MDSS-01",
+        "P-MDSS-02",
+        "P-MDSS-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree; no index run — the slice is query-time only (no INDEXER_VERSION change); isolated rmap only (RMAP_STATE_ROOT/RMAP_SOCKET_PATH under the builder's own /private/tmp/MODULES-DEPS-SUMMARY-SCOPE-1-run.* directory, RMAP_TRANSPORT=stdio, every background pass off) serving COPIES of the manager's before-roots, which are read-only; logs and captures under .agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/{logs,after}/",
+        "command": "G=../.agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/logs && mkdir -p $G && ( set -o pipefail; cargo test -p repo-graph-daemon-runtime --lib 2>&1 | tee $G/mdss-02dr.txt ) && grep -qE '^test result: ok\\.' $G/mdss-02dr.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' $G/mdss-02dr.txt && for t in modules_deps_with_a_module_emits_that_modules_counters_with_scope_module modules_deps_module_cross_module_figure_equals_the_sum_of_the_filtered_edges_under_each_direction modules_deps_module_counters_count_only_the_imports_the_direction_selects modules_deps_without_a_module_emits_todays_repo_wide_counters_with_scope_repo modules_violations_diagnostics_are_unchanged modules_deps_include_tests_restores_test_imports modules_violations_keep_test_imports_and_count_inferred_ones_not_judged; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" $G/mdss-02dr.txt || grep -qE \"^test $t \\.\\.\\. ok$\" $G/mdss-02dr.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-daemon-runtime --lib -- --list 2>/dev/null | grep -c ': test$')\" -ge 889 && ( set -o pipefail; cargo test -p repo-graph-daemon-runtime --test consolidation_witness 2>&1 | tee $G/mdss-02w.txt ) && grep -qE '^test result: ok\\.' $G/mdss-02w.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' $G/mdss-02w.txt && grep -qE '^test result: ok\\. 15 passed; 0 failed' $G/mdss-02w.txt && for t in every_dispatch_arm_is_declared_in_manifest fact_class_declarations_are_valid reader_set_matches_sanctioned_list_on_head test_scaffolding_readers_are_cfg_test_gated_on_head; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" $G/mdss-02w.txt || grep -qE \"^test $t \\.\\.\\. ok$\" $G/mdss-02w.txt || { echo \"MISSING $t\"; exit 1; }; done && ( set -o pipefail; cargo test -p repo-graph-rgr --lib 2>&1 | tee $G/mdss-02rgr.txt ) && grep -qE '^test result: ok\\.' $G/mdss-02rgr.txt && ! grep -E '^test .* FAILED$|^thread .* panicked at|^test result: FAILED|^error(\\[E[0-9]+\\])?: ' $G/mdss-02rgr.txt && for t in deps_render_module_summary_states_the_module_and_direction_with_the_modules_figures deps_render_unfiltered_without_a_scope_key_renders_as_today deps_render_repo_wide_figures_beside_a_module_name_the_whole_repository deps_render_module_scope_without_a_module_name_states_that_reason deps_render_unknown_scope_prints_the_stored_value_marked deps_render_shows_summary deps_render_shows_edges deps_render_shows_edge_counts; do grep -qE \"^test .*::$t \\.\\.\\. ok$\" $G/mdss-02rgr.txt || grep -qE \"^test $t \\.\\.\\. ok$\" $G/mdss-02rgr.txt || { echo \"MISSING $t\"; exit 1; }; done && test \"$(cargo test -p repo-graph-rgr --lib -- --list 2>/dev/null | grep -c ': test$')\" -ge 1478",
+        "inputs": "daemon-runtime `--lib` (884 at HEAD; floor >= 889 = 884 + 5), the daemon-runtime reviewed-boundary witness `--test consolidation_witness` (15 tests at HEAD, all must pass; four named) and rgr `--lib` (1473; floor >= 1478 = 1473 + 5). NEW daemon-runtime (5), in the `#[cfg(test)] mod tests` of import_partition_view.rs on its `mini_leveldb` dispatch fixture (extended there if a case needs an unowned file or an intra-module import): `modules_deps_with_a_module_emits_that_modules_counters_with_scope_module` (with a module the answer carries `diagnostics_scope: \"module\"` and `diagnostics` = that module's counters, `imports_total` = the sum of the four others); `modules_deps_module_cross_module_figure_equals_the_sum_of_the_filtered_edges_under_each_direction` (all / outbound / inbound: `imports_cross_module` = the sum of `results[].import_count`); `modules_deps_module_counters_count_only_the_imports_the_direction_selects` (outbound: `imports_source_unowned` = 0 and `imports_target_unowned` = X's; inbound: `imports_target_unowned` = 0 and `imports_source_unowned` = X's; `imports_intra_module` = X's under every direction); `modules_deps_without_a_module_emits_todays_repo_wide_counters_with_scope_repo` (no module: the five repo-wide values and `diagnostics_scope: \"repo\"`); `modules_violations_diagnostics_are_unchanged` (the `modules violations` diagnostics object equals the repo-wide derivation counters, with no `diagnostics_scope` key). EXISTING daemon by name: `modules_deps_include_tests_restores_test_imports`, `modules_violations_keep_test_imports_and_count_inferred_ones_not_judged`. NEW rgr (5) in modules_deps.rs, one per decode case of SLICE_DOC 2.1 item 3: `deps_render_module_summary_states_the_module_and_direction_with_the_modules_figures` (scope `module` with `module: X` renders `Summary (module X, <label>):` for each of the three `Queried:` labels, then the three lines with the answer's figures); `deps_render_unfiltered_without_a_scope_key_renders_as_today` (no `module` and no `diagnostics_scope`, and no `module` with `repo`: `Summary:` byte-identical to today); `deps_render_repo_wide_figures_beside_a_module_name_the_whole_repository` (`module: X` with `diagnostics_scope` absent — an older daemon, whose figures are repo-wide — or `repo`: the header is `Summary (whole repository, not module X):`, never `Summary:` under `Module: X` and never the scoped header); `deps_render_module_scope_without_a_module_name_states_that_reason` (`diagnostics_scope: \"module\"` without a `module` key: `Summary (diagnostics scope \"module\" but the answer names no module):`); `deps_render_unknown_scope_prints_the_stored_value_marked` (a value the build has no phrase for: `Summary (diagnostics scope \"<value>\" — not a scope this build reads):`). EXISTING rgr by name: `deps_render_shows_summary`, `deps_render_shows_edges`, `deps_render_shows_edge_counts`."
+      },
+      "expected": "exit 0: under a module filter the JSON diagnostics are the module's own counts over the imports the direction selects with `diagnostics_scope: module`, and the cross-module figure equals the rendered edges' sum in every direction; the human block under a module states the module and the direction in its header; repo-wide figures beside a module name are headed as the whole repository, a module scope without a module name states that reason, and an unknown scope prints as stored and marked; the witness passes; every preserved obligation this check carries is unchanged (no behavior change): the unscoped `Summary:` block and its JSON values, the edge rows, the remainder, the `modules violations` diagnostics, an older unfiltered envelope's render and the witness manifests are preserved by the existing tests, by name with unchanged assertions",
+      "candidateSha256": "sha256:ad837934b4e08a24534b6dd2ae909199a58de331a2af4240eef6d38b67b4198c",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Passed, exit 0: daemon-runtime 888 passed; 0 failed; 1 ignored (889 listed, floor 889); witness 15 passed; 0 failed; rgr 1478 passed; 0 failed (floor 1478). All named tests passed.",
+        "supportingEvidence": [
+          ".agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/logs/mdss-02dr.txt",
+          ".agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/logs/mdss-02w.txt",
+          ".agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/logs/mdss-02rgr.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "MDSS-C03",
+      "obligationIds": [
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L05",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L07",
+        "RG-REQ-002-L08",
+        "RG-REQ-002-L09",
+        "RG-REQ-002-L10",
+        "RG-REQ-004-L03",
+        "RG-REQ-004-L04",
+        "RG-REQ-004-L05",
+        "RG-REQ-004-L06",
+        "RG-REQ-004-L08",
+        "RG-REQ-004-L09",
+        "P-MDSS-05"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree; no index run — the slice is query-time only (no INDEXER_VERSION change); isolated rmap only (RMAP_STATE_ROOT/RMAP_SOCKET_PATH under the builder's own /private/tmp/MODULES-DEPS-SUMMARY-SCOPE-1-run.* directory, RMAP_TRANSPORT=stdio, every background pass off) serving COPIES of the manager's before-roots, which are read-only; logs and captures under .agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/{logs,after}/",
+        "command": "cargo fmt -p repo-graph-classification -p repo-graph-daemon-runtime -p repo-graph-rgr -- --check && ( set -o pipefail; cargo clippy -p repo-graph-classification -p repo-graph-daemon-runtime -p repo-graph-rgr --all-targets -- -D warnings 2>&1 | tail -3 ) && git -C .. diff --quiet HEAD -- rust/crates/module-queries rust/crates/trust rust/crates/storage rust/crates/indexer rust/crates/repo-index rust/crates/daemon-runtime/witness && git -C .. diff --check HEAD && test -z \"$(git -C .. status --porcelain -- . ':!.agent-manager' ':!rust/target' | awk '{print $2}' | grep -vxF -f <(printf '%s\\n' rust/crates/classification/src/module_edges.rs rust/crates/daemon-runtime/src/dispatch.rs rust/crates/daemon-runtime/src/import_partition_view.rs rust/crates/rgr/src/presentation/modules_deps.rs docs/cli/rmap-contracts.md))\" && git -C .. diff -U0 HEAD -- rust/crates/daemon-runtime/src/import_partition_view.rs | awk '/^@@/{split($2,a,\",\"); if (substr(a[1],2)+0 < 528) bad=1} END{exit bad}' && grep -q 'MODULES-DEPS-SUMMARY-SCOPE-1' ../docs/cli/rmap-contracts.md",
+        "inputs": "SCOPE CONTROL, not an output oracle: fmt per touched crate (CLAUDE.md: `cargo fmt --check -p <touched crates>`); clippy -D warnings over the three touched crates (`--all-targets`); no source change in module-queries, trust, storage, indexer, repo-index or the daemon-runtime witness manifests (no re-index, no INDEXER_VERSION change, no manifest edit); whitespace; the porcelain restricted to the five candidate paths; import_partition_view.rs changed only at or below line 528 of HEAD (inside `#[cfg(test)] mod tests`, which opens at :527-528); the CLI contract gained the `modules deps` section citing MODULES-DEPS-SUMMARY-SCOPE-1. That the readers of the shared derivation answer as before is proven by MDSS-C01 (derivation literals) and MDSS-C04 (before-binary comparison), not by this check's file identity."
+      },
+      "expected": "exit 0: every preserved obligation this check carries is unchanged (no behavior change): the change is confined to the five candidate paths — no other source, storage schema, indexer, INDEXER_VERSION or witness manifest changes, so the store-reading, indexing and policy code those obligations rest on is the code at HEAD; import_partition_view.rs's non-test code is unchanged; the contract states that under a module filter the Summary is that module's counts over the imports the direction selects, with its universe in the header, and that the unscoped block is unchanged",
+      "candidateSha256": "sha256:ad837934b4e08a24534b6dd2ae909199a58de331a2af4240eef6d38b67b4198c",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Passed, exit 0: fmt, clippy -D warnings, frozen crates and witness manifests unchanged, diff --check, porcelain limited to five paths, import_partition_view.rs changed only after line 528, and contract grep.",
+        "supportingEvidence": [
+          ".agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/logs/mdss-03.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "MDSS-C04",
+      "obligationIds": [
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L11",
+        "RG-REQ-004-L01",
+        "RG-REQ-004-L02",
+        "RG-REQ-004-L07",
+        "RG-REQ-004-L11",
+        "P-MDSS-02",
+        "P-MDSS-03",
+        "P-MDSS-04",
+        "P-MDSS-05",
+        "RG-REQ-004-L12"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree; no index run — the slice is query-time only (no INDEXER_VERSION change); isolated rmap only (RMAP_STATE_ROOT/RMAP_SOCKET_PATH under the builder's own /private/tmp/MODULES-DEPS-SUMMARY-SCOPE-1-run.* directory, RMAP_TRANSPORT=stdio, every background pass off) serving COPIES of the manager's before-roots, which are read-only, one copy per binary; a before-binary built once from `git worktree add --detach <unique>/wt HEAD`, where `<unique>` is a fresh `mktemp -d /private/tmp/MODULES-DEPS-SUMMARY-SCOPE-1-before-src.XXXXXX` and the worktree is the admission commit, whose rust/ equals 4e7bd983's. The EXIT trap removes only what this run created: the run directory, the worktree (only after `git worktree add` succeeded, recorded by `WT_CREATED=1`) and the unique parent. A failed removal is printed as `CLEANUP FAILED: <path>` and turns a passing run into exit 1, never into success (CLAUDE.md: never stash or reset the working tree; delete only what you created); logs and captures under .agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/{logs,after}/",
+        "command": "bash -eu -o pipefail -c 'export RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off RMAP_SEED_VECTORS=off\nL=\"/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases\"\nB=\"/private/tmp/MODULES-DEPS-SUMMARY-SCOPE-1\"\nSL=\"$PWD/../.agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1\"\nE=\"$SL/after\"; mkdir -p \"$E/consumers\"\nW=$(mktemp -d \"$B-run.XXXXXX\")\nWTP=$(mktemp -d \"$B-before-src.XXXXXX\"); WT=\"$WTP/wt\"; WT_CREATED=0\ncleanup(){ rc=$?; bad=0\n  rm -rf \"$W\" || { echo \"CLEANUP FAILED: $W not removed\" >&2; bad=1; }\n  if [ \"$WT_CREATED\" = 1 ]; then git -C .. worktree remove --force \"$WT\" || { echo \"CLEANUP FAILED: worktree $WT not removed\" >&2; bad=1; }; fi\n  rmdir \"$WTP\" || { echo \"CLEANUP FAILED: $WTP not removed\" >&2; bad=1; }\n  if [ \"$rc\" -eq 0 ] && [ \"$bad\" -ne 0 ]; then exit 1; fi; exit \"$rc\"; }\ntrap cleanup EXIT\ncargo build --release -p repo-graph-rgr -p rmapd 2>&1 | tail -1\nRM=\"$PWD/target/release/rmap\"\ngit -C .. worktree add --detach \"$WT\" HEAD\nWT_CREATED=1\n(cd \"$WT/rust\" && cargo build --release -p repo-graph-rgr -p rmapd 2>&1 | tail -1)\nRB=\"$WT/rust/target/release/rmap\"\nfor r in leveldb poco; do\n  (cd \"$B-$r-before\" && find . -type f -name \"*.db\" | sort | xargs shasum -a 256) | diff - \"$SL/before/$r.db.sha\"\n  for side in cand base; do\n    cp -R \"$B-$r-before\" \"$W/$r-$side\"\n    python3 - \"$W/$r-$side\" <<\"PY\"\nimport json,sys,glob\nroot=sys.argv[1]; p=root+\"/registry.json\"; r=json.load(open(p)); dbs=glob.glob(root+\"/databases/*.db\"); assert len(dbs)==1,dbs\nfor e in r[\"repos\"]: e[\"db_path\"]=dbs[0]\njson.dump(r,open(p,\"w\"),indent=2)\nPY\n  done\ndone\nrun(){ local bin=\"$1\" root=\"$2\" dir=\"$3\"; shift 3; (cd \"$dir\" && RMAP_STATE_ROOT=\"$W/$root\" RMAP_SOCKET_PATH=\"$W/$root/d.sock\" \"$bin\" \"$@\" 2>>\"$E/stderr.txt\"); }\nc(){ local r=\"$1\"; shift; run \"$RM\" \"$r-cand\" \"$L/$r\" \"$@\"; }\nrun \"$RM\" leveldb-cand \"$L/leveldb\" modules deps > \"$E/leveldb-all.txt\"; diff \"$SL/before/leveldb-all.txt\" \"$E/leveldb-all.txt\"\nrun \"$RM\" poco-cand \"$L/poco\" modules deps > \"$E/poco-all.txt\"; diff \"$SL/before/poco-all.txt\" \"$E/poco-all.txt\"\nc leveldb modules deps table > \"$E/leveldb-table.txt\"\nc poco modules deps Foundation > \"$E/poco-foundation.txt\"\nc leveldb modules deps table --json > \"$E/leveldb-table-all.json\"\nc poco modules deps Foundation --json > \"$E/poco-foundation-all.json\"\nfor d in outbound inbound; do\n  c leveldb modules deps table --$d --json > \"$E/leveldb-table-$d.json\"\n  c poco modules deps Foundation --$d --json > \"$E/poco-foundation-$d.json\"\ndone\nc leveldb modules deps table --include-tests --json > \"$E/leveldb-table-include-tests.json\"\nc poco modules deps Foundation --include-inferred --json > \"$E/poco-foundation-include-inferred.json\"\nc poco modules deps Foundation --include-inferred --outbound --json > \"$E/poco-foundation-include-inferred-outbound.json\"\nc poco modules deps Foundation --include-tests --include-inferred --json > \"$E/poco-foundation-both.json\"\nc leveldb modules deps --json > \"$E/leveldb-repo.json\"\nc poco modules deps --json > \"$E/poco-repo.json\"\npython3 - \"$E\" \"$SL/before\" <<\"PY\"\nimport json,sys\nE,BF=sys.argv[1],sys.argv[2]\nK=(\"imports_total\",\"imports_cross_module\",\"imports_intra_module\",\"imports_source_unowned\",\"imports_target_unowned\")\ndef diag(t): return dict(zip(K,t))\nscoped={\"leveldb-table-all.json\":(65,46,19,0,0),\"leveldb-table-outbound.json\":(60,41,19,0,0),\"leveldb-table-inbound.json\":(24,5,19,0,0),\n \"leveldb-table-include-tests.json\":(85,62,23,0,0),\"poco-foundation-all.json\":(3446,1653,1751,27,15),\n \"poco-foundation-outbound.json\":(1766,0,1751,0,15),\"poco-foundation-inbound.json\":(3431,1653,1751,27,0),\n \"poco-foundation-include-inferred.json\":(3462,1653,1751,27,31),\"poco-foundation-include-inferred-outbound.json\":(1782,0,1751,0,31),\n \"poco-foundation-both.json\":(5345,2494,2793,27,31)}\nfor f,t in scoped.items():\n    d=json.load(open(E+\"/\"+f)); s=sum(r[\"import_count\"] for r in d[\"results\"])\n    assert d[\"diagnostics_scope\"]==\"module\",(f,d.get(\"diagnostics_scope\"))\n    assert d[\"diagnostics\"]==diag(t),(f,d[\"diagnostics\"],t)\n    assert d[\"diagnostics\"][\"imports_cross_module\"]==s,(f,\"edge sum\",s)\n    print(\"OK\",f,d[\"diagnostics\"])\nfor f,t in ((\"leveldb-repo.json\",(343,185,140,18,0)),(\"poco-repo.json\",(7852,2006,4624,1207,15))):\n    d=json.load(open(E+\"/\"+f)); assert d[\"diagnostics_scope\"]==\"repo\",f; assert d[\"diagnostics\"]==diag(t),(f,d[\"diagnostics\"]); print(\"OK\",f,d[\"diagnostics\"])\ndef split(path):\n    ls=open(path).read().split(\"\\n\"); i=[j for j,l in enumerate(ls) if l==\"Summary:\" or l.startswith(\"Summary (\")][0]\n    return ls[:i]+ls[i+4:], ls[i:i+4]\nfor b,a,want in ((\"leveldb-table-before.txt\",\"leveldb-table.txt\",[\"Summary (module table, all directions):\",\"  46 cross-module dependencies\",\"  19 intra-module imports\",\"  0 imports from unowned sources\"]),\n                 (\"poco-foundation-before.txt\",\"poco-foundation.txt\",[\"Summary (module Foundation, all directions):\",\"  1653 cross-module dependencies\",\"  1751 intra-module imports\",\"  27 imports from unowned sources\"])):\n    rb,_=split(BF+\"/\"+b); ra,sa=split(E+\"/\"+a)\n    assert sa==want,(a,sa); assert ra==rb,(a,\"a line outside the Summary block changed\"); print(\"OK\",a,sa)\nPY\nn=0\nfor r in leveldb poco; do\n  for q in \"modules list\" \"modules list --include-tests --include-inferred\" \"cycles\" \"cycles --include-tests --include-inferred\" \"modules violations\" \"trust\" \"orient\"; do\n    n=$((n+1)); f=\"$E/consumers/$r-$n\"\n    run \"$RB\" \"$r-base\" \"$L/$r\" $q > \"$f.base.txt\"\n    run \"$RM\" \"$r-cand\" \"$L/$r\" $q > \"$f.cand.txt\"\n    cmp \"$f.base.txt\" \"$f.cand.txt\"; echo \"same: $r $q ($(wc -l < \"$f.cand.txt\") lines)\"\n  done\ndone\nrun \"$RB\" leveldb-base \"$L/leveldb\" modules show table > \"$E/consumers/leveldb-show.base.txt\"; run \"$RM\" leveldb-cand \"$L/leveldb\" modules show table > \"$E/consumers/leveldb-show.cand.txt\"; cmp \"$E/consumers/leveldb-show.base.txt\" \"$E/consumers/leveldb-show.cand.txt\"; echo \"same: leveldb modules show table\"\nfor r in leveldb poco; do (cd \"$B-$r-before\" && find . -type f -name \"*.db\" | sort | xargs shasum -a 256) | diff - \"$SL/before/$r.db.sha\"; done\necho MDSS-C04-OK'",
+        "inputs": "The outward proof, query-time only — NO index run: the candidate's release binary serves COPIES (registry `db_path` repointed) of the manager's before-roots `/private/tmp/MODULES-DEPS-SUMMARY-SCOPE-1-{leveldb,poco}-before` (byte copies of the retained v0.20.0 stores `1196d1380537d43e.db` sha256 c5bb3e8f…, `9858deeeefef8599.db` d23bffde…; durable copies `~/repo-graph-retained/MODULES-DEPS-SUMMARY-SCOPE-1-before/`; digests in `.agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/before/*.db.sha`, asserted before and after). BEFORE (manager, HEAD f69759f4 binary, captures in `before/`): leveldb `modules deps table` prints `Summary:` `185 cross-module dependencies` / `140 intra-module imports` / `18 imports from unowned sources` (the repo-wide figures) while its 4 edges sum to 46; poco `modules deps Foundation` prints 2006 / 4624 / 1207 while its 24 edges sum to 1653. LITERALS (document author, EXECUTED 2026-10-04: a read-only SQL re-implementation of `derive_module_dependency_edges_in_view` over the before-stores — `module_candidates`, `module_file_ownership`, and the IMPORTS rows of `storage/src/import_partition_reads.rs:84-104`, latest ready snapshot, sqlite `immutable=1` — that reproduces the captured repo-wide figures and edge sums exactly), as {imports_total, imports_cross_module, imports_intra_module, imports_source_unowned, imports_target_unowned}, DEFAULT view: leveldb `table` all {65, 46, 19, 0, 0}, outbound {60, 41, 19, 0, 0}, inbound {24, 5, 19, 0, 0}; `table --include-tests` all {85, 62, 23, 0, 0}; poco `Foundation` all {3446, 1653, 1751, 27, 15}, outbound {1766, 0, 1751, 0, 15}, inbound {3431, 1653, 1751, 27, 0}; `Foundation --include-inferred` all {3462, 1653, 1751, 27, 31}, outbound {1782, 0, 1751, 0, 31} (the inferred-only witness: 16 inferred production imports from Foundation into unowned files, e.g. `Foundation/src/NumericString.cpp:27` `#include \"bignum-dtoa.cc\"`, stored `inferred`, basis `unique_basename`, target `dependencies/v8_double_conversion/src/bignum-dtoa.cc`, which no module owns); `Foundation --include-tests --include-inferred` all {5345, 2494, 2793, 27, 31}; repo-wide leveldb {343, 185, 140, 18, 0}, poco {7852, 2006, 4624, 1207, 15}. Oracles: (i) unscoped human text byte-identical to the before capture on both repositories; (ii) the scoped human Summary block is exactly the header and three lines bound in the script, and every other line of the scoped output equals the before capture (Queried, Module, edge rows, remainder, undetermined block); (iii) every scoped JSON answer: `diagnostics_scope == module`, `diagnostics` equals the literal, `imports_cross_module == Σ results.import_count`; unscoped: `diagnostics_scope == repo` and today's values; (iv) the readers of the shared derivation answer as before: a before-binary built from HEAD and the candidate binary serve separate copies of the same before-store, and their human answers to `modules list`, `modules list --include-tests --include-inferred`, `cycles`, `cycles --include-tests --include-inferred`, `modules violations`, `trust` and `orient` on leveldb and poco, and `modules show table` on leveldb, are byte-identical (`cmp`); (v) the before-roots untouched. Evidence in `.agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/after/`; the run directory is removed on exit. RG-REQ-004-L12 (preserved, ratified by D-TEST-SCOPE-1) is held by the same literals and oracles, which follow the excluded-import rule of SLICE_DOC 2.1 item 1 (`module_edges.rs:218-268`, `import_partition.rs:420-439`): an import the view does not admit adds to no diagnostics counter (repo-wide or per-module) and to no edge's `import_count` or `source_file_count`; an excluded CROSS-MODULE import (both files owned, by different modules) is still counted in its relation's partition cell, which `edge_partitions` carries when the relation has at least one admitted import, and adds to the `imports` count of its partition's remainder group (the group whose flags would show it); a relation with no admitted import adds one to the `edges` count of exactly one group, the first group in the order tests, inferred, tests-and-inferred in which the relation has an excluded import (`import_partition.rs:429-436`), so a relation whose excluded imports fall in two groups (for example one test certain and one production inferred import) adds to both groups' `imports` and only to the tests group's `edges`; an excluded intra-module import or an excluded import with an unowned endpoint is in no partition cell and in no remainder. In the field: leveldb `table` with `--include-tests` gains 20 admitted imports ({65, 46, 19, 0, 0} → {85, 62, 23, 0, 0}): 16 cross-module test imports, which are exactly the default view's scoped remainder line `+16 imports from test files, not shown (1 cross-module dependency only through them) — --include-tests`, and 4 intra-module test imports, which no remainder states; poco `Foundation` with both flags gains 841 cross-module imports (the default remainder `+841 imports from test files`) and 1042 intra-module imports (in no remainder), and with `--include-inferred` 16 inferred imports into unowned targets (`imports_target_unowned` 15 → 31, in no remainder; the scoped default answer has no inferred remainder line because Foundation's cross-module figure is 1653 in both views). Oracle (ii) keeps the scoped remainder lines identical to the before capture. Oracle (i) compares only the UNSCOPED default `modules deps` human text, and it compares it with the manager's before capture (HEAD f69759f4 binary), not with a before-binary run; no `--include-tests --include-inferred` answer of `modules deps` is compared, and the scoped default Summary block is the intended change, bound by oracle (ii). Oracle (iv) is the before-binary comparison: the default and `--include-tests --include-inferred` answers of `modules list` and `cycles` (and the other readers it names) are byte-identical between the before-binary and the candidate, so a cycle that exists only through excluded partitions stays out of the default view as at HEAD."
+      },
+      "expected": "exit 0 and MDSS-C04-OK: leveldb `table` reads `Summary (module table, all directions):` with 46 / 19 / 0 and poco `Foundation` 1653 / 1751 / 27; every scoped JSON answer equals its literal in each direction and view, including the inferred-only `--include-inferred` figures; every preserved obligation this check carries is unchanged (no behavior change): the unscoped default `modules deps` human answers are byte-identical to the before captures (oracle (i), not a before-binary run), every line outside the scoped Summary block is unchanged, the repo-wide diagnostics keep today's values, the human answers of modules list, cycles, modules violations, trust, orient and modules show are byte-identical between the before-binary and the candidate on the same store, the before-roots are untouched, and the run's own directories and worktree are removed with no `CLEANUP FAILED` line; the partition behaviour of RG-REQ-004-L12 is unchanged: the default-view figures exclude the test-file and inferred imports bound in the literals, `--include-tests`, `--include-inferred` and both flags admit exactly their partitions, the scoped remainder lines (which state only excluded cross-module imports) are unchanged, and the default and both-flag answers of `modules list` and `cycles` are byte-identical to the before-binary",
+      "candidateSha256": "sha256:ad837934b4e08a24534b6dd2ae909199a58de331a2af4240eef6d38b67b4198c",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Passed, exit 0, ending MDSS-C04-OK. All 12 JSON literals printed OK, including --include-inferred cases; both scoped Summary blocks matched; unscoped human text matched before captures byte for byte; 15 old/new binary comparison lines were same; no CLEANUP FAILED lines; before-root start and end checksums matched.",
+        "supportingEvidence": [
+          ".agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/logs/mdss-04.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "MDSS-C05",
+      "obligationIds": [
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L04",
+        "RG-REQ-004-L01",
+        "RG-REQ-004-L10",
+        "P-MDSS-01",
+        "P-MDSS-03",
+        "P-MDSS-04"
+      ],
+      "owner": "reviewer",
+      "method": {
+        "kind": "inspection",
+        "subject": "git diff HEAD -- the five candidate paths, read on the candidate tree",
+        "criterion": "(1) the per-module counters are computed inside `derive_module_dependency_edges_in_view` in the same pass that computes the repo-wide counters — one computation (RG-REQ-004-L01); the map is written by the loop and read by nothing in the derivation, so the repo-wide counters, the edges, `edge_partitions` and the remainder are computed by the same statements as at HEAD; (2) `handle_modules_deps` takes X's intra-module and unowned counters from the derivation (never recounted from edges), applies the edge filter's predicate to every counter (outbound: source = X, so `imports_source_unowned` = 0; inbound: target = X, so `imports_target_unowned` = 0; all: both), takes the cross-module figure from the filtered edges' `import_count` sum, and sets `imports_total` to the sum of the four; a module absent from the map (no admitted intra-module or unowned-endpoint import adds to it) emits measured zeros for those three counters, never `null`, and its cross-module figure still comes from the filtered edges; (3) the only JSON change is the additive top-level `diagnostics_scope` key and, under a module, the scoped values of the existing keys; `modules violations` is untouched; (4) the renderer distinguishes the five decode cases of SLICE_DOC 2.1 item 3: scoped header in the `Queried:` label's words; unfiltered without the key or with `repo` byte-identical; repo-wide figures beside a module name headed `Summary (whole repository, not module X):`; `module` scope without a module name stating that reason; an unknown value printed as stored and marked — no case prints repo-wide figures under a plain `Summary:` beneath `Module: X`; (5) no `unwrap_or(0)`, `.ok()` swallow or default introduced on the rendering or decoding path (RG-REQ-002-L04); the new `diagnostics_scope` decode distinguishes absent (an older daemon: repo-wide) from an unknown value; (6) each phrase restates its predicate at the site named in SLICE_DOC 2.2 (D-AGENT-USEFULNESS-FRAME-1), and the contract section does the same; (7) import_partition_view.rs changes only inside its test module; dispatch.rs changes only at the diagnostics object of `handle_modules_deps` (the CLAUDE.md size guardrail); no new crate or module, no index-time change, no INDEXER_VERSION change.",
+        "inputs": "The candidate's diff of the five paths; SLICE_DOC sections 2.1–2.3; D-MDSS-SCOPE-1; RG-REQ-002-L03/L04; RG-REQ-004-L01/L10."
+      },
+      "expected": "every criterion holds on the candidate; every preserved obligation this check carries is unchanged (no behavior change): the one module-edge computation, the unscoped output, the readers of the repo-wide diagnostics, the derivation outputs other than `per_module` and the edge rows are preserved",
+      "candidateSha256": "sha256:ad837934b4e08a24534b6dd2ae909199a58de331a2af4240eef6d38b67b4198c",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "not-run",
+        "reason": "This is the reviewer's check; it was not run."
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "docs/cli/rmap-contracts.md",
+      "obligationIds": [
+        "RG-REQ-002-L03"
+      ],
+      "summary": "Added the `modules deps` module-scoped Summary contract section, stating which count each test applies to."
+    },
+    {
+      "path": "rust/crates/classification/src/module_edges.rs",
+      "obligationIds": [
+        "RG-REQ-002-L03",
+        "RG-REQ-004-L01",
+        "RG-REQ-004-L02",
+        "RG-REQ-004-L12",
+        "RG-REQ-002-L11",
+        "P-MDSS-01",
+        "P-MDSS-03",
+        "P-MDSS-04"
+      ],
+      "summary": "Shared derivation now fills a per-module count map in the same loop while retaining existing repo-wide counters, edges, partition counts, and remainder; added five F4 fixture tests."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+      "obligationIds": [
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L04",
+        "RG-REQ-004-L01",
+        "P-MDSS-02",
+        "P-MDSS-03"
+      ],
+      "summary": "Changed only `handle_modules_deps` diagnostics: filtered module figures are scoped and derived from filtered edges and the per-module map; unfiltered figures are retained with repo scope."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/import_partition_view.rs",
+      "obligationIds": [
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L04",
+        "RG-REQ-004-L01",
+        "P-MDSS-01",
+        "P-MDSS-02",
+        "P-MDSS-03"
+      ],
+      "summary": "Test module only: added five daemon tests and a fixture for intra-module and unowned imports; existing `mini_leveldb` fixture is unchanged."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/modules_deps.rs",
+      "obligationIds": [
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L04",
+        "P-MDSS-02",
+        "P-MDSS-03"
+      ],
+      "summary": "Decodes `diagnostics_scope` and selects the header from the slice document's five cases and exact wording; added five tests."
+    }
+  ],
+  "completedAt": "2026-10-04T05:13:29.030Z",
+  "limitations": [
+    "MDSS-C05, the reviewer's inspection, is still open.",
+    "The human Summary block still does not show `imports_target_unowned`; that figure is only in JSON (15 for Foundation).",
+    "`ImportDiagnostics` still uses `#[serde(default)]`, so a missing key renders as 0; this predates the slice and the slice does not add to it.",
+    "`cargo test --workspace` and the dogfood were not run because they are the operator's gate.",
+    "The four new tests in each crate were run before the fix and failed for the intended reasons; the fifth test in each crate passed before the fix as a preservation test."
+  ],
+  "report": "MODULES-DEPS-SUMMARY-SCOPE-1 is implemented. All four builder checks pass, MDSS-C01 to MDSS-C04, each run verbatim in the foreground. Nothing is committed. MDSS-C05 is the reviewer's inspection and is still open.\n\n**What changed for the agent:** `rmap modules deps table` on leveldb now prints the module's own figures under a header that names its universe. Before, it printed the repository's totals.\n\n| | Before (`before/leveldb-table-before.txt`) | After (`after/leveldb-table.txt`) |\n|---|---|---|\n| Header | `Summary:` | `Summary (module table, all directions):` |\n| cross-module | 185 | 46 |\n| intra-module | 140 | 19 |\n| from unowned sources | 18 | 0 |\n\nThe four edge rows below it (`db -> table` 5, `table -> include` 30, `table -> port` 1, `table -> util` 10) sum to 46. The rows and the line `+16 imports from test files, not shown (1 cross-module dependency only through them) — --include-tests` are unchanged.\n\nFor poco `modules deps Foundation`, the figures go from 2006 / 4624 / 1207 to 1653 / 1751 / 27. The 24 edge rows sum to 1653.\n\n## Check results (EXECUTED; logs are in `.agent-manager/slices/MODULES-DEPS-SUMMARY-SCOPE-1/`)\n\n| Check | Result | Proof line |\n|---|---|---|\n| MDSS-C01 | passed, exit 0 | `logs/mdss-01.txt`: `test result: ok. 319 passed; 0 failed`. All 10 named tests end in `... ok`. `--list` counts 322 (floor 322). No test function was removed. |\n| MDSS-C02 | passed, exit 0 | `logs/mdss-02dr.txt`: `test result: ok. 888 passed; 0 failed; 1 ignored` (889 listed, floor 889). `logs/mdss-02w.txt`: `test result: ok. 15 passed; 0 failed`. `logs/mdss-02rgr.txt`: `test result: ok. 1478 passed; 0 failed` (floor 1478). All named tests end in `ok`. |\n| MDSS-C03 | passed, exit 0 | `logs/mdss-03.txt`: fmt, clippy `-D warnings`, the frozen crates and witness manifests unchanged, `diff --check`, porcelain limited to the 5 paths, `import_partition_view.rs` changed only after line 528, and the contract grep. |\n| MDSS-C04 | passed, exit 0 | `logs/mdss-04.txt` ends `MDSS-C04-OK`. All 12 JSON literals print `OK`, including the `--include-inferred` ones (poco target-unowned 15 → 31). Both scoped Summary blocks match. The unscoped human text matches the before captures byte for byte. 15 `same:` lines from the old/new binary comparison (`modules list`, `cycles`, `modules violations`, `trust`, `orient` on both repos, plus `modules show table`). There are 0 `CLEANUP FAILED` lines, and the check's start and end checksums of the before-roots match. |\n| MDSS-C05 | not run | This is the reviewer's check. |\n\nFailing tests came first (logs `prefix-*.txt`):\n- 4 of the 5 new tests in each crate failed before the fix, for the intended reason:\n  - classification: `X has an entry under ImportView{..}`\n  - daemon: `diagnostics_scope` was Null, and the cross-module figure was 3 where the edges sum to 2\n  - renderer: the old plain `Summary:` header was printed\n- The fifth test in each crate passed before the fix. Each is a preservation test, so this is expected:\n  - `derivation_outputs_other_than_per_module_equal_their_literals_in_every_view`\n  - `modules_violations_diagnostics_are_unchanged`\n  - `deps_render_unfiltered_without_a_scope_key_renders_as_today`\n\n## Changed files and what they serve\n- **`rust/crates/classification/src/module_edges.rs`** — the shared derivation now also fills a per-module count map, keyed by module path, in the same loop. It counts imports inside the module, imports from an unowned file into it, and imports from it to an unowned file, over the imports the view admits. The five repo-wide counters, the edges, the partition counts and the remainder use the same statements as before. Five new tests run on fixture F4. Serves RG-REQ-002-L03, RG-REQ-004-L01, L02 and L12, RG-REQ-002-L11, P-MDSS-01, P-MDSS-03 and P-MDSS-04.\n- **`rust/crates/daemon-runtime/src/dispatch.rs`** — only the `diagnostics` object of `handle_modules_deps` changes.\n  - Before (`:8518-8524` at HEAD): the five counters were copied unfiltered from `facts.diagnostics.*`.\n  - After, with a module filter:\n    - the cross-module figure is the sum of the filtered edges;\n    - intra-module and unowned counts come from the module's map entry, with the edge filter's direction rule (unowned-source is 0 when outbound, unowned-target is 0 when inbound);\n    - the total is the sum of the four;\n    - the answer carries `\"diagnostics_scope\": \"module\"`.\n  - After, without a filter: the same figures as before plus `\"repo\"`.\n  - A module with no map entry gets measured zeros; the code comments that rule. Serves RG-REQ-002-L03, L04, RG-REQ-004-L01, P-MDSS-02 and P-MDSS-03.\n- **`rust/crates/daemon-runtime/src/import_partition_view.rs`** — test module only. It adds the five daemon tests and a fixture, `mini_leveldb_with_intra_and_unowned_imports`. The existing `mini_leveldb` fixture is unchanged. Serves the same obligations as `dispatch.rs`, plus P-MDSS-01 through the violations test.\n- **`rust/crates/rgr/src/presentation/modules_deps.rs`** — decodes `diagnostics_scope` and picks the header from the five cases in the slice document's §2.1 item 3, with the exact wording in §2.2. Five new tests. Serves RG-REQ-002-L03, L04, P-MDSS-02 and P-MDSS-03.\n- **`docs/cli/rmap-contracts.md`** — new section `\"`modules deps` — module-scoped Summary (MODULES-DEPS-SUMMARY-SCOPE-1)\"`, with each count stated as the test it applies. Serves RG-REQ-002-L03.\n\n## Examples from the analyzed code\n- **Inferred-only case (poco):** `Foundation/src/NumericString.cpp:27` reads `#include \"bignum-dtoa.cc\"` (OBSERVED in the checkout). This is one of 16 such imports. They raise Foundation's `imports_target_unowned` from 15 to 31 only under `--include-inferred` (`after/poco-foundation-include-inferred.json`).\n- **Residual class, intra-module test imports:** leveldb `table --include-tests` grows from {65, 46, 19, 0, 0} to {85, 62, 23, 0, 0}. The 4 extra intra-module test imports appear in no remainder line in the default view. This is unchanged and was a documented rule before this slice.\n\n## Decisions I made locally\n- I wrote the contract section before the first MDSS-C03 run (the slice orders it as step 4). So MDSS-C03 ran once, with the contract already present.\n- MDSS-C02, C03 and C04 ran with `bash`, from text taken byte for byte from the slice document's metadata block. I re-ran MDSS-C01 from the extracted text too: exit 0.\n- New helper names: `summary_header`, `f4`, `f4_admitted_per_shape`, `diag`, `edge_sum`, plus the daemon fixture named above. None of them is a phrase, field or test name that a reader sees.\n- If a module has no path in the derivation's lookup table, its per-module counts are skipped. The edges skip such a module the same way.\n\n## Limitations and follow-ups (all listed in the slice document's §8)\n- The human Summary block still does not show `imports_target_unowned`; the figure is only in JSON. For Foundation that is 15.\n- `ImportDiagnostics` still uses `#[serde(default)]`, so a missing key renders as 0. This predates the slice, and the slice does not add to it.\n- Not run, because they are the operator's gate: `cargo test --workspace` and the dogfood.\n\n**Cleanup:** I removed my 6 temporary scripts. MDSS-C04 removed its own run directory and worktree. The manager's before-roots and the pre-existing `m-r2-baseline-worktree` are untouched."
+}

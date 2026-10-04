@@ -73,6 +73,11 @@ pub struct ModulesDepsResponse {
     pub count: u64,
     #[serde(default)]
     pub diagnostics: Option<ImportDiagnostics>,
+    /// MODULES-DEPS-SUMMARY-SCOPE-1: the universe of `diagnostics` — `module` (the named
+    /// module's imports the direction selects) or `repo` (the whole repository). Absent = a
+    /// daemon that predates the key, whose `diagnostics` are always the repository's.
+    #[serde(default)]
+    pub diagnostics_scope: Option<String>,
     /// TEST-EDGE-SCOPE-1B (D-TESB-08): the import view. Absent = a daemon that predates the
     /// partition (stated, never a zero remainder).
     #[serde(default)]
@@ -115,6 +120,29 @@ impl ModulesDepsResponse {
         out
     }
 
+    /// MODULES-DEPS-SUMMARY-SCOPE-1 (SLICE_DOC 2.1 item 3, 2.2): the Summary header, decided by
+    /// (`diagnostics_scope`, `module`). Each header states the universe of the figures below it.
+    fn summary_header(&self, direction_label: &str) -> String {
+        match (self.diagnostics_scope.as_deref(), self.module.as_deref()) {
+            // The figures count module X's imports that the direction selects.
+            (Some("module"), Some(module)) => {
+                format!("Summary (module {module}, {direction_label}):")
+            }
+            (Some("module"), None) => {
+                "Summary (diagnostics scope \"module\" but the answer names no module):".to_string()
+            }
+            // Repo-wide figures: `repo`, or absent (a daemon older than the key, whose
+            // diagnostics are always the unfiltered derivation counters).
+            (None | Some("repo"), None) => "Summary:".to_string(),
+            (None | Some("repo"), Some(module)) => {
+                format!("Summary (whole repository, not module {module}):")
+            }
+            (Some(other), _) => {
+                format!("Summary (diagnostics scope \"{other}\" — not a scope this build reads):")
+            }
+        }
+    }
+
     /// Render as human-readable text.
     pub fn render_human(&self) -> String {
         let mut out = String::new();
@@ -136,7 +164,7 @@ impl ModulesDepsResponse {
 
         // -- Summary from diagnostics --
         if let Some(ref diag) = self.diagnostics {
-            out.push_str("\nSummary:\n");
+            out.push_str(&format!("\n{}\n", self.summary_header(direction_label)));
             out.push_str(&format!(
                 "  {} cross-module dependencies\n",
                 diag.cross_module_edges
@@ -216,6 +244,7 @@ mod tests {
                 cross_module_edges: 15,
                 from_unowned_edges: 5,
             }),
+            diagnostics_scope: None,
             import_view: Some(
                 serde_json::json!({"include_tests": false, "include_inferred": false}),
             ),
@@ -247,6 +276,7 @@ mod tests {
                 cross_module_edges: 0,
                 from_unowned_edges: 143,
             }),
+            diagnostics_scope: None,
             import_view: Some(
                 serde_json::json!({"include_tests": false, "include_inferred": false}),
             ),
@@ -349,5 +379,133 @@ mod tests {
         assert!(old
             .render_human()
             .contains("import partition unavailable from this daemon"));
+    }
+
+    // ── Summary scope (MODULES-DEPS-SUMMARY-SCOPE-1, SLICE_DOC 2.1 item 3) ──
+
+    /// The Summary block of a render: the header line and the three figure lines.
+    fn summary_block(out: &str) -> Vec<&str> {
+        let lines: Vec<&str> = out.lines().collect();
+        let i = lines
+            .iter()
+            .position(|l| *l == "Summary:" || l.starts_with("Summary ("))
+            .unwrap_or_else(|| panic!("no Summary block: {out}"));
+        lines[i..i + 4].to_vec()
+    }
+
+    #[test]
+    fn deps_render_module_summary_states_the_module_and_direction_with_the_modules_figures() {
+        for (direction, label) in [
+            ("all", "all directions"),
+            ("outbound", "outbound only"),
+            ("inbound", "inbound only"),
+        ] {
+            let mut r = sample_deps_response();
+            r.direction = direction.to_string();
+            r.module = Some("packages/core".to_string());
+            r.diagnostics_scope = Some("module".to_string());
+            let out = r.render_human();
+            assert!(out.contains(&format!("Queried: {label}\n")), "{out}");
+            assert!(out.contains("Module: packages/core\n"), "{out}");
+            assert_eq!(
+                summary_block(&out),
+                vec![
+                    format!("Summary (module packages/core, {label}):").as_str(),
+                    "  15 cross-module dependencies",
+                    "  80 intra-module imports",
+                    "  5 imports from unowned sources",
+                ],
+                "{out}"
+            );
+        }
+    }
+
+    #[test]
+    fn deps_render_unfiltered_without_a_scope_key_renders_as_today() {
+        // The render at HEAD 4e7bd983 for this fixture, written by hand.
+        let today = "Module Dependencies\n\
+                     \n\
+                     Queried: all directions\n\
+                     \n\
+                     Summary:\n  \
+                     15 cross-module dependencies\n  \
+                     80 intra-module imports\n  \
+                     5 imports from unowned sources\n\
+                     \n\
+                     2 dependency edges\n\
+                     \n  \
+                     packages/api -> packages/core  (10 imports from 3 files)\n  \
+                     packages/cli -> packages/core  (5 imports from 2 files)\n";
+        let absent = sample_deps_response();
+        assert_eq!(absent.render_human(), today);
+        let mut repo = sample_deps_response();
+        repo.diagnostics_scope = Some("repo".to_string());
+        assert_eq!(repo.render_human(), today);
+    }
+
+    #[test]
+    fn deps_render_repo_wide_figures_beside_a_module_name_the_whole_repository() {
+        // An older daemon: a module-filtered envelope with no `diagnostics_scope` key, whose
+        // figures are the repository's (it copied the unfiltered derivation counters).
+        let older: ModulesDepsResponse = serde_json::from_value(serde_json::json!({
+            "command": "modules deps", "repo": "r", "snapshot": "s", "direction": "all",
+            "module": "table",
+            "diagnostics": {"imports_total": 343, "imports_cross_module": 185,
+                            "imports_intra_module": 140, "imports_source_unowned": 18,
+                            "imports_target_unowned": 0},
+            "results": [], "count": 0,
+        }))
+        .expect("decodes");
+        assert_eq!(older.diagnostics_scope, None);
+        let mut repo = sample_deps_response();
+        repo.module = Some("table".to_string());
+        repo.diagnostics_scope = Some("repo".to_string());
+        for (r, figures) in [(&older, ["185", "140", "18"]), (&repo, ["15", "80", "5"])] {
+            let out = r.render_human();
+            assert_eq!(
+                summary_block(&out),
+                vec![
+                    "Summary (whole repository, not module table):".to_string(),
+                    format!("  {} cross-module dependencies", figures[0]),
+                    format!("  {} intra-module imports", figures[1]),
+                    format!("  {} imports from unowned sources", figures[2]),
+                ],
+                "{out}"
+            );
+            assert!(!out.contains("\nSummary:\n"), "{out}");
+            assert!(!out.contains("Summary (module"), "{out}");
+        }
+    }
+
+    #[test]
+    fn deps_render_module_scope_without_a_module_name_states_that_reason() {
+        let mut r = sample_deps_response();
+        r.diagnostics_scope = Some("module".to_string());
+        let out = r.render_human();
+        assert_eq!(
+            summary_block(&out),
+            vec![
+                "Summary (diagnostics scope \"module\" but the answer names no module):",
+                "  15 cross-module dependencies",
+                "  80 intra-module imports",
+                "  5 imports from unowned sources",
+            ],
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn deps_render_unknown_scope_prints_the_stored_value_marked() {
+        for module in [None, Some("table".to_string())] {
+            let mut r = sample_deps_response();
+            r.module = module;
+            r.diagnostics_scope = Some("package".to_string());
+            let out = r.render_human();
+            assert_eq!(
+                summary_block(&out)[0],
+                "Summary (diagnostics scope \"package\" — not a scope this build reads):",
+                "{out}"
+            );
+        }
     }
 }

@@ -168,6 +168,23 @@ pub struct ModuleEdgeDiagnostics {
     pub imports_intra_module: u64,
     /// Imports crossing module boundaries (included).
     pub imports_cross_module: u64,
+    /// Per-module counts of the admitted imports that reach no edge, keyed by the
+    /// module's canonical path (MODULES-DEPS-SUMMARY-SCOPE-1). A module has an entry
+    /// only when an admitted intra-module or unowned-endpoint import adds to it; a
+    /// missing entry means those three counts are zero for that module, never that the
+    /// module has no imports — its cross-module imports are on the edges.
+    pub per_module: BTreeMap<String, ModuleScopedCounts>,
+}
+
+/// One module's counts of the admitted imports that reach no edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ModuleScopedCounts {
+    /// Imports whose source and target files are both owned by this module.
+    pub intra_module: u64,
+    /// Imports whose source file has no module owner and whose target file this module owns.
+    pub source_unowned_into: u64,
+    /// Imports whose source file this module owns and whose target file has no module owner.
+    pub target_unowned_from: u64,
 }
 
 // ── Pure derivation function ───────────────────────────────────────
@@ -192,6 +209,8 @@ pub fn derive_module_dependency_edges(
 ///    different modules, count it in its relation's partition cell; when the
 ///    view admits it, also count it in the relation's import count, its source
 ///    file set and the diagnostics
+///    An admitted import that reaches no edge (intra-module, or with one owned and
+///    one unowned endpoint) also counts in its owning module's `per_module` entry
 /// 4. Emit the relations with at least one admitted import; the others form the
 ///    remainder (with every excluded import, per group)
 /// 5. Sort deterministically
@@ -227,6 +246,17 @@ pub fn derive_module_dependency_edges_in_view(
             None => {
                 if admitted {
                     diagnostics.imports_source_unowned += 1;
+                    // An unowned source into an owned target counts in that module's entry.
+                    if let Some(path) = ownership_index
+                        .get(import.target_file_uid.as_str())
+                        .and_then(|m| module_lookup.get(m))
+                    {
+                        diagnostics
+                            .per_module
+                            .entry((*path).to_string())
+                            .or_default()
+                            .source_unowned_into += 1;
+                    }
                 }
                 continue;
             }
@@ -238,6 +268,13 @@ pub fn derive_module_dependency_edges_in_view(
             None => {
                 if admitted {
                     diagnostics.imports_target_unowned += 1;
+                    if let Some(path) = module_lookup.get(source_module) {
+                        diagnostics
+                            .per_module
+                            .entry((*path).to_string())
+                            .or_default()
+                            .target_unowned_from += 1;
+                    }
                 }
                 continue;
             }
@@ -247,6 +284,13 @@ pub fn derive_module_dependency_edges_in_view(
         if source_module == target_module {
             if admitted {
                 diagnostics.imports_intra_module += 1;
+                if let Some(path) = module_lookup.get(source_module) {
+                    diagnostics
+                        .per_module
+                        .entry((*path).to_string())
+                        .or_default()
+                        .intra_module += 1;
+                }
             }
             continue;
         }
@@ -803,5 +847,262 @@ mod tests {
             "the same pair inside a result carries its measured counts"
         );
         assert!(default.partitions_of(&default.edges[0]).is_some());
+    }
+
+    // ── Per-module counters (MODULES-DEPS-SUMMARY-SCOPE-1) ─────────
+
+    const FOUR_PARTITIONS: [ImportPartition; 4] =
+        [PROD_CERTAIN, TEST_CERTAIN, PROD_INFERRED, TEST_INFERRED];
+
+    const FOUR_VIEWS: [ImportView; 4] = [
+        ImportView::DEFAULT,
+        ImportView::CERTAIN_WITH_TESTS,
+        ImportView::WITH_INFERRED,
+        ImportView::ALL,
+    ];
+
+    /// Fixture F4: owned modules A (`a1`) and X (`x1`, `x2`), unowned files `n1`, `n2`;
+    /// one import in EACH of the four partitions for each shape: A→X, X→A, X→X, unowned→X,
+    /// X→unowned, unowned→unowned (24 imports).
+    fn f4() -> ModuleEdgeDerivationInput {
+        let shapes = [
+            ("a1", "x1"),
+            ("x1", "a1"),
+            ("x1", "x2"),
+            ("n1", "x1"),
+            ("x1", "n1"),
+            ("n1", "n2"),
+        ];
+        let mut imports = Vec::new();
+        for (s, t) in shapes {
+            for p in FOUR_PARTITIONS {
+                imports.push(make_partitioned_import(s, t, p));
+            }
+        }
+        ModuleEdgeDerivationInput {
+            imports,
+            ownership: vec![
+                make_ownership("a1", "mod-a"),
+                make_ownership("x1", "mod-x"),
+                make_ownership("x2", "mod-x"),
+            ],
+            modules: vec![make_module("mod-a", "a"), make_module("mod-x", "x")],
+        }
+    }
+
+    /// Admitted imports per shape of F4 under `view` (one per admitted partition), written
+    /// from the view rule, not from the code under test.
+    fn f4_admitted_per_shape(view: ImportView) -> u64 {
+        match (view.include_tests, view.include_inferred) {
+            (false, false) => 1,
+            (true, false) | (false, true) => 2,
+            (true, true) => 4,
+        }
+    }
+
+    #[test]
+    fn per_module_counters_count_intra_module_imports_per_module() {
+        for view in FOUR_VIEWS {
+            let k = f4_admitted_per_shape(view);
+            let r = derive_module_dependency_edges_in_view(f4(), view).expect("derivation");
+            let x = r
+                .diagnostics
+                .per_module
+                .get("x")
+                .unwrap_or_else(|| panic!("X has an entry under {view:?}"));
+            assert_eq!(x.intra_module, k, "{view:?}");
+            assert_eq!(
+                r.diagnostics.per_module.get("a"),
+                None,
+                "A's admitted imports are all cross-module: no entry under {view:?}"
+            );
+            assert_eq!(
+                r.diagnostics.per_module.keys().collect::<Vec<_>>(),
+                vec!["x"],
+                "{view:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn per_module_counters_count_unowned_source_imports_by_target_module() {
+        for view in FOUR_VIEWS {
+            let k = f4_admitted_per_shape(view);
+            let r = derive_module_dependency_edges_in_view(f4(), view).expect("derivation");
+            let x = r.diagnostics.per_module["x"];
+            // n1→x1 counts in X; n1→n2 (both unowned) counts in no entry.
+            assert_eq!(x.source_unowned_into, k, "{view:?}");
+            let sum: u64 = r
+                .diagnostics
+                .per_module
+                .values()
+                .map(|c| c.source_unowned_into)
+                .sum();
+            assert_eq!(sum, k, "unowned→unowned adds to no entry under {view:?}");
+            // The repo-wide counter still counts both unowned-source shapes.
+            assert_eq!(r.diagnostics.imports_source_unowned, 2 * k, "{view:?}");
+        }
+    }
+
+    #[test]
+    fn per_module_counters_count_unowned_target_imports_by_source_module() {
+        for view in FOUR_VIEWS {
+            let k = f4_admitted_per_shape(view);
+            let r = derive_module_dependency_edges_in_view(f4(), view).expect("derivation");
+            let x = r.diagnostics.per_module["x"];
+            assert_eq!(x.target_unowned_from, k, "{view:?}");
+        }
+    }
+
+    #[test]
+    fn derivation_outputs_other_than_per_module_equal_their_literals_in_every_view() {
+        // Hand-written from F4's definition. Every cross relation (A→X, X→A) has one import
+        // in each partition and always an admitted production certain one, so both are edges
+        // in every view and carry all four cells.
+        let all_cells = PartitionCounts {
+            production_certain: 1,
+            test_certain: 1,
+            production_inferred: 1,
+            test_inferred: 1,
+            unknown_test_status: 0,
+        };
+        let rc = |imports: u64| RemainderCount { imports, edges: 0 };
+        // (view, import_count per edge, [total, cross, intra, src_unowned, tgt_unowned],
+        //  remainder (tests, inferred, tests_and_inferred))
+        let cases = [
+            (
+                ImportView::DEFAULT,
+                1,
+                [6, 2, 1, 2, 1],
+                ImportRemainder {
+                    tests: rc(2),
+                    inferred: rc(2),
+                    tests_and_inferred: rc(2),
+                },
+            ),
+            (
+                ImportView::CERTAIN_WITH_TESTS,
+                2,
+                [12, 4, 2, 4, 2],
+                ImportRemainder {
+                    tests: rc(0),
+                    inferred: rc(4),
+                    tests_and_inferred: rc(0),
+                },
+            ),
+            (
+                ImportView::WITH_INFERRED,
+                2,
+                [12, 4, 2, 4, 2],
+                ImportRemainder {
+                    tests: rc(4),
+                    inferred: rc(0),
+                    tests_and_inferred: rc(0),
+                },
+            ),
+            (
+                ImportView::ALL,
+                4,
+                [24, 8, 4, 8, 4],
+                ImportRemainder::default(),
+            ),
+        ];
+        for (view, n, diag, remainder) in cases {
+            let r = derive_module_dependency_edges_in_view(f4(), view).expect("derivation");
+            assert_eq!(
+                r.edges,
+                vec![
+                    ModuleDependencyEdge {
+                        source_module_uid: "mod-a".into(),
+                        source_canonical_path: "a".into(),
+                        target_module_uid: "mod-x".into(),
+                        target_canonical_path: "x".into(),
+                        import_count: n,
+                        source_file_count: 1,
+                    },
+                    ModuleDependencyEdge {
+                        source_module_uid: "mod-x".into(),
+                        source_canonical_path: "x".into(),
+                        target_module_uid: "mod-a".into(),
+                        target_canonical_path: "a".into(),
+                        import_count: n,
+                        source_file_count: 1,
+                    },
+                ],
+                "{view:?}"
+            );
+            let mut want_parts = BTreeMap::new();
+            want_parts.insert(("mod-a".to_string(), "mod-x".to_string()), all_cells);
+            want_parts.insert(("mod-x".to_string(), "mod-a".to_string()), all_cells);
+            assert_eq!(r.edge_partitions, want_parts, "{view:?}");
+            assert_eq!(r.remainder, remainder, "{view:?}");
+            let d = &r.diagnostics;
+            assert_eq!(
+                [
+                    d.imports_total,
+                    d.imports_cross_module,
+                    d.imports_intra_module,
+                    d.imports_source_unowned,
+                    d.imports_target_unowned,
+                ],
+                diag,
+                "{view:?}"
+            );
+            assert_eq!(r.view, view);
+        }
+    }
+
+    #[test]
+    fn per_module_counters_count_only_the_imports_the_view_admits() {
+        // F4 with the X-entry shapes split by partition: X's three counters count exactly the
+        // admitted partitions, each partition tested on its own.
+        let x_counts = |view: ImportView, p: ImportPartition| {
+            let input = ModuleEdgeDerivationInput {
+                imports: vec![
+                    make_partitioned_import("x1", "x2", p),
+                    make_partitioned_import("n1", "x1", p),
+                    make_partitioned_import("x1", "n1", p),
+                ],
+                ..f4()
+            };
+            derive_module_dependency_edges_in_view(input, view)
+                .expect("derivation")
+                .diagnostics
+                .per_module
+                .get("x")
+                .copied()
+        };
+        let one = Some(ModuleScopedCounts {
+            intra_module: 1,
+            source_unowned_into: 1,
+            target_unowned_from: 1,
+        });
+        // (view, [production certain, test certain, production inferred, test inferred])
+        let admitted = [
+            (ImportView::DEFAULT, [true, false, false, false]),
+            (ImportView::CERTAIN_WITH_TESTS, [true, true, false, false]),
+            (ImportView::WITH_INFERRED, [true, false, true, false]),
+            (ImportView::ALL, [true, true, true, true]),
+        ];
+        for (view, cells) in admitted {
+            for (p, admit) in FOUR_PARTITIONS.into_iter().zip(cells) {
+                let want = if admit { one } else { None };
+                assert_eq!(x_counts(view, p), want, "{view:?} {p:?}");
+            }
+        }
+        // On the full F4, X's counters are the sum of the admitted partitions.
+        for view in FOUR_VIEWS {
+            let k = f4_admitted_per_shape(view);
+            let r = derive_module_dependency_edges_in_view(f4(), view).expect("derivation");
+            assert_eq!(
+                r.diagnostics.per_module["x"],
+                ModuleScopedCounts {
+                    intra_module: k,
+                    source_unowned_into: k,
+                    target_unowned_from: k,
+                },
+                "{view:?}"
+            );
+        }
     }
 }

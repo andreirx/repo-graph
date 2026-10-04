@@ -8509,19 +8509,59 @@ impl ServiceDispatcher {
 
         let count = results.len();
 
+        // MODULES-DEPS-SUMMARY-SCOPE-1 (RG-REQ-002-L03, D-MDSS-SCOPE-1 A): under a module filter
+        // every counter counts the admitted imports the edge filter above selects (outbound:
+        // source = X; inbound: target = X; all: either) — cross-module from the filtered edges,
+        // the others from X's entry of the one derivation; without a module, the repo-wide counters.
+        let (diagnostics, diagnostics_scope) = match &resolved_module_path {
+            Some(module_path) => {
+                let own = match facts.diagnostics.per_module.get(module_path) {
+                    Some(c) => *c,
+                    // The derivation adds every admitted intra-module or unowned-endpoint import
+                    // to its owner's entry, so no entry means those three counts are zero.
+                    None => repo_graph_classification::module_edges::ModuleScopedCounts::default(),
+                };
+                let cross: u64 = filtered_edges.iter().map(|e| e.import_count).sum();
+                let intra = own.intra_module;
+                let source_unowned = if direction == "outbound" {
+                    0
+                } else {
+                    own.source_unowned_into
+                };
+                let target_unowned = if direction == "inbound" {
+                    0
+                } else {
+                    own.target_unowned_from
+                };
+                let scoped = serde_json::json!({
+                    "imports_total": cross + intra + source_unowned + target_unowned,
+                    "imports_cross_module": cross,
+                    "imports_intra_module": intra,
+                    "imports_source_unowned": source_unowned,
+                    "imports_target_unowned": target_unowned,
+                });
+                (scoped, "module")
+            }
+            None => (
+                serde_json::json!({
+                    "imports_total": facts.diagnostics.imports_total,
+                    "imports_cross_module": facts.diagnostics.imports_cross_module,
+                    "imports_intra_module": facts.diagnostics.imports_intra_module,
+                    "imports_source_unowned": facts.diagnostics.imports_source_unowned,
+                    "imports_target_unowned": facts.diagnostics.imports_target_unowned,
+                }),
+                "repo",
+            ),
+        };
+
         // Build response
         let mut response = serde_json::json!({
             "command": "modules deps",
             "repo": repo_uid,
             "snapshot": snapshot.snapshot_uid,
             "direction": direction,
-            "diagnostics": {
-                "imports_total": facts.diagnostics.imports_total,
-                "imports_cross_module": facts.diagnostics.imports_cross_module,
-                "imports_intra_module": facts.diagnostics.imports_intra_module,
-                "imports_source_unowned": facts.diagnostics.imports_source_unowned,
-                "imports_target_unowned": facts.diagnostics.imports_target_unowned,
-            },
+            "diagnostics": diagnostics,
+            "diagnostics_scope": diagnostics_scope,
             "results": results,
             "count": count,
         });

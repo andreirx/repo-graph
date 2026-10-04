@@ -718,6 +718,35 @@ different selector domain).
 Output includes `diagnostics` object reporting derivation counts so callers
 can detect degraded graphs where ownership gaps suppress violations.
 
+### `modules deps` — module-scoped Summary (MODULES-DEPS-SUMMARY-SCOPE-1)
+
+RG-REQ-002-L03 (every measured count states its universe). Query time only; no re-index.
+
+- **Under a module filter** (`rmap modules deps <X>`), `diagnostics` counts the imports of the
+  requested view whose source is X (`--outbound`), whose target is X (`--inbound`), or either
+  (default, all directions) — the same predicate the answer's edge rows are filtered by:
+  - `imports_cross_module` — imports whose source and target files are owned by different
+    modules: the sum of `results[].import_count`;
+  - `imports_intra_module` — imports whose source and target files are both owned by X (the same
+    under every direction);
+  - `imports_source_unowned` — imports whose source file has no module owner and whose target
+    file X owns (0 under `--outbound`);
+  - `imports_target_unowned` — imports whose source file X owns and whose target file has no
+    module owner (0 under `--inbound`);
+  - `imports_total` — the sum of the four.
+  The answer carries `diagnostics_scope: "module"`. The human block's header states the universe:
+  `Summary (module X, all directions):` / `…, outbound only):` / `…, inbound only):`.
+- **Without a module filter**, `diagnostics` and the human `Summary:` block are unchanged (the
+  whole repository's counts of the view); the answer carries `diagnostics_scope: "repo"`.
+- **`diagnostics_scope`** is `module` or `repo`. The renderer reads it with `module`:
+  - absent or `repo` beside a `module` (a daemon older than the key copies the repository's
+    counts under a module filter) → `Summary (whole repository, not module X):`;
+  - `module` without a `module` key → `Summary (diagnostics scope "module" but the answer names
+    no module):`;
+  - any other value → `Summary (diagnostics scope "<value>" — not a scope this build reads):`.
+- The counts come from the one module-edge derivation `trust` and `modules list` read
+  (RG-REQ-004-L01); `modules violations`' `diagnostics` stay repo-wide and carry no scope key.
+
 ### `deps list` — Gradle catalog aliases and Java group matching (DEPS-GRADLE-CATALOG-1B)
 
 RG-REQ-006-L13. Index time (stored; `indexer:1.8.0` re-indexes every Gradle store):
