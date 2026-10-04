@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-20-1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-20.json",
+    "sha256": "sha256:de991e77da24317315d2eb02b20d94064f7318f0f6a6e592c35caa9b8441d0c7"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-20"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-20-1"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T15:38:01.000Z",
+  "report": "Standalone read-only review (codex exec --sandbox read-only, gpt-6-sol, high; session 01a1078d-8282-76b1-8eaa-a7961529f371), pass 1, self-contained prompt with the one diff inlined (/private/tmp/rgbootstrap16/review.txt). Subject = INPUT-19 + the re-pin of docs/cli/rmap-contracts.md (changed by the shipped, implementation-reviewed, gate-green MODULES-DEPS-SUMMARY-SCOPE-1, b5c67086: the modules deps module-scoped Summary text). No requirement, governance file or decision record changed.\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED all 59 candidate digests match HEAD ad01e194; RG-REQ-006 is the only pin changed from INPUT-19, and all other pins remain as in INPUT-17. OBSERVED every edit to RG-REQ-006 since 3e6136a9 is within L14; its header, L01\u2013L13, preservation obligations, and approval section are unchanged. OBSERVED revision 2\u2019s enclosing-module title, rule, verification criterion, and evidence are internally consistent with D-RSR-INLINE-MODULE-1 and the accepted directory-cycle movement in D-RSR-DIR-CYCLES-1; its counts satisfy 3,222 = 3,152 + 70, 70 = 43 + 27, and 32 = 15 + 17 within the 345 inline rows. OBSERVED the README\u2019s dated note and queue line both state the enclosing-module rule. OBSERVED one correction to the supplied comparison instruction: aead0088\u2192HEAD changes one line, but cc776ead\u2192HEAD changes four lines, all within L14.\n"
+}
