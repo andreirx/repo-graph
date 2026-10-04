@@ -1,0 +1,159 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-manifest",
+  "baselineId": "HELP-SURFACE-PARITY-1-INPUT-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "requirements": [
+    {
+      "path": "docs/requirements/rg-req-012-cli-protocol-surface.md",
+      "sha256": "sha256:60598f5c99e45318b24b424c6e5619e4c5d1c21e95530db239dcf6036122eefe"
+    },
+    {
+      "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+      "sha256": "sha256:8f2da793ee99d9f756ec48b66c133b49716db1d079686e2b90d5fce2cc88c68b"
+    }
+  ],
+  "dependencies": [
+    {
+      "role": "source",
+      "path": "docs/VISION.md",
+      "sha256": "sha256:84a7d22ba3684b06d5914b3c46ae3cce9f1b3bb274f207f5128704e0261dad37"
+    },
+    {
+      "role": "source",
+      "path": "docs/contracts/exit-codes.md",
+      "sha256": "sha256:0bf82ef2c91e6876fe9b907ce6bb228bac198dcb9265953efe366923339f5429"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/economy-2.md",
+      "sha256": "sha256:b989f23b13306789d3368eb16299c738325e9a37c162b16d639a58c4dacdf5e4"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/cursor-roundtrip-1.md",
+      "sha256": "sha256:e609a244b17187dc19dd40ef61deb30404bf260258fa5051fde4ace0237413be"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/anchors-everywhere-1.md",
+      "sha256": "sha256:c6cfc05647db9a709392175b807523dd1e7c63422ae3f6f0bccacc315855bd60"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/honesty-gate-2.md",
+      "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/coherence-3.md",
+      "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/headline-truth-1.md",
+      "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/find-facts-1.md",
+      "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+      "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+    },
+    {
+      "role": "governance",
+      "path": "docs/slices/rg-requirements-bootstrap-1.md",
+      "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b"
+    },
+    {
+      "role": "governance",
+      "path": "docs/requirements/README.md",
+      "sha256": "sha256:94bb90a4551aa20dce17841db600820e0fdd68534637d117435e87678d828638"
+    },
+    {
+      "role": "governance",
+      "path": "CLAUDE.md",
+      "sha256": "sha256:30a113d5cc92684d246cf7b4e004866c9839688ee5aca878403a0c860d5c068a"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+      "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+      "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-HSP-SCOPE-1.md",
+      "sha256": "sha256:c5717fc425b7a14572a8dd40994df17cbe0cd10dfaece9c9e628b12e05e8aa81"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-HSP-COVERAGE-CONST.md",
+      "sha256": "sha256:5dfa4c65ba457b0ae00bdc331f36a11cfa449bf2500e5bbbfc5f2fd6d57b8207"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-HSP-L09-SCOPE.md",
+      "sha256": "sha256:31b5e1833d33f343ba2bddbfafdb8ef957c78e861dc601b43607eac9b06aca3e"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-HSP-CONST-DIRECTION.md",
+      "sha256": "sha256:7fa10817ad75eb548c4c7431071cb87ff1284467af53993a250303a62bd66564"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-HSP-PERF-USAGE.md",
+      "sha256": "sha256:5d18c543c311cd02bb1b3d9d4496a853394bbd96bf717567b48f33986a4ee785"
+    },
+    {
+      "role": "allocation",
+      "path": "docs/slices/help-surface-parity-1.md",
+      "sha256": "sha256:3beb175a7c8f0b0645a115d81a31d0ef220985a0151c4ce3271c09c73ef4a5e0"
+    }
+  ],
+  "reviewObligationIds": [
+    "RG-REQ-012",
+    "RG-REQ-002",
+    "RG-REQ-012-L01",
+    "RG-REQ-012-L02",
+    "RG-REQ-012-L03",
+    "RG-REQ-012-L04",
+    "RG-REQ-012-L05",
+    "RG-REQ-012-L06",
+    "RG-REQ-012-L07",
+    "RG-REQ-012-L08",
+    "RG-REQ-012-L09",
+    "RG-REQ-002-L01",
+    "RG-REQ-002-L02",
+    "RG-REQ-002-L03",
+    "RG-REQ-002-L04",
+    "RG-REQ-002-L05",
+    "RG-REQ-002-L06",
+    "RG-REQ-002-L07",
+    "RG-REQ-002-L08",
+    "RG-REQ-002-L09",
+    "RG-REQ-002-L10",
+    "RG-REQ-002-L11"
+  ],
+  "requiredDecisionIds": [
+    "D-AGENT-USEFULNESS-FRAME-1",
+    "D-CERTAINTY-MARK-1",
+    "D-HSP-SCOPE-1",
+    "D-HSP-COVERAGE-CONST",
+    "D-HSP-L09-SCOPE",
+    "D-HSP-CONST-DIRECTION",
+    "D-HSP-PERF-USAGE"
+  ]
+}

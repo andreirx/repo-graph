@@ -1,0 +1,83 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "HELP-SURFACE-PARITY-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/HELP-SURFACE-PARITY-1-INPUT-2.json",
+    "sha256": "sha256:926554426010a28f55cda2ffd0312f115430c9d9c6296bd350a0a78a1cbe2423"
+  },
+  "review": {
+    "path": "docs/assurance/HELP-SURFACE-PARITY-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:713682b728c6c8102aad0cd901b96283d7a96f57caf6b3628b278822d218245d"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-HSP-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-HSP-SCOPE-1.md",
+        "sha256": "sha256:c5717fc425b7a14572a8dd40994df17cbe0cd10dfaece9c9e628b12e05e8aa81"
+      }
+    },
+    {
+      "id": "D-HSP-COVERAGE-CONST",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-HSP-COVERAGE-CONST.md",
+        "sha256": "sha256:5dfa4c65ba457b0ae00bdc331f36a11cfa449bf2500e5bbbfc5f2fd6d57b8207"
+      }
+    },
+    {
+      "id": "D-HSP-L09-SCOPE",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-HSP-L09-SCOPE.md",
+        "sha256": "sha256:31b5e1833d33f343ba2bddbfafdb8ef957c78e861dc601b43607eac9b06aca3e"
+      }
+    },
+    {
+      "id": "D-HSP-CONST-DIRECTION",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-HSP-CONST-DIRECTION.md",
+        "sha256": "sha256:7fa10817ad75eb548c4c7431071cb87ff1284467af53993a250303a62bd66564"
+      }
+    },
+    {
+      "id": "D-HSP-PERF-USAGE",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-HSP-PERF-USAGE.md",
+        "sha256": "sha256:5d18c543c311cd02bb1b3d9d4496a853394bbd96bf717567b48f33986a4ee785"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-04T20:19:49.072Z",
+  "rationale": "HELP-SURFACE-PARITY-1 INPUT-2 (the implementation baseline after admission 1's F-HSP-PARSER-PARITY and D-HSP-PERF-USAGE): accepted at document cycle 9 (relay iteration 5, review-5, codex gpt-6-sol; author claude-opus-5-5) under bootstrap INPUT-22 after three cycles on this baseline (7\u20139) \u2014 findings on the operator's text only (test list, ignored-suite reasons scoped per file). The operator approves on the human's standing authorization."
+}
