@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-25-pass1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-25.json",
+    "sha256": "sha256:178b2d7f4de6f8695657bfb7e75d1e8e9238620ab54c1531a8cc9b7585bb892b"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-25"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-25-pass1"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T22:16:33.000Z",
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin(s): docs/requirements/rg-req-011-daemon-and-store-lifecycle.md (sha256:a96c9f478703fbab558735d037a5d2a690627fd9b689d2520b22b94acaef6ce6). Codex session 01a108fb-f2f3-7b12-b113-8f482edb4782. Record written 2026-10-04T22:20:13.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-24 → INPUT-25: one pin changed — docs/requirements/rg-req-011-daemon-and-store-lifecycle.md: RG-REQ-011-L12 revision 6 (DOCTOR-FALLBACK-STATE-ROOT-1 document review cycle 1, DFSR-D01 → A): the service note asserts no daemon identity it cannot prove — under forced stdio the subprocess fact, under a configured non-global root with auto/socket a neutral measured-the-global-service note. Also changed but NOT a bootstrap pin: docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-SCOPE-1.md (Correction 2 appended; pinned by the slice manifest). Pass 1 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high), pass 1, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended text.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: The untracked INPUT-25 manifest has 59 pins; only the RG-REQ-011 digest differs from INPUT-24, and its new digest matches the file at HEAD c470a835. OBSERVED: After substituting the baseline ID and that digest, the two manifests are byte-for-byte equal. OBSERVED: The diff from 123850a1 changes only L12’s revision label, service-note sentences, and macOS verification sentence. INFERRED: The forced-stdio detail follows the client’s subprocess-spawn branch; the non-global-root detail states the configured path without claiming which daemon answered. Both agree with D-DFSR-SCOPE-1 Corrections 1–2 and do not contradict L06, L08, L09, or RG-REQ-002-L02/L08."
+}
