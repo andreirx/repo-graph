@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-27-pass1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-27.json",
+    "sha256": "sha256:57e49fa969f8c323707a55cd9638224b9afae9a77c3bdeb45756341cc0e584d1"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-27"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-27-pass1"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T23:28:15.000Z",
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin(s): docs/requirements/rg-req-011-daemon-and-store-lifecycle.md (sha256:e56d8e9931b48b9c0af3974385206768c7dabad41c61d748c21a862d7d3fa832). Codex session 01a1093b-2303-7f31-8d62-023de8839577. Record written 2026-10-04T23:28:55.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-26 → INPUT-27: one pin changed — docs/requirements/rg-req-011-daemon-and-store-lifecycle.md: RG-REQ-011-L12 revision 8 (DOCTOR-FALLBACK-STATE-ROOT-1 document review cycle 5 → D-DFSR-STDIO-DETAIL-1 A): the forced-stdio service note states the configured transport (stdio transport configured; this service is not used by a stdio client), not a successful spawn. Also changed but NOT bootstrap pins: D-DFSR-STDIO-DETAIL-1.md (new) and D-DFSR-SCOPE-1.md Correction 3 (pinned by the slice manifest). Pass 1 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high), pass 1, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended text.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: At HEAD 52d66c3f, the untracked INPUT-27 manifest has 59 pins; its RG-REQ-011 digest matches the tracked file, and the other 58 pins match INPUT-26. OBSERVED: The diff from 2aa3b85b changes only L12’s revision label and forced-stdio detail phrase. OBSERVED: `RMAP_TRANSPORT=stdio` selects the stdio branch before connection; that branch may fail while spawning, but it does not use the socket service. INFERRED: The new phrase states that configuration predicate without claiming a successful spawn, and revision 8 remains consistent with D-DFSR-SCOPE-1 Corrections 1–3, D-DFSR-FALLBACK-NOTE-1, D-DFSR-LINUX-SCOPE-1, L06/L08/L09, and RG-REQ-002-L02/L08."
+}
