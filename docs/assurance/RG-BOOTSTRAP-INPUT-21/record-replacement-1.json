@@ -1,0 +1,31 @@
+{
+  "formatVersion": 1,
+  "kind": "record-correction-note",
+  "noteId": "RG-BOOTSTRAP-INPUT-21-record-replacement-1",
+  "recordedAt": "2026-10-04T16:23:05.000Z",
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "statement": "The committed records requirements-review.json and baseline-approval.json of this directory were REPLACED IN PLACE by commit fb5abbd3, one minute after they were committed in adca6ef8, without an appended correction. This note is that correction, written after the RUST-SELF-RESOLUTION-1-PREP document reviewer (cycle 12, review-8, DECISION-1) found the gap.",
+  "original": {
+    "commit": "adca6ef8",
+    "committedAt": "2026-10-04T16:07:46Z",
+    "requirements-review.json": "sha256:410ce24a06d553c4527cbc78c6f00d56ef481337cc1d8564ac7adb046b28e541",
+    "baseline-approval.json": "sha256:f69244767b7cf1833fc2f2d7ca6d15dd94125b948596448f267ba4f0d97994fd"
+  },
+  "replacement": {
+    "commit": "fb5abbd3",
+    "committedAt": "2026-10-04T16:09:11Z",
+    "requirements-review.json": "sha256:c8cfc440ff39fc51c3e43d16e2b46c9c58182918d33db47e5b6303004c98bdd5",
+    "baseline-approval.json": "sha256:2328207e31a4f8fae99459e9fd146323f118222caaea2d00366aa1a3b67b592d"
+  },
+  "whatChanged": "The review record's fields reviewScope, changedPins, recordedAt, changeReviewed and reviewer.session — which the runtime's closed record grammar rejects (baseline admission failed with unknown-field) — were moved verbatim into the report text; the approval re-digested the review and took a new decidedAt. The reviewer, session, verdict, result and subject are identical in both versions; no judgment changed.",
+  "whyNotAppended": "Operator error under the append-only rule: the record had never been admitted, so it was treated as unpublished. It was committed, so it was published. The rule in agent-manager CLAUDE.md (Editing records) applies; this note and the appended review-2/approval-2 restore the chain without touching either version further.",
+  "parsedChain": {
+    "requirements-review.json": "sha256:c8cfc440ff39fc51c3e43d16e2b46c9c58182918d33db47e5b6303004c98bdd5",
+    "baseline-approval.json": "sha256:2328207e31a4f8fae99459e9fd146323f118222caaea2d00366aa1a3b67b592d",
+    "requirements-review-2.json": "sha256:fbfc3cb8ee5cd0b524893c48369bd1913eed91b9fcb784d7699e107940bfa47e",
+    "baseline-approval-2.json": "sha256:19ddf0c019f76945e472aea6345e2d4dbdfc51283780a51eaa966654cb79a060"
+  }
+}

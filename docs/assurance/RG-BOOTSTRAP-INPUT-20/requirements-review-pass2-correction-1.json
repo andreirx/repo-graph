@@ -1,0 +1,17 @@
+{
+  "formatVersion": 1,
+  "kind": "record-correction-note",
+  "noteId": "RG-BOOTSTRAP-INPUT-20-pass2-kind-correction-1",
+  "recordedAt": "2026-10-04T16:23:05.000Z",
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "corrects": {
+    "path": "docs/assurance/RG-BOOTSTRAP-INPUT-20/requirements-review-pass2.json",
+    "sha256": "sha256:c3b9bbc402069ce8ce60eb288604f4704a71c4dc533a91e4aa05b9fcd5bb87e4",
+    "defect": "it declares kind manual-requirements-review while carrying fields (reviewScope, reviewedPin, recordedAt, resolution, reviewer.session) and a result value (refinement-required) the runtime's closed parser does not accept (RUST-SELF-RESOLUTION-1-PREP cycle 12, review-8, FINDING-1)."
+  },
+  "statement": "That file is NARRATIVE EVIDENCE of the second independent review of the INPUT-20 pin (the standalone prompt's result vocabulary: accepted | refinement-required), not a runtime-parsed review record; its kind should read record-correction-note. The runtime reads only requirements-review.json and baseline-approval.json. The parsed, schema-valid review of the current leaf is docs/assurance/RG-BOOTSTRAP-INPUT-21/requirements-review-2.json with docs/assurance/RG-BOOTSTRAP-INPUT-21/baseline-approval-2.json; correction-2 of INPUT-20 and INPUT-19 keep pointing at the narrative file as the review that found F-1.",
+  "unchanged": "The pass-2 file is not edited; its content stands as written."
+}

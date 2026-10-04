@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-21-whole-leaf-1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-21.json",
+    "sha256": "sha256:b026dc204663380cfd2de9c7cdbf0cae41f82ec71ff1781b7a603b653715b6bf"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-21"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-21-whole-leaf-1"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T16:22:17.000Z",
+  "report": "Full-leaf review of RG-REQ-006-L14 revision 3 as pinned by INPUT-21 (docs/requirements/rg-req-006-import-resolution-and-dependencies.md sha256:65f5a44b74d545068e3604025f131547c884f8bb8a10fcb6d610cd12dc2c025a) at HEAD fb5abbd3: the declaration-evidence sibling rule, agreement with D-RSR-ENTRY-CLIMB-1 and D-RSR-INLINE-MODULE-1, implementability from the recorded rust_mod_decls fact, every sum of the evidence line including 457 = 326 + 18 + 113 of 5,056 and the 345/32 label, the criterion's coverage, and closure of F-1 (the #[path]/inline-target sentence). Commissioned after RUST-SELF-RESOLUTION-1-PREP cycle 12 (review-8, DECISION-1, operator option A). Codex session 01a107b6-d5ed-74d1-ada6-1ad60ae6a5d3; record written 2026-10-04T16:23:05.000Z (completedAt is the verdict file's time). Standalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high).\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: I assessed the whole current RG-REQ-006-L14 leaf, not only the revision 3 edits; HEAD is fb5abbd3, and the INPUT-21 RG-REQ-006 SHA-256 matches the file at HEAD. OBSERVED: The title, STATUS, rule, verification criterion, and evidence are consistent with resolution from the module enclosing the `use`; the sibling rule requires a matching `rust_mod_decls` declaration and an indexed first-segment module file, and no sentence permits shortening past that segment. OBSERVED: F-1 is closed: the `#[path]` and inline-target sentence limits shortening to later sibling segments or segments under a `crate`, `super`, or `self` head, and says a first-segment sibling without a module file binds nothing. OBSERVED: The leaf agrees with D-RSR-ENTRY-CLIMB-1 and D-RSR-INLINE-MODULE-1; its named tests cover positive and negative sibling cases, the declared-crate miss, inline-module context, the five bind-nothing cases, and the accepted directory-cycle movement. INFERRED: The recorded module-declaration facts and file inventory, together with the specified additive import key, suffice to implement the rule; the declaration guard prevents `use std::…` in `main.rs` beside `lib.rs` from binding to `lib.rs`. OBSERVED: Every stated count balances, including the 457-of-5,056 inline-body population; 345 and 32 are labelled as revision 2 historical measurements. INFERRED: The operator’s store replay counts are internally consistent with the rule, but I did not independently verify them because the stores could not be run."
+}
