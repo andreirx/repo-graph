@@ -1,0 +1,125 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DEPS-GRADLE-CATALOG-1B-BASELINE-APPROVAL-5",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DEPS-GRADLE-CATALOG-1B-INPUT-5.json",
+    "sha256": "sha256:6380e5e13a94a421a656a577e898e3295d2adcf5aeb86f220902b9bfdb295c2f"
+  },
+  "review": {
+    "path": "docs/assurance/DEPS-GRADLE-CATALOG-1B-INPUT-5/requirements-review.json",
+    "sha256": "sha256:182ad0e725521b9c4ff1ace97ee312229b517f55a371909fe9eddb2802a85a04"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-GRADLE-DECLARED-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-GRADLE-DECLARED-1.md",
+        "sha256": "sha256:089a6a629f4341e602cd83c46f5ddaaef70e3cd71c5547c08557d2e2fd6c464b"
+      }
+    },
+    {
+      "id": "D-REFRESH-STALE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-REFRESH-STALE-1.md",
+        "sha256": "sha256:0422c857ee1422a4f0a3dd6122056ff3995569d1e6f5a82c499e7c4aa5a82996"
+      }
+    },
+    {
+      "id": "D-DGC-CONDITIONAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-CONDITIONAL-1.md",
+        "sha256": "sha256:240e67c53adcd3f4daf09233d8bdbd003d5acaa61a300230977af94da4bfa3f0"
+      }
+    },
+    {
+      "id": "D-STALE-SIGNAL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-STALE-SIGNAL-1.md",
+        "sha256": "sha256:b138f9f21e82a924f622ef58512dce6a4f7beb94e21dcf514911cd7f6979cc8c"
+      }
+    },
+    {
+      "id": "D-DGC-ATTRIBUTION-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-ATTRIBUTION-1.md",
+        "sha256": "sha256:c0dd3ff3220f38fc273398376dac6c52bcdb1b2645559ec7a2edda295d5c2d77"
+      }
+    },
+    {
+      "id": "D-DGC-BOUNDARY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC-BOUNDARY-1.md",
+        "sha256": "sha256:42ae2be3c2feaaee11c6ce4416c28d8449007d61291a04546690bf9d5ab8012d"
+      }
+    },
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-DGC1B-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-SCOPE-1.md",
+        "sha256": "sha256:18ce35def897bdf6f435a954b68cc81758f2da6cbe9dbb669238c5da59951371"
+      }
+    },
+    {
+      "id": "D-DGC1B-TOML-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-TOML-1.md",
+        "sha256": "sha256:33806f2787b9006d32f14a122a7ba8521c217c630ef545ac5e4442ef07c46263"
+      }
+    },
+    {
+      "id": "D-DGC1B-ALIAS-MARKING-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-ALIAS-MARKING-1.md",
+        "sha256": "sha256:48799435457fd2498da5caa15209c9bd00e013c332d4e75b88310f2d608c3475"
+      }
+    },
+    {
+      "id": "D-DGC1B-ARTIFACT-INTERPOLATION-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-ARTIFACT-INTERPOLATION-1.md",
+        "sha256": "sha256:b0b11c2a53eaf7173a1538af545546fd533ec3f0df67c43bad2ebd6cbcf8a55a"
+      }
+    },
+    {
+      "id": "D-DGC1B-ALIAS-APPLICABILITY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-ALIAS-APPLICABILITY-1.md",
+        "sha256": "sha256:fb2d0c6678aebcedeebf9a8825a3e9935a806d7e544435b23749a997a3c7d4b2"
+      }
+    },
+    {
+      "id": "D-DGC1B-MAP-GRAMMAR-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DGC1B-MAP-GRAMMAR-1.md",
+        "sha256": "sha256:34402e8c75f46ddf88a3479b137340b8584dd82b17bfd5f3eaa4c086273b7641"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-04T00:52:43.049Z",
+  "rationale": "DEPS-GRADLE-CATALOG-1B INPUT-5 accepted at document cycle 6 (codex gpt-6-sol review-6 accepted; claude-opus-5-5 author). INPUT-4 (D-DGC1B-ALIAS-APPLICABILITY-1, operator A: rename and apply-from statements scoped as 1A scopes blocks) raised review-3 F-DGC1B-MAP-SCOPE and review-4 F-DGC1B-MAP-ORDER; the HUMAN ruled D-DGC1B-MAP-GRAMMAR-1 (closed grammar: literal top-level or ext-block assignments evaluated in order; anything else makes the map unreadable) and INPUT-5 encodes it. Operator approval; the human's record governs; the operator records remain overridable."
+}
