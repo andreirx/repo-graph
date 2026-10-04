@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-18-5",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-18.json",
+    "sha256": "sha256:94e09bc2398b0e357b38d6537a586e58692e5be6b8daf6091477440ead2ad3e8"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-18"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-18-5"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T13:26:29.000Z",
+  "report": "Standalone read-only review (codex exec --sandbox read-only, gpt-6-sol, high; session 01a10716-544c-7381-8964-db4a78643833), pass 5, self-contained prompt with the one diff inlined (/private/tmp/rgbootstrap16/review.txt). Subject = INPUT-17 + the re-pin of docs/cli/rmap-contracts.md (changed by the shipped, implementation-reviewed, gate-green MODULES-DEPS-SUMMARY-SCOPE-1, b5c67086: the modules deps module-scoped Summary text). No requirement, governance file or decision record changed.\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: All 59 candidate digests match HEAD f1983080; compared with INPUT-17, only the RG-REQ-006 pin changed. OBSERVED: The 5-insertion, 5-deletion change to RG-REQ-006 is wholly inside L14; the header, L01\u2013L13, and preservation and approval sections are unchanged. OBSERVED: Revision 2 uses the enclosing-module rule, agrees with both named decisions, and states the accepted directory-cycle movement in its rule and verification criterion; the README queue line and dated note also use the enclosing-module rule. OBSERVED: The evidence arithmetic holds: 3,222 = 3,152 + 70; 70 = 43 + 27; and 32 of the 345 inline-body rows = 15 + 17.\n"
+}
