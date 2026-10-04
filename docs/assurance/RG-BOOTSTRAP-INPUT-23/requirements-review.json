@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-23-pass2",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-23.json",
+    "sha256": "sha256:d09beffa1c4dab632294ba0df303c495014e68eb45ea9b4251ae4048e71659a7"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-23"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-23-pass2"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T21:04:59.000Z",
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin(s): docs/cli/rmap-contracts.md (sha256:2ce2318635b61450629490c45a8293665478551d31dfb21a0f85a8bceedf7da1); docs/requirements/rg-req-012-cli-protocol-surface.md (sha256:834397b1613e7e68313019f2d42b8945bdaaaa50c2c4f66a37311fcb4b96f73b). Codex session 01a108ba-aa77-7772-b7fc-21ad81ddcc11. Record written 2026-10-04T21:05:22.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-22 → INPUT-23: two pins changed by the shipped, implementation-reviewed, gate-green HELP-SURFACE-PARITY-1 (381cbb1f) and its closeout — docs/cli/rmap-contracts.md (the help-vs-handler note retired, the enrich line corrected, a bounded parity subsection), docs/requirements/rg-req-012-cli-protocol-surface.md (L09 evidence PARTIALLY MET: top-level parity shipped, twelve nested subcommands open → HELP-SURFACE-PARITY-2; criterion names the shipped tests; commit 27844a6a), Also changed but NOT a bootstrap pin (reviewed as context, pass 1 of this review corrected the operator's three-pin claim): docs/requirements/README.md (RG-REQ-012 row 7 met · 1 partially met · 1 unknown). No governance file or decision record changed. Pass 2 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high), pass 2, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended text.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: At clean HEAD 91a7fdfa, all 59 candidate pin digests match their files; only the two named digests differ from INPUT-22, and `docs/requirements/README.md` is unpinned. OBSERVED: The diffs are confined to the stated L09, contract, and README changes, and the README row agrees with L09’s PARTIALLY MET status. OBSERVED: The inspected tests, implementation-review report, and D-HSP-L09-SCOPE support top-level command-head coverage while leaving twelve nested subcommands open; neither L09 nor the contract claims parser-level alignment. INFERRED: The contract’s bounded claims for four shared usage constants, six inspected printed-usage lines, and the documented `perf` exception support this re-pin without presenting full L09 compliance as proven."
+}
