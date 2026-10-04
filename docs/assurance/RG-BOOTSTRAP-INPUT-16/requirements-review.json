@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-CATALOG-INPUT-16-1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-16.json",
+    "sha256": "sha256:bd967c22a846e9b0354b4f3428a7e5ae67c3e633f2d6b6b97dec7d75a33a4bc4"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-CATALOG-INPUT-16"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-CATALOG-INPUT-16-1"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-04T05:47:52.000Z",
+  "report": "Standalone read-only review (codex exec --sandbox read-only, gpt-6-sol, high; session 01a10573-8b00-7223-9995-141273e536ab), pass 1, self-contained prompt with the one diff inlined (/private/tmp/rgbootstrap16/review.txt). Subject = INPUT-15 + the re-pin of docs/cli/rmap-contracts.md (changed by the shipped, implementation-reviewed, gate-green MODULES-DEPS-SUMMARY-SCOPE-1, b5c67086: the modules deps module-scoped Summary text). No requirement, governance file or decision record changed.\n\nRESULT: accepted\n\nThe supplied contract diff is consistent with the three cited requirements and the stated D-MDSS-SCOPE-1 decision. It names the count universe under a module filter, preserves the unfiltered Summary, and adds a scope key without changing the bounded-human-output and complete-JSON distinction. This is a review of the pinned text, not an independent verification of the shipped code.\n\nHighest-priority recommendation: Accept the one-digest re-pin, provided the manifest diff is exactly as stated.\n"
+}
