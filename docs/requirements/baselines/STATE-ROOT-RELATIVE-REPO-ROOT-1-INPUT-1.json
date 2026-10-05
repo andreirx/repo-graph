@@ -1,0 +1,97 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-manifest",
+  "baselineId": "STATE-ROOT-RELATIVE-REPO-ROOT-1-INPUT-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "requirements": [
+    {
+      "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+      "sha256": "sha256:01cf703ac67fb28c1e23c80da325d0dfbcdce2ad99c200ecf30db019745d0037"
+    }
+  ],
+  "dependencies": [
+    {
+      "role": "source",
+      "path": "docs/VISION.md",
+      "sha256": "sha256:84a7d22ba3684b06d5914b3c46ae3cce9f1b3bb274f207f5128704e0261dad37"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/state-root-separation-1.md",
+      "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/snapshot-retention-1.md",
+      "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/daemon-residuals-2.md",
+      "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/self-pollution-1.md",
+      "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+      "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+    },
+    {
+      "role": "governance",
+      "path": "docs/slices/rg-requirements-bootstrap-1.md",
+      "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b"
+    },
+    {
+      "role": "governance",
+      "path": "docs/requirements/README.md",
+      "sha256": "sha256:087936e578be0712f20a5c9c64fb97701bf1974fdc0fff823f8aee818f3b0ab3"
+    },
+    {
+      "role": "governance",
+      "path": "CLAUDE.md",
+      "sha256": "sha256:30a113d5cc92684d246cf7b4e004866c9839688ee5aca878403a0c860d5c068a"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-SRR-ROOTPATH-1.md",
+      "sha256": "sha256:fa43f9fd240a886c086f215deae05112067576f9f214c4710412ab3e99d87c76"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-SRR-SCOPE-1.md",
+      "sha256": "sha256:571957dc813ce3d5bc261c6477e19a7b3e7db13594e65626f830b240a4f5e9c2"
+    },
+    {
+      "role": "allocation",
+      "path": "docs/slices/state-root-relative-repo-root-1.md",
+      "sha256": "sha256:18783091c8b9ae73a6850f35d6caa3171a2a711698c2d95034fbc0cf21575fb8"
+    }
+  ],
+  "reviewObligationIds": [
+    "RG-REQ-011",
+    "RG-REQ-011-L01",
+    "RG-REQ-011-L02",
+    "RG-REQ-011-L03",
+    "RG-REQ-011-L04",
+    "RG-REQ-011-L05",
+    "RG-REQ-011-L06",
+    "RG-REQ-011-L07",
+    "RG-REQ-011-L08",
+    "RG-REQ-011-L09",
+    "RG-REQ-011-L10",
+    "RG-REQ-011-L11",
+    "RG-REQ-011-L12",
+    "RG-REQ-011-L13"
+  ],
+  "requiredDecisionIds": [
+    "D-SRR-ROOTPATH-1",
+    "D-SRR-SCOPE-1"
+  ]
+}

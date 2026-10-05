@@ -1,0 +1,48 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "STATE-ROOT-RELATIVE-REPO-ROOT-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/STATE-ROOT-RELATIVE-REPO-ROOT-1-INPUT-1.json",
+    "sha256": "sha256:36c91e69b46ef493968866e33a5f88889ac55287f61d73b3d5630db2465823ad"
+  },
+  "review": {
+    "path": "docs/assurance/STATE-ROOT-RELATIVE-REPO-ROOT-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:7f951c19e3bd7482755d8d78290e05c913911578fd730234d7a43074bbf9ae99"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-SRR-ROOTPATH-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-SRR-ROOTPATH-1.md",
+        "sha256": "sha256:fa43f9fd240a886c086f215deae05112067576f9f214c4710412ab3e99d87c76"
+      }
+    },
+    {
+      "id": "D-SRR-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-SRR-SCOPE-1.md",
+        "sha256": "sha256:571957dc813ce3d5bc261c6477e19a7b3e7db13594e65626f830b240a4f5e9c2"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-05T14:36:00.092Z",
+  "rationale": "Accepted by the independent requirements review at document cycle 3 (author claude-opus-5-5, reviewer codex gpt-6.1-sol; the author found nothing blocking). INPUT-1 binds RG-REQ-011-L13 (revision 2) for STATE-ROOT-RELATIVE-REPO-ROOT-1: every working-tree reader takes the registry canonical_path through one checked lookup in a new module daemon-runtime/src/repo_root.rs; the db-relative helpers and EnrichmentStoragePort::get_repo_root are deleted; the orient decorator carries the root check result and is built for every orient request with a READY epoch; the document read is a connection-free storage function; an unreachable root is named (repo root not found) and never rendered as an absence; docs JSON repo_path is absolute; no migration and no eager rewrite. SRR-C03 is proven by the operator on HEAD (fails at the defect; passes steps 3-5 on simulated-fixed output). Decisions: D-SRR-ROOTPATH-1 (human, A) and D-SRR-SCOPE-1 (operator, A, overridable by the human), each with an operator Correction 1. Cycles 1-2 were operator-text corrections (one decision, SRR-ORIENT-BARE-BRANCH, resolved A by the operator in agreement with both reviews); cycle 3 accepted."
+}
