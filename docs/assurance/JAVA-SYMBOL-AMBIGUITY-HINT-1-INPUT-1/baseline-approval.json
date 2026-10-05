@@ -1,0 +1,76 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "JAVA-SYMBOL-AMBIGUITY-HINT-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-1.json",
+    "sha256": "sha256:b9a9bf596e293c653260a2f4c48c5e8c3a2e86bca79fcebd7e5d9866391837cc"
+  },
+  "review": {
+    "path": "docs/assurance/JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:d6008e41f369b530cd92cade7f3cdca81379925322108ee3f6e47edf4c795e8c"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-JSAH-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-SCOPE-1.md",
+        "sha256": "sha256:146bfef3b05cedd567260b5b88ce3ccb8375b61dfa6fc5cf132e8d98e76516af"
+      }
+    },
+    {
+      "id": "D-JSAH-CURSOR-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-CURSOR-1.md",
+        "sha256": "sha256:be5042e5163a30ae2800d07f1657db995a4f474b3a6ef597192d7114f92334f4"
+      }
+    },
+    {
+      "id": "D-JSAH-PLACEMENT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-PLACEMENT-1.md",
+        "sha256": "sha256:3a01854a736e2fd2fb45b493ab6eb60c7e0903bb24a0c038ef93ab9eafe26407"
+      }
+    },
+    {
+      "id": "D-JSAH-STORAGE-READ-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-STORAGE-READ-1.md",
+        "sha256": "sha256:7f3bcdd947062eb47a3b1dba00081cdf2899adc168c4d41b2b3122be157b84a1"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-05T03:25:11.947Z",
+  "rationale": "JAVA-SYMBOL-AMBIGUITY-HINT-1 INPUT-1 accepted at document cycle 5 (relay iteration 4) with no finding, after cycles 1-4 refined the operator's text: one narrow public storage read by stable key in a new storage file (D-JSAH-STORAGE-READ-1 A - a frozen-path amendment reported to the human; queries.rs and agent_impl.rs stay byte-identical), the ambiguity listing as runnable shell_quote_arg-quoted stable-key cursors with file:line, stored qualified name, kind and whitespace-collapsed signature, the Java type/constructor collapse with separator-agnostic membership proof, constructor cursors as quoted stable keys on every language (D-JSAH-CURSOR-1 with Corrections 1-2 - the apostrophe case measured: 1204 SYMBOL keys, 0 CONSTRUCTOR keys across the 29 retained stores), placement in three new modules (D-JSAH-PLACEMENT-1 with Correction 1), --budget large and explicit failing negatives in JSAH-C03, P-JSAH-02 bounded to answers outside both changed paths. The six pinned decisions are operator decisions under the human's standing authority, overridable. Reviewer's implementation note carried to the packet: constructor-renderer fixtures use real stable-key syntax containing '#'."
+}

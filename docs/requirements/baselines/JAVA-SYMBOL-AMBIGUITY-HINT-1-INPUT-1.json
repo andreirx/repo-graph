@@ -1,0 +1,142 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-manifest",
+  "baselineId": "JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "requirements": [
+    {
+      "path": "docs/requirements/rg-req-005-symbol-relationship-discovery.md",
+      "sha256": "sha256:8d6b67c3350d9e4350af68b74b6882d31935432f24e0fe854f9dfb3d7dce3a56"
+    },
+    {
+      "path": "docs/requirements/rg-req-012-cli-protocol-surface.md",
+      "sha256": "sha256:834397b1613e7e68313019f2d42b8945bdaaaa50c2c4f66a37311fcb4b96f73b"
+    }
+  ],
+  "dependencies": [
+    {
+      "role": "source",
+      "path": "docs/VISION.md",
+      "sha256": "sha256:84a7d22ba3684b06d5914b3c46ae3cce9f1b3bb274f207f5128704e0261dad37"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/symbol-identity-1.md",
+      "sha256": "sha256:0c5960434f1e4f9689069fd1a2b2abdcd997b519841a3bb6d0114434d0f1f647"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/cpp-declarators-1.md",
+      "sha256": "sha256:e882b256aab71af8d5dc7c0961b5dc5774503a563b8f68fdab3064192be8a408"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/anchors-everywhere-1.md",
+      "sha256": "sha256:c6cfc05647db9a709392175b807523dd1e7c63422ae3f6f0bccacc315855bd60"
+    },
+    {
+      "role": "source",
+      "path": "docs/contracts/exit-codes.md",
+      "sha256": "sha256:0bf82ef2c91e6876fe9b907ce6bb228bac198dcb9265953efe366923339f5429"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/economy-2.md",
+      "sha256": "sha256:b989f23b13306789d3368eb16299c738325e9a37c162b16d639a58c4dacdf5e4"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/cursor-roundtrip-1.md",
+      "sha256": "sha256:e609a244b17187dc19dd40ef61deb30404bf260258fa5051fde4ace0237413be"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+      "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+    },
+    {
+      "role": "governance",
+      "path": "docs/slices/rg-requirements-bootstrap-1.md",
+      "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b"
+    },
+    {
+      "role": "governance",
+      "path": "docs/requirements/README.md",
+      "sha256": "sha256:0c2c5a96be7f4f3f855b7f3a2113503a2b44af784560dad3fa999957b4c669c3"
+    },
+    {
+      "role": "governance",
+      "path": "CLAUDE.md",
+      "sha256": "sha256:30a113d5cc92684d246cf7b4e004866c9839688ee5aca878403a0c860d5c068a"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+      "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+      "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-SCOPE-1.md",
+      "sha256": "sha256:146bfef3b05cedd567260b5b88ce3ccb8375b61dfa6fc5cf132e8d98e76516af"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-CURSOR-1.md",
+      "sha256": "sha256:be5042e5163a30ae2800d07f1657db995a4f474b3a6ef597192d7114f92334f4"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-PLACEMENT-1.md",
+      "sha256": "sha256:3a01854a736e2fd2fb45b493ab6eb60c7e0903bb24a0c038ef93ab9eafe26407"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-STORAGE-READ-1.md",
+      "sha256": "sha256:7f3bcdd947062eb47a3b1dba00081cdf2899adc168c4d41b2b3122be157b84a1"
+    },
+    {
+      "role": "allocation",
+      "path": "docs/slices/java-symbol-ambiguity-hint-1.md",
+      "sha256": "sha256:75007090655b7739542d599cf9771e9f688d7dbe862a00f69c20b0a384f8094c"
+    }
+  ],
+  "reviewObligationIds": [
+    "RG-REQ-005",
+    "RG-REQ-012",
+    "RG-REQ-005-L01",
+    "RG-REQ-005-L02",
+    "RG-REQ-005-L03",
+    "RG-REQ-005-L04",
+    "RG-REQ-005-L05",
+    "RG-REQ-005-L06",
+    "RG-REQ-005-L07",
+    "RG-REQ-005-L08",
+    "RG-REQ-005-L09",
+    "RG-REQ-005-L10",
+    "RG-REQ-012-L01",
+    "RG-REQ-012-L02",
+    "RG-REQ-012-L03",
+    "RG-REQ-012-L04",
+    "RG-REQ-012-L05",
+    "RG-REQ-012-L06",
+    "RG-REQ-012-L07",
+    "RG-REQ-012-L08",
+    "RG-REQ-012-L09"
+  ],
+  "requiredDecisionIds": [
+    "D-AGENT-USEFULNESS-FRAME-1",
+    "D-CERTAINTY-MARK-1",
+    "D-JSAH-SCOPE-1",
+    "D-JSAH-CURSOR-1",
+    "D-JSAH-PLACEMENT-1",
+    "D-JSAH-STORAGE-READ-1"
+  ]
+}
