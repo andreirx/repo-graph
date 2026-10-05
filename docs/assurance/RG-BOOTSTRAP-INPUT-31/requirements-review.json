@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-31-pass3",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-31.json",
+    "sha256": "sha256:5bfcb52dbab7ab3360e4e3360acfec923e3b9edf461a9c857c678109e297c357"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-31"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-31-pass3"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-05T07:26:08.000Z",
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin(s): docs/requirements/rg-req-005-symbol-relationship-discovery.md (sha256:f8a50020abced8aed84e3c3a173e1368bdfb553173c7c5163461b03473bcca08); docs/cli/rmap-contracts.md (sha256:79e79e7f6ef68d68d55e4054b126ce055c0fe2d89b8fe3726326caca7fef8776). Codex session 01a10af0-182a-7f43-b1d8-47dca95a5d5e. Record written 2026-10-05T07:26:50.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-30 -> INPUT-31: two pins changed - docs/requirements/rg-req-005-symbol-relationship-discovery.md at 2c22b9a4 (RG-REQ-005-L05 and L04 gain their post-ship evidence lines: MET after JAVA-SYMBOL-AMBIGUITY-HINT-1 66341d63 - ambiguity listings as runnable stable-key cursors with file:line, stored qualified name, kind and signature, the lookup state per candidate, the Java type/constructor collapse with constructor cursors as quoted stable keys; the requirement text, criteria and status lines are unchanged) and docs/cli/rmap-contracts.md at 66341d63 (the new subsection Ambiguous symbols - the listing and its cursors). docs/requirements/README.md also changed at 2c22b9a4 but is not a bootstrap pin. Review passes 1 and 2 (gpt-6-sol) returned no verdict - the provider reported the model at capacity (logs rgb31/codex-attempt1-capacity.err, codex-attempt2-capacity.err); pass 3 ran on gpt-5.6-terra, the standing default reviewer model, and accepted. Pass 3 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-5.6-terra, model_reasoning_effort=high), pass 3, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended text.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: INPUT-31 has 59 pins; only the baseline ID and the two stated digests differ from INPUT-30, and both digests equal HEAD `f4bc8bb4`. OBSERVED: the 10c1f093→HEAD diffs are confined to the two evidence paragraphs and the one ambiguous-symbol contract subsection. OBSERVED: source and tracked verification/review records support the stored-row `lookup` states, incomplete-listing behavior, cursor quoting, test-count claims, and the 1,204 apostrophe-key measurement. INFERRED: “MET” is justified for L05 revision 2 and L04’s Java/type-constructor clause; L04 correctly retains base/derived types as not re-read, and no reviewed sentence overclaims."
+}
