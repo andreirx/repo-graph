@@ -1,0 +1,97 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DOCTOR-FALLBACK-STATE-ROOT-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DOCTOR-FALLBACK-STATE-ROOT-1-INPUT-2.json",
+    "sha256": "sha256:de3b194c062860c1e37dd857233d968c13b3b1aa08f81d39de722a60ed2cd21b"
+  },
+  "review": {
+    "path": "docs/assurance/DOCTOR-FALLBACK-STATE-ROOT-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:ce9803474d23f697bdb8717b9e0862a3f9b09fc538ba0a3ae64805f317480b04"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-DFSR-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-SCOPE-1.md",
+        "sha256": "sha256:b9a155389291b6fe92655409f685acce4683d5355877990194de437176b0b3b4"
+      }
+    },
+    {
+      "id": "D-DFSR-PATHS-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-PATHS-1.md",
+        "sha256": "sha256:adfed6d83733e34ec53e2ca28a3a313b79372f62f921f075ac554b8aa9e1adf4"
+      }
+    },
+    {
+      "id": "D-DFSR-FALLBACK-NOTE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-FALLBACK-NOTE-1.md",
+        "sha256": "sha256:c54bd28d6cb5f879cb8710486d370911b5a0bbc709b2debf6d78d77e599d73f1"
+      }
+    },
+    {
+      "id": "D-DFSR-LINUX-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-LINUX-SCOPE-1.md",
+        "sha256": "sha256:0f273b7be85e6574dc97840833965c1f10efcc961e043e8edad2d4ec25a6b303"
+      }
+    },
+    {
+      "id": "D-DFSR-STDIO-DETAIL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-STDIO-DETAIL-1.md",
+        "sha256": "sha256:bd5189f38ee3ca39f400cd6e704bd1cabc2ded5f4d7122b926d68c92dcbb0a7a"
+      }
+    },
+    {
+      "id": "D-DFSR-NONUTF8-ROOT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-NONUTF8-ROOT-1.md",
+        "sha256": "sha256:f24424142005c536f9d980de0700fd2204829e7a9f8fc50745422d002d419348"
+      }
+    },
+    {
+      "id": "D-DFSR-ROOTCONFIG-EXPORT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-ROOTCONFIG-EXPORT-1.md",
+        "sha256": "sha256:950304cc93516520eeafa381e624ab8a2b513d3d175d698f3b13dd6fae684a03"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-05T00:53:40.383Z",
+  "rationale": "DOCTOR-FALLBACK-STATE-ROOT-1 INPUT-2 accepted at document cycle 12 (relay iteration 5, reused after INPUT-1's acceptance) with no finding: the BINDING SEAM's platform/mod.rs re-export list now names only the four production users, RootConfig is re-exported #[cfg(test)] and service_note_detail on its macOS-gated line (D-DFSR-ROOTCONFIG-EXPORT-1, option A, raised by the implementation reviewer of admission 1); baselinePath and the \u00a710 note are the only other changes. The nine pinned decisions are operator decisions under the human's standing authority, overridable. The reviewer's advisory (the explicit DoctorConfig binding in execute_doctor keeps the re-export used on Linux) is carried to the implementation review."
+}
