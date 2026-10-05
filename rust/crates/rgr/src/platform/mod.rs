@@ -12,6 +12,17 @@
 
 pub mod manifest;
 
+mod doctor_config_probes;
+#[cfg(target_os = "macos")]
+pub(crate) use doctor_config_probes::service_note_detail;
+// `RootConfig` is named outside its module only by sibling unit tests; a non-test re-export is
+// an unused import under `clippy -D warnings` (DOCTOR-FALLBACK-STATE-ROOT-1 build record).
+#[cfg(test)]
+pub(crate) use doctor_config_probes::RootConfig;
+pub(crate) use doctor_config_probes::{
+    doctor_config, early_config_probes, service_note_applies, DoctorConfig,
+};
+
 #[cfg(target_os = "macos")]
 pub mod macos;
 
@@ -20,7 +31,7 @@ pub mod linux;
 
 use std::path::PathBuf;
 
-use crate::cli::paths;
+use crate::cli::paths::{self, PathResolutionDiagnostics};
 use crate::daemon_client::{
     check_socket_connectivity, DaemonClient, SocketConnectResult, StateRootMode, TransportMode,
 };
@@ -82,19 +93,32 @@ impl ProbeResult {
     }
 }
 
-/// Check daemon socket connectivity with full path resolution diagnostics.
+/// The `daemon_socket` probe: under a forced stdio transport (`RMAP_TRANSPORT=stdio`) it does not
+/// touch the socket and returns `n/a (stdio transport)`, a pass. Only when the configured transport
+/// is NOT forced stdio does it check daemon socket connectivity with full path resolution
+/// diagnostics.
 ///
 /// This is a cross-platform probe used by both macOS and Linux adapters.
-/// It checks:
+/// When the transport is not forced stdio, it checks:
 /// 1. Socket path can be determined
 /// 2. Socket file exists
 /// 3. Daemon accepts connections on the socket
 ///
-/// The socket connectivity check uses the same code path as production
+/// That socket connectivity check uses the same code path as production
 /// CLI-to-daemon communication (no special health endpoint).
 pub fn check_daemon_socket() -> ProbeResult {
-    let diag = paths::daemon_socket_path_with_diagnostics();
+    check_daemon_socket_with(
+        TransportMode::from_env(),
+        &paths::daemon_socket_path_with_diagnostics(),
+    )
+}
 
+/// [`check_daemon_socket`] over a given configured transport and resolution (testable as values).
+/// Under a forced stdio transport the socket is not used: `n/a (stdio transport)`, a pass.
+fn check_daemon_socket_with(mode: TransportMode, diag: &PathResolutionDiagnostics) -> ProbeResult {
+    if mode == TransportMode::Stdio {
+        return ProbeResult::pass("daemon_socket", "n/a (stdio transport)");
+    }
     let socket_path = match diag.chosen_path {
         Some(ref p) => p.clone(),
         None => {
@@ -162,16 +186,38 @@ pub fn check_daemon_socket() -> ProbeResult {
     }
 }
 
-/// Run granular socket health probes.
+/// Granular socket health probes. Under a forced stdio transport (`RMAP_TRANSPORT=stdio`) they do
+/// not touch the socket: `socket_file`, `socket_connect` and `socket_ping` are `n/a (stdio
+/// transport)` passes and `transport` / `state_root` are not emitted here. Only when the configured
+/// transport is NOT forced stdio do they test socket connectivity.
 ///
-/// DAEMON-SOCKET-HEALTH-1: Returns separate probes for each failure layer:
+/// DAEMON-SOCKET-HEALTH-1 (transport not forced stdio): returns separate probes for each failure
+/// layer:
 /// - `socket_file`: exists / missing
 /// - `socket_connect`: succeeded / failed (with error detail)
 /// - `socket_ping`: succeeded / failed / timeout
 ///
 /// Used by `rmap doctor --json` for agent-parseable diagnostics.
 pub fn granular_socket_probes() -> Vec<ProbeResult> {
-    let diag = paths::daemon_socket_path_with_diagnostics();
+    granular_socket_probes_with(
+        TransportMode::from_env(),
+        &paths::daemon_socket_path_with_diagnostics(),
+    )
+}
+
+/// [`granular_socket_probes`] over a given configured transport and resolution. Under a forced
+/// stdio transport the three socket probes are `n/a (stdio transport)` passes, and `transport` /
+/// `state_root` are not emitted here (`doctor` emits them first, from the configuration).
+fn granular_socket_probes_with(
+    mode: TransportMode,
+    diag: &PathResolutionDiagnostics,
+) -> Vec<ProbeResult> {
+    if mode == TransportMode::Stdio {
+        return ["socket_file", "socket_connect", "socket_ping"]
+            .into_iter()
+            .map(|name| ProbeResult::pass(name, "n/a (stdio transport)"))
+            .collect();
+    }
     let mut probes = Vec::new();
 
     let socket_path = match diag.chosen_path {
@@ -319,10 +365,24 @@ pub fn granular_socket_probes() -> Vec<ProbeResult> {
 
 /// Generate socket resolution diagnostic probes.
 ///
-/// Returns detailed probes about path resolution for `rmap doctor --json`.
+/// Returns detailed probes about path resolution for `rmap doctor --json`. Under a forced stdio
+/// transport `socket_path` is `n/a (stdio transport)`; the other probes report the same
+/// path-resolution facts on every transport.
 /// Human output uses the simpler `check_daemon_socket()` result.
 pub fn socket_resolution_probes() -> Vec<ProbeResult> {
-    let diag = paths::daemon_socket_path_with_diagnostics();
+    socket_resolution_probes_with(
+        TransportMode::from_env(),
+        &paths::daemon_socket_path_with_diagnostics(),
+    )
+}
+
+/// [`socket_resolution_probes`] over a given configured transport and resolution. Under a forced
+/// stdio transport `socket_path` is `n/a (stdio transport)`; the other probes are path-resolution
+/// facts and report the same values as under `auto`/`socket`.
+fn socket_resolution_probes_with(
+    mode: TransportMode,
+    diag: &PathResolutionDiagnostics,
+) -> Vec<ProbeResult> {
     let mut probes = Vec::new();
 
     // Effective UID probe
@@ -350,7 +410,9 @@ pub fn socket_resolution_probes() -> Vec<ProbeResult> {
     }
 
     // Socket path resolution probe
-    if let Some(ref path) = diag.chosen_path {
+    if mode == TransportMode::Stdio {
+        probes.push(ProbeResult::pass("socket_path", "n/a (stdio transport)"));
+    } else if let Some(ref path) = diag.chosen_path {
         let exists = path.exists();
         let msg = format!(
             "{} ({})",

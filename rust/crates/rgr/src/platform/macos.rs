@@ -10,7 +10,8 @@ use std::process::Command;
 use crate::cli::paths;
 
 use super::{
-    check_daemon_socket, manifest, InstallManifest, PlatformAdapter, ProbeResult, ServiceStatus,
+    check_daemon_socket, doctor_config, manifest, service_note_applies, service_note_detail,
+    DoctorConfig, InstallManifest, PlatformAdapter, ProbeResult, ServiceStatus,
 };
 
 /// Service label for launchd.
@@ -208,23 +209,8 @@ impl PlatformAdapter for MacOSAdapter {
             probes.push(self.check_directory(&logs_dir, "logs_dir"));
         }
 
-        // Service check (launchd status)
-        let status = self.service_status();
-        let service_probe = match &status {
-            ServiceStatus::Running { pid } => {
-                let msg = match pid {
-                    Some(p) => format!("running (pid: {})", p),
-                    None => "running".to_string(),
-                };
-                ProbeResult::pass("daemon_service", msg)
-            }
-            ServiceStatus::Stopped => ProbeResult::fail("daemon_service", "loaded but not running"),
-            ServiceStatus::NotInstalled => ProbeResult::fail("daemon_service", "not installed"),
-            ServiceStatus::Unknown { reason } => {
-                ProbeResult::fail("daemon_service", format!("unknown: {}", reason))
-            }
-        };
-        probes.push(service_probe);
+        // Service check (launchd status of the GLOBAL root's service; DOCTOR-FALLBACK-STATE-ROOT-1)
+        probes.push(service_probe(self.service_status(), &doctor_config()));
 
         // Socket connectivity check (actual daemon responsiveness)
         probes.push(check_daemon_socket());
@@ -242,6 +228,40 @@ impl PlatformAdapter for MacOSAdapter {
         }
 
         probes
+    }
+}
+
+/// The `daemon_service` probe: the launchd service of the GLOBAL state root (pure; the live
+/// `launchctl` read stays in `doctor_probes`).
+///
+/// Under the ONE note predicate (`service_note_applies`: forced stdio, or a configured override
+/// root) the probe passes whatever the service state — this run is not judged by the global
+/// service — and carries the detail that states what the configuration proves. Otherwise today's
+/// pass/fail per state, no detail.
+fn service_probe(status: ServiceStatus, cfg: &DoctorConfig) -> ProbeResult {
+    let (passed_today, state) = match &status {
+        ServiceStatus::Running { pid } => {
+            let msg = match pid {
+                Some(p) => format!("running (pid: {})", p),
+                None => "running".to_string(),
+            };
+            (true, msg)
+        }
+        ServiceStatus::Stopped => (false, "loaded but not running".to_string()),
+        ServiceStatus::NotInstalled => (false, "not installed".to_string()),
+        ServiceStatus::Unknown { reason } => (false, format!("unknown: {}", reason)),
+    };
+    let message = format!("launchd service (global state root): {}", state);
+    if service_note_applies(cfg) {
+        let probe = ProbeResult::pass("daemon_service", message);
+        match service_note_detail(cfg) {
+            Some(detail) => probe.with_details(detail),
+            None => probe,
+        }
+    } else if passed_today {
+        ProbeResult::pass("daemon_service", message)
+    } else {
+        ProbeResult::fail("daemon_service", message)
     }
 }
 
@@ -293,5 +313,85 @@ gui/501/com.repo-graph.rmapd = {
 "#;
         let status = adapter.parse_launchctl_print(output);
         assert!(matches!(status, ServiceStatus::Stopped));
+    }
+
+    // RG-REQ-011-L12 (macOS, D-DFSR-LINUX-SCOPE-1): the service probe names what it measures; it is
+    // a passing note under forced stdio (any root) or a configured override root, with a detail that
+    // states only what the configuration proves; under auto/socket on the global root it keeps
+    // today's pass/fail per state with the new label and no detail.
+    #[test]
+    fn daemon_service_probe_names_the_global_root_under_override() {
+        use super::super::RootConfig;
+        use crate::daemon_client::TransportMode;
+
+        let iso = PathBuf::from("/private/tmp/iso-root/state");
+        let states = [
+            (
+                ServiceStatus::Running { pid: Some(42) },
+                "running (pid: 42)",
+                true,
+            ),
+            (ServiceStatus::Running { pid: None }, "running", true),
+            (ServiceStatus::Stopped, "loaded but not running", false),
+            (ServiceStatus::NotInstalled, "not installed", false),
+            (
+                ServiceStatus::Unknown {
+                    reason: "could not parse launchctl output".to_string(),
+                },
+                "unknown: could not parse launchctl output",
+                false,
+            ),
+        ];
+        let stdio_detail = "stdio transport configured; this service is not used by a stdio client";
+        let override_detail = format!(
+            "measures the global launchd service; this run's configured state root is {}",
+            iso.display()
+        );
+
+        for (status, state, passed_today) in states {
+            let label = format!("launchd service (global state root): {state}");
+
+            // Forced stdio — global root, override root, non-UTF-8 root: a passing note.
+            for root in [
+                RootConfig::Global,
+                RootConfig::Override(iso.clone()),
+                RootConfig::InvalidUtf8,
+            ] {
+                let cfg = DoctorConfig {
+                    transport: TransportMode::Stdio,
+                    root: root.clone(),
+                };
+                let p = service_probe(status.clone(), &cfg);
+                assert_eq!(p.name, "daemon_service");
+                assert_eq!(p.message, label, "{root:?}");
+                assert!(p.passed, "stdio {root:?} {state}");
+                assert_eq!(p.details.as_deref(), Some(stdio_detail), "{root:?}");
+            }
+
+            for transport in [TransportMode::Auto, TransportMode::Socket] {
+                // A configured non-global root under auto/socket: the neutral note.
+                let cfg = DoctorConfig {
+                    transport,
+                    root: RootConfig::Override(iso.clone()),
+                };
+                let p = service_probe(status.clone(), &cfg);
+                assert_eq!(p.message, label);
+                assert!(p.passed, "{transport:?} override {state}");
+                assert_eq!(p.details.as_deref(), Some(override_detail.as_str()));
+
+                // The global root (and a non-UTF-8 value, which is not an override): today's
+                // pass/fail per state, the new label, no detail.
+                for root in [RootConfig::Global, RootConfig::InvalidUtf8] {
+                    let cfg = DoctorConfig {
+                        transport,
+                        root: root.clone(),
+                    };
+                    let p = service_probe(status.clone(), &cfg);
+                    assert_eq!(p.message, label);
+                    assert_eq!(p.passed, passed_today, "{transport:?} {root:?} {state}");
+                    assert!(p.details.is_none(), "{transport:?} {root:?}: {p:?}");
+                }
+            }
+        }
     }
 }

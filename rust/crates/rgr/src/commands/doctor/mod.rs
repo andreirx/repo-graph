@@ -13,7 +13,8 @@ use serde::Serialize;
 use crate::cli::paths;
 use crate::daemon_client::DaemonClient;
 use crate::platform::{
-    get_adapter, granular_socket_probes, socket_resolution_probes, PlatformAdapter, ProbeResult,
+    doctor_config, early_config_probes, get_adapter, granular_socket_probes, service_note_applies,
+    socket_resolution_probes, DoctorConfig, PlatformAdapter, ProbeResult,
 };
 
 /// `daemon_info`-derived probes (authority policy + daemon RSS + total storage).
@@ -36,8 +37,8 @@ mod seed;
 mod summary;
 
 use summary::{
-    apply_degraded_enrichment_tone, apply_seed_probe_tone, cwd_check_verdict, status_line,
-    ProbeTone, SnapshotVerdict,
+    apply_degraded_enrichment_tone, apply_seed_probe_tone, apply_service_probe_tone,
+    cwd_check_verdict, status_line, ProbeTone, SnapshotVerdict,
 };
 
 /// Doctor output for JSON mode.
@@ -139,7 +140,11 @@ pub fn run_doctor(args: &[String]) -> ExitCode {
 
 fn execute_doctor() -> (DoctorOutput, bool) {
     let adapter = get_adapter();
-    let mut probes = adapter.doctor_probes();
+    // DOCTOR-FALLBACK-STATE-ROOT-1: under forced stdio, `transport`/`state_root` first (config only).
+    // The explicit `DoctorConfig` type keeps that re-export used on Linux, where macos.rs is not built.
+    let cfg: DoctorConfig = doctor_config();
+    let mut probes = early_config_probes(&cfg);
+    probes.extend(adapter.doctor_probes());
 
     // Add socket resolution diagnostics for detailed output
     let resolution_probes = socket_resolution_probes();
@@ -185,6 +190,9 @@ fn execute_doctor() -> (DoctorOutput, bool) {
     apply_degraded_enrichment_tone(&mut probe_outputs, enrichment_degraded);
     // AUDIT5-MINORS-1 F5: an unavailable/absent/degraded seed store renders `[note]`, not `[ok]`.
     apply_seed_probe_tone(&mut probe_outputs, seed_note);
+    // The global-service note tone: macOS only in this slice (D-DFSR-LINUX-SCOPE-1).
+    let note = cfg!(target_os = "macos") && service_note_applies(&cfg);
+    apply_service_probe_tone(&mut probe_outputs, note);
 
     let output = DoctorOutput {
         platform,

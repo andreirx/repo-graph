@@ -1613,6 +1613,32 @@ rmap contracts usages [--element <element_uid>] [--min-confidence <0.0-1.0>]
 
 **Design doc:** `docs/slices/cs-1-protobuf-schema.md`
 
+### `doctor` — transport, state root and the daemon it judges (DOCTOR-FALLBACK-STATE-ROOT-1)
+
+RG-REQ-011-L12. Platform scope: macOS (D-DFSR-LINUX-SCOPE-1). Source: `rust/crates/rgr/src/platform/doctor_config_probes.rs`, `platform/mod.rs` (`*_with` socket probes), `platform/macos.rs` (`service_probe`), `commands/doctor/summary.rs` (`apply_service_probe_tone`).
+
+**Forced stdio (`RMAP_TRANSPORT=stdio`).** `doctor` reads the client configuration before any connection: the transport with `TransportMode::from_env()` and the state root with `std::env::var("RMAP_STATE_ROOT")`, the predicate the client uses.
+
+- The first two probes are `transport: stdio (configured)` and `state_root`. `transport` makes no `active:` claim, because no connection exists yet. `state_root` has one of three forms:
+  - `override (<path>)`, a pass, when the variable is present and valid UTF-8;
+  - `global`, a pass, when the variable is absent;
+  - `RMAP_STATE_ROOT is set but is not valid UTF-8; the client ignores it (global root, or a sandbox-local root after an auto fallback)`, a counted failure.
+- The five socket-related probes `daemon_socket`, `socket_file`, `socket_connect`, `socket_ping` and `socket_path` are passes that read `n/a (stdio transport)`. They give no crash diagnosis. The other resolution probes (`effective_uid`, `env_home`, `canonical_home`, `socket_resolution`, `socket_override`) keep their values. `--json` lists 27 probes for an isolated override root. When every resolution probe passes, the human text hides the `Socket Resolution:` section, so `socket_path` is visible only in `--json`.
+- `transport` and `state_root` are not emitted a second time after the connection attempt.
+
+**The service probe.** `daemon_service` reads `launchd service (global state root): <state>` on every path, where `<state>` is `running (pid: n)`, `loaded but not running`, `not installed` or `unknown: …`. The probe is a passing note (`[note]` in the human text; `passed: true` in JSON) for every service state when one predicate holds: the transport is forced stdio, or `RMAP_STATE_ROOT` is present and valid UTF-8. A non-UTF-8 value is not an override, and a sandbox-local root reached through an `auto` permission fallback is not in the predicate. The note's detail states only what the configuration proves:
+
+- forced stdio, on any root: `stdio transport configured; this service is not used by a stdio client`;
+- a configured override root under `auto`/`socket`: `measures the global launchd service; this run's configured state root is <path>`. This detail does not name the daemon that answered. With `RMAP_STATE_ROOT` alone, the client can still reach the global socket.
+
+Otherwise (`auto`/`socket` on the global root, also after an EPERM fallback), the service probe keeps its pass/fail for each state, with the new label and no detail. A probe whose `passed` is false is never rendered as a note, on any platform.
+
+**Verdict.** The verdict rule does not change: the verdict counts `passed`. A note is a passed probe. The healthy line words notes separately (`N ok · M note`). A forced-stdio run whose stdio daemon answers is healthy whatever the state of the global service.
+
+**`auto` / `socket`.** The socket probes keep their order, texts and failure semantics. `transport` and `state_root` print after the connection attempt with the observed active transport. A missing override socket under `auto` stays a failure (`daemon_socket: socket not found: <path>`, `Status: daemon UNHEALTHY`). The exception is the `daemon_service` probe: it has the new label on every service state, and when `RMAP_STATE_ROOT` is present and valid UTF-8 it is a passing note with the detail `measures the global launchd service; this run's configured state root is <path>`, for every launchd state. On the global root (no `RMAP_STATE_ROOT`), `daemon_service` keeps its pass/fail and only its label changes, so the normal environment's output differs from earlier releases only in the `daemon_service` label. The probe names in `--json` are the same as before.
+
+**Residual: Linux (DFSR-LINUX-1).** The Linux adapter (`platform/linux.rs`) is unchanged. On Linux, `daemon_service` keeps its earlier label, its counted pass/fail and its `[ok]`/`[FAIL]` tone. A forced-stdio run with a stopped systemd or manual service therefore still reports UNHEALTHY. The early `transport`/`state_root` probes and the five `n/a (stdio transport)` socket probes come from shared code, so they apply on Linux as well. No test has run them on a Linux host. The service label, note and verdict rule for Linux follow in DFSR-LINUX-1, tested on a Linux host.
+
 ## Output Format
 
 The agent-facing query commands default to **human-readable** plain-text output and emit the

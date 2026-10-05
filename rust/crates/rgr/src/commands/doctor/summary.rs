@@ -160,6 +160,21 @@ pub(super) fn apply_seed_probe_tone(probes: &mut [ProbeOutput], seed_note: bool)
     }
 }
 
+/// DOCTOR-FALLBACK-STATE-ROOT-1 (RG-REQ-011-L12): the global service probe renders `[note]` exactly
+/// when `note` holds (the caller passes the ONE predicate, `service_note_applies`) AND the probe
+/// passed — a probe whose `passed` is false is never marked a note, so verdict and display never
+/// disagree (D-DFSR-LINUX-SCOPE-1).
+pub(super) fn apply_service_probe_tone(probes: &mut [ProbeOutput], note: bool) {
+    if note {
+        if let Some(p) = probes
+            .iter_mut()
+            .find(|p| p.name == "daemon_service" && p.passed)
+        {
+            p.tone = ProbeTone::Note;
+        }
+    }
+}
+
 /// §1: the doctor summary line. Frames the verdict as DAEMON/INSTALL health ("daemon healthy (N/N
 /// checks)") and NAMES the cwd repo's separate `check` verdict (snapshot quality) in its own clause when
 /// resolvable — omitted honestly otherwise. Pure, so the exact contract wording is unit-tested without a
@@ -209,7 +224,10 @@ pub(super) fn status_line(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::ProbeResult;
+    use crate::daemon_client::TransportMode;
+    use crate::platform::{
+        early_config_probes, service_note_applies, DoctorConfig, ProbeResult, RootConfig,
+    };
 
     fn summary(passed: usize, failed: usize) -> Summary {
         Summary {
@@ -365,5 +383,92 @@ mod tests {
             vec![ProbeResult::pass("semantic_seeding", "present (256-dim, model m)").into()];
         apply_seed_probe_tone(&mut probes, false);
         assert_eq!(probes[0].tone, ProbeTone::Ok);
+    }
+
+    fn service(passed: bool) -> ProbeOutput {
+        let msg = "launchd service (global state root): loaded but not running";
+        if passed {
+            ProbeResult::pass("daemon_service", msg).into()
+        } else {
+            ProbeResult::fail("daemon_service", msg).into()
+        }
+    }
+
+    fn cfg(transport: TransportMode, root: RootConfig) -> DoctorConfig {
+        DoctorConfig { transport, root }
+    }
+
+    // D-DFSR-LINUX-SCOPE-1: a `daemon_service` probe with `passed = false` keeps the FAIL tone
+    // whatever the predicate — a failed probe is never rendered as a note on any platform.
+    #[test]
+    fn failed_probe_is_never_rendered_as_a_note() {
+        for note in [true, false] {
+            let mut probes = vec![service(false)];
+            apply_service_probe_tone(&mut probes, note);
+            assert_eq!(probes[0].tone, ProbeTone::Fail, "note={note}");
+            assert!(!probes[0].passed);
+        }
+    }
+
+    // RG-REQ-011-L12 / D-DFSR-FALLBACK-NOTE-1: the tone of `daemon_service` is `Note` exactly when the
+    // ONE predicate holds (forced stdio, or a configured UTF-8 override) and `Ok`/`FAIL` otherwise —
+    // including `{ Auto, Global }`, the configuration an `auto` run holds before any EPERM fallback;
+    // only `daemon_service` moves; the status line over a forced-stdio probe list reads healthy with
+    // the note counted as a note.
+    #[test]
+    fn service_probe_renders_as_note_under_forced_stdio_or_configured_override() {
+        let iso = || RootConfig::Override(std::path::PathBuf::from("/private/tmp/iso-root/state"));
+        let note_cases = [
+            cfg(TransportMode::Stdio, RootConfig::Global),
+            cfg(TransportMode::Stdio, iso()),
+            cfg(TransportMode::Stdio, RootConfig::InvalidUtf8),
+            cfg(TransportMode::Auto, iso()),
+            cfg(TransportMode::Socket, iso()),
+        ];
+        for c in &note_cases {
+            let mut probes = vec![service(true), ProbeResult::pass("plist", "p").into()];
+            apply_service_probe_tone(&mut probes, service_note_applies(c));
+            assert_eq!(probes[0].tone, ProbeTone::Note, "{c:?}");
+            assert!(probes[0].passed);
+            assert_eq!(probes[1].tone, ProbeTone::Ok, "only daemon_service moves");
+        }
+        let counted_cases = [
+            cfg(TransportMode::Auto, RootConfig::Global),
+            cfg(TransportMode::Socket, RootConfig::Global),
+            cfg(TransportMode::Auto, RootConfig::InvalidUtf8),
+            cfg(TransportMode::Socket, RootConfig::InvalidUtf8),
+        ];
+        for c in &counted_cases {
+            let mut probes = vec![service(true)];
+            apply_service_probe_tone(&mut probes, service_note_applies(c));
+            assert_eq!(probes[0].tone, ProbeTone::Ok, "{c:?}");
+            let mut probes = vec![service(false)];
+            apply_service_probe_tone(&mut probes, service_note_applies(c));
+            assert_eq!(probes[0].tone, ProbeTone::Fail, "{c:?}");
+        }
+
+        // A forced-stdio probe list: early probes, the five n/a socket probes, the service note.
+        let c = cfg(TransportMode::Stdio, iso());
+        let mut probes: Vec<ProbeOutput> = early_config_probes(&c)
+            .into_iter()
+            .map(ProbeOutput::from)
+            .collect();
+        for name in [
+            "daemon_socket",
+            "socket_file",
+            "socket_connect",
+            "socket_ping",
+            "socket_path",
+        ] {
+            probes.push(ProbeResult::pass(name, "n/a (stdio transport)").into());
+        }
+        probes.push(service(true));
+        apply_service_probe_tone(&mut probes, service_note_applies(&c));
+        let passed = probes.iter().filter(|p| p.passed).count();
+        let failed = probes.len() - passed;
+        let notes = probes.iter().filter(|p| p.tone == ProbeTone::Note).count();
+        assert_eq!((passed, failed, notes), (8, 0, 1), "{probes:?}");
+        let line = status_line(&summary(passed, failed), &None, notes);
+        assert_eq!(line, "Status: daemon healthy (7 ok · 1 note)");
     }
 }

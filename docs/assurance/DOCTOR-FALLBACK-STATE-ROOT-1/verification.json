@@ -1,0 +1,316 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-DOCTOR-FALLBACK-STATE-ROOT-1-0",
+  "workItemId": "DOCTOR-FALLBACK-STATE-ROOT-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/DOCTOR-FALLBACK-STATE-ROOT-1-INPUT-2.json",
+    "sha256": "sha256:de3b194c062860c1e37dd857233d968c13b3b1aa08f81d39de722a60ed2cd21b"
+  },
+  "allocation": {
+    "path": "docs/slices/doctor-fallback-state-root-1.md",
+    "sha256": "sha256:cd66ac1b8d44412845d09b47cbd6be310f5e37f4c8fa6e04e2361f096ee76d19"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "5e16b937115bdbcf6171c12c299372793f4fc298",
+    "entries": [
+      {
+        "path": "docs/cli/rmap-contracts.md",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:2ce2318635b61450629490c45a8293665478551d31dfb21a0f85a8bceedf7da1",
+          "byteLength": 80442
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:411f35a50f0696c7e18ff5e8fc02b65e9e7c7fd4e29bc8c443da8af00b9ed9cf",
+          "byteLength": 85067
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/doctor/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:a17c5fa405847dd32d2378069a3c4c2b684302f876440eae1f3685186842c160",
+          "byteLength": 21186
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:d8c8b4eba24d58c07968e54142bbdea37e9f4bbfa11eceed8c00dfbbdeb0751b",
+          "byteLength": 21801
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/doctor/summary.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:87d76d9bdea24130ffa22887a96175a2058712762b62870a0e594bd93eb80c94",
+          "byteLength": 16397
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f66dd0db32f7dc0e66554ed9c48643815d6a012cfb5c6f2358b2dc2847b5c0ca",
+          "byteLength": 21228
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/platform/doctor_config_probes.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:3ad8805ef5207898e6707d816f4427435ddb9e2ebdc3fddc31683c8f7f312ef8",
+          "byteLength": 13325
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/platform/macos.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:3fad276a6ac0f128b714e0996193746f36db158d6c754fa94acf0b2410d61be0",
+          "byteLength": 9483
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:50982fa003c5ad2ea53d45cb6e6affcbc284a039b1ecb1c1100aa6b072cddafa",
+          "byteLength": 14154
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/platform/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:b01dc573a3da3e29641e5a7895dd4283098991af9cc3ed3550dbb1e93f2ed052",
+          "byteLength": 16131
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7a48717a93ddaa52ab50178c85f882258777de5b8613f9e5b88d665eddf5722c",
+          "byteLength": 19193
+        }
+      }
+    ],
+    "sha256": "sha256:f68b0704bc60e3566cb54e290fd91a5f2b6e0a047c8bcd7baf4f21af44861b86"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-DOCTOR-FALLBACK-STATE-ROOT-1-0"
+  },
+  "checks": [
+    {
+      "checkId": "DFSR-C01",
+      "obligationIds": [
+        "RG-REQ-011-L12",
+        "RG-REQ-011-L06",
+        "RG-REQ-011-L08",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L08",
+        "P-DFSR-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree, built from rust/; cargo only; no rmap invocation",
+        "command": "( set -o pipefail; cargo test -p repo-graph-rgr --lib 2>&1 | tee /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-01.txt ) && grep -qE '^test result: ok\\.' /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-01.txt && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-01.txt && echo c01-named-tests && : > /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-01-named.txt && for t in commands::doctor::summary::tests::failed_probe_is_never_rendered_as_a_note commands::doctor::summary::tests::service_probe_renders_as_note_under_forced_stdio_or_configured_override platform::doctor_config_probes::tests::doctor_auto_and_socket_transport_keep_socket_failures platform::doctor_config_probes::tests::doctor_emits_transport_and_state_root_before_socket_probes platform::doctor_config_probes::tests::doctor_stdio_transport_marks_socket_probes_not_applicable platform::macos::tests::daemon_service_probe_names_the_global_root_under_override; do cargo test -p repo-graph-rgr --lib \"$t\" -- --exact > /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-01-one.txt 2>&1; rc=$?; cat /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-01-one.txt >> /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-01-named.txt; test \"$rc\" -eq 0 && grep -qE '^test result: ok\\. 1 passed' /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-01-one.txt || { echo \"named test did not run or failed: $t\"; exit 1; }; done && echo c01-placement && for t in doctor_emits_transport_and_state_root_before_socket_probes doctor_stdio_transport_marks_socket_probes_not_applicable doctor_auto_and_socket_transport_keep_socket_failures; do grep -q \"fn $t\" crates/rgr/src/platform/doctor_config_probes.rs || { echo \"missing test in doctor_config_probes.rs: $t\"; exit 1; }; done && grep -q 'fn daemon_service_probe_names_the_global_root_under_override' crates/rgr/src/platform/macos.rs && grep -q 'fn service_probe_renders_as_note_under_forced_stdio_or_configured_override' crates/rgr/src/commands/doctor/summary.rs && grep -q 'fn failed_probe_is_never_rendered_as_a_note' crates/rgr/src/commands/doctor/summary.rs && echo c01-retained && cargo test -p repo-graph-rgr --lib -- --list 2>/dev/null | grep ': test$' | sed 's/: test$//' | LC_ALL=C sort > /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-rgr-lib-tests-after.txt && LC_ALL=C sort -c ../.agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/before/rgr-lib-tests.txt && test \"$(LC_ALL=C comm -23 ../.agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/before/rgr-lib-tests.txt /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-rgr-lib-tests-after.txt | wc -l | tr -d ' ')\" -eq 0 && test \"$(LC_ALL=C comm -13 ../.agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/before/rgr-lib-tests.txt /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-rgr-lib-tests-after.txt | wc -l | tr -d ' ')\" -eq 6 && test \"$(wc -l < /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-rgr-lib-tests-after.txt | tr -d ' ')\" -eq 1488 && echo c01-guardrail && test \"$(grep -c '#\\[test\\]' crates/rgr/src/platform/mod.rs)\" -eq 0 && test \"$(grep -c '#\\[test\\]' crates/rgr/src/commands/doctor/mod.rs)\" -eq 2",
+        "inputs": "rgr `--lib` (1482 listed at HEAD c3f38efd, EXECUTED `-- --list` 2026-10-05 — the sorted name list is the operator's before witness `before/rgr-lib-tests.txt`; after = exactly that list plus the six new names, 1488 in total: every retained test keeps its name — the retained-name oracle; unchanged assertions are judged by the reviewer on the diff, DFSR-C04 (9)). Each of the six new tests is also RUN BY NAME with its MODULE-QUALIFIED libtest name (`cargo test --lib platform::doctor_config_probes::tests::<name> -- --exact` etc. → `1 passed`; a bare function name selects zero tests), each run captured to a file and then inspected (no `tee | grep` under `pipefail`), so a renamed or skipped test cannot hide behind a count; the before witness was sorted under `LC_ALL=C` and the after list is sorted and compared under the same locale. NEW (6), placed per D-DFSR-PATHS-1: in the NEW child module `platform/doctor_config_probes.rs` tests — `doctor_emits_transport_and_state_root_before_socket_probes` (given `DoctorConfig { Stdio, Override(p) }`, `DoctorConfig { Stdio, Global }` — forced stdio with no override, `state_root: global` — and `DoctorConfig { Stdio, InvalidUtf8 }` — the FAILED `state_root` probe naming the fact (D-DFSR-NONUTF8-ROOT-1) — the early builder yields `transport: stdio (configured)` (no `active:` claim before a connection, and NO `using stdio subprocess (socket permission denied)` detail — that cause belongs only to an observed `auto` permission fallback, `platform/mod.rs:272-279`) then `state_root: override (<path>)`, both passed; given `Auto` or `Socket` it yields nothing — the two probes come after the connection attempt as today; `service_note_applies` is false for `InvalidUtf8` with `Auto`/`Socket` — the non-UTF-8 value under auto yields no early probe and no service note (L12 revision 10 criterion)), `doctor_stdio_transport_marks_socket_probes_not_applicable` (given forced stdio and a missing socket path, the five socket-related probes `daemon_socket`, `socket_file`, `socket_connect`, `socket_ping`, `socket_path` are present, passed, and read `n/a (stdio transport)`; no `may have crashed` text), `doctor_auto_and_socket_transport_keep_socket_failures` (given `TransportMode::Auto` AND given `TransportMode::Socket`, each with a missing socket path: `daemon_socket` fails `socket not found: <path>`, `socket_file` fails `not found`, `socket_connect`/`socket_ping` fail `skipped (socket missing)`, `socket_path` fails `(not found)` — today's texts, unchanged); in `platform/macos.rs` tests — `daemon_service_probe_names_the_global_root_under_override` (`service_probe(status, &cfg)` built from each `ServiceStatus` variant reads `launchd service (global state root): <state>` — `running (pid: n)`, `loaded but not running`, `not installed`, `unknown: …`; under forced stdio (global root or override root) it is `passed = true` with the detail `stdio transport configured; this service is not used by a stdio client`; under a configured non-global root (`RootConfig::Override` — a valid UTF-8 read of `RMAP_STATE_ROOT`) with `Auto`/`Socket` it is `passed = true` with the detail `measures the global launchd service; this run's configured state root is <path>`; under `Auto`/`Socket` with `RootConfig::Global` — the configuration an `auto` run holds before any EPERM fallback (D-DFSR-FALLBACK-NOTE-1 A; the fallback's sandbox-local outcome is a residual, not a `RootConfig` state) — today's pass/fail per state with the new label prefix and no detail); in `commands/doctor/summary.rs` tests — `failed_probe_is_never_rendered_as_a_note` (a `daemon_service` `ProbeOutput` with `passed = false` keeps the `FAIL` tone whatever the predicate — D-DFSR-LINUX-SCOPE-1: on Linux, outside this slice, the stopped-service failure stays a visible `[FAIL]`); `service_probe_renders_as_note_under_forced_stdio_or_configured_override` (the human tone of `daemon_service` is `Note` — rendered `[note]` — exactly when the ONE predicate holds — the transport is forced stdio, or `RMAP_STATE_ROOT` is read as a valid UTF-8 override (`RootConfig::Override`) — and `Ok`/`FAIL` otherwise, including `DoctorConfig { Auto, Global }` — the configuration an `auto` run holds before any EPERM fallback; the fallback's sandbox-local outcome is a stated residual (DFSR-FALLBACK-2), not a `RootConfig` state (the tone and `passed` never disagree); the status line over a forced-stdio probe list reads healthy with the note counted as a note). BINDING SEAM — every signature is stated HERE once; §2.1 refers to this list. In the new child module `rust/crates/rgr/src/platform/doctor_config_probes.rs` (declared `mod doctor_config_probes;` in `platform/mod.rs`, which re-exports exactly what production code outside the module uses — `pub(crate) use doctor_config_probes::{doctor_config, early_config_probes, service_note_applies, DoctorConfig};` — plus two single-item lines: the macOS-gated `#[cfg(target_os = \"macos\")] pub(crate) use doctor_config_probes::service_note_detail;` and the test-only `#[cfg(test)] pub(crate) use doctor_config_probes::RootConfig;` (D-DFSR-ROOTCONFIG-EXPORT-1: `RootConfig` is named outside its module only by the sibling unit tests; an unconditional re-export is an unused import under DFSR-C02's `clippy -D warnings`) so `commands::doctor` and the adapters can call them): `pub(crate) enum RootConfig { Global, Override(PathBuf), InvalidUtf8 }`; `pub(crate) struct DoctorConfig { pub transport: TransportMode, pub root: RootConfig }`; `pub(crate) fn doctor_config() -> DoctorConfig` — THE ONE configuration reader: `TransportMode::from_env()` (no `DaemonClient` is constructed) and `std::env::var(\"RMAP_STATE_ROOT\")` matched `Ok(p)` → `Override(PathBuf::from(p))`, `Err(NotPresent)` → `Global`, `Err(NotUnicode(_))` → `InvalidUtf8` — the SAME predicate the client uses (`daemon_client/mod.rs:154`, `stdio_transport.rs:179-180` use `std::env::var(..).is_ok()`), so the probe and the client cannot disagree (D-DFSR-NONUTF8-ROOT-1); it is called at the two existing sites — `execute_doctor` (`commands/doctor/mod.rs`) and the macOS adapter's `doctor_probes` (`platform/macos.rs`), two reads of the same immutable process environment; `pub(crate) fn early_config_probes(cfg: &DoctorConfig) -> Vec<ProbeResult>` — empty unless `cfg.transport == TransportMode::Stdio`; then `transport: stdio (configured)` (passed, no detail) and the `state_root` probe: `Override(p)` → `state_root: override (<p>)` passed; `Global` → `state_root: global` passed; `InvalidUtf8` → `state_root: RMAP_STATE_ROOT is set but is not valid UTF-8; the client ignores it (global root, or a sandbox-local root after an auto fallback)` FAILED (counted); `pub(crate) fn service_note_applies(cfg: &DoctorConfig) -> bool` — `cfg.transport == Stdio || matches!(cfg.root, RootConfig::Override(_))` (the ONE note predicate; `InvalidUtf8` is not an override — the client ignores it); `pub(crate) fn service_note_detail(cfg: &DoctorConfig) -> Option<String>` — `Stdio` → `stdio transport configured; this service is not used by a stdio client`; otherwise `Override(p)` → `measures the global launchd service; this run's configured state root is <p>`; else `None`. In `platform/mod.rs`: `check_daemon_socket()`, `granular_socket_probes()`, `socket_resolution_probes()` keep their public no-argument signatures (the adapters and the Linux adapter call them unchanged) and delegate to `check_daemon_socket_with(mode: TransportMode, diag: &PathResolutionDiagnostics)`, `granular_socket_probes_with(mode, diag)`, `socket_resolution_probes_with(mode, diag)`; the public functions pass `TransportMode::from_env()` and the live diagnostics; under `Stdio` the `_with` variants return the FIVE named socket-related probes (`daemon_socket`, `socket_file`, `socket_connect`, `socket_ping`, `socket_path`) as `n/a (stdio transport)` passes without touching the socket, and `socket_resolution_probes_with` keeps its OTHER resolution probes (`effective_uid`, `env_home`, `canonical_home`, `socket_resolution`, `socket_override`) exactly as today — they are facts of path resolution, not socket probes — so the stdio JSON still totals 27 probes. In `platform/macos.rs`: `fn service_probe(status: ServiceStatus, cfg: &DoctorConfig) -> ProbeResult` (pure; `doctor_probes` passes the live `launchctl` status and `doctor_config()`): label `launchd service (global state root): <state>`; when `service_note_applies(cfg)` → `passed = true` with `service_note_detail(cfg)` as the detail; otherwise today's pass/fail per state, no detail. In `commands/doctor/summary.rs`: `pub(super) fn apply_service_probe_tone(probes: &mut [ProbeOutput], note: bool)` — sets `daemon_service`'s tone to `Note` only when `note && passed` (a failed probe is never a note); `execute_doctor` always calls it with ONE expression on every target: `let note = cfg!(target_os = \"macos\") && service_note_applies(&cfg);` (`cfg!` is a plain `bool`, so the Linux library build still references and type-checks `service_note_applies` — NO `#[cfg]`-selected statements anywhere in `execute_doctor`; D-DFSR-LINUX-SCOPE-1 reserves the note rule for DFSR-LINUX-1: on Linux `note` is always `false` and a passing Linux `daemon_service` never shows `[note]`); `service_note_applies`, `apply_service_probe_tone`, `early_config_probes`, `doctor_config` and the `_with` variants are cross-platform — compiled, referenced from production code and unit-tested on both targets; ONLY `service_note_detail` and its re-export are `#[cfg(target_os = \"macos\")]`-gated (its one consumer is the macOS adapter's `service_probe`; the re-export is its own gated `pub(crate) use doctor_config_probes::service_note_detail;` line, separate from the cross-platform `pub(crate) use` list), so Linux Clippy (`cargo clippy --all-targets -- -D warnings` in CI) sees no unused item and every rgr unit test compiles on Linux. No test reads or sets the process environment: every test constructs `DoctorConfig` / `PathResolutionDiagnostics` / `ServiceStatus` / `ProbeOutput` values.  PRE-CONNECTION SOURCE: `doctor_config()` above — nothing on this path depends on `DaemonClient::new()` succeeding; an absent variable (`NotPresent` → `Global`) is distinct from a malformed one (`NotUnicode` → `InvalidUtf8`, a failed probe)."
+      },
+      "expected": "exit 0: the six named tests each run and pass by name in the files D-DFSR-PATHS-1 names; the forced-stdio case yields `transport`, `state_root` first, five `n/a (stdio transport)` passes and a healthy status line with the global service probe as a passing note; the auto and socket cases keep today's order and failure texts; a failed probe is never a note; the after test list equals the before list plus the six new names (1488); the two files over 500 lines gain no test module; every existing rgr unit test is preserved by name (no behavior change outside the doctor seam)",
+      "candidateSha256": "sha256:f68b0704bc60e3566cb54e290fd91a5f2b6e0a047c8bcd7baf4f21af44861b86",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Passed, exit 0. All four markers printed; 1488 tests passed, including the six new tests by name.",
+        "supportingEvidence": [
+          "/private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-01.txt",
+          "/private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-01-named.txt",
+          "/private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-rgr-lib-tests-after.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "DFSR-C02",
+      "obligationIds": [
+        "RG-REQ-011-L01",
+        "RG-REQ-011-L02",
+        "RG-REQ-011-L03",
+        "RG-REQ-011-L04",
+        "RG-REQ-011-L05",
+        "RG-REQ-011-L07",
+        "RG-REQ-011-L09",
+        "RG-REQ-011-L10",
+        "RG-REQ-011-L11",
+        "RG-REQ-002-L01",
+        "RG-REQ-002-L03",
+        "RG-REQ-002-L04",
+        "RG-REQ-002-L05",
+        "RG-REQ-002-L06",
+        "RG-REQ-002-L07",
+        "RG-REQ-002-L09",
+        "RG-REQ-002-L10",
+        "RG-REQ-002-L11",
+        "P-DFSR-02",
+        "P-DFSR-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree; cargo and git only; no rmap invocation",
+        "command": "echo c02-fmt && cargo fmt -p repo-graph-rgr -- --check && echo c02-clippy && ( set -o pipefail; cargo clippy -p repo-graph-rgr --all-targets -- -D warnings 2>&1 | tee /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-02.txt ) && echo c02-paths && test -z \"$(git -C .. status --porcelain -- . ':!.agent-manager' ':!docs/assurance' | grep -vE '^( M|M |MM|A |\\?\\?) (rust/crates/rgr/src/platform/mod\\.rs|rust/crates/rgr/src/platform/doctor_config_probes\\.rs|rust/crates/rgr/src/platform/macos\\.rs|rust/crates/rgr/src/commands/doctor/mod\\.rs|rust/crates/rgr/src/commands/doctor/summary\\.rs|docs/cli/rmap-contracts\\.md)$')\" && echo c02-frozen && test \"$(git -C .. diff HEAD --stat -- rust/crates/rgr/src/main.rs rust/crates/rgr/src/daemon_client rust/crates/rgr/src/platform/linux.rs rust/crates/daemon-runtime rust/crates/platform-paths rust/crates/rmapd | wc -l)\" -eq 0 && echo c02-hygiene && git -C .. diff --check -- . ':!.agent-manager'",
+        "inputs": "fmt and clippy `-D warnings --all-targets` over rgr; the worktree holds changes ONLY under the six candidate paths (the slice document and its manifest are committed before admission, so they are not in the porcelain output); `main.rs`, `daemon_client/`, `platform/linux.rs`, the `daemon-runtime`, `platform-paths` and `rmapd` crates are byte-identical to HEAD (the Linux adapter is the stated residual DFSR-LINUX-1 — it cannot be compiled on this machine); `git diff --check`."
+      },
+      "expected": "exit 0: every file outside the six candidate paths is byte-identical and the frozen paths are unchanged, so every other command, the daemon, the client transport fallback and the path resolution are preserved (no behavior change); rgr is formatted and warning-free",
+      "candidateSha256": "sha256:f68b0704bc60e3566cb54e290fd91a5f2b6e0a047c8bcd7baf4f21af44861b86",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Passed, exit 0. Formatting and clippy --all-targets -D warnings were clean; only the six paths changed, frozen paths were byte-identical, and diff --check was clean.",
+        "supportingEvidence": [
+          "/private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-02.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "DFSR-C03",
+      "obligationIds": [
+        "RG-REQ-011-L12",
+        "RG-REQ-011-L06",
+        "RG-REQ-011-L08",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L08",
+        "P-DFSR-01",
+        "P-DFSR-03"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree, built from rust/; `cargo build --release -p repo-graph-rgr -p rmapd` — the candidate `rmapd` sibling is the one the stdio transport spawns (`stdio_transport.rs:232-255` prefers the executable's sibling), and its `--version` and path are recorded in `after/rmapd-version.txt`; steps 1–4 run `rmap doctor` from INSIDE a unique isolated root (`cd $ISO`; `mktemp -d /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-iso.XXXXXX`; RMAP_STATE_ROOT=<root>/state RMAP_SOCKET_PATH=<root>/rmap.sock plus RMAP_AUTO_ENRICH/REINDEX/RETENTION=off RMAP_SEED_VECTORS=off; step 1 with RMAP_TRANSPORT=stdio, step 4 with it unset) — an EXIT trap removes the root, the step-5 directory and only an rmapd that did not exist before and holds a file under the root; step 5 is the ONE named exception to isolation: `rmap doctor` and `rmap doctor --json` in the normal environment against the operator's real daemon, READ-ONLY, run from an empty `mktemp -d /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-cwd.XXXXXX` directory so no indexed repository is resolved from cwd (asserted: `storage: no repo indexed in cwd`) and no store is loaded, with the operator registry's sha256 compared before and after (must be equal — RG-REQ-011-L06's bounded proof); the before captures are the operator's (`before/doctor-normal.*`, `before/doctor-stdio-iso.*`, `before/doctor-auto-iso.*`, HEAD release binary, 2026-10-05, taken from an unindexed cwd)",
+        "command": "bash -Eeu -o pipefail -c 'cargo build --release -p repo-graph-rgr -p rmapd 2>&1 | tail -1; RM=\"$PWD/target/release/rmap\"; test -x \"$PWD/target/release/rmapd\"; SL=\"$PWD/../.agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1\"; mkdir -p \"$SL/after\"; ISO=$(mktemp -d /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-iso.XXXXXX); CWD5=$(mktemp -d /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-cwd.XXXXXX); PIDS0=$(pgrep -x rmapd || true); cleanup(){ for p in $(pgrep -x rmapd || true); do echo \"$PIDS0\" | grep -qx \"$p\" && continue; lsof -p \"$p\" 2>/dev/null | grep -qF \"$ISO\" && kill \"$p\" || true; done; rm -rf \"$ISO\" \"$CWD5\"; }; trap cleanup EXIT; \"$PWD/target/release/rmapd\" --version > \"$SL/after/rmapd-version.txt\" 2>&1 || true; echo \"$PWD/target/release/rmapd\" >> \"$SL/after/rmapd-version.txt\"; echo step1-stdio-iso; ( cd \"$ISO\"; export RMAP_STATE_ROOT=\"$ISO/state\" RMAP_SOCKET_PATH=\"$ISO/rmap.sock\" RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off RMAP_SEED_VECTORS=off RMAP_TRANSPORT=stdio; rc=0; \"$RM\" doctor > \"$SL/after/doctor-stdio-iso.stdout.txt\" 2> \"$SL/after/doctor-stdio-iso.stderr.txt\" || rc=$?; echo \"$rc\" > \"$SL/after/doctor-stdio-iso.exit\"; rc=0; \"$RM\" doctor --json > \"$SL/after/doctor-stdio-iso.json\" 2>/dev/null || rc=$?; echo \"$rc\" > \"$SL/after/doctor-stdio-iso.json.exit\" ); test \"$(cat \"$SL/after/doctor-stdio-iso.exit\")\" -eq 0; H=\"$SL/after/doctor-stdio-iso.stdout.txt\"; echo step2-stdio-lines; test \"$(grep -c \"^  \\[ok\\] transport: \" \"$H\")\" -eq 1; test \"$(grep -c \"^  \\[ok\\] state_root: \" \"$H\")\" -eq 1; test \"$(grep -c \"daemon_service: \" \"$H\")\" -eq 1; T=$(grep -n \"^  \\[ok\\] transport: stdio (configured)\" \"$H\" | cut -d: -f1); R=$(grep -n \"^  \\[ok\\] state_root: override ($ISO/state)\" \"$H\" | cut -d: -f1); D=$(grep -n \"^  \\[note\\] daemon_service: launchd service (global state root): \" \"$H\" | cut -d: -f1); test -n \"$T\" && test -n \"$R\" && test -n \"$D\" && test \"$T\" -lt \"$D\" && test \"$R\" -lt \"$D\"; grep -qF \"stdio transport configured; this service is not used by a stdio client\" \"$H\"; for p in daemon_socket socket_file socket_connect socket_ping; do grep -qE \"^  \\[ok\\] $p: n/a \\(stdio transport\\)\" \"$H\" || { echo \"missing n/a line: $p\"; exit 1; }; done; ! grep -qF \"Socket Resolution:\" \"$H\"; ! grep -qF \"may have crashed\" \"$H\"; ! grep -qF \"socket permission denied\" \"$H\"; grep -qF \"Status: daemon healthy\" \"$H\"; echo step3-stdio-json; python3 -c \"import json,sys; d=json.load(open(sys.argv[1])); ps=d[\\\"probes\\\"]; names=[p[\\\"name\\\"] for p in ps]; assert len(ps)==27, len(ps); assert names.count(\\\"transport\\\")==1 and names.count(\\\"state_root\\\")==1 and names.count(\\\"daemon_service\\\")==1, names; assert names.index(\\\"transport\\\")<names.index(\\\"daemon_service\\\") and names.index(\\\"state_root\\\")<names.index(\\\"daemon_service\\\"), names; sock=[p for p in ps if p[\\\"name\\\"] in (\\\"daemon_socket\\\",\\\"socket_file\\\",\\\"socket_connect\\\",\\\"socket_ping\\\",\\\"socket_path\\\")]; assert len(sock)==5, [p[\\\"name\\\"] for p in sock]; bad=[(p[\\\"name\\\"],p[\\\"passed\\\"],p[\\\"message\\\"]) for p in sock if not (p[\\\"passed\\\"] and p[\\\"message\\\"]==\\\"n/a (stdio transport)\\\")]; assert not bad, bad; assert all(p[\\\"passed\\\"] for p in ps if p[\\\"name\\\"] in (\\\"transport\\\",\\\"state_root\\\",\\\"daemon_service\\\")); print(\\\"stdio json ok\\\", len(ps), \\\"probes\\\")\" \"$SL/after/doctor-stdio-iso.json\"; echo step4-auto-iso; ( cd \"$ISO\"; export RMAP_STATE_ROOT=\"$ISO/state\" RMAP_SOCKET_PATH=\"$ISO/rmap.sock\" RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off RMAP_SEED_VECTORS=off; unset RMAP_TRANSPORT; rc=0; \"$RM\" doctor > \"$SL/after/doctor-auto-iso.stdout.txt\" 2> \"$SL/after/doctor-auto-iso.stderr.txt\" || rc=$?; echo \"$rc\" > \"$SL/after/doctor-auto-iso.exit\" ); test \"$(cat \"$SL/after/doctor-auto-iso.exit\")\" -eq 1; A=\"$SL/after/doctor-auto-iso.stdout.txt\"; grep -qE \"^  \\[FAIL\\] daemon_socket: socket not found: $ISO/rmap.sock\" \"$A\"; grep -qE \"^  \\[FAIL\\] socket_file: not found\" \"$A\"; grep -qF \"Status: daemon UNHEALTHY\" \"$A\"; grep -qF \"measures the global launchd service; this run'\"'\"'s configured state root is $ISO/state\" \"$A\"; diff <(grep -v \"^$\" \"$SL/before/doctor-auto-iso.stdout.txt\" | grep -vE \"daemon memory|total storage|activity:|retention:|last enrichment pass|^Status:|^        \" | sed -E \"s#/private/tmp/(DFSR-1-iso|DOCTOR-FALLBACK-STATE-ROOT-1-iso)\\.[A-Za-z0-9]+#<ISO>#g\") <(grep -v \"^$\" \"$A\" | grep -vE \"daemon memory|total storage|activity:|retention:|last enrichment pass|^Status:|^        \" | sed -E \"s#/private/tmp/(DFSR-1-iso|DOCTOR-FALLBACK-STATE-ROOT-1-iso)\\.[A-Za-z0-9]+#<ISO>#g\") > \"$SL/after/doctor-auto-iso.diff.txt\" || true; test \"$(grep -c \"^<\" \"$SL/after/doctor-auto-iso.diff.txt\")\" -eq 1; grep -qF \"<   [ok] daemon_service: running (pid:\" \"$SL/after/doctor-auto-iso.diff.txt\"; test \"$(grep -c \"^>\" \"$SL/after/doctor-auto-iso.diff.txt\")\" -eq 1; grep -qF \">   [note] daemon_service: launchd service (global state root): running (pid:\" \"$SL/after/doctor-auto-iso.diff.txt\"; echo step5-normal-env-readonly; REG=\"$HOME/Library/Application Support/repo-graph/registry.json\"; S0=$(shasum -a 256 \"$REG\" | cut -c1-64); ( cd \"$CWD5\"; unset RMAP_TRANSPORT RMAP_STATE_ROOT RMAP_SOCKET_PATH; rc=0; \"$RM\" doctor > \"$SL/after/doctor-normal.stdout.txt\" 2> \"$SL/after/doctor-normal.stderr.txt\" || rc=$?; echo \"$rc\" > \"$SL/after/doctor-normal.exit\"; \"$RM\" doctor --json > \"$SL/after/doctor-normal.json\" 2>/dev/null || true ); S1=$(shasum -a 256 \"$REG\" | cut -c1-64); test \"$S0\" = \"$S1\"; test \"$(cat \"$SL/after/doctor-normal.exit\")\" -eq \"$(cat \"$SL/before/doctor-normal.exit\")\"; grep -qF \"storage: no repo indexed in cwd\" \"$SL/after/doctor-normal.stdout.txt\"; diff <(grep -v \"^$\" \"$SL/before/doctor-normal.stdout.txt\" | grep -vE \"daemon memory|total storage|activity:|retention:|last enrichment pass|^Status:|^        \") <(grep -v \"^$\" \"$SL/after/doctor-normal.stdout.txt\" | grep -vE \"daemon memory|total storage|activity:|retention:|last enrichment pass|^Status:|^        \") > \"$SL/after/doctor-normal.diff.txt\" || true; grep -qF \"Status: daemon healthy\" \"$SL/after/doctor-normal.stdout.txt\"; grep -qF \"[ok] transport: auto (active: socket)\" \"$SL/after/doctor-normal.stdout.txt\"; grep -qF \"[ok] state_root: global\" \"$SL/after/doctor-normal.stdout.txt\"; test \"$(grep -c \"^<\" \"$SL/after/doctor-normal.diff.txt\")\" -eq 1; grep -qF \"<   [ok] daemon_service: running (pid:\" \"$SL/after/doctor-normal.diff.txt\"; test \"$(grep -c \"^>\" \"$SL/after/doctor-normal.diff.txt\")\" -eq 1; grep -qF \">   [ok] daemon_service: launchd service (global state root): running (pid:\" \"$SL/after/doctor-normal.diff.txt\"; python3 -c \"import json,sys; a=json.load(open(sys.argv[1])); b=json.load(open(sys.argv[2])); na=sorted(p[\\\"name\\\"] for p in a[\\\"probes\\\"]); nb=sorted(p[\\\"name\\\"] for p in b[\\\"probes\\\"]); assert na==nb, (na,nb); print(\\\"normal json names identical\\\", len(na))\" \"$SL/before/doctor-normal.json\" \"$SL/after/doctor-normal.json\"; echo step6-cleanup-by-trap; echo DFSR-C03-OK'",
+        "inputs": "(step 1) under forced stdio, from inside the isolated root, the candidate binary exits 0 and prints exactly one `transport` line, one `state_root` line and one `daemon_service` line — `  [ok] transport: stdio (configured)` and `  [ok] state_root: override (<root>/state)` BOTH BEFORE `  [note] daemon_service: launchd service (global state root): <state>` (a passing NOTE), whose detail reads `stdio transport configured; this service is not used by a stdio client`; the `transport` line carries NO `socket permission denied` detail (that cause is false for forced stdio; it belongs to an observed `auto` fallback only); the four Daemon-group socket probes read `  [ok] <name>: n/a (stdio transport)`; the `Socket Resolution:` section is ABSENT from the human text (it renders only on a resolution failure or legacy fallback — `commands/doctor/mod.rs:403-410` — so `socket_path` is visible only in JSON under forced stdio); no `may have crashed`; `Status: daemon healthy`; (step 3) `doctor --json` under stdio: EXACTLY 27 probes with exactly one `transport`, one `state_root` and one `daemon_service` (the early pair is not emitted a second time), `transport` and `state_root` preceding `daemon_service`; exactly five socket-related probes, each `passed` with `message` == `n/a (stdio transport)`; `transport`, `state_root`, `daemon_service` passed; (step 4) under auto transport with the override socket missing the binary still exits 1 and KEEPS `[FAIL] daemon_socket: socket not found: <root>/rmap.sock`, `[FAIL] socket_file: not found` and `Status: daemon UNHEALTHY` — the override-socket failure is real and stays reported — the service note carries the neutral detail `measures the global launchd service; this run's configured state root is <root>/state`, and, with the volatile lines removed (`daemon memory`, `total storage`, `activity:`, `retention:`, `last enrichment pass` — it embeds a relative age — the `Status:` line, indented detail lines) and both runs' root paths normalised to one placeholder, its output compared IN ORDER (no sort) differs from the operator's before capture by EXACTLY the relabelled `daemon_service` line (now a note): nothing else moves under auto; the `Status: daemon UNHEALTHY` prefix is asserted separately; (step 5) from an empty unindexed directory, in the normal environment with `RMAP_TRANSPORT`, `RMAP_STATE_ROOT` and `RMAP_SOCKET_PATH` explicitly unset (so no inherited override can spawn a stdio daemon against the global state), the human output with the volatile lines removed (`daemon memory`, `total storage`, `activity:`, `retention:`, `last enrichment pass`, `Status:`, indented detail lines), compared IN ORDER, differs from the operator's before capture by EXACTLY one removed line (`[ok] daemon_service: running (pid: …)`) and one added line (`[ok] daemon_service: launchd service (global state root): running (pid: …)` — a counted pass on the global root under auto); `storage: no repo indexed in cwd`, `[ok] transport: auto (active: socket)`, `[ok] state_root: global` and the `Status: daemon healthy` prefix are present; the JSON probe NAME set is identical (26 names); the exit status equals the before capture's; the operator registry's digest is unchanged. Isolated roots and the cwd directory are named `/private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-*` (CLAUDE.md cleanup rule) and removed by the EXIT trap. The forced-stdio-on-the-global-root case (`state_root: global`) is NOT run live: with `RMAP_TRANSPORT=stdio` and no `RMAP_STATE_ROOT` the client would spawn a stdio daemon against the operator's global state; it is covered by the unit tests in DFSR-C01."
+      },
+      "expected": "exit 0 and DFSR-C03-OK: under an isolated stdio root `doctor` states its configured transport and state root first, marks the five socket-related probes not applicable (four in the human text, all five in JSON) and reports a healthy daemon it actually used (RG-REQ-011-L12 met on real output); under auto transport with a missing override socket the failures, order and texts are preserved except the service line, now a neutral note (no behavior change); in the normal environment every line except the renamed `daemon_service` label is preserved (no behavior change), the probe names are unchanged and the operator's registry is untouched (RG-REQ-011-L06)",
+      "candidateSha256": "sha256:f68b0704bc60e3566cb54e290fd91a5f2b6e0a047c8bcd7baf4f21af44861b86",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Passed, exit 0, DFSR-C03-OK. Stdio JSON had 27 probes, normal JSON names were identical (26), and registry digest was unchanged.",
+        "supportingEvidence": [
+          ".agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/after/"
+        ]
+      }
+    },
+    {
+      "checkId": "DFSR-C04",
+      "obligationIds": [
+        "RG-REQ-011-L12",
+        "RG-REQ-011-L06",
+        "RG-REQ-011-L08",
+        "RG-REQ-011-L09",
+        "RG-REQ-002-L02",
+        "RG-REQ-002-L08",
+        "P-DFSR-01",
+        "P-DFSR-02",
+        "P-DFSR-03"
+      ],
+      "owner": "reviewer",
+      "method": {
+        "kind": "inspection",
+        "subject": "git diff HEAD -- the six candidate paths, read on the candidate tree, with SLICE_DOC sections 2-3 and the after/ captures",
+        "criterion": "(1) under FORCED stdio only, `transport: stdio (configured)` (no `active:` claim before any connection — `active_transport_name()` is `None` then — and no `socket permission denied` detail, which is false for forced stdio) and `state_root` are built in the new child module `platform/doctor_config_probes.rs` from the client configuration (transport mode, state-root mode, override path — no connection) and inserted BEFORE `daemon_service` in the probe list by `commands/doctor/mod.rs`'s call line; under `auto`/`socket` the two probes print where they print today (after the connection attempt, with the observed active transport and a possibly sandbox-local root); the code matches DFSR-C01's BINDING SEAM signature for signature (`doctor_config`, `early_config_probes`, `service_note_applies`, `service_note_detail`, `service_probe`, the `*_with` variants, `apply_service_probe_tone`, the `pub(crate) use` re-export); the configured transport is read with `TransportMode::from_env()` and NEVER through a `DaemonClient` (whose construction can fail before the five `n/a` probes are built); the state root is read with `std::env::var(\"RMAP_STATE_ROOT\")` — the client's predicate — and the three outcomes map to the three `state_root` forms, the non-UTF-8 one a failed probe; no test reads or sets the process environment; the Linux adapter is untouched and gets the same `n/a` behaviour through the unchanged public functions; (2) under `TransportMode::Stdio` exactly the five named socket-related probes (`socket_path` included) are `n/a (stdio transport)` passes, the other resolution probes are unchanged, and NO crash diagnosis is produced; the human `Socket Resolution:` section is absent in the isolated override case DFSR-C03 proves (every resolution probe passes there) — the slice claims no wider suppression (a `LegacyFallback` resolution can still print it); under `Auto`/`Socket` the socket probes keep today's texts and failure semantics exactly; (3) `daemon_service` is labelled `launchd service (global state root)` and, exactly when the ONE predicate `service_note_applies(&cfg)` holds (forced stdio, or `RootConfig::Override` — a valid UTF-8 read of `RMAP_STATE_ROOT`; never a non-UTF-8 value, never a sandbox-local root reached through an `auto` EPERM fallback; D-DFSR-FALLBACK-NOTE-1, D-DFSR-NONUTF8-ROOT-1) — forced stdio (including on the global root): detail `stdio transport configured; this service is not used by a stdio client`; a configured non-global state root with `auto`/`socket`: the neutral detail `measures the global launchd service; this run's configured state root is <path>` — is `passed = true` for every launchd state and renders with the `Note` tone (`[note]`, applied in `commands/doctor/summary.rs` like the enrichment and seed tones) — the tone keys on the same predicate as `passed` AND never marks a probe whose `passed` is false as a note (the `passed` guard — D-DFSR-LINUX-SCOPE-1), so verdict and display never disagree; under `auto`/`socket` on the global root (including after an EPERM fallback) today's pass/fail per state with the new label and no detail; no sentence of `doctor` output asserts which daemon answered when the client cannot prove it (RG-REQ-002-L02/L08); (4) the verdict logic is unchanged (it counts `passed`; a note is a passed probe; the healthy line words notes separately, ok = passed − notes) — a forced-stdio run with a working stdio daemon is healthy whatever the global service's state; an auto run with a missing override socket is unhealthy; (5) `main.rs`, `daemon_client/`, `platform/linux.rs`, `daemon-runtime`, `platform-paths` and `rmapd` are byte-identical; the contract states the macOS scope and the Linux gap (D-DFSR-LINUX-SCOPE-1: on Linux `daemon_service` keeps today's counted pass/fail AND tone until DFSR-LINUX-1 — the tone step's `note` flag is the ONE expression `cfg!(target_os = \"macos\") && service_note_applies(&cfg)` on every target (no `#[cfg]`-selected statements), so a passing Linux `daemon_service` never renders `[note]` while the Linux library build still references `service_note_applies`; `service_note_applies` and `apply_service_probe_tone` stay cross-platform so their unit tests compile on Linux; only `service_note_detail` and its re-export are cfg-gated, so Linux Clippy `cargo clippy --all-targets -- -D warnings` sees nothing unused) and no text claims the rule holds on Linux; `platform/mod.rs` and `commands/doctor/mod.rs` (over 500 lines) gain no new responsibility — only changed branches and call lines (CLAUDE.md:87; D-DFSR-PATHS-1); the Linux adapter's matching change is named as the residual DFSR-LINUX-1, not claimed; (6) the contract's new `doctor` subsection states exactly (1)–(4) and the residual, in the reader's terms (D-AGENT-USEFULNESS-FRAME-1: `n/a (stdio transport)` — the predicate at the code's site — never `skipped`; `launchd service (global state root)` — what the probe measures); (7) no line of `doctor` output claims a fact about a daemon the client did not talk to; (8) every rmap invocation in DFSR-C03 steps 1–4 runs from inside the isolated root, step 5 runs from an empty unindexed directory read-only with the registry digest unchanged, and the candidate `rmapd` served the stdio runs (`after/rmapd-version.txt`); (9) every retained test keeps its assertions (read the test diff: only additions in the three test files; no existing `assert` changed — DFSR-C01's retained-name oracle covers names, this criterion covers assertions); (10) honesty of reads on the changed render path (RG-REQ-002-L04): no new `unwrap_or` / `unwrap_or_else` / `.ok()` / `unwrap_or_default` turns a FAILED read into a default that renders as a fact — in particular the early `state_root` probe and the service note take their root from `doctor_config()`'s `RootConfig` (absent = `Global`; present = `Override`; not UTF-8 = `InvalidUtf8`, rendered as a counted failure — never defaulted to `global` or `(unknown)`), never `std::env::var(\"RMAP_STATE_ROOT\").unwrap_or_else(|_| \"(unknown)\".to_string())` (today's `platform/mod.rs:302` form stays only on the unchanged post-connection path); a failed read on the new path renders as unknown, not as a value.",
+        "inputs": "The candidate's diff of the six paths; SLICE_DOC sections 2-3; D-DFSR-SCOPE-1 (with Corrections 1–3), D-DFSR-PATHS-1, D-DFSR-FALLBACK-NOTE-1, D-DFSR-LINUX-SCOPE-1, D-DFSR-STDIO-DETAIL-1, D-DFSR-NONUTF8-ROOT-1 (with Correction 1), D-AGENT-USEFULNESS-FRAME-1, D-CERTAINTY-MARK-1; RG-REQ-011-L12 (revision 10), L06, L08, L09; RG-REQ-002-L02/L04/L08 (RC-4's root cause is restated in SLICE_DOC §1 — the audit file is not in the manifest closure and is not an input); the before captures (`before/doctor-normal.*`, `before/doctor-stdio-iso.*`, `before/doctor-auto-iso.*`, `before/rgr-lib-tests.txt`) and the builder's after captures and DFSR-C01–C03 logs."
+      },
+      "expected": "every criterion (1)–(10) holds on the candidate; every handler's arguments, exit codes and JSON for every other command, the auto/socket failure semantics and every other printed string are preserved (no behavior change)",
+      "candidateSha256": "sha256:f68b0704bc60e3566cb54e290fd91a5f2b6e0a047c8bcd7baf4f21af44861b86",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "not-run",
+        "reason": "This check belongs to the reviewer."
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "docs/cli/rmap-contracts.md",
+      "obligationIds": [
+        "RG-REQ-011-L12",
+        "RG-REQ-002-L08"
+      ],
+      "summary": "The admission-1 subsection was updated with the DFSR-F02 wording fix. The auto/socket paragraph states the socket probes' preserved behavior and the daemon_service exception and behavior for valid UTF-8 RMAP_STATE_ROOT; the verdict wording was also clarified."
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/doctor/mod.rs",
+      "obligationIds": [
+        "RG-REQ-011-L12"
+      ],
+      "summary": "The admission-1 call lines remain, with a comment explaining that the explicit DoctorConfig type keeps its re-export used on Linux, where macos.rs is not compiled."
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/doctor/summary.rs",
+      "obligationIds": [
+        "RG-REQ-011-L12"
+      ],
+      "summary": "The admission-1 fix remains unchanged; the report ties it to RG-REQ-011-L12 and the six new tests."
+    },
+    {
+      "path": "rust/crates/rgr/src/platform/doctor_config_probes.rs",
+      "obligationIds": [
+        "RG-REQ-011-L12"
+      ],
+      "summary": "The admission-1 fix remains unchanged; the report ties it to RG-REQ-011-L12 and the six new tests."
+    },
+    {
+      "path": "rust/crates/rgr/src/platform/macos.rs",
+      "obligationIds": [
+        "RG-REQ-011-L12"
+      ],
+      "summary": "The admission-1 fix remains unchanged; the report ties it to RG-REQ-011-L12 and the six new tests."
+    },
+    {
+      "path": "rust/crates/rgr/src/platform/mod.rs",
+      "obligationIds": [
+        "RG-REQ-002-L08",
+        "RG-REQ-011-L12"
+      ],
+      "summary": "The admission-1 socket-probe changes, child-module declaration, and re-exports remain. This cycle added comments clarifying socket-probe behavior when stdio is forced (DFSR-F02, RG-REQ-002-L08)."
+    }
+  ],
+  "completedAt": "2026-10-05T01:02:31.793Z",
+  "limitations": [
+    "The Linux build and Linux behavior (DFSR-LINUX-1 residual) are not verified because the host cannot compile Linux.",
+    "Operator gates cargo test --workspace and dogfood were not run here, by design.",
+    "The tests-failing-first condition was not re-run this cycle; the admission-1 build-progress record reports four tests failing for the intended reason and two passing by design.",
+    "The C03 exit trap removed the isolated root and empty working directory; logs and check scripts were retained as evidence.",
+    "Only the operator's rmapd (pid 32224) remained running after cleanup.",
+    "Several MCP servers require sign-in and were unavailable; the report states none were needed for this slice."
+  ],
+  "report": "Admission 2 is complete: the admission-1 candidate is re-applied with the wording fixes, and all three builder checks (DFSR-C01, C02, C03) pass on the final tree. Nothing is committed, and no stop condition or decision is open.\n\n**Step 0.** The admission-1 patch applied cleanly on HEAD 5e16b937. `git status --short` lists exactly the six candidate paths (EXECUTED).\n\n## Checks (run from `rust/`, one at a time, in the foreground)\n\n| Check | Exact command | Result | Evidence |\n|---|---|---|---|\n| DFSR-C01 | `bash \"/private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-DFSR-C01.sh\"` | **passed**, exit 0 (EXECUTED) | All four markers printed. `test result: ok. 1488 passed; 0 failed`. The six new tests each ran by name and passed. The test list is the 1482 before-names plus exactly six. The two large files still have 0 and 2 `#[test]`. Logs: `/private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-01.txt`, `-dfsr-01-named.txt`, `-rgr-lib-tests-after.txt` |\n| DFSR-C02 | `bash \"/private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-DFSR-C02.sh\"` | **passed**, exit 0 (EXECUTED) | fmt is clean and clippy `--all-targets -D warnings` is clean. Only the six paths changed; the frozen paths are byte-identical; `diff --check` is clean. Log: `/private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-dfsr-02.txt` |\n| DFSR-C03 | `bash \"/private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-DFSR-C03.sh\"` | **passed**, exit 0, `DFSR-C03-OK` (EXECUTED) | `stdio json ok 27 probes`, `normal json names identical 26`, registry digest unchanged. Captures are in `.agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/after/` |\n| DFSR-C04 | — | not-run: this check belongs to the reviewer | — |\n\n- **Script source:** each script was copied byte-for-byte from the allocation block. The slice document's sha256 (cd66ac1b…) matches the manifest pin.\n- **Tests failing first:** not re-run this cycle, because the tests and the fix are unchanged from admission 1. The record from that admission (OBSERVED, `admission-1/build-progress.md:11-18`) shows four tests failing for the intended reason and two passing by design.\n\n## Real output (OBSERVED, from the captures)\n\n- **Isolated root, forced stdio.**\n  - Before (HEAD binary): `[ok] daemon_service: running (pid: 32224)`, then four `[FAIL]` socket lines (`socket not found`, `not found`, `skipped (socket missing)` ×2), `[FAIL] socket_path`, no `transport` or `state_root` line, and `Status: daemon UNHEALTHY (5/25 checks failed)` with exit 1.\n  - After (exit 0):\n    ```\n    [ok] transport: stdio (configured)\n    [ok] state_root: override (/private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-iso.OK7bIW/state)\n    [note] daemon_service: launchd service (global state root): running (pid: 32224)\n          stdio transport configured; this service is not used by a stdio client\n    [ok] daemon_socket: n/a (stdio transport)\n    ... socket_file / socket_connect / socket_ping: n/a (stdio transport)\n    Status: daemon healthy (26 ok · 1 note)\n    ```\n    The `Socket Resolution:` section is gone from the text output. All five `n/a` probes appear in the JSON, which has 27 probes.\n- **Isolated root, auto transport.** The only line that differs from before is `[note] daemon_service: launchd service (global state root): running (pid: 32224)`, with the detail `measures the global launchd service; this run's configured state root is /private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-iso.OK7bIW/state`. The socket failures and `UNHEALTHY (7/25)` remain.\n- **Normal environment.** The only line that differs is `[ok] daemon_service: launchd service (global state root): running (pid: 32224)`. The status is still `daemon healthy (25 ok · 1 note)`, and the probe names are the same.\n- **Daemon used:** the candidate `rmapd 0.20.0` at `rust/target/release/rmapd` (`after/rmapd-version.txt`).\n\n## Files changed and why\n\n- **`platform/doctor_config_probes.rs` (new), `platform/macos.rs`, `commands/doctor/summary.rs`:** the admission-1 fix, unchanged (RG-REQ-011-L12 and the six new tests).\n- **`platform/mod.rs`:**\n  - The admission-1 changes: the `*_with` socket probes, the child-module declaration, and the re-exports already in the shape D-DFSR-ROOTCONFIG-EXPORT-1 A requires (four production names, `RootConfig` on its own `#[cfg(test)]` line, `service_note_detail` on its own macOS-only line).\n  - New this cycle, comments only (DFSR-F02, RG-REQ-002-L08): the doc comments of `check_daemon_socket`, `granular_socket_probes` and `socket_resolution_probes` (and its `_with` variant) now say they test socket connectivity only when the transport is not forced stdio. Under forced stdio they return `n/a (stdio transport)` passes.\n  - The file is now 562 lines. The added lines are the changed socket-probe branches, the delegations and these comments, which D-DFSR-PATHS-1 permits; it has no new test module.\n- **`commands/doctor/mod.rs`:** the admission-1 call lines, plus one new comment line at `let cfg: DoctorConfig = doctor_config();`. It explains that the explicit type keeps the `DoctorConfig` re-export used on Linux, where `macos.rs` is not compiled (the document reviewer's advisory).\n- **`docs/cli/rmap-contracts.md`:** the admission-1 subsection, with DFSR-F02 fixed.\n  - The `auto`/`socket` paragraph now says only the socket probes keep their order, texts and failure semantics. It names `daemon_service` as the exception: it has the new label on every state, and it becomes a passing note with the neutral detail, for every launchd state, when `RMAP_STATE_ROOT` is valid UTF-8.\n  - \"Verdict. No change\" now reads \"The verdict rule does not change\".\n\n## Gaps and cleanup\n\n- **Linux:** the Linux build and the Linux behaviour (the DFSR-LINUX-1 residual) are not verified, because this macOS host cannot compile it.\n- **Operator's gates:** `cargo test --workspace` and the dogfood are not run here, by design.\n- **Cleanup:** the C03 exit trap removed the isolated root and the empty working directory. Only the operator's `rmapd` (pid 32224) is still running. The logs and check scripts in `/private/tmp/DOCTOR-FALLBACK-STATE-ROOT-1-*` are kept as evidence.\n- **Progress log:** written after each step to `.agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/build-progress.md`.\n\n**MCP connectors:** several MCP servers in this session need sign-in and cannot be used until then: claude.ai Gmail and Google Calendar (in your claude.ai connector settings), and the design plugin's asana, atlassian, intercom, linear, notion and slack (via `/mcp` in an interactive session). None of them was needed for this slice."
+}

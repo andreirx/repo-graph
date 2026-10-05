@@ -1,0 +1,634 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-DOCTOR-FALLBACK-STATE-ROOT-1-0",
+  "workItemId": "DOCTOR-FALLBACK-STATE-ROOT-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/DOCTOR-FALLBACK-STATE-ROOT-1-INPUT-2.json",
+    "sha256": "sha256:de3b194c062860c1e37dd857233d968c13b3b1aa08f81d39de722a60ed2cd21b"
+  },
+  "allocation": {
+    "path": "docs/slices/doctor-fallback-state-root-1.md",
+    "sha256": "sha256:cd66ac1b8d44412845d09b47cbd6be310f5e37f4c8fa6e04e2361f096ee76d19"
+  },
+  "subject": {
+    "candidateSha256": "sha256:f68b0704bc60e3566cb54e290fd91a5f2b6e0a047c8bcd7baf4f21af44861b86",
+    "verification": {
+      "path": "docs/assurance/DOCTOR-FALLBACK-STATE-ROOT-1/verification.json",
+      "sha256": "sha256:cc14016b44bbd1c00a66f02de41222f9a75eb5f81c794531ed242d57f93c5eaf"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-DOCTOR-FALLBACK-STATE-ROOT-1-0"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/DOCTOR-FALLBACK-STATE-ROOT-1-INPUT-2.json",
+      "sha256": "sha256:de3b194c062860c1e37dd857233d968c13b3b1aa08f81d39de722a60ed2cd21b"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:b2effee57f0033adfec8929c441c40ba0a0f5d00b9d508ce77a39a762efe8a9f",
+        "byteLength": 28968
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/DOCTOR-FALLBACK-STATE-ROOT-1-INPUT-2.json",
+        "sha256": "sha256:de3b194c062860c1e37dd857233d968c13b3b1aa08f81d39de722a60ed2cd21b",
+        "byteLength": 5825
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+        "sha256": "sha256:208f833b610106dddae9cc4d8bd8cbc214b386c5fc955fbec12fcdf85070f9b6",
+        "byteLength": 23463
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+        "sha256": "sha256:8f2da793ee99d9f756ec48b66c133b49716db1d079686e2b90d5fce2cc88c68b",
+        "byteLength": 17414
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:84a7d22ba3684b06d5914b3c46ae3cce9f1b3bb274f207f5128704e0261dad37",
+        "byteLength": 21622,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/state-root-separation-1.md",
+        "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f",
+        "byteLength": 10847,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/snapshot-retention-1.md",
+        "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff",
+        "byteLength": 5984,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/daemon-residuals-2.md",
+        "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408",
+        "byteLength": 9750,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/self-pollution-1.md",
+        "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199",
+        "byteLength": 4474,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/honesty-gate-2.md",
+        "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed",
+        "byteLength": 5569,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/coherence-3.md",
+        "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36",
+        "byteLength": 3408,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/headline-truth-1.md",
+        "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351",
+        "byteLength": 8211,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/find-facts-1.md",
+        "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3",
+        "byteLength": 8017,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:19e9e6ae718321db5226be1a8928073eace90c8e065b48d1524868f505dc21d1",
+        "byteLength": 15439
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:30a113d5cc92684d246cf7b4e004866c9839688ee5aca878403a0c860d5c068a",
+        "byteLength": 11784
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072",
+        "byteLength": 7615
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27",
+        "byteLength": 3147
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-SCOPE-1.md",
+        "sha256": "sha256:b9a155389291b6fe92655409f685acce4683d5355877990194de437176b0b3b4",
+        "byteLength": 6603
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-PATHS-1.md",
+        "sha256": "sha256:adfed6d83733e34ec53e2ca28a3a313b79372f62f921f075ac554b8aa9e1adf4",
+        "byteLength": 2613
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-FALLBACK-NOTE-1.md",
+        "sha256": "sha256:c54bd28d6cb5f879cb8710486d370911b5a0bbc709b2debf6d78d77e599d73f1",
+        "byteLength": 2325
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-LINUX-SCOPE-1.md",
+        "sha256": "sha256:0f273b7be85e6574dc97840833965c1f10efcc961e043e8edad2d4ec25a6b303",
+        "byteLength": 2439
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-STDIO-DETAIL-1.md",
+        "sha256": "sha256:bd5189f38ee3ca39f400cd6e704bd1cabc2ded5f4d7122b926d68c92dcbb0a7a",
+        "byteLength": 1779
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-NONUTF8-ROOT-1.md",
+        "sha256": "sha256:f24424142005c536f9d980de0700fd2204829e7a9f8fc50745422d002d419348",
+        "byteLength": 2816
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-ROOTCONFIG-EXPORT-1.md",
+        "sha256": "sha256:950304cc93516520eeafa381e624ab8a2b513d3d175d698f3b13dd6fae684a03",
+        "byteLength": 2677
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/doctor-fallback-state-root-1.md",
+        "sha256": "sha256:cd66ac1b8d44412845d09b47cbd6be310f5e37f4c8fa6e04e2361f096ee76d19",
+        "byteLength": 81051
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/DOCTOR-FALLBACK-STATE-ROOT-1-INPUT-2/requirements-review.json",
+        "sha256": "sha256:ce9803474d23f697bdb8717b9e0862a3f9b09fc538ba0a3ae64805f317480b04",
+        "byteLength": 59695
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/DOCTOR-FALLBACK-STATE-ROOT-1-INPUT-2/baseline-approval.json",
+        "sha256": "sha256:97691b6856f23b0fbf628c66e24816e22d80e39dd38a462f4893fac7b969a9d9",
+        "byteLength": 4028
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:e4e9c5944a15f5fe4b7cdbfb4483a1bf5436cf18aa6c608452c30419abeedd55",
+        "byteLength": 7940
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/selection.md",
+        "sha256": "sha256:2d408b1544d96f4cfc4cf51519a224e2defc98b7ffda6543add3fb20975e3510",
+        "byteLength": 9099
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-0",
+        "sha256": "sha256:1844b25792b79717c7128d1737ac5a78cb7a2909bcc96aec4fe4d4baca034fd5",
+        "byteLength": 6490
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-0",
+        "sha256": "sha256:09722bc5bc80e9c46eeaa68e9a937c20c948c1c5911d8f7e3559b15a4889ba38",
+        "byteLength": 2401
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review-subject",
+        "path": ".agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/verification-draft-0.json",
+        "sha256": "sha256:cc14016b44bbd1c00a66f02de41222f9a75eb5f81c794531ed242d57f93c5eaf",
+        "byteLength": 53468,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-command-0",
+        "sha256": "sha256:6614ba571f9ae0efeb7776a916d1363bc3ccd13ca8c9eda79978b43405f76690",
+        "byteLength": 1217
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:eebd989c2911b5b3acefe5d860609371540eaeffc7de287dc3a1aa27305ab228",
+        "byteLength": 18101
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:b2effee57f0033adfec8929c441c40ba0a0f5d00b9d508ce77a39a762efe8a9f",
+        "byteLength": 28968
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:32c270b7703661774d11df6aa51efb2e85ce8ddc7497171b9907f614c965f402",
+        "byteLength": 309459
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-011-L12",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L11",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-002-L11",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DFSR-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DFSR-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-DFSR-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "DFSR-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer inspected the 1,488-test log and six new test assertions; did not rerun Cargo in the read-only environment."
+      }
+    },
+    {
+      "checkId": "DFSR-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer inspected the Clippy log and independently checked the diff and changed-path set."
+      }
+    },
+    {
+      "checkId": "DFSR-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "Reviewer inspected before/after human and JSON captures; did not launch a daemon."
+      }
+    },
+    {
+      "checkId": "DFSR-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "The reviewer's own inspection (DFSR-C04 is reviewer-owned): 'DFSR-C04 — OBSERVED PASS by source, diff, contract, and capture inspection.' The uncommitted tree matches the six-path candidate checkpoint including all six file hashes; git diff --check passed; the approved INPUT-2 seam is present and the prior wording finding is closed (the CLI contract names daemon_service as the exception to unchanged auto/socket output); the isolated forced-stdio capture changes from 'daemon UNHEALTHY (5/25 checks failed)' to 'daemon healthy (26 ok · 1 note)' with transport and state_root first and all five socket probes 'n/a (stdio transport)' in JSON; the isolated auto capture remains UNHEALTHY (7/25); RG-REQ-011-L12 passes at its approved macOS boundary; Linux remains the DFSR-LINUX-1 residual.",
+          "supportingEvidence": [
+            ".agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/review-0.json (sha256:b91a841a0a28bc2e392e860d2fd15af5a6ee3e2fc9859f19d730f83023418690)",
+            ".agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/after/ (the builder's captures the reviewer inspected)",
+            ".agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/implementation-evidence-0.json (sha256:04dc211dbe6ebef06b98be74c34da7d72dec6998cd70f4ab29ed418bcdff6b8d)"
+          ]
+        }
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "docs/cli/rmap-contracts.md",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/doctor/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/doctor/summary.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/platform/doctor_config_probes.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/platform/macos.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/platform/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-10-05T01:08:10.538Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nRESULT: accepted\n\n**OBSERVED:** The uncommitted tree matches the six-path candidate checkpoint, including all six file hashes. `git diff --check` passed. The approved INPUT-2 seam is present, and the prior wording finding is closed: the CLI contract now names `daemon_service` as the exception to unchanged `auto`/`socket` output.\n\n| Check | Review result |\n|---|---|\n| DFSR-C01 | **BUILDER-EXECUTED PASS.** I inspected the 1,488-test log and the six new test assertions; I did not rerun Cargo in this read-only environment. |\n| DFSR-C02 | **BUILDER-EXECUTED PASS.** I inspected the Clippy log and independently checked the diff and changed-path set. |\n| DFSR-C03 | **BUILDER-EXECUTED PASS.** I inspected the before/after human and JSON captures; I did not launch a daemon. |\n| DFSR-C04 | **OBSERVED PASS** by source, diff, contract, and capture inspection. |\n\n**Acceptance witness:** The isolated forced-stdio capture changes from `daemon UNHEALTHY (5/25 checks failed)` with socket failures to `daemon healthy (26 ok · 1 note)`. It puts `transport: stdio (configured)` and the configured state root first; JSON marks all five socket probes `n/a (stdio transport)`. The isolated `auto` capture remains `UNHEALTHY (7/25)` for its missing socket. This gives an agent a usable, non-misleading diagnosis, consistent with the VISION’s honesty rule.\n\n**Obligations:** RG-REQ-011-L12 passes at its approved **macOS** boundary. P-DFSR-01, P-DFSR-02, and P-DFSR-03 pass within the inspected diff and captures. Preservation is accepted for RG-REQ-011-L01, L02, L03, L04, L05, L06, L07, L08, L09, and L10; L11 is withdrawn. Preservation is accepted for RG-REQ-002-L01, L02, L03, L04, L05, L06, L07, L08, L09, L10, and L11. Parent RG-REQ-011 and RG-REQ-002 are served by this bounded change, **not** declared globally verified.\n\n**Changed paths:** `platform/doctor_config_probes.rs` models the three configured-root outcomes and builds early probes; `platform/mod.rs` makes the existing socket probes transport-aware; `platform/macos.rs` labels and scores the global service; `commands/doctor/mod.rs` orders the probes and selects the tone; `commands/doctor/summary.rs` applies the passed-only note tone; `docs/cli/rmap-contracts.md` states the resulting contract. The child module serves the doctor command and macOS adapter; its concrete force is the approved 500-line placement boundary, rather than adding responsibility to the two oversized files. The `*_with` functions provide value-based tests without changing adapter signatures.\n\n**Limit:** Linux service labeling and verdict behavior remain the expressly approved DFSR-LINUX-1 residual. Operator-owned workspace and dogfood gates remain to be run after acceptance.\n\nManager interpretation by manager-claude-fable-5-1: The bookkeeper's transcription (attempt 2) of the reviewer's ACCEPTED verdict is applied with ONE mechanical repair the record grammar requires: DFSR-C04 is reviewer-owned and the grammar admits an accepted reviewer-owned check only as a reproduced verification with a passed outcome — the reviewer's own inspection result ('OBSERVED PASS by source, diff, contract, and capture inspection') is recorded as that outcome, quoting the report (TD-026 repair, as on RUST-SELF-RESOLUTION-1 and HELP-SURFACE-PARITY-1). Builder evidence at this checkpoint: DFSR-C01–C03 passed (implementation-evidence-0.json, admission 2 cycle 1, reruns on the final tree as the RESUME NOTE required). All 26 obligation assessments, the six changed-path assessments, the three builder-owned check assessments (relied-on-builder-evidence with the reviewer's stated limitations), the empty findings and decisions, and the report are the reviewer's. No conversion of meaning. Source provider run review-DOCTOR-FALLBACK-STATE-ROOT-1-0; retained output .agent-manager/slices/DOCTOR-FALLBACK-STATE-ROOT-1/review-0.json sha256:0f83bc5a56ae99419cadb84250e07ac2a12b355fca3ad420dfe5e9b53e29ecfb. The provider remains the performer; this interpretation is not independent execution evidence."
+}
