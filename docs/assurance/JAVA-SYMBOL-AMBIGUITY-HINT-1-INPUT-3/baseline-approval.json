@@ -1,0 +1,90 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "JAVA-SYMBOL-AMBIGUITY-HINT-1-BASELINE-APPROVAL-3",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-3.json",
+    "sha256": "sha256:1343fe281ec8a6b552cfc3bd1763b07f567c624be3559776dadc38b647433289"
+  },
+  "review": {
+    "path": "docs/assurance/JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-3/requirements-review.json",
+    "sha256": "sha256:01e5e7d3cc8cdc5c775d8e45677da4d51f3138dc3b649a200f9915095c69a71a"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-JSAH-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-SCOPE-1.md",
+        "sha256": "sha256:146bfef3b05cedd567260b5b88ce3ccb8375b61dfa6fc5cf132e8d98e76516af"
+      }
+    },
+    {
+      "id": "D-JSAH-CURSOR-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-CURSOR-1.md",
+        "sha256": "sha256:be5042e5163a30ae2800d07f1657db995a4f474b3a6ef597192d7114f92334f4"
+      }
+    },
+    {
+      "id": "D-JSAH-PLACEMENT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-PLACEMENT-1.md",
+        "sha256": "sha256:18b83c76701e9d5c75f6e97337ebeb816334d592da11a4c4e814f02bbfab4a93"
+      }
+    },
+    {
+      "id": "D-JSAH-STORAGE-READ-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-STORAGE-READ-1.md",
+        "sha256": "sha256:7f3bcdd947062eb47a3b1dba00081cdf2899adc168c4d41b2b3122be157b84a1"
+      }
+    },
+    {
+      "id": "D-JSAH-READ-STATE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-READ-STATE-1.md",
+        "sha256": "sha256:c9b16c809da9f1ca8199df9e02d14e0fbc8e2d14ea6a1d65890c12a0f42cfde2"
+      }
+    },
+    {
+      "id": "D-JSAH-INCOMPLETE-CURSOR-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-INCOMPLETE-CURSOR-1.md",
+        "sha256": "sha256:c10aa3353c19f7ad5cd40cc85dae9eb73ea6dfbbdec49ebf150118e5c0cfbb66"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-05T06:27:50.642Z",
+  "rationale": "JAVA-SYMBOL-AMBIGUITY-HINT-1 INPUT-3 accepted at document cycle 12 (relay iteration 10) with no finding: the amendment after implementation admission 2 (which passed JSAH-C01-C03 and returned DECISION_REQUIRED on an incomplete payload) - D-JSAH-INCOMPLETE-CURSOR-1 A with Corrections 1-2 (a candidate whose command cannot be formed keeps its row, gets no cursor line, and the hint names each tested condition; the renderer chooses the reason from data.query; line_start 0 is read as null and presentation::anchor never prints :0; u64::try_from nulls negatives only) and D-JSAH-PLACEMENT-1 Correction 2 (the renderer takes cursor: Option<(prefix, suffix)>; path_cursor_affixes returns Option - the unknown-side state is a type, never an empty-string sentinel); JSAH-C01 runs the daemon-crate consolidation witness; sixteen new tests. The eight pinned decisions are operator decisions under the human's standing authority, overridable. Cycles 9-11 of this item were operator-text corrections (one relaunch wasted on a cap error); cycle 12 accepted."
+}
