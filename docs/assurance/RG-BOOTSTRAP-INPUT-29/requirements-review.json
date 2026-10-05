@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-29-pass3",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-29.json",
+    "sha256": "sha256:6c0f83d250c463943b6e79bbefd490d2ccb8633e7fa93493296e8afae854d29f"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-29"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-29-pass3"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-05T01:39:32.000Z",
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin(s): docs/requirements/rg-req-011-daemon-and-store-lifecycle.md (sha256:02e82082128f95878ea29a000da53c442d96ab128a860d92fe25f521bae7df9e); docs/cli/rmap-contracts.md (sha256:4133cfaff87c6a14f309e80999921d080a0e75ceb9c7cf7a217d8582222efedd). Codex session 01a109b5-7030-7770-9f51-b6d8a1d96620. Record written 2026-10-05T01:40:48.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-28 → INPUT-29: two pins changed — docs/requirements/rg-req-011-daemon-and-store-lifecycle.md at 674f9f47: RG-REQ-011-L12 gains its post-ship evidence line (MET on macOS after DOCTOR-FALLBACK-STATE-ROOT-1 44f357bb; Linux residual DFSR-LINUX-1; the requirement text, criterion and status line are unchanged); docs/cli/rmap-contracts.md at 44f357bb (the new  subsection, DOCTOR-FALLBACK-STATE-ROOT-1) with wording corrections 80feaaf4 (pass-1 findings F-01 verdict overclaim, F-02 the 27-probe count as a rule, F-03 the no-pid  form) and 47bca4d9 (pass-2 findings F-04 no-pid wording, F-05 post-connection probes absent on early return) — the CLI contract is pinned as one file (TD-030), so the standalone re-pin review read the shipped subsection a second time and its five findings were corrected before acceptance. No requirement text changed; docs/requirements/README.md also changed at 674f9f47 but is not a bootstrap pin. Pass 3 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high), pass 3, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended text.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: At HEAD 47bca4d9, the candidate has 59 pins; its two changed digests match the files, and every other pin matches INPUT-28. OBSERVED: The requirement diff adds only the evidence paragraph, and the CLI diff adds only the `doctor` subsection. OBSERVED: The code supports the revised no-PID wording and the absence of post-connection probes when `auto` or `socket` returns early; the subsection makes no new overclaim. INFERRED: “MET on macOS” is appropriately bounded by the Linux residual; the tracked verification and accepted implementation review support the 27-probe capture, unchanged registry digest, and 1482 → 1488 test count, but I did not rerun Cargo or the live capture in this read-only review."
+}
