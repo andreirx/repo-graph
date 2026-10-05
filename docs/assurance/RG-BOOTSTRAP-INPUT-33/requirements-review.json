@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-33-pass2",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-33.json",
+    "sha256": "sha256:2fb28e2803217ef78936a7437969932b2f73ab6004476f2d48ea4cf8e4789d33"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-33"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-33-pass2"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-05T17:27:49.000Z",
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin(s): docs/requirements/rg-req-011-daemon-and-store-lifecycle.md (sha256:4337ba4272f38f46f75fd829248c45b9963c1d33aedb91267d7ecb8aa8cf894b). Codex session 01a10d17-ce89-70c0-a63b-9d9dd6da0643. Record written 2026-10-05T17:28:01.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-32 -> INPUT-33: one pin changed - docs/requirements/rg-req-011-daemon-and-store-lifecycle.md at 0ff300e9 and aa1ca03a (RG-REQ-011-L13 gains its post-ship evidence line: MET after STATE-ROOT-RELATIVE-REPO-ROOT-1 38f7f8f8 - every working-tree reader takes the registry canonical_path through one checked lookup; repos.root_path is kept and never used to resolve the working tree; the leveldb store served from three state roots answers identically after the stated normalization; invalid-root outcomes proven by nine dispatcher tests and a renderer test; the seed hand-off observed before model load with its read by inspection). The requirement text, criterion and status line are unchanged. docs/requirements/README.md also changed at 0ff300e9 but is not a bootstrap pin. Pass 1 (gpt-6.1-sol, session 01a10d13-338f-7491-91d9-6a0dd5fad7f1) returned refinement-required with two wording findings (never read -> never used to resolve; the normalization stated) applied at aa1ca03a. Pass 2 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6.1-sol, model_reasoning_effort=high), pass 2, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended text.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: INPUT-33 has 59 pins, all matching HEAD aa1ca03a; only RG-REQ-011’s digest differs from INPUT-32, with the other 58 unchanged. OBSERVED: Removing the added evidence paragraph and its blank separator restores the pinned file’s afe7a457 bytes exactly, including the requirement, verification criterion and STATUS. OBSERVED: The shipped readers use checked registry roots; `repos.root_path` remains written and read for compatibility, but does not resolve the working tree. OBSERVED: The nine dispatcher tests and renderer test support the named invalid-root outcomes and both orient routes; seed hand-off is observed before model load, while its subsequent working-tree read is correctly limited to inspection. OBSERVED: SRR-C03 and the accepted implementation-review record support the three-root comparison, stated output normalization, parsed-JSON exception and original-depth `repo_path` exception; the missing-root field limitation agrees with CLI working-directory resolution. INFERRED: MET is justified for L13 without an overclaim and supports the VISION’s trustworthy orientation and honest degradation; NOT RUN: Cargo tests or live field checks during this read-only review."
+}
