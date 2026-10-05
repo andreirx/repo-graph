@@ -1,0 +1,168 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-manifest",
+  "baselineId": "DOCTOR-FALLBACK-STATE-ROOT-1-INPUT-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "requirements": [
+    {
+      "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+      "sha256": "sha256:208f833b610106dddae9cc4d8bd8cbc214b386c5fc955fbec12fcdf85070f9b6"
+    },
+    {
+      "path": "docs/requirements/rg-req-002-honesty-about-certainty.md",
+      "sha256": "sha256:8f2da793ee99d9f756ec48b66c133b49716db1d079686e2b90d5fce2cc88c68b"
+    }
+  ],
+  "dependencies": [
+    {
+      "role": "source",
+      "path": "docs/VISION.md",
+      "sha256": "sha256:84a7d22ba3684b06d5914b3c46ae3cce9f1b3bb274f207f5128704e0261dad37"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/state-root-separation-1.md",
+      "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/snapshot-retention-1.md",
+      "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/daemon-residuals-2.md",
+      "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/self-pollution-1.md",
+      "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/honesty-gate-2.md",
+      "sha256": "sha256:ac1b6dad08f9d129e28d24a5a2bec7379d05f1bea9a799a51aa51bdd9e29a0ed"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/coherence-3.md",
+      "sha256": "sha256:254a1a75663484a594071d2e8a4424df3fe8f1da2b1e0107c643a159c436fa36"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/headline-truth-1.md",
+      "sha256": "sha256:c121dec5497fa18988fcb982a0732abad3ffab5b5ab350a29c6b039bc6078351"
+    },
+    {
+      "role": "source",
+      "path": "docs/slices/find-facts-1.md",
+      "sha256": "sha256:69b26d87289849215a664cff4e66554855ea6872f858ff216ee04d43d0b37ce3"
+    },
+    {
+      "role": "source",
+      "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+      "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+    },
+    {
+      "role": "governance",
+      "path": "docs/slices/rg-requirements-bootstrap-1.md",
+      "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b"
+    },
+    {
+      "role": "governance",
+      "path": "docs/requirements/README.md",
+      "sha256": "sha256:19e9e6ae718321db5226be1a8928073eace90c8e065b48d1524868f505dc21d1"
+    },
+    {
+      "role": "governance",
+      "path": "CLAUDE.md",
+      "sha256": "sha256:30a113d5cc92684d246cf7b4e004866c9839688ee5aca878403a0c860d5c068a"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+      "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+      "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-SCOPE-1.md",
+      "sha256": "sha256:b9a155389291b6fe92655409f685acce4683d5355877990194de437176b0b3b4"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-PATHS-1.md",
+      "sha256": "sha256:adfed6d83733e34ec53e2ca28a3a313b79372f62f921f075ac554b8aa9e1adf4"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-FALLBACK-NOTE-1.md",
+      "sha256": "sha256:c54bd28d6cb5f879cb8710486d370911b5a0bbc709b2debf6d78d77e599d73f1"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-LINUX-SCOPE-1.md",
+      "sha256": "sha256:0f273b7be85e6574dc97840833965c1f10efcc961e043e8edad2d4ec25a6b303"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-STDIO-DETAIL-1.md",
+      "sha256": "sha256:bd5189f38ee3ca39f400cd6e704bd1cabc2ded5f4d7122b926d68c92dcbb0a7a"
+    },
+    {
+      "role": "governance",
+      "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-NONUTF8-ROOT-1.md",
+      "sha256": "sha256:f24424142005c536f9d980de0700fd2204829e7a9f8fc50745422d002d419348"
+    },
+    {
+      "role": "allocation",
+      "path": "docs/slices/doctor-fallback-state-root-1.md",
+      "sha256": "sha256:1270f004f7a6c7e114e373f7c74e3ee8b1f56917ca8c95cf9a204dbeda5094f3"
+    }
+  ],
+  "reviewObligationIds": [
+    "RG-REQ-011",
+    "RG-REQ-002",
+    "RG-REQ-011-L01",
+    "RG-REQ-011-L02",
+    "RG-REQ-011-L03",
+    "RG-REQ-011-L04",
+    "RG-REQ-011-L05",
+    "RG-REQ-011-L06",
+    "RG-REQ-011-L07",
+    "RG-REQ-011-L08",
+    "RG-REQ-011-L09",
+    "RG-REQ-011-L10",
+    "RG-REQ-011-L11",
+    "RG-REQ-011-L12",
+    "RG-REQ-002-L01",
+    "RG-REQ-002-L02",
+    "RG-REQ-002-L03",
+    "RG-REQ-002-L04",
+    "RG-REQ-002-L05",
+    "RG-REQ-002-L06",
+    "RG-REQ-002-L07",
+    "RG-REQ-002-L08",
+    "RG-REQ-002-L09",
+    "RG-REQ-002-L10",
+    "RG-REQ-002-L11"
+  ],
+  "requiredDecisionIds": [
+    "D-AGENT-USEFULNESS-FRAME-1",
+    "D-CERTAINTY-MARK-1",
+    "D-DFSR-SCOPE-1",
+    "D-DFSR-PATHS-1",
+    "D-DFSR-FALLBACK-NOTE-1",
+    "D-DFSR-LINUX-SCOPE-1",
+    "D-DFSR-STDIO-DETAIL-1",
+    "D-DFSR-NONUTF8-ROOT-1"
+  ]
+}

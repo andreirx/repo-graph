@@ -1,0 +1,90 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "DOCTOR-FALLBACK-STATE-ROOT-1-BASELINE-APPROVAL-1",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/DOCTOR-FALLBACK-STATE-ROOT-1-INPUT-1.json",
+    "sha256": "sha256:93ae94e08410b53b749c67dee81699d490230051f8923a5c53d0a88752253c83"
+  },
+  "review": {
+    "path": "docs/assurance/DOCTOR-FALLBACK-STATE-ROOT-1-INPUT-1/requirements-review.json",
+    "sha256": "sha256:f8723749e8ef71f3d5b09232932eb5839c1ca1b090a3b204b71e483a8b0334f1"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-DFSR-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-SCOPE-1.md",
+        "sha256": "sha256:b9a155389291b6fe92655409f685acce4683d5355877990194de437176b0b3b4"
+      }
+    },
+    {
+      "id": "D-DFSR-PATHS-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-PATHS-1.md",
+        "sha256": "sha256:adfed6d83733e34ec53e2ca28a3a313b79372f62f921f075ac554b8aa9e1adf4"
+      }
+    },
+    {
+      "id": "D-DFSR-FALLBACK-NOTE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-FALLBACK-NOTE-1.md",
+        "sha256": "sha256:c54bd28d6cb5f879cb8710486d370911b5a0bbc709b2debf6d78d77e599d73f1"
+      }
+    },
+    {
+      "id": "D-DFSR-LINUX-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-LINUX-SCOPE-1.md",
+        "sha256": "sha256:0f273b7be85e6574dc97840833965c1f10efcc961e043e8edad2d4ec25a6b303"
+      }
+    },
+    {
+      "id": "D-DFSR-STDIO-DETAIL-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-STDIO-DETAIL-1.md",
+        "sha256": "sha256:bd5189f38ee3ca39f400cd6e704bd1cabc2ded5f4d7122b926d68c92dcbb0a7a"
+      }
+    },
+    {
+      "id": "D-DFSR-NONUTF8-ROOT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-DFSR-NONUTF8-ROOT-1.md",
+        "sha256": "sha256:f24424142005c536f9d980de0700fd2204829e7a9f8fc50745422d002d419348"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-05T00:24:16.234Z",
+  "rationale": "DOCTOR-FALLBACK-STATE-ROOT-1 INPUT-1 accepted at document cycle 11 (relay iteration 5) after cycles 7, 9, 10 refined the operator's text: a cross-platform note predicate with the one expression cfg!(target_os = \"macos\") && service_note_applies(&cfg), one override predicate RootConfig::Override (a valid UTF-8 read), DoctorConfig { Auto, Global } as the pre-fallback test input, the _with contract naming the five n/a probes and keeping the other resolution probes (27 total), and \u00a72.3 rows qualified by predicate and transport; cycle 8 was void (unchanged document). The eight pinned decisions are operator decisions under the human's standing authority, overridable; the Linux note rule stays the DFSR-LINUX-1 residual."
+}
