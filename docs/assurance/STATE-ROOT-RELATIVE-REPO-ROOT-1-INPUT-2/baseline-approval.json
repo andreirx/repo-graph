@@ -1,0 +1,62 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "STATE-ROOT-RELATIVE-REPO-ROOT-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/STATE-ROOT-RELATIVE-REPO-ROOT-1-INPUT-2.json",
+    "sha256": "sha256:f1c9d684faf4108c5cc488530a5ffde9015c14a9d1f2980366ade066c9b5b79c"
+  },
+  "review": {
+    "path": "docs/assurance/STATE-ROOT-RELATIVE-REPO-ROOT-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:f274383dd14a59e64ffe7a12102ed547df076022aa3c9eb1ff0f8af95ee53d60"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-SRR-ROOTPATH-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-SRR-ROOTPATH-1.md",
+        "sha256": "sha256:fa43f9fd240a886c086f215deae05112067576f9f214c4710412ab3e99d87c76"
+      }
+    },
+    {
+      "id": "D-SRR-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-SRR-SCOPE-1.md",
+        "sha256": "sha256:571957dc813ce3d5bc261c6477e19a7b3e7db13594e65626f830b240a4f5e9c2"
+      }
+    },
+    {
+      "id": "D-SRR-DOCTEST-IDENTITY-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-SRR-DOCTEST-IDENTITY-1.md",
+        "sha256": "sha256:3890993abadd02f14bad401d78de4f269374090a3d91340980c72d63ebc8519d"
+      }
+    },
+    {
+      "id": "D-SRR-SEED-OBSERVABLE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-SRR-SEED-OBSERVABLE-1.md",
+        "sha256": "sha256:dcb45fda759a9c350df281441d0b996fa1925a4863064b8a54cf9303583714ff"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-05T15:58:09.838Z",
+  "rationale": "Accepted by the independent requirements review at document cycle 6 (author claude-opus-5-5, reviewer codex gpt-6.1-sol; no blocking finding). INPUT-2 supersedes INPUT-1 after implementation admission 1, whose candidate passed SRR-C02 and SRR-C03 and failed only SRR-C01's retention oracle on a doctest named by its source line (D-SRR-DOCTEST-IDENTITY-1, operator A: compare without the line suffix, collision-checked) and fell short of SRR-C04(6) test coverage (F-SRR-IMPL-02: two more daemon tests, orient on both routes, the exact reason and the reader-facing line, a root removed after registration). The valid-root seed hand-off is observed through a test-only hook owned by the seed call site before any model load (D-SRR-SEED-OBSERVABLE-1, operator A, with Correction 1). Cycles 4-5 were operator-text corrections; cycle 6 accepted. The author's low note F-PREP-07 (the hook is inert unless a test installs it) is carried as an implementation obligation in the admission-2 packet. Decisions: D-SRR-ROOTPATH-1 (human, A, operator Correction 1), D-SRR-SCOPE-1, D-SRR-DOCTEST-IDENTITY-1, D-SRR-SEED-OBSERVABLE-1 (operator, overridable by the human)."
+}
