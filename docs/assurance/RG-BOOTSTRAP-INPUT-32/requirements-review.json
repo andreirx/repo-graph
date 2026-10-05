@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-32-pass2",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-32.json",
+    "sha256": "sha256:c1361eefe0d5dfd4ce24154c5c8df52d349b62efd80614e742f534a09f6faaca"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-32"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-32-pass2"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-05T13:35:03.000Z",
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin(s): docs/requirements/rg-req-011-daemon-and-store-lifecycle.md (sha256:01cf703ac67fb28c1e23c80da325d0dfbcdce2ad99c200ecf30db019745d0037). Codex session 01a10c44-2ba6-7632-a436-4e5a43d28c27. Record written 2026-10-05T13:35:16.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-31 -> INPUT-32: one pin changed - docs/requirements/rg-req-011-daemon-and-store-lifecycle.md at df6ec53e and c2d62ce3 (new leaf RG-REQ-011-L13 PROPOSED, revision 2: a repository working tree is found from the registry canonical_path, never from the store repos.root_path; root-dependent results are identical whichever directory holds the state root; an unreachable root is named with the prefix repo root not found; NOT MET evidence from audit round nine RC-1). Authority: D-SRR-ROOTPATH-1 (human) and D-SRR-SCOPE-1 (operator), not bootstrap pins. Pass 1 (gpt-6.1-sol, session 01a10c3f-ca91-7621-be21-98bf6a7fe138) returned refinement-required with two findings (invalid-root cases and outcome forms in the criterion; the equality promise bounded) applied as revision 2. Pass 2 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6.1-sol, model_reasoning_effort=high), pass 2, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended text.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED — The untracked INPUT-32 manifest contains 59 unique pins, all matching HEAD c2d62ce3; only RG-REQ-011’s digest differs from INPUT-31, and it equals `sha256:01cf703ac67fb28c1e23c80da325d0dfbcdce2ad99c200ecf30db019745d0037`. OBSERVED — The pinned-file diff since 9c5cba27 contains only L13 and its machine-block entry: 14 insertions, no deletions. OBSERVED — Revision 2 covers all eleven sites named by D-SRR-SCOPE-1, refresh’s pass handoffs, both invalid-root cases, each required outcome, forbidden misleading forms, and both JSON `repo_path` checks. INFERRED — The requirement is verifiable and bounded: equality applies to named root-dependent results with fixed inputs, permits per-operation variation, and makes registry `canonical_path` the sole resolution source while retaining the stored field as D-SRR-ROOTPATH-1 requires. INFERRED — It is consistent with L06’s state isolation, L12, RG-REQ-008-L07, migration-only schema evolution, the 300 s read window, and the closed error-code set; named unavailability supports the VISION’s honesty rule. OBSERVED — The NOT MET account agrees with both audit records and distinguishes the map write-path inference from reproduction; this review did not inspect unavailable captures or execute behavioral proofs."
+}
