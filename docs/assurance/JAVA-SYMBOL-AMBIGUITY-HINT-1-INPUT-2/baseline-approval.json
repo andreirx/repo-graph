@@ -1,0 +1,83 @@
+{
+  "formatVersion": 2,
+  "kind": "requirements-baseline-approval",
+  "approvalId": "JAVA-SYMBOL-AMBIGUITY-HINT-1-BASELINE-APPROVAL-2",
+  "target": {
+    "projectId": "repo-graph",
+    "root": "."
+  },
+  "subject": {
+    "path": "docs/requirements/baselines/JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-2.json",
+    "sha256": "sha256:819ac450e4851fbb2bc26b8f1b185d246a1ed25f081bd32a10b553cc03607136"
+  },
+  "review": {
+    "path": "docs/assurance/JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-2/requirements-review.json",
+    "sha256": "sha256:b38ad9fc199584a91294bfd433ae61d3f89a43486083e55bddab346bc3c194e4"
+  },
+  "decision": "approved",
+  "approvedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "recordedBy": {
+    "actorType": "operator",
+    "actorId": "in-place-manager"
+  },
+  "authorityBasis": {
+    "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+    "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982"
+  },
+  "resolvedDecisions": [
+    {
+      "id": "D-AGENT-USEFULNESS-FRAME-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072"
+      }
+    },
+    {
+      "id": "D-CERTAINTY-MARK-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27"
+      }
+    },
+    {
+      "id": "D-JSAH-SCOPE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-SCOPE-1.md",
+        "sha256": "sha256:146bfef3b05cedd567260b5b88ce3ccb8375b61dfa6fc5cf132e8d98e76516af"
+      }
+    },
+    {
+      "id": "D-JSAH-CURSOR-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-CURSOR-1.md",
+        "sha256": "sha256:be5042e5163a30ae2800d07f1657db995a4f474b3a6ef597192d7114f92334f4"
+      }
+    },
+    {
+      "id": "D-JSAH-PLACEMENT-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-PLACEMENT-1.md",
+        "sha256": "sha256:3a01854a736e2fd2fb45b493ab6eb60c7e0903bb24a0c038ef93ab9eafe26407"
+      }
+    },
+    {
+      "id": "D-JSAH-STORAGE-READ-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-STORAGE-READ-1.md",
+        "sha256": "sha256:7f3bcdd947062eb47a3b1dba00081cdf2899adc168c4d41b2b3122be157b84a1"
+      }
+    },
+    {
+      "id": "D-JSAH-READ-STATE-1",
+      "record": {
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-READ-STATE-1.md",
+        "sha256": "sha256:c9b16c809da9f1ca8199df9e02d14e0fbc8e2d14ea6a1d65890c12a0f42cfde2"
+      }
+    }
+  ],
+  "decidedAt": "2026-10-05T04:22:53.876Z",
+  "rationale": "JAVA-SYMBOL-AMBIGUITY-HINT-1 INPUT-2 accepted at document cycle 8 (relay iteration 6) with no finding: the amendment after implementation admission 1 (which passed JSAH-C01-C03 and returned DECISION_REQUIRED on the unspecified failed-read state) - D-JSAH-READ-STATE-1 B with Correction 1: each ambiguity candidate carries a lookup state (found | missing | read-failed with reason), a failed store read is never folded into a missing row, the missing-row text states only the observed condition (no stored row for this key in the snapshot read) and the hint claims at most one symbol per stable key (the UNIQUE index proves uniqueness, not existence); two more tests (thirteen new); the contract task names the states and the two non-found row forms. The seven pinned decisions are operator decisions under the human's standing authority, overridable. The INPUT-2 review's cycle 6 and the void cycle 7 (an operator cap allowed two cycles in one launch) are archived."
+}
