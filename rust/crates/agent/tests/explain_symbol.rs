@@ -246,15 +246,80 @@ fn explain_bare_name_resolves_to_type_over_its_constructor() {
     let ev = serde_json::to_value(identity.evidence()).unwrap();
     assert_eq!(ev["stable_key"], "r1:src/w.cpp:Widget:SYMBOL");
 
-    // The constructor cursor is surfaced in `next`, never hidden.
+    // The constructor cursor is surfaced in `next`, never hidden. JAVA-SYMBOL-AMBIGUITY-HINT-1
+    // (D-JSAH-CURSOR-1): the cursor is the constructor's STABLE KEY, which names exactly one
+    // constructor (the qualified name `Widget::Widget` is shared by every constructor).
     assert_eq!(result.next.len(), 1, "one constructor cursor surfaced");
     let action = &result.next[0];
-    assert_eq!(action.target.as_deref(), Some("Widget::Widget"));
+    assert_eq!(
+        action.target.as_deref(),
+        Some("r1:src/w.cpp:Widget::Widget:SYMBOL")
+    );
     assert!(
         action.reason.contains("constructor"),
         "reason names the constructor, got {:?}",
         action.reason
     );
+}
+
+#[test]
+fn explain_bare_java_type_resolves_to_type_over_dotted_init_constructors() {
+    // JAVA-SYMBOL-AMBIGUITY-HINT-1 (RG-REQ-005-L04 Java clause): the Java extractor stores a
+    // constructor's qualified name as `<pkg>.<Type>.<init>`. Its container (the qualified name
+    // minus the segment after the LAST `::` or `.`) is the type's qualified name, so a bare type
+    // name over the type and its constructors resolves to the TYPE, as on C++, and each
+    // constructor is surfaced by its stable key.
+    let mut fake = FakeAgentStorage::new();
+    fake.seed_minimal_repo("r1", "my-repo", "snap1");
+    let class_key = "r1:src/org/example/Widget.java#Widget:SYMBOL:CLASS";
+    let ctor1 = "r1:src/org/example/Widget.java#Widget:SYMBOL:CONSTRUCTOR";
+    let ctor2 = "r1:src/org/example/Widget.java#Widget:SYMBOL:CONSTRUCTOR:dup2";
+    let cand = |key: &str, line: u64| AgentFocusCandidate {
+        stable_key: key.into(),
+        kind: AgentFocusKind::Symbol,
+        file: Some("src/org/example/Widget.java".into()),
+        line: Some(line),
+    };
+    fake.symbol_name_results.insert(
+        ("snap1".into(), "Widget".into()),
+        vec![cand(class_key, 5), cand(ctor1, 9), cand(ctor2, 14)],
+    );
+    for (key, qn, subtype, line) in [
+        (class_key, "org.example.Widget", "CLASS", 5),
+        (ctor1, "org.example.Widget.<init>", "CONSTRUCTOR", 9),
+        (ctor2, "org.example.Widget.<init>", "CONSTRUCTOR", 14),
+    ] {
+        fake.symbol_contexts.insert(
+            ("snap1".into(), key.into()),
+            AgentSymbolContext {
+                file_path: Some("src/org/example/Widget.java".into()),
+                module_path: Some("src/org/example".into()),
+                module_stable_key: None,
+                name: "Widget".into(),
+                qualified_name: Some(qn.into()),
+                subtype: Some(subtype.into()),
+                line_start: Some(line),
+            },
+        );
+    }
+    fake.symbol_definition_counts
+        .insert(("snap1".into(), "Widget".into()), 3);
+
+    let result = run_explain(&fake, "r1", "Widget", Budget::Medium, TEST_NOW).unwrap();
+
+    assert!(
+        result.focus.resolved,
+        "a bare Java type name over its `.<init>` constructors resolves to the type"
+    );
+    let identity = result
+        .signals
+        .iter()
+        .find(|s| s.code() == SignalCode::ExplainIdentity)
+        .expect("resolved type must have EXPLAIN_IDENTITY");
+    let ev = serde_json::to_value(identity.evidence()).unwrap();
+    assert_eq!(ev["stable_key"], class_key);
+    let targets: Vec<Option<&str>> = result.next.iter().map(|a| a.target.as_deref()).collect();
+    assert_eq!(targets, vec![Some(ctor1), Some(ctor2)]);
 }
 
 #[test]

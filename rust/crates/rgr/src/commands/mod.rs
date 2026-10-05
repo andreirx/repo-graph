@@ -17,6 +17,7 @@
 //!
 //! Command families use shared infrastructure from `crate::cli`.
 
+mod ambiguous_matches; // JAVA-SYMBOL-AMBIGUITY-HINT-1: the human listing of an ambiguous symbol (callers/callees/path)
 mod assess;
 mod boundaries;
 mod contracts;

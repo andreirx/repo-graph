@@ -169,6 +169,7 @@ mod boundary_interaction_impl; // Boundary interaction write storage (BI-1A)
 mod boundary_interaction_read_impl; // Boundary interaction read port (BI-1A)
 pub mod call_remainder_reads; // PYTHON-RECEIVER-BINDING-1: a symbol's call remainder (inferred rows, unresolved calls naming/leaving it)
 mod call_resolution_reads; // RESOLUTION-BREAKDOWN-CLI-1: per-language/module call-resolution grouping reads
+mod candidate_rows; // JAVA-SYMBOL-AMBIGUITY-HINT-1: one node row by stable key (identity, anchor, signature) for the ambiguity listing
 mod cargo_module_impl; // CargoModuleStorePort impl for StorageConnection (rust-module-parity Phase 1)
 pub mod connection;
 mod contract_schema_impl; // ContractSchemaStoragePort impl for StorageConnection

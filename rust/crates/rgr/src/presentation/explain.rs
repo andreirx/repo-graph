@@ -310,8 +310,10 @@ impl ExplainResponse {
     /// (spec §2.3) is a SINGLE counted line — `N constructor(s) also match: explain '<cursor>'` —
     /// grammatically singular/plural, reporting the TRUE total (`next.len()` plus any the budget
     /// omitted), with the runnable `explain '<cursor>'` invocation(s) ON THE SAME LINE (comma-joined
-    /// when more than one), so a constructor query is never hidden. Each cursor is single-quoted
-    /// (a C++ qualified name / stable key carries no quote) and the verb comes from the action's
+    /// when more than one), so a constructor query is never hidden. Each cursor is the
+    /// constructor's stable key quoted with `shell_quote_arg` (JAVA-SYMBOL-AMBIGUITY-HINT-1,
+    /// D-JSAH-CURSOR-1 Correction 1: `'<key>'` for a key without an apostrophe — every key holds
+    /// `#` — and a runnable `'…'\''…'` for a key with one) and the verb comes from the action's
     /// own `kind`. Empty `next` ⇒ empty string ⇒ no section (byte-identical to every other answer).
     fn render_related_cursors(&self) -> String {
         if self.next.is_empty() {
@@ -327,7 +329,7 @@ impl ExplainResponse {
             .next
             .iter()
             .map(|action| match &action.target {
-                Some(target) => format!("{} '{}'", action.kind, target),
+                Some(target) => format!("{} {}", action.kind, super::shell_quote_arg(target)),
                 None => action.reason.clone(),
             })
             .collect();
@@ -1220,6 +1222,11 @@ mod tests {
         }
     }
 
+    // JAVA-SYMBOL-AMBIGUITY-HINT-1 (D-JSAH-CURSOR-1): the constructor cursor is the constructor's
+    // STABLE KEY (one distinct key per constructor), quoted with `shell_quote_arg`. The fixtures
+    // use real stable-key syntax (`<repo>:<path>#<qualified_name>:SYMBOL:CONSTRUCTOR[:dupN]`).
+    const CTOR_KEY: &str = "r1:src/w.cpp#Widget::Widget:SYMBOL:CONSTRUCTOR";
+
     #[test]
     fn render_constructor_also_matches_counted_line_singular() {
         // CPP-DECLARATORS-1 §2.3 (review-4 #4): ONE constructor rides on `next` → the ratified
@@ -1227,12 +1234,12 @@ mod tests {
         // runnable cursor on ONE line (operator ruling: never hidden).
         let mut r = symbol_target(Some(55));
         r.next = vec![ctor_action(
-            "CGHeroInstance::CGHeroInstance",
+            "r1:lib/CGHeroInstance.h#CGHeroInstance::CGHeroInstance:SYMBOL:CONSTRUCTOR",
             "CGHeroInstance",
         )];
         let out = r.render_human(false);
         assert!(
-            out.contains("1 constructor also matches: explain 'CGHeroInstance::CGHeroInstance'"),
+            out.contains("1 constructor also matches: explain 'r1:lib/CGHeroInstance.h#CGHeroInstance::CGHeroInstance:SYMBOL:CONSTRUCTOR'"),
             "ratified single-line form (count + quoted runnable cursor):\n{out}"
         );
     }
@@ -1243,14 +1250,14 @@ mod tests {
         // "2 constructors also match:" and BOTH cursors render on the same line (never hidden).
         let mut r = symbol_target(Some(55));
         r.next = vec![
-            ctor_action("Widget::Widget", "Widget"),
-            ctor_action("Widget::Widget", "Widget"),
+            ctor_action(CTOR_KEY, "Widget"),
+            ctor_action(&format!("{CTOR_KEY}:dup2"), "Widget"),
         ];
         let out = r.render_human(false);
         assert!(
-            out.contains(
-                "2 constructors also match: explain 'Widget::Widget', explain 'Widget::Widget'"
-            ),
+            out.contains(&format!(
+                "2 constructors also match: explain '{CTOR_KEY}', explain '{CTOR_KEY}:dup2'"
+            )),
             "plural single-line form with both cursors:\n{out}"
         );
     }
@@ -1260,12 +1267,60 @@ mod tests {
         // review-4 #4: the count is the TRUE total — one rendered cursor plus two the budget
         // dropped → "3 constructors also match:", with the one available cursor on the line.
         let mut r = symbol_target(Some(55));
-        r.next = vec![ctor_action("Widget::Widget", "Widget")];
+        r.next = vec![ctor_action(CTOR_KEY, "Widget")];
         r.next_omitted_count = Some(2);
         let out = r.render_human(false);
         assert!(
-            out.contains("3 constructors also match: explain 'Widget::Widget'"),
+            out.contains(&format!("3 constructors also match: explain '{CTOR_KEY}'")),
             "count = rendered + omitted, with the available cursor shown:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_constructor_cursors_are_distinct_stable_keys() {
+        // D-JSAH-CURSOR-1: three constructors of one class → three DISTINCT stable-key cursors
+        // (the qualified name `Widget::Widget` is shared by all three and runs as none of them).
+        let mut r = symbol_target(Some(55));
+        r.next = vec![
+            ctor_action(CTOR_KEY, "Widget"),
+            ctor_action(&format!("{CTOR_KEY}:dup2"), "Widget"),
+            ctor_action(&format!("{CTOR_KEY}:dup3"), "Widget"),
+        ];
+        let out = r.render_human(false);
+        let line = out
+            .lines()
+            .find(|l| l.starts_with("3 constructors also match: "))
+            .unwrap_or_else(|| panic!("counted line present:\n{out}"));
+        let cursors: Vec<&str> = line
+            .trim_start_matches("3 constructors also match: ")
+            .split(", ")
+            .collect();
+        assert_eq!(
+            cursors,
+            vec![
+                format!("explain '{CTOR_KEY}'"),
+                format!("explain '{CTOR_KEY}:dup2'"),
+                format!("explain '{CTOR_KEY}:dup3'"),
+            ]
+        );
+        assert!(cursors[0].ends_with(":CONSTRUCTOR'"));
+        assert!(cursors[1].ends_with(":CONSTRUCTOR:dup2'"));
+        assert!(cursors[2].ends_with(":CONSTRUCTOR:dup3'"));
+    }
+
+    #[test]
+    fn render_constructor_cursor_with_apostrophe_is_shell_quoted() {
+        // D-JSAH-CURSOR-1 Corrections 1-2: a key containing `'` (Rust lifetimes put one in 1204
+        // measured SYMBOL keys; 0 CONSTRUCTOR keys today) renders as a runnable `'…'\''…'` cursor.
+        let mut r = symbol_target(Some(55));
+        r.next = vec![ctor_action(
+            "r1:src/ctx.rs#Ctx<'a>::Ctx:SYMBOL:CONSTRUCTOR",
+            "Ctx",
+        )];
+        let out = r.render_human(false);
+        assert!(
+            out.contains("1 constructor also matches: explain 'r1:src/ctx.rs#Ctx<'\\''a>::Ctx:SYMBOL:CONSTRUCTOR'"),
+            "the apostrophe is escaped so the cursor runs as printed:\n{out}"
         );
     }
 

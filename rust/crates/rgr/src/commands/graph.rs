@@ -96,7 +96,16 @@ fn create_daemon_client(_command: &str) -> Result<DaemonClient, ExitCode> {
 }
 
 /// Handle daemon error response with REG-1 hint for repo not found.
-fn handle_daemon_error(err: DaemonClientError) -> ExitCode {
+///
+/// `ambiguity_listing` (JAVA-SYMBOL-AMBIGUITY-HINT-1): for `callers`/`callees`/`path` — the only
+/// commands whose daemon handlers return `AmbiguousSymbol` — renders the error's `data` with
+/// `render_ambiguous_matches` and the failing command's `cursor` (`Some((prefix, suffix))` when
+/// the command can be formed, `None` when it cannot), so each printed cursor runs as printed.
+/// `None` for every other command (no listing).
+fn handle_daemon_error(
+    err: DaemonClientError,
+    ambiguity_listing: Option<&dyn Fn(&serde_json::Value) -> String>,
+) -> ExitCode {
     match err {
         DaemonClientError::DaemonError {
             code,
@@ -107,24 +116,10 @@ fn handle_daemon_error(err: DaemonClientError) -> ExitCode {
                 eprintln!("error: repo not indexed");
                 eprintln!("hint: run 'rmap index .' to index this repo");
             } else if code == "AmbiguousSymbol" {
-                // Render structured ambiguity data
+                // Render structured ambiguity data: the candidates with runnable stable-key cursors.
                 eprintln!("error: {}", message);
-                if let Some(data) = data {
-                    if let Some(matches) = data.get("matches").and_then(|m| m.as_array()) {
-                        eprintln!();
-                        eprintln!("Matches:");
-                        for (i, m) in matches.iter().enumerate() {
-                            let qualified = m
-                                .get("qualified_name")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("?");
-                            let kind = m.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
-                            let file = m.get("file").and_then(|v| v.as_str()).unwrap_or("?");
-                            eprintln!("  {}. {}  {}  {}", i + 1, qualified, kind, file);
-                        }
-                        eprintln!();
-                        eprintln!("hint: use qualified name for exact match");
-                    }
+                if let (Some(data), Some(render_listing)) = (data, ambiguity_listing) {
+                    eprint!("{}", render_listing(&data));
                 }
             } else {
                 eprintln!("error: {}: {}", code, message);
@@ -376,7 +371,7 @@ fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
                 ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
             }
         },
-        Err(e) => handle_daemon_error(e),
+        Err(e) => handle_daemon_error(e, None),
     }
 }
 
@@ -434,7 +429,7 @@ fn run_dev_cycle_completeness_audit(args: &[String]) -> ExitCode {
                 ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
             }
         },
-        Err(e) => handle_daemon_error(e),
+        Err(e) => handle_daemon_error(e, None),
     }
 }
 
@@ -499,7 +494,7 @@ fn run_dev_livegraph_preload(args: &[String]) -> ExitCode {
                 ExitCode::from(crate::daemon_command::EXIT_RUNTIME_ERROR)
             }
         },
-        Err(e) => handle_daemon_error(e),
+        Err(e) => handle_daemon_error(e, None),
     }
 }
 
@@ -617,7 +612,12 @@ pub fn run_callers(args: &[String]) -> ExitCode {
                 }
             }
         }
-        Err(e) => handle_daemon_error(e),
+        Err(e) => handle_daemon_error(
+            e,
+            Some(&|data| {
+                super::ambiguous_matches::render_ambiguous_matches(Some(("rmap callers", "")), data)
+            }),
+        ),
     }
 }
 
@@ -740,7 +740,12 @@ pub fn run_callees(args: &[String]) -> ExitCode {
                 }
             }
         }
-        Err(e) => handle_daemon_error(e),
+        Err(e) => handle_daemon_error(
+            e,
+            Some(&|data| {
+                super::ambiguous_matches::render_ambiguous_matches(Some(("rmap callees", "")), data)
+            }),
+        ),
     }
 }
 
@@ -881,7 +886,18 @@ pub fn run_path(args: &[String]) -> ExitCode {
                 }
             }
         }
-        Err(e) => handle_daemon_error(e),
+        Err(e) => handle_daemon_error(
+            e,
+            Some(&|data| {
+                let query = data.get("query").and_then(|q| q.as_str());
+                let affixes =
+                    super::ambiguous_matches::path_cursor_affixes(from_query, to_query, query);
+                super::ambiguous_matches::render_ambiguous_matches(
+                    affixes.as_ref().map(|(p, s)| (p.as_str(), s.as_str())),
+                    data,
+                )
+            }),
+        ),
     }
 }
 
@@ -1083,7 +1099,7 @@ pub fn run_imports(args: &[String]) -> ExitCode {
                 }
             }
         }
-        Err(e) => handle_daemon_error(e),
+        Err(e) => handle_daemon_error(e, None),
     }
 }
 
@@ -1383,7 +1399,7 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
                 }
             }
         }
-        Err(e) => handle_daemon_error(e),
+        Err(e) => handle_daemon_error(e, None),
     }
 }
 
@@ -1520,7 +1536,7 @@ pub fn run_stats(args: &[String]) -> ExitCode {
                 }
             }
         }
-        Err(e) => handle_daemon_error(e),
+        Err(e) => handle_daemon_error(e, None),
     }
 }
 

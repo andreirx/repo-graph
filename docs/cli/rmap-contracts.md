@@ -515,6 +515,68 @@ depth D; a route exists using N inferred call/import edges — investigate`. A c
 is a decode error. Among equal-depth routes the one with the fewest inferred edges, then the
 smallest stable-key sequence, is chosen.
 
+### Ambiguous symbols — the listing and its cursors (JAVA-SYMBOL-AMBIGUITY-HINT-1)
+
+When the symbol argument of `callers`, `callees` or `path` resolves to more than one candidate, the
+command exits 2 with the unchanged first line `error: symbol '<query>' is ambiguous` (stderr), then
+lists every candidate the shared resolver returned, in its order:
+
+```
+Candidates (<N>) — each matches '<query>'; pick one by its stable key:
+  1. <file>:<line>  <qualified_name>  <kind>  <signature>
+     → <command> '<stable_key>'
+  2. …
+hint: run one of the cursors above; a stable key names at most one symbol
+```
+
+- Each row is the stored node the candidate's stable key names (`StorageConnection::symbol_row_by_stable_key`),
+  never text parsed from the key: `<file>:<line>` (`<file>` alone when no positive line is stored —
+  the store's `0` "no span" sentinel reads as no line, so neither the row nor JSON ever carries
+  `:0`; `?` when no file is stored), the stored qualified name (the name when none is stored), `<kind>` as
+  `SYMBOL:<SUBTYPE>` (an overload key's `:dupN` suffix never appears in it), and the stored
+  signature with every whitespace run collapsed to one space. A column without a stored value is
+  omitted.
+- A candidate whose row is not read is still listed, with its cursor, under one of two distinct
+  row forms — never folded together:
+  - `  <n>. ? — no stored row for this key in the snapshot read` — the read returned no row;
+  - `  <n>. ? — store read failed: <reason>` — the read itself failed; `<reason>` is the error text.
+- Cursor rule: one cursor per candidate WHOSE COMMAND CAN BE FORMED, in the failing command, with
+  the candidate's stable key quoted by the same encoder as `find` (a key with an apostrophe renders
+  `'…'\''…'` and still runs). `path`: the ambiguous side is the argument equal to `<query>` (`from`
+  compared first); the other argument is quoted the same way (`rmap path '<key>' <to>` /
+  `rmap path <from> '<key>'`).
+- Incomplete listing: when a candidate's command cannot be formed — the `path` side is unknown
+  because `<query>` is absent or equals neither argument, or the candidate carries no stable key —
+  its row is still printed, NO `→` line follows it, and the last line is
+  `hint: this listing is incomplete — <reasons>` instead of the run hint. `<reasons>` lists every
+  applicable reason, in this order, joined by `; `: `the daemon did not say which path argument was
+  ambiguous` (`<query>` absent), `the error's query matches neither path argument` (`<query>`
+  present, equal to neither argument), `a candidate has no stable key`. With an absent `<query>`
+  the header reads `Candidates (<N>) — pick one by its stable key:`. The current daemon always
+  sends `query` and every `stable_key`; this form is the renderer's answer to a payload it cannot
+  complete.
+- Hint rule: the hint names the stable key — the one form that distinguishes candidates which
+  share a qualified name (Java and C++ overloads). `at most one` is what the store's UNIQUE index
+  on `(snapshot_uid, stable_key)` guarantees; it does not claim the key still names a symbol. The
+  earlier hint `use qualified name for exact match` is gone.
+- JSON (`AmbiguousSymbol` error `data`): `query`, the error code and the message are unchanged;
+  each `matches[]` entry carries `stable_key`, `qualified_name` (the STORED qualified name), `name`,
+  `kind`, `file`, `line` (`null` for the `0` sentinel) and `signature` (verbatim), each `null` when
+  not stored, and `lookup` — the
+  state of the candidate's read: `{"kind":"found"}`, `{"kind":"missing"}` (no row for the key in
+  the snapshot read; the other fields `null`) or `{"kind":"read-failed","reason":"<error text>"}`
+  (the read failed; the other fields `null`) — additive fields.
+
+`explain <bare type name>`: when the candidates are exactly one type and its constructors, the
+type is the answer in every language — a constructor belongs to the type when its qualified name
+minus the segment after the last `::` or `.` equals the type's qualified name (C++
+`leveldb::Slice::Slice`, Java `org.example.Widget.<init>`). The line `<N> constructor(s) also match:
+explain '<stable_key>', …` lists one DISTINCT stable-key cursor per constructor (quoted as above),
+each of which runs as printed; it no longer prints the shared qualified name.
+
+Out of scope (pre-existing, not changed here): under `--json` every `rmap` error, this one included,
+leaves stdout empty and prints the human text on stderr (follow-up ERROR-JSON-1).
+
 ### Rate surfaces — `inferred_calls`
 
 The calls-resolved share counts certain calls only; the inferred calls stay in its universe

@@ -1,0 +1,622 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-JAVA-SYMBOL-AMBIGUITY-HINT-1-0",
+  "workItemId": "JAVA-SYMBOL-AMBIGUITY-HINT-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-3.json",
+    "sha256": "sha256:1343fe281ec8a6b552cfc3bd1763b07f567c624be3559776dadc38b647433289"
+  },
+  "allocation": {
+    "path": "docs/slices/java-symbol-ambiguity-hint-1.md",
+    "sha256": "sha256:dfc4496ac02c23584c2043f44770d4f640e37e98fe7c90167c72581b94c5304a"
+  },
+  "subject": {
+    "candidateSha256": "sha256:6c4c422fbb6bdf7f79c427cdf826c25f920eafa1bb9004db727ba5a37cc03c8a",
+    "verification": {
+      "path": "docs/assurance/JAVA-SYMBOL-AMBIGUITY-HINT-1/verification.json",
+      "sha256": "sha256:4b240b8975988c1fc31e102aa55793affd4bbbcfa6a8e0a75f02c6649cfea8f8"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-JAVA-SYMBOL-AMBIGUITY-HINT-1-0"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-3.json",
+      "sha256": "sha256:1343fe281ec8a6b552cfc3bd1763b07f567c624be3559776dadc38b647433289"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:b2effee57f0033adfec8929c441c40ba0a0f5d00b9d508ce77a39a762efe8a9f",
+        "byteLength": 28968
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-3.json",
+        "sha256": "sha256:1343fe281ec8a6b552cfc3bd1763b07f567c624be3559776dadc38b647433289",
+        "byteLength": 5133
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-005-symbol-relationship-discovery.md",
+        "sha256": "sha256:8d6b67c3350d9e4350af68b74b6882d31935432f24e0fe854f9dfb3d7dce3a56",
+        "byteLength": 20112
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-012-cli-protocol-surface.md",
+        "sha256": "sha256:834397b1613e7e68313019f2d42b8945bdaaaa50c2c4f66a37311fcb4b96f73b",
+        "byteLength": 14355
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:84a7d22ba3684b06d5914b3c46ae3cce9f1b3bb274f207f5128704e0261dad37",
+        "byteLength": 21622,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/symbol-identity-1.md",
+        "sha256": "sha256:0c5960434f1e4f9689069fd1a2b2abdcd997b519841a3bb6d0114434d0f1f647",
+        "byteLength": 7330,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cpp-declarators-1.md",
+        "sha256": "sha256:e882b256aab71af8d5dc7c0961b5dc5774503a563b8f68fdab3064192be8a408",
+        "byteLength": 13202,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/anchors-everywhere-1.md",
+        "sha256": "sha256:c6cfc05647db9a709392175b807523dd1e7c63422ae3f6f0bccacc315855bd60",
+        "byteLength": 4803,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/contracts/exit-codes.md",
+        "sha256": "sha256:0bf82ef2c91e6876fe9b907ce6bb228bac198dcb9265953efe366923339f5429",
+        "byteLength": 3756,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/economy-2.md",
+        "sha256": "sha256:b989f23b13306789d3368eb16299c738325e9a37c162b16d639a58c4dacdf5e4",
+        "byteLength": 4956,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/cursor-roundtrip-1.md",
+        "sha256": "sha256:e609a244b17187dc19dd40ef61deb30404bf260258fa5051fde4ace0237413be",
+        "byteLength": 2882,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:0c2c5a96be7f4f3f855b7f3a2113503a2b44af784560dad3fa999957b4c669c3",
+        "byteLength": 15454
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:30a113d5cc92684d246cf7b4e004866c9839688ee5aca878403a0c860d5c068a",
+        "byteLength": 11784
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-AGENT-USEFULNESS-FRAME-1.md",
+        "sha256": "sha256:105b9d8dcb346a9de4af16f5bbd658ae18736aabc26a058758ae438d5686f072",
+        "byteLength": 7615
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-CERTAINTY-MARK-1.md",
+        "sha256": "sha256:25765befac1b9e32a17b7f52f2f53dc9c321b1bd1deb2c234244f1b45f4bca27",
+        "byteLength": 3147
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-SCOPE-1.md",
+        "sha256": "sha256:146bfef3b05cedd567260b5b88ce3ccb8375b61dfa6fc5cf132e8d98e76516af",
+        "byteLength": 3369
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-CURSOR-1.md",
+        "sha256": "sha256:be5042e5163a30ae2800d07f1657db995a4f474b3a6ef597192d7114f92334f4",
+        "byteLength": 3883
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-PLACEMENT-1.md",
+        "sha256": "sha256:18b83c76701e9d5c75f6e97337ebeb816334d592da11a4c4e814f02bbfab4a93",
+        "byteLength": 3918
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-STORAGE-READ-1.md",
+        "sha256": "sha256:7f3bcdd947062eb47a3b1dba00081cdf2899adc168c4d41b2b3122be157b84a1",
+        "byteLength": 2982
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-READ-STATE-1.md",
+        "sha256": "sha256:c9b16c809da9f1ca8199df9e02d14e0fbc8e2d14ea6a1d65890c12a0f42cfde2",
+        "byteLength": 3740
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-JSAH-INCOMPLETE-CURSOR-1.md",
+        "sha256": "sha256:c10aa3353c19f7ad5cd40cc85dae9eb73ea6dfbbdec49ebf150118e5c0cfbb66",
+        "byteLength": 5659
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/java-symbol-ambiguity-hint-1.md",
+        "sha256": "sha256:dfc4496ac02c23584c2043f44770d4f640e37e98fe7c90167c72581b94c5304a",
+        "byteLength": 79665
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-3/requirements-review.json",
+        "sha256": "sha256:01e5e7d3cc8cdc5c775d8e45677da4d51f3138dc3b649a200f9915095c69a71a",
+        "byteLength": 63639
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-3/baseline-approval.json",
+        "sha256": "sha256:3d85291c9e57c4d42b137bc0ef87b825b90fb597c134fc68c22917235abd76e3",
+        "byteLength": 4089
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:e4e9c5944a15f5fe4b7cdbfb4483a1bf5436cf18aa6c608452c30419abeedd55",
+        "byteLength": 7940
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1/selection.md",
+        "sha256": "sha256:d52c0c465fd71dff8150f50e44e4da407120082653ffd5bfb10224e96e04b259",
+        "byteLength": 14798
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-0",
+        "sha256": "sha256:507d36384869d340f2980d0b855353f1d51e384bd02ea819c285c32838ea8a43",
+        "byteLength": 7281
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-0",
+        "sha256": "sha256:ab18dc073d99e7c83d4b074face0d1ef101f8e04b16352b10da07ce1235a641e",
+        "byteLength": 4848
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review-subject",
+        "path": ".agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1/verification-draft-0.json",
+        "sha256": "sha256:4b240b8975988c1fc31e102aa55793affd4bbbcfa6a8e0a75f02c6649cfea8f8",
+        "byteLength": 64442,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-command-0",
+        "sha256": "sha256:688ff94dcc7ddb00a94d1d6003eb15be0cd84e4f6ad3cc0a31d713423fa264e7",
+        "byteLength": 1664
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:5df3e8fe0a957d0c049da69591740fc9c11c9a794feca05ed1b9bfc751b10f96",
+        "byteLength": 24591
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:b2effee57f0033adfec8929c441c40ba0a0f5d00b9d508ce77a39a762efe8a9f",
+        "byteLength": 28968
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:544f3e2adef2c770116d7d9de750f7621906f145dd15f1ebc3fa67e6c8c73b9b",
+        "byteLength": 322286
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-005-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-005-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-012-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-JSAH-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-JSAH-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-JSAH-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "JSAH-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports the builder executed this check with exit 0 and independently reran the compiled incomplete-listing and zero-line tests and daemon reader-set witness; the reviewer did not report rerunning JSAH-C01 as a whole."
+      }
+    },
+    {
+      "checkId": "JSAH-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports the builder executed this check with exit 0 and independently reran the compiled incomplete-listing and zero-line tests and daemon reader-set witness; the reviewer did not report rerunning JSAH-C02 as a whole."
+      }
+    },
+    {
+      "checkId": "JSAH-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The reviewer reports builder execution with exit 0 and inspected isolated Kafka and leveldb captures, but could not independently rerun a live index in the read-only environment."
+      }
+    },
+    {
+      "checkId": "JSAH-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "The reviewer's own inspection (JSAH-C04 is reviewer-owned): 'JSAH-C04 is OBSERVED PASS by source, test, documentation, and capture inspection.' The uncommitted tree matches checkpoint 6c4c422f at base 04b6e944 with exactly the 13 allocated paths; the reviewer also reran the compiled incomplete-listing and zero-line tests and the daemon reader-set witness, compared the three unchanged-answer captures and checked the frozen paths have no diff; Kafka's two send declarations (KafkaProducer.java:943, :1062) are distinguished by their stored anchors :942/:1061 and both printed keys were executed in JSAH-C03; the leveldb Slice() default constructor absent from the store is the stated out-of-scope residual.",
+          "supportingEvidence": [
+            ".agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1/review-0.json (sha256:43804c896bb6206f0f39ed0032a01e9f93ce4fda3e572c56efdc889278ee259b)",
+            ".agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1/after/ (the builder's captures the reviewer inspected)",
+            ".agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1/implementation-evidence-0.json (sha256:ef397be4a18eba0cd1147cc52cab740fef4cdf591a9e2b37a5684f703738dd31)"
+          ]
+        }
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "docs/cli/rmap-contracts.md",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/src/explain/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/agent/tests/explain_symbol.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch_ambiguous_matches.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/ambiguous_matches.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/graph.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/tests/daemon_dispatch.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/candidate_rows.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-10-05T07:00:02.945Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nRESULT: accepted\n\n**OBSERVED — candidate:** The uncommitted tree matches checkpoint `6c4c422f…` at base revision `04b6e944`; it contains exactly the 13 allocated paths. I inspected the staged and unstaged diff and all three new files. JSAH-C04 passes by inspection.\n\n**Obligation assessment:** RG-REQ-005 and RG-REQ-012: accepted within this slice. RG-REQ-005-L04 and RG-REQ-005-L05: met by the inspected code and live captures. RG-REQ-005-L01, L02, L03, L06, L07, L08, L09, L10; RG-REQ-012-L01, L02, L04, L05, L08, L09: bounded preservation passes on the allocated checks, not a global regression claim. RG-REQ-012-L03, L06, L07: pass for the changed cursors, paired candidate data, and line handling. P-JSAH-01, P-JSAH-02, P-JSAH-03: pass; I independently compared the three unchanged-answer captures and checked that the frozen paths have no diff.\n\n**Checks:** JSAH-C01 and JSAH-C02 are **BUILDER-EXECUTED**, exit 0; I also reran the compiled incomplete-listing and zero-line tests and the daemon reader-set witness. JSAH-C03 is **BUILDER-EXECUTED**, exit 0; I inspected its isolated Kafka and leveldb captures but could not independently rerun a live index in this read-only environment. JSAH-C04 is **OBSERVED PASS** by source, test, documentation, and capture inspection. Evidence is in `/private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-0*.txt` and `.agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1/after/`.\n\n**Changed-path accounting:** `storage/src/candidate_rows.rs` and `storage/src/lib.rs` add the narrow keyed read; `daemon-runtime/src/dispatch_ambiguous_matches.rs`, `dispatch.rs`, and `lib.rs` replace key parsing with stored-row evidence; `rgr/src/commands/ambiguous_matches.rs`, `graph.rs`, and `mod.rs` render runnable or explicitly unavailable commands; `agent/src/explain/mod.rs` and `rgr/src/presentation/explain.rs` make constructor cursors distinct and shell-quoted; `agent/tests/explain_symbol.rs` and `rgr/tests/daemon_dispatch.rs` verify those paths; `docs/cli/rmap-contracts.md` states the resulting protocol. These are the 13 allocated paths.\n\nUnder the hood, the storage read returns **found, missing, or read-failed** without treating a failed read as absence. The daemon preserves that state per resolver candidate. The CLI uses the stored identity and signature, not a parse of the key. The type classifier keeps its existing completeness rule and uses the constructor’s stable key as its next action. Each new module has a current caller and an earned storage, guardrail, or test-seam force; an in-place expansion of the oversized files was rejected. This serves the VISION by giving an agent a precise next command without presenting an ambiguous overload as a fact.\n\n**Source witness:** Kafka’s two `send` declarations are at `KafkaProducer.java:943` and `:1062`; the captured listing distinguishes their stored anchors at `:942` and `:1061`, and both printed keys were executed in JSAH-C03. **Residual, outside scope:** leveldb `slice.h:30` contains `Slice() : data_(\"\"), size_(0) {}`, but the captured type answer lists only the four stored constructors. The C++ extractor is frozen here.\n\nManager interpretation by manager-claude-fable-5-1: The bookkeeper's transcription of the reviewer's ACCEPTED verdict (admission 3, cycle 1) is applied with mechanical repairs only: JSAH-C04: reviewer-owned accepted check recorded as the reviewer's reproduced verification with a passed outcome (TD-026), quoting the report. Builder evidence at this checkpoint: JSAH-C01–C03 passed on the final tree (implementation-evidence-0.json; the reruns the RESUME NOTE required). All obligation assessments, the 13 changed-path assessments, the empty findings and decisions, and the report are the reviewer's. No conversion of meaning. Source provider run review-JAVA-SYMBOL-AMBIGUITY-HINT-1-0; retained output .agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1/review-0.json sha256:8e8ea2fed611d124e63add451c46e620d49e2f5264533bc2a886c3d5b8d41a20. The provider remains the performer; this interpretation is not independent execution evidence."
+}

@@ -4947,6 +4947,34 @@ fn callers_ambiguous_symbol_returns_structured_error() {
         "Data should have matches field: {}",
         output
     );
+
+    // JAVA-SYMBOL-AMBIGUITY-HINT-1 (RG-REQ-005-L05 rev 2): each match carries the candidate's
+    // stable key — the identity `callers` accepts — and the stored row read by that key.
+    let parsed: serde_json::Value = serde_json::from_str(output.lines().last().unwrap()).unwrap();
+    let matches = parsed["error"]["data"]["matches"]
+        .as_array()
+        .unwrap_or_else(|| panic!("matches array: {output}"));
+    assert_eq!(
+        matches.len(),
+        2,
+        "both `process` definitions listed: {output}"
+    );
+    let mut files = Vec::new();
+    for m in matches {
+        let key = m["stable_key"]
+            .as_str()
+            .unwrap_or_else(|| panic!("each match carries stable_key: {m}"));
+        assert!(
+            key.ends_with("#process:SYMBOL:FUNCTION"),
+            "the stable key of a `process` function: {key}"
+        );
+        assert_eq!(m["kind"], "SYMBOL:FUNCTION", "{m}");
+        assert_eq!(m["name"], "process", "{m}");
+        assert!(m["line"].as_u64().is_some(), "the stored line: {m}");
+        files.push(m["file"].as_str().unwrap().to_string());
+    }
+    files.sort();
+    assert_eq!(files, vec!["moduleA.ts", "moduleB.ts"]);
 }
 
 #[test]

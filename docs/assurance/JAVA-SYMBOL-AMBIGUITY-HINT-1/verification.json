@@ -1,0 +1,475 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-verification",
+  "verificationId": "verification-JAVA-SYMBOL-AMBIGUITY-HINT-1-0",
+  "workItemId": "JAVA-SYMBOL-AMBIGUITY-HINT-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/JAVA-SYMBOL-AMBIGUITY-HINT-1-INPUT-3.json",
+    "sha256": "sha256:1343fe281ec8a6b552cfc3bd1763b07f567c624be3559776dadc38b647433289"
+  },
+  "allocation": {
+    "path": "docs/slices/java-symbol-ambiguity-hint-1.md",
+    "sha256": "sha256:dfc4496ac02c23584c2043f44770d4f640e37e98fe7c90167c72581b94c5304a"
+  },
+  "candidateCheckpoint": {
+    "contract": "requirements-assurance/v3-candidate-checkpoint",
+    "baseRevision": "04b6e9444946cb66b70923c48663296200d0e587",
+    "entries": [
+      {
+        "path": "docs/cli/rmap-contracts.md",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:4133cfaff87c6a14f309e80999921d080a0e75ceb9c7cf7a217d8582222efedd",
+          "byteLength": 85560
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:79e79e7f6ef68d68d55e4054b126ce055c0fe2d89b8fe3726326caca7fef8776",
+          "byteLength": 90106
+        }
+      },
+      {
+        "path": "rust/crates/agent/src/explain/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:83c380039f9b9ac101d7c339638f5769f17eb8188f1a1a8f1c8bf5aed1d63eea",
+          "byteLength": 66123
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7dda8cc0ccb40b0b2df64ec3c3340467540eee74256667d666c412e3448d132e",
+          "byteLength": 66743
+        }
+      },
+      {
+        "path": "rust/crates/agent/tests/explain_symbol.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:e343b8c120a20715ee8799d20b96d141f7f2fb75b7bb79460deb42a4497d3717",
+          "byteLength": 39630
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:06e843e06b3179ec7d3dd1397839fffde9b5a143620f5536849df88846debefb",
+          "byteLength": 42582
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:2039b713f9fe4cddc04f7a1a39de3b8e0c5e94ddc0f66f96983d128a0179a014",
+          "byteLength": 502159
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:8bdaf0b97bdb4462f20c9340c432e040fbe2d91c77d568e1db7f9aa1af03854a",
+          "byteLength": 501107
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/dispatch_ambiguous_matches.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:4294bf19958a702c254cb039d37c5925e64d696a564ba39e896e5e88a6b3d693",
+          "byteLength": 9172
+        }
+      },
+      {
+        "path": "rust/crates/daemon-runtime/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:0995f4c0fed851bde5b01318e851146813a8ad647c010be7f1e7506cf216603b",
+          "byteLength": 20054
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:b086a946590f3dbfd45682f4e0bef5dff6f9955256b56470a4c105ceea64c26a",
+          "byteLength": 20213
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/ambiguous_matches.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:4262b10f6fb0435e1f0c87a05c162190a50890b0a7adac2b5168faa80c2514b2",
+          "byteLength": 22119
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/graph.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:0a92fd7d8b10f54da0053ed49c177cb96287064ba537311ae3e1dad537239064",
+          "byteLength": 70258
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:45c0bbde059a841547a6c5ba4fef0583b3fbd0ea34845992fcc8a155f8450af8",
+          "byteLength": 70860
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/commands/mod.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:cc8bce958697a4a5efa41cdd439b58a454f90ee164b70afa5fef213e0b51a52f",
+          "byteLength": 2027
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:1770c65d304109025b74a1241bec01caef1c5467f8a83c40183650e881679ffd",
+          "byteLength": 2147
+        }
+      },
+      {
+        "path": "rust/crates/rgr/src/presentation/explain.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:3ed103e17e542d5540451cc2fdd47ee77b8c62a1f3a49f79729fb7d59ef59447",
+          "byteLength": 120888
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:f511ae6a7f006415d9832eaeaa3b14ad149317041238a6566c001a288152d495",
+          "byteLength": 123613
+        }
+      },
+      {
+        "path": "rust/crates/rgr/tests/daemon_dispatch.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:897cb5ac064eff170b6f016279ae216b19341d9e681be7674bfac7613fc2d0be",
+          "byteLength": 188663
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:d92445d4d6a9d0d136b1eb6bd51d5b17d20a8697853df1d8b2b61539e072b2cb",
+          "byteLength": 189850
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/candidate_rows.rs",
+        "porcelainStatus": "??",
+        "index": {
+          "kind": "absent"
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:7c86e5aef49772faec962fa95ac7489ffb543bdd8e1659c936b6ab42660ff165",
+          "byteLength": 7173
+        }
+      },
+      {
+        "path": "rust/crates/storage/src/lib.rs",
+        "porcelainStatus": " M",
+        "index": {
+          "kind": "present",
+          "gitMode": "100644",
+          "stage": 0,
+          "sha256": "sha256:d29015f7c7630fa2200477aeb2baffda32972eb3a2d64fb179f2ec3fcc09410f",
+          "byteLength": 12288
+        },
+        "workingTree": {
+          "kind": "present",
+          "gitMode": "100644",
+          "sha256": "sha256:17876b8c995cfa2298039ab7c711a165837609530a38acde79d75b7cdbe3f791",
+          "byteLength": 12424
+        }
+      }
+    ],
+    "sha256": "sha256:6c4c422fbb6bdf7f79c427cdf826c25f920eafa1bb9004db727ba5a37cc03c8a"
+  },
+  "performer": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "runId": "build-JAVA-SYMBOL-AMBIGUITY-HINT-1-0"
+  },
+  "checks": [
+    {
+      "checkId": "JSAH-C01",
+      "obligationIds": [
+        "RG-REQ-005-L05",
+        "RG-REQ-005-L04",
+        "RG-REQ-012-L03",
+        "RG-REQ-012-L07",
+        "RG-REQ-005-L02",
+        "RG-REQ-005-L07",
+        "P-JSAH-01",
+        "P-JSAH-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree, built from rust/; cargo only; no rmap invocation; the before/ test lists were taken by the operator on HEAD",
+        "command": "( set -o pipefail; cargo test -p repo-graph-storage --lib 2>&1 | tee /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-storage.txt ) && grep -qE '^test result: ok\\.' /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-storage.txt && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-storage.txt && echo c01-storage-lib && ( set -o pipefail; cargo test -p repo-graph-daemon-runtime --lib 2>&1 | tee /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-dr.txt ) && grep -qE '^test result: ok\\.' /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-dr.txt && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-dr.txt && echo c01-dr-lib && ( set -o pipefail; cargo test -p repo-graph-rgr --lib 2>&1 | tee /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-rgr.txt ) && grep -qE '^test result: ok\\.' /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-rgr.txt && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-rgr.txt && echo c01-rgr-lib && ( set -o pipefail; cargo test -p repo-graph-agent 2>&1 | tee /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-agent.txt ) && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-agent.txt && echo c01-agent && ( set -o pipefail; cargo test -p repo-graph-rgr --test daemon_dispatch 2>&1 | tee /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-dd.txt ) && grep -qE '^test result: ok\\.' /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-dd.txt && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-dd.txt && echo c01-daemon-dispatch && ( set -o pipefail; cargo test -p repo-graph-daemon-runtime --test consolidation_witness 2>&1 | tee /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-witness.txt ) && grep -qE '^test result: ok\\.' /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-witness.txt && ! grep -qE 'test result: FAILED|panicked at' /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-witness.txt && echo c01-witness && : > /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-named.txt && for t in candidate_rows::tests::row_by_stable_key_carries_signature_file_and_line candidate_rows::tests::missing_key_is_none candidate_rows::tests::zero_line_start_reads_as_none; do cargo test -p repo-graph-storage --lib -- --exact \"$t\" 2>&1 | tee -a /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-named.txt | grep -qE '^test result: ok\\. 1 passed' || exit 10; done && for t in dispatch_ambiguous_matches::tests::dup_key_match_carries_stable_key_stored_name_file_line_and_signature dispatch_ambiguous_matches::tests::missing_row_is_listed_with_its_key_and_nulls dispatch_ambiguous_matches::tests::read_failure_is_marked_distinct_from_a_missing_row; do cargo test -p repo-graph-daemon-runtime --lib -- --exact \"$t\" 2>&1 | tee -a /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-named.txt | grep -qE '^test result: ok\\. 1 passed' || exit 11; done && for t in commands::ambiguous_matches::tests::listing_prints_one_runnable_cursor_per_candidate_and_never_says_use_qualified_name commands::ambiguous_matches::tests::path_cursors_carry_the_other_argument_shell_quoted commands::ambiguous_matches::tests::key_with_apostrophe_is_shell_quoted commands::ambiguous_matches::tests::missing_and_failed_rows_render_their_state_before_the_cursor commands::ambiguous_matches::tests::incomplete_payload_prints_no_cursor_and_names_the_gap commands::ambiguous_matches::tests::zero_line_renders_bare_file commands::ambiguous_matches::tests::signature_renders_as_one_field_with_collapsed_whitespace presentation::explain::tests::render_constructor_cursors_are_distinct_stable_keys presentation::explain::tests::render_constructor_cursor_with_apostrophe_is_shell_quoted presentation::explain::tests::render_constructor_counted_line_reports_omitted_total; do cargo test -p repo-graph-rgr --lib -- --exact \"$t\" 2>&1 | tee -a /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-named.txt | grep -qE '^test result: ok\\. 1 passed' || exit 12; done && for t in explain_bare_java_type_resolves_to_type_over_dotted_init_constructors explain_bare_name_resolves_to_type_over_its_constructor; do cargo test -p repo-graph-agent --test explain_symbol -- --exact \"$t\" 2>&1 | tee -a /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-named.txt | grep -qE '^test result: ok\\. 1 passed' || exit 13; done && cargo test -p repo-graph-rgr --test daemon_dispatch -- --exact callers_ambiguous_symbol_returns_structured_error 2>&1 | tee -a /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-named.txt | grep -qE '^test result: ok\\. 1 passed' && echo c01-named && cargo test -p repo-graph-rgr --lib -- --list 2>/dev/null | grep ': test$' | LC_ALL=C sort > /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-rgr-lib-tests-after.txt && test \"$(wc -l < /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-rgr-lib-tests-after.txt)\" -eq 1497 && test \"$(LC_ALL=C comm -23 \"$PWD/../.agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1/before/rgr-lib-tests.txt\" /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-rgr-lib-tests-after.txt | wc -l)\" -eq 0 && cargo test -p repo-graph-daemon-runtime --lib -- --list 2>/dev/null | grep ': test$' | LC_ALL=C sort > /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-dr-lib-tests-after.txt && test \"$(wc -l < /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-dr-lib-tests-after.txt)\" -eq 895 && test \"$(LC_ALL=C comm -23 \"$PWD/../.agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1/before/dr-lib-tests.txt\" /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-dr-lib-tests-after.txt | wc -l)\" -eq 0 && cargo test -p repo-graph-storage --lib -- --list 2>/dev/null | grep ': test$' | LC_ALL=C sort > /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-storage-lib-tests-after.txt && test \"$(wc -l < /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-storage-lib-tests-after.txt)\" -eq 764 && test \"$(LC_ALL=C comm -23 \"$PWD/../.agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1/before/storage-lib-tests.txt\" /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-storage-lib-tests-after.txt | wc -l)\" -eq 0 && test \"$(cargo test -p repo-graph-agent --test explain_symbol -- --list 2>/dev/null | grep -c ': test$')\" -eq 25 && echo c01-retained && test \"$(grep -c 'fn parse_ambiguous_matches' crates/daemon-runtime/src/dispatch.rs)\" -eq 0 && test \"$(grep -c '#\\[test\\]' crates/daemon-runtime/src/dispatch.rs)\" -eq \"$(git show HEAD:rust/crates/daemon-runtime/src/dispatch.rs | grep -c '#\\[test\\]')\" && test \"$(grep -c '#\\[test\\]' crates/rgr/src/commands/graph.rs)\" -eq \"$(git show HEAD:rust/crates/rgr/src/commands/graph.rs | grep -c '#\\[test\\]')\" && test \"$(grep -c '#\\[test\\]' crates/agent/src/explain/mod.rs)\" -eq \"$(git show HEAD:rust/crates/agent/src/explain/mod.rs | grep -c '#\\[test\\]')\" && test \"$(grep -c '#\\[test\\]' crates/rgr/src/presentation/explain.rs)\" -eq \"$(( $(git show HEAD:rust/crates/rgr/src/presentation/explain.rs | grep -c '#\\[test\\]') + 2 ))\" && ! grep -q 'use qualified name' crates/rgr/src/commands/graph.rs crates/rgr/src/commands/ambiguous_matches.rs && echo c01-guardrail",
+        "inputs": "BINDING SEAM (signatures and texts; §2.1 refers to this list). (0) NEW `rust/crates/storage/src/candidate_rows.rs` (declared `mod candidate_rows;` in `storage/src/lib.rs`; D-JSAH-STORAGE-READ-1 A): `pub struct SymbolRow { pub stable_key: String, pub name: String, pub qualified_name: Option<String>, pub kind: String, pub subtype: Option<String>, pub file: Option<String>, pub line: Option<i64>, pub signature: Option<String> }` and `impl StorageConnection { pub fn symbol_row_by_stable_key(&self, snapshot_uid: &str, stable_key: &str) -> Result<Option<SymbolRow>, StorageError> }` — ONE SQL query (`SELECT n.stable_key, n.name, n.qualified_name, n.kind, n.subtype, f.path, n.line_start, n.signature FROM nodes n LEFT JOIN files f ON n.file_uid = f.file_uid WHERE n.snapshot_uid = ? AND n.stable_key = ? LIMIT 1`); the read maps `line_start` 0 to `None` (the no-span sentinel is never a line — RG-REQ-012-L07, as the other storage reads do); `queries.rs` (`resolve_symbol`, `ResolvedSymbol`, `query_symbol_by_field`) is NOT touched. (1) NEW `rust/crates/daemon-runtime/src/dispatch_ambiguous_matches.rs` (declared `mod dispatch_ambiguous_matches;` in `daemon-runtime/src/lib.rs` — NOT as a child of `dispatch.rs`, which declares `explain_alias` via `#[path]` at :57-58; D-JSAH-PLACEMENT-1 with Correction 1): `pub(super) fn ambiguous_matches(storage: &StorageConnection, snapshot_uid: &str, keys: &[String]) -> serde_json::Value` — for each key IN RESOLVER ORDER, `storage.symbol_row_by_stable_key(snapshot_uid, key)` (seam (0)); a found row yields `{\"stable_key\": <key>, \"qualified_name\": <stored qualified_name, or null when None>, \"name\": <name>, \"kind\": \"<kind>:<subtype>\" (e.g. `SYMBOL:METHOD` — never a `:dupN` fragment; `<kind>` alone when subtype is None), \"file\": <file or null>, \"line\": <line or null>, \"signature\": <nodes.signature or null, verbatim — the renderer normalises whitespace>, \"lookup\": {\"kind\": \"found\"}}`; a key whose row is MISSING (`Ok(None)`) yields `{\"stable_key\": <key>, \"qualified_name\": null, \"name\": null, \"kind\": null, \"file\": null, \"line\": null, \"signature\": null, \"lookup\": {\"kind\": \"missing\"}}`; a key whose read FAILED (`Err(e)`) yields the same nulls with `\"lookup\": {\"kind\": \"read-failed\", \"reason\": <e.to_string()>}` and the error is still logged to the daemon's stderr — the two states are never folded together (D-JSAH-READ-STATE-1; RG-REQ-002-L04: a failed read renders unknown-with-reason); every candidate is listed, never dropped, never parsed from the key. `dispatch.rs` DELETES `parse_ambiguous_matches` (:228) and its four call sites (`handle_callers` :1375, `handle_callees` :1554, `handle_path` from :2795 and to :2834) call `ambiguous_matches(&storage, epoch.snapshot_uid(), &keys)`; `ErrorDetail::ambiguous_symbol(query, matches)` and its message `symbol '<query>' is ambiguous` are unchanged, so the JSON error code, message and the `query` field are byte-identical and `matches` gains fields (additive; `qualified_name` becomes the STORED qualified name). (2) NEW `rust/crates/rgr/src/commands/ambiguous_matches.rs` (declared in `commands/mod.rs`): `pub(crate) fn render_ambiguous_matches(cursor: Option<(&str, &str)>, data: &serde_json::Value) -> String` (D-JSAH-PLACEMENT-1 Correction 2: `Some((cursor_prefix, cursor_suffix))` when the failing command is known, `None` when it is not — the state is a type, never an empty-string sentinel) — renders, from `data.matches`, EXACTLY the byte form of SLICE_DOC §2.2 (column zero; the block below is that form with `\\n` written out):\n\nCandidates (<N>) — each matches '<query>'; pick one by its stable key:\n  1. <file>:<line>  <qualified_name>  <kind>  <signature>\n     → <cursor_prefix> <shell_quote_arg(stable_key)><cursor_suffix>\n  2. …\nhint: run one of the cursors above; a stable key names at most one symbol\n\nA candidate whose `lookup.kind` is `missing` renders its row as `  <n>. ? — no stored row for this key in the snapshot read`; one whose `lookup.kind` is `read-failed` renders `  <n>. ? — store read failed: <reason>`; both are followed by their cursor line as usual, and the hint is unchanged (D-JSAH-READ-STATE-1). INCOMPLETE PAYLOAD (D-JSAH-INCOMPLETE-CURSOR-1): when a candidate's command cannot be formed — the `path` side is unknown because `data.query` is absent or equals neither argument, or the candidate has no `stable_key` — its row is still printed, NO `→` line follows it, and the final line is `hint: this listing is incomplete — <reasons>` instead of the run hint, where `<reasons>` lists EVERY applicable reason in this fixed order joined by `; ` (D-JSAH-INCOMPLETE-CURSOR-1 Correction 1): `the daemon did not say which path argument was ambiguous` (`data.query` absent), `the error's query matches neither path argument` (`data.query` present, equal to neither argument), `a candidate has no stable key` (a candidate without `stable_key`); `path_cursor_affixes` returns `None` for both unknown-side inputs, so the RENDERER chooses between reasons (i) and (ii) by reading `data.query` itself when `cursor` is `None` — absent → (i), present → (ii) — and reason (iii) by its per-candidate `stable_key` read; with an absent `data.query` the header is `Candidates (<N>) — pick one by its stable key:` (never `each matches '?'`). For a `found` row, `<file>:<line>` is `presentation::anchor(file, u64::try_from(line).ok())` (the payload's `line` is `i64`: a negative value fails the conversion and becomes `None`; `0` converts to `Some(0)` and `presentation::anchor` suppresses it — never `as u64`, never `:0`) — `<file>` alone when `line` is null (the storage read already maps the 0 sentinel to null) and `?` when `file` is null; `<qualified_name>` is the stored qualified name, the `name` when the qualified name is null, omitted when both are null (the suffix tier can list candidates with DIFFERENT qualified names — the column is what tells them apart); `<kind>` is the payload's `kind` (`SYMBOL:METHOD`) or omitted when null; the key is quoted with `presentation::shell_quote_arg` (`rust/crates/rgr/src/presentation/mod.rs:203`) — every stable key contains `#`, so it renders as `'<key>'`, and a key with an apostrophe — a REAL case: 1204 SYMBOL keys across the 29 retained v0.20.0 stores carry one, Rust lifetimes and generics in qualified names such as `ExtractionCtx<'a>.make_stable_key:SYMBOL:METHOD` (D-JSAH-CURSOR-1 Correction 2) — renders runnable as `'…'\\''…'` (RG-REQ-012-L03); `<signature>` is the stored signature with ALL whitespace runs collapsed to one space (`split_whitespace().collect::<Vec<_>>().join(\" \")` — C++ stores the qualified declarator with its parameters, kafka stores multi-line parameter lists; the field is printed as its own column, never concatenated to the name) or omitted when null; the text `use qualified name` never appears. `handle_daemon_error` in `graph.rs` (:109-126) replaces the `Matches:` loop and the `hint: use qualified name for exact match` line with ONE call: `callers` → `render_ambiguous_matches(Some((\"rmap callers\", \"\")), data)`, `callees` → `Some((\"rmap callees\", \"\"))`, `path`: the ambiguous side is the one whose argument equals `data.query` — `from` is compared FIRST because dispatch resolves `from` before `to` (`handle_path` :2795 then :2834) — from-ambiguity → `Some((\"rmap path\", \" \" + shell_quote_arg(to)))`, to-ambiguity → `Some((\"rmap path \" + shell_quote_arg(from), \"\"))`, unknown side → `None`, the other argument quoted with the existing `presentation::shell_quote_arg` (`rust/crates/rgr/src/presentation/mod.rs:203`, the encoder `find` mirrors); `handle_daemon_error` gains one parameter `ambiguity_listing: Option<&dyn Fn(&serde_json::Value) -> String>` and each caller passes a closure that calls `render_ambiguous_matches` with its own `cursor` (`Some((prefix, suffix))` when the failing command is known, `None` when it is not); the `ambiguity_listing` parameter itself is `None` for a command that has no listing (two different `None`s with two owners: `ambiguity_listing: None` = no listing; `cursor: None` = a listing whose command cannot be formed); for `path` the closure derives the pair with `pub(crate) fn path_cursor_affixes(from: &str, to: &str, query: Option<&str>) -> Option<(String, String)>` — `None` when `query` is absent or equals neither argument — and passes it as the renderer's `cursor`; the renderer then prints no `→` line and the incomplete-listing hint — never a silent default to `from` or `to`, never an empty-prefix line; the error line `error: symbol '<q>' is ambiguous` stays first and unchanged. (3) `rust/crates/agent/src/explain/mod.rs` `classify_type_constructor_collision`: membership proof `container(ctor_qn) == type_qn` where `container` strips the LAST segment after the last `::` or the last `.`, whichever occurs later in the string (C++ `leveldb::Slice::Slice` → `leveldb::Slice`; Java `org.apache.kafka.clients.producer.KafkaProducer.<init>` → `org.apache.kafka.clients.producer.KafkaProducer`); `ConstructorHint.cursor` = the constructor candidate's `stable_key` (D-JSAH-CURSOR-1), `type_name` unchanged; the completeness rule (`count_symbol_definitions_by_name` equals the candidate count) and the one-type rule are unchanged. `NextAction.target` therefore carries the full stable key (raw cursor in JSON; RG-REQ-012-L03: a canonical cursor is untouched by the alias site). (4) `rust/crates/rgr/src/presentation/explain.rs` `render_related_cursors` (:316-333): the target is quoted with `presentation::shell_quote_arg` instead of literal single quotes (D-JSAH-CURSOR-1 Correction 1) — byte-identical `'<key>'` for every key without an apostrophe, runnable `'…'\\''…'` for a key with one; its three tests' expected strings change from `explain 'Widget::Widget'` to stable-key cursors (names kept — they still describe singular/plural/omitted counting) and TWO new tests are added. `rust/crates/agent/tests/explain_symbol.rs:252` (`explain_bare_name_resolves_to_type_over_its_constructor`) is EXTENDED: its expectation `Some(\"Widget::Widget\")` becomes the fake constructor's stable key (the test's name still describes what it asserts). TESTS (sixteen new, module-qualified names binding JSAH-C01; two existing tests extended): storage lib `candidate_rows::tests::row_by_stable_key_carries_signature_file_and_line`, `candidate_rows::tests::missing_key_is_none` and `candidate_rows::tests::zero_line_start_reads_as_none` (a row stored with `line_start` 0 reads back with `line: None`); daemon-runtime lib `dispatch_ambiguous_matches::tests::dup_key_match_carries_stable_key_stored_name_file_line_and_signature` (a `…:SYMBOL:METHOD:dup2` key against an in-memory store yields the seven fields with `kind` = `SYMBOL:METHOD`, `qualified_name` = the stored dotted name and `lookup.kind` = `found`), `dispatch_ambiguous_matches::tests::missing_row_is_listed_with_its_key_and_nulls` (`lookup.kind` = `missing`) and `dispatch_ambiguous_matches::tests::read_failure_is_marked_distinct_from_a_missing_row` (an in-memory store whose `nodes` table was dropped → `lookup.kind` = `read-failed` with a non-empty `reason`, the key kept, the other fields null — and NOT `missing`); rgr lib `commands::ambiguous_matches::tests::listing_prints_one_runnable_cursor_per_candidate_and_never_says_use_qualified_name`, `commands::ambiguous_matches::tests::path_cursors_carry_the_other_argument_shell_quoted` (an argument containing a single quote and a space), `commands::ambiguous_matches::tests::key_with_apostrophe_is_shell_quoted` (a Rust-shaped stable key whose qualified name contains `<'a>`), `commands::ambiguous_matches::tests::missing_and_failed_rows_render_their_state_before_the_cursor` (a `missing` and a `read-failed` candidate render the two §2.2 row forms, each followed by its cursor; a `found` row is unchanged), `commands::ambiguous_matches::tests::incomplete_payload_prints_no_cursor_and_names_the_gap` (an absent `query`, a `query` matching neither `path` argument, and a candidate without `stable_key`: no `→` line for the affected candidates, no run hint, the incomplete-listing hint with each applicable reason in its fixed order, the no-query header form; `path_cursor_affixes` returns `None` for the two unknown-side inputs), `commands::ambiguous_matches::tests::zero_line_renders_bare_file` (`line: 0` in the payload renders `<file>` alone, never `<file>:0`) and `commands::ambiguous_matches::tests::signature_renders_as_one_field_with_collapsed_whitespace` (a C++ declarator signature and a multi-line kafka-shaped signature); rgr lib `presentation::explain::tests::render_constructor_cursors_are_distinct_stable_keys` (three constructors → three DISTINCT `explain '<key>'` cursors ending `:CONSTRUCTOR`, `:CONSTRUCTOR:dup2`, `:CONSTRUCTOR:dup3`) and `presentation::explain::tests::render_constructor_cursor_with_apostrophe_is_shell_quoted` (a constructor key containing `'` renders as a runnable `'…'\\''…'` cursor — hypothetical today: 0 measured CONSTRUCTOR keys carry one, D-JSAH-CURSOR-1 Correction 2); agent integration `explain_symbol::explain_bare_java_type_resolves_to_type_over_dotted_init_constructors` (a CLASS `org.example.Widget` plus two CONSTRUCTOR candidates with qualified name `org.example.Widget.<init>` → the type resolves, `next` = the two constructor stable keys). Extended (expectations change, names kept): `agent/tests/explain_symbol.rs::explain_bare_name_resolves_to_type_over_its_constructor` (:252), `rgr/tests/daemon_dispatch.rs::callers_ambiguous_symbol_returns_structured_error` (asserts `stable_key` in each match). Retained-name lists: rgr lib 1488 → 1497 (+9), daemon-runtime lib 892 → 895 (+3), storage lib 761 → 764 (+3), agent lib 344 → 344, `agent --test explain_symbol` 24 → 25 (+1), `rgr --test daemon_dispatch` 110 → 110. GUARDRAIL: `grep -c 'fn parse_ambiguous_matches' dispatch.rs` = 0 after; `#[test]` counts unchanged in `dispatch.rs`, `graph.rs`, `agent/src/explain/mod.rs`; `presentation/explain.rs` exactly +2 (66 → 68). BEFORE WITNESSES: before/rgr-lib-tests.txt (1488 names), before/dr-lib-tests.txt (892 names) and before/storage-lib-tests.txt (761 names), LC_ALL=C sorted, operator-captured on HEAD 10c1f093."
+      },
+      "expected": "Every marker c01-storage-lib, c01-dr-lib, c01-rgr-lib, c01-agent, c01-daemon-dispatch, c01-witness, c01-named, c01-retained, c01-guardrail prints and the script exits 0: the five suites and the daemon-crate witness `consolidation_witness` pass (CLAUDE.md: a touched daemon crate runs it); each of the sixteen new tests and the two extended tests passes alone by its module-qualified name; every before test name is retained and the lib counts are exactly 1497 (rgr), 895 (daemon-runtime), 764 (storage) and 25 (`explain_symbol`); `parse_ambiguous_matches` is gone; the over-guardrail files gain no test and `presentation/explain.rs` exactly two (no new responsibility — preserving their structure); the text `use qualified name` is absent from both renderer files. The resolver (`storage/src/queries.rs`, `agent_impl.rs`) and the extractors remain unchanged (JSAH-C02 frozen paths), so RG-REQ-005-L02/L07 and every other symbol-resolution behaviour are preserved — no-behavior-change outside the ambiguity listing and the constructor cursors.",
+      "candidateSha256": "sha256:6c4c422fbb6bdf7f79c427cdf826c25f920eafa1bb9004db727ba5a37cc03c8a",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Exit 0. All nine markers print, c01-storage-lib through c01-guardrail. Storage: 761 passed + 3 ignored (764 listed). daemon-runtime: 894 passed + 1 ignored (895 listed). rgr: 1497. daemon_dispatch: 110. explain_symbol: 25. consolidation_witness: 15 passed. The 16 new and 2 extended tests each pass alone by their full name. parse_ambiguous_matches is gone, and the #[test] counts meet the guardrail.",
+        "supportingEvidence": [
+          "/private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-{run,storage,dr,rgr,agent,dd,witness,named}.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "JSAH-C02",
+      "obligationIds": [
+        "RG-REQ-005-L05",
+        "RG-REQ-005-L04",
+        "P-JSAH-03",
+        "RG-REQ-005-L01",
+        "RG-REQ-005-L02",
+        "RG-REQ-005-L03",
+        "RG-REQ-005-L06",
+        "RG-REQ-005-L07",
+        "RG-REQ-005-L08",
+        "RG-REQ-005-L09",
+        "RG-REQ-005-L10",
+        "RG-REQ-012-L01",
+        "RG-REQ-012-L02",
+        "RG-REQ-012-L03",
+        "RG-REQ-012-L04",
+        "RG-REQ-012-L05",
+        "RG-REQ-012-L06",
+        "RG-REQ-012-L07",
+        "RG-REQ-012-L08",
+        "RG-REQ-012-L09"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "candidate tree; cargo fmt/clippy over the four touched crates (rgr, daemon-runtime, agent, storage); git over the repository",
+        "command": "echo c02-fmt && cargo fmt -p repo-graph-rgr -p repo-graph-daemon-runtime -p repo-graph-agent -p repo-graph-storage -- --check && echo c02-clippy && ( set -o pipefail; cargo clippy -p repo-graph-rgr -p repo-graph-daemon-runtime -p repo-graph-agent -p repo-graph-storage --all-targets -- -D warnings 2>&1 | tee /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-02.txt ) && echo c02-paths && test -z \"$(git -C .. status --short | grep -vE '^(.M|\\?\\?) (rust/crates/storage/src/candidate_rows.rs|rust/crates/storage/src/lib.rs|rust/crates/daemon-runtime/src/dispatch.rs|rust/crates/daemon-runtime/src/dispatch_ambiguous_matches.rs|rust/crates/daemon-runtime/src/lib.rs|rust/crates/rgr/src/commands/graph.rs|rust/crates/rgr/src/commands/ambiguous_matches.rs|rust/crates/rgr/src/commands/mod.rs|rust/crates/agent/src/explain/mod.rs|rust/crates/rgr/src/presentation/explain.rs|rust/crates/agent/tests/explain_symbol.rs|rust/crates/rgr/tests/daemon_dispatch.rs|docs/cli/rmap-contracts.md)$' | grep -v '^?? \\.agent-manager/')\" && echo c02-frozen && git -C .. diff --quiet HEAD -- rust/crates/storage/src/queries.rs rust/crates/storage/src/agent_impl.rs rust/crates/java-extractor rust/crates/cpp-extractor rust/crates/daemon-transport rust/crates/daemon-runtime/src/dispatch_explain_alias.rs && echo c02-ws && git -C .. diff --check HEAD && echo c02-ok",
+        "inputs": "fmt and clippy `-D warnings --all-targets` over rgr, daemon-runtime, agent and storage; the worktree holds changes ONLY under the thirteen candidate paths (the slice document and its manifest are committed before admission, so they are not in the porcelain output; the `.agent-manager/` process trail is excluded); frozen and byte-identical to HEAD: rust/crates/storage/src/queries.rs and agent_impl.rs (the shared resolver and its adapter — D-JSAH-STORAGE-READ-1 adds one new file beside them), rust/crates/java-extractor, rust/crates/cpp-extractor, rust/crates/daemon-transport (`ErrorDetail::ambiguous_symbol`), rust/crates/daemon-runtime/src/dispatch_explain_alias.rs."
+      },
+      "expected": "c02-fmt, c02-clippy, c02-paths, c02-frozen, c02-ws, c02-ok all print and the script exits 0: formatting and `clippy --all-targets -D warnings` clean on rgr, daemon-runtime, agent and storage; only the thirteen candidate paths changed (the `.agent-manager/` process trail excluded); `queries.rs`, `agent_impl.rs`, both extractors, the transport envelope and the alias site are byte-identical to HEAD — the preserved leaves of RG-REQ-005 and RG-REQ-012 remain as they are (no-behavior-change there); `git diff --check` clean.",
+      "candidateSha256": "sha256:6c4c422fbb6bdf7f79c427cdf826c25f920eafa1bb9004db727ba5a37cc03c8a",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Exit 0. All six markers print, c02-fmt through c02-ok. fmt and clippy --all-targets -D warnings are clean on the four crates. Only the thirteen paths changed. The frozen paths match HEAD byte-for-byte. diff --check is clean.",
+        "supportingEvidence": [
+          "/private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-02.txt"
+        ]
+      }
+    },
+    {
+      "checkId": "JSAH-C03",
+      "obligationIds": [
+        "RG-REQ-005-L05",
+        "RG-REQ-005-L04",
+        "RG-REQ-012-L03",
+        "RG-REQ-012-L07",
+        "P-JSAH-01",
+        "P-JSAH-02"
+      ],
+      "owner": "builder",
+      "method": {
+        "kind": "command",
+        "cwd": "rust",
+        "environment": "release build of rmap AND rmapd from the candidate; an isolated mktemp state root under /private/tmp holding COPIES of the kafka and leveldb stores from the operator's retained v0.20.0 root (~/repo-graph-retained/audit-v0.20.0, read only); RMAP_TRANSPORT=stdio with every RMAP_AUTO_* off and RMAP_SEED_VECTORS=off; cwd = the kafka and leveldb repositories (read only); the EXIT trap removes the root and kills only an rmapd that is new since the start AND holds a file under the isolated root (`lsof -p`) — never a daemon another process started; before/ captures are the operator's on the HEAD release binary",
+        "command": "bash -Eeu -o pipefail -c 'cargo build --release -p repo-graph-rgr -p rmapd 2>&1 | tail -1; RM=\"$PWD/target/release/rmap\"; RMD=\"$PWD/target/release/rmapd\"; test -x \"$RMD\"; SL=\"$PWD/../.agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1\"; mkdir -p \"$SL/after\"; ISO=$(mktemp -d /private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-iso.XXXXXX); RMAPD_BEFORE=$(pgrep -x rmapd | LC_ALL=C sort || true); trap '\"'\"'for p in $(pgrep -x rmapd | LC_ALL=C sort | LC_ALL=C comm -13 <(echo \"$RMAPD_BEFORE\") - ); do if lsof -p \"$p\" 2>/dev/null | grep -q -- \"$ISO\"; then kill \"$p\" 2>/dev/null || true; fi; done; rm -rf \"$ISO\"'\"'\"' EXIT; python3 - \"$ISO\" <<\"PY\"\nimport json,os,shutil,sys\nISO=sys.argv[1]; R=os.path.expanduser(\"~/repo-graph-retained/audit-v0.20.0\"); r=json.load(open(R+\"/registry.json\")); os.makedirs(ISO+\"/databases\")\nkeep=[]\nfor x in r[\"repos\"]:\n    if x[\"canonical_path\"].endswith((\"/kafka\",\"/leveldb\")):\n        dst=ISO+\"/databases/\"+os.path.basename(x[\"db_path\"]); shutil.copy2(x[\"db_path\"],dst)\n        for e in (\"-wal\",\"-shm\"):\n            if os.path.exists(x[\"db_path\"]+e): shutil.copy2(x[\"db_path\"]+e,dst+e)\n        x[\"db_path\"]=dst; keep.append(x)\nassert len(keep)==2, keep\nr[\"repos\"]=keep; json.dump(r,open(ISO+\"/registry.json\",\"w\"),indent=2)\nPY\nexport RMAP_STATE_ROOT=\"$ISO\" RMAP_SOCKET_PATH=\"$ISO/rmap.sock\" RMAP_TRANSPORT=stdio RMAP_AUTO_ENRICH=off RMAP_AUTO_REINDEX=off RMAP_AUTO_RETENTION=off RMAP_SEED_VECTORS=off; KAFKA=\"/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/kafka\"; LDB=\"/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb\"; echo step1; cd \"$KAFKA\"; set +e; \"$RM\" callers KafkaProducer.send > \"$SL/after/callers-send.out\" 2> \"$SL/after/callers-send.err\"; echo $? > \"$SL/after/callers-send.exit\"; set -e; test \"$(cat \"$SL/after/callers-send.exit\")\" -eq 2; grep -q \"^error: symbol .KafkaProducer.send. is ambiguous\" \"$SL/after/callers-send.err\"; if grep -q \"use qualified name\" \"$SL/after/callers-send.err\"; then exit 21; fi; if grep -q \"  METHOD:dup2\" \"$SL/after/callers-send.err\"; then exit 22; fi; if grep -q \"^Matches:\" \"$SL/after/callers-send.err\"; then exit 23; fi; grep -q \"^Candidates (2) — each matches .KafkaProducer.send.; pick one by its stable key:\" \"$SL/after/callers-send.err\"; grep -q \"^  1. clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java:942  org.apache.kafka.clients.producer.KafkaProducer.send  SYMBOL:METHOD  (ProducerRecord<K, V> record)$\" \"$SL/after/callers-send.err\"; grep -q \"^  2. clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java:1061  org.apache.kafka.clients.producer.KafkaProducer.send  SYMBOL:METHOD  (ProducerRecord<K, V> record, Callback callback)$\" \"$SL/after/callers-send.err\"; grep -q \"^hint: run one of the cursors above; a stable key names at most one symbol$\" \"$SL/after/callers-send.err\"; grep -o \"rmap callers '\"'\"'[^'\"'\"']*'\"'\"'\" \"$SL/after/callers-send.err\" > \"$SL/after/callers-send.cursors\"; test \"$(wc -l < \"$SL/after/callers-send.cursors\")\" -eq 2; grep -q \"#KafkaProducer.send:SYMBOL:METHOD'\"'\"'$\" \"$SL/after/callers-send.cursors\"; grep -q \"#KafkaProducer.send:SYMBOL:METHOD:dup2'\"'\"'$\" \"$SL/after/callers-send.cursors\"; echo step2; n=0; while IFS= read -r c; do n=$((n+1)); k=$(printf \"%s\" \"$c\" | sed \"s/^rmap callers '\"'\"'//; s/'\"'\"'$//\"); \"$RM\" callers \"$k\" > \"$SL/after/callers-cursor-$n.out\" 2>/dev/null; done < \"$SL/after/callers-send.cursors\"; grep -q \"^File: clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java:942$\" \"$SL/after/callers-cursor-1.out\"; grep -q \"^File: clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java:1061$\" \"$SL/after/callers-cursor-2.out\"; echo step3; \"$RM\" explain KafkaProducer --budget large > \"$SL/after/explain-kp.out\" 2>/dev/null; grep -q \"^Target: KafkaProducer$\" \"$SL/after/explain-kp.out\"; grep -q \"^Members (73)\" \"$SL/after/explain-kp.out\"; grep -q \"^Referenced by (90 files)\" \"$SL/after/explain-kp.out\"; if grep -q \"unresolved: ambiguous\" \"$SL/after/explain-kp.out\"; then exit 31; fi; grep -q \"^6 constructors also match: \" \"$SL/after/explain-kp.out\"; grep -o \"explain '\"'\"'[^'\"'\"']*'\"'\"'\" \"$SL/after/explain-kp.out\" | sed \"s/^explain '\"'\"'//; s/'\"'\"'$//\" > \"$SL/after/explain-kp.cursors\"; test \"$(wc -l < \"$SL/after/explain-kp.cursors\")\" -eq 6; test \"$(LC_ALL=C sort -u \"$SL/after/explain-kp.cursors\" | wc -l)\" -eq 6; n=0; while IFS= read -r k; do n=$((n+1)); \"$RM\" explain \"$k\" > \"$SL/after/explain-ctor-$n.out\" 2>/dev/null; grep -q \"^Target: KafkaProducer$\" \"$SL/after/explain-ctor-$n.out\"; grep -q \"^File: clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java:[0-9]*$\" \"$SL/after/explain-ctor-$n.out\"; done < \"$SL/after/explain-kp.cursors\"; test \"$(grep -h \"^File: \" \"$SL\"/after/explain-ctor-*.out | LC_ALL=C sort -u | wc -l)\" -eq 6; echo step4; cd \"$LDB\"; \"$RM\" explain Slice --budget large > \"$SL/after/ldb-explain-slice.out\" 2>/dev/null; grep -q \"^Target: Slice$\" \"$SL/after/ldb-explain-slice.out\"; grep -q \"^Members (14)\" \"$SL/after/ldb-explain-slice.out\"; grep -q \"^Referenced by (20 files)\" \"$SL/after/ldb-explain-slice.out\"; grep -q \"^Callees (0) — a type is not called\" \"$SL/after/ldb-explain-slice.out\"; if grep -q \"unresolved: ambiguous\" \"$SL/after/ldb-explain-slice.out\"; then exit 41; fi; grep -q \"^4 constructors also match: \" \"$SL/after/ldb-explain-slice.out\"; grep -o \"explain '\"'\"'[^'\"'\"']*'\"'\"'\" \"$SL/after/ldb-explain-slice.out\" | sed \"s/^explain '\"'\"'//; s/'\"'\"'$//\" > \"$SL/after/ldb-slice.cursors\"; test \"$(LC_ALL=C sort -u \"$SL/after/ldb-slice.cursors\" | wc -l)\" -eq 4; grep -q \"slice.h#leveldb::Slice::Slice:SYMBOL:CONSTRUCTOR$\" \"$SL/after/ldb-slice.cursors\"; grep -q \"slice.h#leveldb::Slice::Slice:SYMBOL:CONSTRUCTOR:dup4$\" \"$SL/after/ldb-slice.cursors\"; n=0; while IFS= read -r k; do n=$((n+1)); \"$RM\" explain \"$k\" > \"$SL/after/ldb-slice-ctor-$n.out\" 2>/dev/null; grep -q \"^File: include/leveldb/slice.h:\" \"$SL/after/ldb-slice-ctor-$n.out\"; done < \"$SL/after/ldb-slice.cursors\"; test \"$(grep -h \"^File: \" \"$SL\"/after/ldb-slice-ctor-*.out | LC_ALL=C sort -u | wc -l)\" -eq 4; echo step5; \"$RM\" callers Slice::size > \"$SL/after/ldb-callers-slice-size.out\" 2>/dev/null; cmp \"$SL/before/ldb-callers-slice-size.out\" \"$SL/after/ldb-callers-slice-size.out\"; cd \"$KAFKA\"; \"$RM\" callers \"repo_01m3zqq5v29yw8msrmq5hrsfyg:clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#KafkaProducer.send:SYMBOL:METHOD\" > \"$SL/after/callers-key1.out\" 2>/dev/null; cmp \"$SL/before/callers-key1.out\" \"$SL/after/callers-key1.out\"; \"$RM\" explain \"repo_01m3zqq5v29yw8msrmq5hrsfyg:clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#KafkaProducer:SYMBOL:CLASS\" > \"$SL/after/explain-class-key.out\" 2>/dev/null; cmp \"$SL/before/explain-class-key.out\" \"$SL/after/explain-class-key.out\"; echo step6; \"$RM\" --version > \"$SL/after/rmap-version.txt\"; \"$RMD\" --version >> \"$SL/after/rmap-version.txt\"; echo \"$RMD\" >> \"$SL/after/rmap-version.txt\"; echo JSAH-C03-OK'",
+        "inputs": "before/callers-send.err (today: `Matches:` rows, row 2 `KafkaProducer.send:SYMBOL  METHOD:dup2`, `hint: use qualified name for exact match`), before/callers-key1.out and before/callers-key2.out (the two keys resolve to :942 and :1061 — the stored anchors are the `@Override` lines; the declarations are at :943 and :1062), before/explain-kp.out (ambiguous: CLASS + six CONSTRUCTOR keys), before/ldb-explain-slice.out (`4 constructors also match: explain 'leveldb::Slice::Slice'` ×4), before/ldb-explain-slice-ctor.out (that cursor is ambiguous: slice.h:33/36/39/42), before/ldb-callers-slice-size.out (an unambiguous callers answer — byte-identity witness)"
+      },
+      "expected": "Markers step1–step6 and `JSAH-C03-OK` print; exit 0. step1: `callers KafkaProducer.send` still exits 2 with the unchanged first line `error: symbol 'KafkaProducer.send' is ambiguous`, lists `Candidates (2) — each matches 'KafkaProducer.send'; pick one by its stable key:` with the rows `  1. clients/…/KafkaProducer.java:942  org.apache.kafka.clients.producer.KafkaProducer.send  SYMBOL:METHOD  (ProducerRecord<K, V> record)` and `  2. …:1061  …KafkaProducer.send  SYMBOL:METHOD  (ProducerRecord<K, V> record, Callback callback)`, exactly two `rmap callers '<key>'` cursors ending `:SYMBOL:METHOD'` and `:SYMBOL:METHOD:dup2'`, the hint `run one of the cursors above; a stable key names at most one symbol`, and none of `use qualified name`, a `  METHOD:dup2` kind column or a `Matches:` heading (each forbidden text has its own failing exit code 21/22/23). step2: both printed cursors run as printed and answer `File: …KafkaProducer.java:942` / `:1061`. step3: `explain KafkaProducer --budget large` (the Medium default caps `next` at five cursors; large allows ten) resolves the CLASS (`Target: KafkaProducer`, `Members (73)`, `Referenced by (90 files)`, no `unresolved: ambiguous`) and prints `6 constructors also match:` with six DISTINCT stable-key cursors, each of which runs and anchors a distinct `File: …KafkaProducer.java:<line>`. step4: leveldb `explain Slice --budget large` keeps its type answer (`Target: Slice`, `Members (14)`, `Referenced by (20 files)`, `Callees (0) — a type is not called…`, no `unresolved: ambiguous` — P-JSAH-01) and prints `4 constructors also match:` with four DISTINCT cursors (`…slice.h#leveldb::Slice::Slice:SYMBOL:CONSTRUCTOR` … `:dup4`), each running to a distinct slice.h line — the C++ cursors that were identical and unrunnable before. step5: answers that enter neither changed path are byte-identical to before — leveldb `callers Slice::size`, kafka `callers` by stable key, kafka `explain` by the CLASS key at the default budget (no collapse, no ambiguity) — P-JSAH-02 preserved. step6: the candidate `rmap` and `rmapd` versions and the `rmapd` path (captured at the start of the script) named.",
+      "candidateSha256": "sha256:6c4c422fbb6bdf7f79c427cdf826c25f920eafa1bb9004db727ba5a37cc03c8a",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "passed",
+        "actual": "Markers step1–step6 and JSAH-C03-OK print. Every printed cursor ran. The three byte-identity witnesses match before/.",
+        "supportingEvidence": [
+          ".agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1/after/"
+        ]
+      }
+    },
+    {
+      "checkId": "JSAH-C04",
+      "obligationIds": [
+        "RG-REQ-005-L05",
+        "RG-REQ-005-L04",
+        "RG-REQ-012-L03",
+        "RG-REQ-012-L06",
+        "RG-REQ-012-L07",
+        "P-JSAH-01",
+        "P-JSAH-02",
+        "P-JSAH-03"
+      ],
+      "owner": "reviewer",
+      "method": {
+        "kind": "inspection",
+        "subject": "git diff HEAD -- the thirteen candidate paths, read on the candidate tree, with SLICE_DOC sections 2-3 and the after/ captures",
+        "criterion": "(1) the storage read is one query by stable key in the new file (`candidate_rows.rs`), `queries.rs` and `agent_impl.rs` untouched; the daemon builder lists every key the resolver returned, in its order, looks each up with that read and never parses the key text for identity; a missing row is listed with nulls and `lookup.kind` `missing`, a failed read with nulls and `lookup.kind` `read-failed` plus its reason — never folded into one state (D-JSAH-READ-STATE-1), never dropped; the JSON error code, message and `query` are unchanged and `matches` is additive (`qualified_name` is the STORED name); (2) the human renderer prints one shell-quoted cursor per candidate whose command can be formed, in the command the error came from (`callers`/`callees`/`path` with the other argument), and for a candidate whose command cannot be formed (unknown `path` side, no `stable_key`) NO `→` line and the incomplete-listing hint with one reason per tested condition (D-JSAH-INCOMPLETE-CURSOR-1 with Correction 1; the state crosses the helper as `Option<(prefix, suffix)>` — D-JSAH-PLACEMENT-1 Correction 2) — never a line shaped like a command that is not one; `<file>:<line>` through `presentation::anchor` (no invented line, never `:0` — RG-REQ-012-L07; the storage read maps the 0 sentinel to null so JSON carries no false line either), the stored qualified name (or name) as its own column, the signature as its own whitespace-collapsed column when stored, the key quoted with `shell_quote_arg` (a key containing an apostrophe still runs), the `path` cursor on the side whose argument equals `data.query` (`from` compared first) with the other argument `shell_quote_arg`-quoted, and never the text `use qualified name`; the first `error:` line is unchanged; every reader-facing phrase is the predicate at its site (`each matches '<query>'` — the suffix tier can list different qualified names; `a stable key names at most one symbol` — the UNIQUE index on `(snapshot_uid, stable_key)`, true for declarations too); (3) the type/constructor collapse proves membership by the qualified-name container with `::` or `.` and keeps the completeness and one-type rules; `ConstructorHint.cursor` is the constructor's stable key; the C++ answer for a type still resolves (`explain Slice`) with cursors that are now distinct and runnable; (4) `render_related_cursors` changes only its quoting (`shell_quote_arg` for the target; D-JSAH-CURSOR-1 Correction 1) and nothing else; the three re-expected tests and the two new tests describe what they assert; (5) no change outside the thirteen paths; `queries.rs`, `agent_impl.rs`, the extractors, transport envelope and alias site are byte-identical; the over-guardrail files (`dispatch.rs`, `graph.rs`, `agent/src/explain/mod.rs`, `presentation/explain.rs`) gain no new responsibility — the new logic lives in the three new modules (D-JSAH-PLACEMENT-1 with Correction 1, D-JSAH-STORAGE-READ-1); (6) `docs/cli/rmap-contracts.md` states the ambiguity listing (format, the cursor rule as one cursor per candidate whose command can be formed, the run hint, the incomplete-listing form with the no-query header and the three reasons, the unchanged error line, the additive JSON fields including the per-candidate `lookup` state `found` | `missing` | `read-failed` with reason, and the two non-found row forms) and the constructor-cursor rule, claims only what JSAH-C01–C03 check, and keeps the JSON-channel gap (every error leaves stdout empty under `--json`) OUT of scope by naming it as pre-existing; (7) every name introduced says what it does (`ambiguous_matches`, `render_ambiguous_matches`, the test names) — a name that does not match its behaviour is a finding.",
+        "inputs": "SLICE_DOC §2.1 (the fix), §2.2 (wording), §2.3 (evidence taxonomy), §9 (residuals: the JSON error channel; `explain WriteBatch` on leveldb — ambiguous for a reason this slice does not touch; leveldb's default constructor `Slice()` at slice.h:30 absent from the store — a C++ extractor gap, frozen here)"
+      },
+      "expected": "All seven criteria hold on the candidate; the implementation review records the result. Preservation: the shared resolver and extractors remain unchanged, the non-ambiguous answers remain byte-identical (step5), and the C++ type answer remains a type answer — no-behavior-change beyond the ambiguity listing and the constructor cursors.",
+      "candidateSha256": "sha256:6c4c422fbb6bdf7f79c427cdf826c25f920eafa1bb9004db727ba5a37cc03c8a",
+      "basis": "provider-run-report",
+      "outcome": {
+        "kind": "not-run",
+        "reason": "This check belongs to the reviewer."
+      }
+    }
+  ],
+  "changeJustifications": [
+    {
+      "path": "docs/cli/rmap-contracts.md",
+      "obligationIds": [
+        "RG-REQ-005-L05",
+        "RG-REQ-012-L03",
+        "RG-REQ-012-L07"
+      ],
+      "summary": "States the cursor rule as one cursor per candidate whose command can be formed, the incomplete-listing form, and that no row or JSON field carries a line of 0. RG-REQ-005-L05, RG-REQ-012-L03 and L07."
+    },
+    {
+      "path": "rust/crates/agent/src/explain/mod.rs",
+      "obligationIds": [
+        "RG-REQ-005-L05"
+      ],
+      "summary": "The other nine paths are unchanged from admission 2 and serve the same IDs as in SLICE_DOC §2.1; not stated by the builder."
+    },
+    {
+      "path": "rust/crates/agent/tests/explain_symbol.rs",
+      "obligationIds": [
+        "RG-REQ-005-L05"
+      ],
+      "summary": "The other nine paths are unchanged from admission 2 and serve the same IDs as in SLICE_DOC §2.1; not stated by the builder."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+      "obligationIds": [
+        "RG-REQ-005-L05"
+      ],
+      "summary": "The other nine paths are unchanged from admission 2 and serve the same IDs as in SLICE_DOC §2.1; not stated by the builder."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch_ambiguous_matches.rs",
+      "obligationIds": [
+        "RG-REQ-005-L05"
+      ],
+      "summary": "The other nine paths are unchanged from admission 2 and serve the same IDs as in SLICE_DOC §2.1; not stated by the builder."
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-005-L05"
+      ],
+      "summary": "The other nine paths are unchanged from admission 2 and serve the same IDs as in SLICE_DOC §2.1; not stated by the builder."
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/ambiguous_matches.rs",
+      "obligationIds": [
+        "RG-REQ-005-L05",
+        "RG-REQ-012-L03",
+        "RG-REQ-012-L07"
+      ],
+      "summary": "Renders an optional cursor per candidate; incomplete payloads print no cursor and name the gap; missing query removes 'each matches'; rows are anchored through presentation::anchor. Adds incomplete-payload and zero-line tests."
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/graph.rs",
+      "obligationIds": [
+        "RG-REQ-005-L05",
+        "RG-REQ-012-L03"
+      ],
+      "summary": "callers/callees pass Some((prefix, \"\")); the path closure passes the Option from path_cursor_affixes."
+    },
+    {
+      "path": "rust/crates/rgr/src/commands/mod.rs",
+      "obligationIds": [
+        "RG-REQ-005-L05"
+      ],
+      "summary": "The other nine paths are unchanged from admission 2 and serve the same IDs as in SLICE_DOC §2.1; not stated by the builder."
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/explain.rs",
+      "obligationIds": [
+        "RG-REQ-005-L05"
+      ],
+      "summary": "The other nine paths are unchanged from admission 2 and serve the same IDs as in SLICE_DOC §2.1; not stated by the builder."
+    },
+    {
+      "path": "rust/crates/rgr/tests/daemon_dispatch.rs",
+      "obligationIds": [
+        "RG-REQ-005-L05"
+      ],
+      "summary": "The other nine paths are unchanged from admission 2 and serve the same IDs as in SLICE_DOC §2.1; not stated by the builder."
+    },
+    {
+      "path": "rust/crates/storage/src/candidate_rows.rs",
+      "obligationIds": [
+        "RG-REQ-012-L07"
+      ],
+      "summary": "line_start now reads as None when it is not positive, using the same > 0 filter as agent_impl.rs:245. Adds zero_line_start_reads_as_none; missing-key test now uses :dup4 because fixture :dup3 exists."
+    },
+    {
+      "path": "rust/crates/storage/src/lib.rs",
+      "obligationIds": [
+        "RG-REQ-012-L07"
+      ],
+      "summary": "The other nine paths are unchanged from admission 2 and serve the same IDs as in SLICE_DOC §2.1; not stated by the builder."
+    }
+  ],
+  "completedAt": "2026-10-05T06:46:11.001Z",
+  "limitations": [
+    "The new renderer tests were not shown failing as written because they do not compile against the old signature.",
+    "No corpus case was found for the incomplete-listing form; the current daemon always sends query and stable_key, so this form is exercised only by unit tests.",
+    "One gap remains: Slice() at slice.h:30 is not in the store. This is the C++ extractor gap recorded in SLICE_DOC §9; the extractor is a frozen path.",
+    "Not run, because they are the operator's gate after acceptance: cargo test --workspace and the dogfood run."
+  ],
+  "report": "# JAVA-SYMBOL-AMBIGUITY-HINT-1, admission 3 (INPUT-3): builder report\n\n**Outcome:** all three builder checks passed on the final tree, each run alone in the foreground: JSAH-C01, JSAH-C02 and JSAH-C03. I did not commit. The tree changes exactly the thirteen allocated paths: ten modified, three new. No stop condition was hit and no decision is needed.\n\n## Checks (all run on this tree; no earlier admission's log is used)\n\nEach check's `command` was copied byte-for-byte from the allocation block into `/private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-<id>.sh`, then run from `rust/` as `bash \"<file>\"`.\n\n| Check | Status | Observed result | Evidence |\n|---|---|---|---|\n| JSAH-C01 | **passed**, exit 0 | All nine markers print, `c01-storage-lib` through `c01-guardrail`. Storage: 761 passed + 3 ignored (764 listed). daemon-runtime: 894 passed + 1 ignored (895 listed). rgr: 1497. `daemon_dispatch`: 110. `explain_symbol`: 25. `consolidation_witness`: 15 passed. The 16 new and 2 extended tests each pass alone by their full name. `parse_ambiguous_matches` is gone, and the `#[test]` counts meet the guardrail. | `/private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-01-{run,storage,dr,rgr,agent,dd,witness,named}.txt` |\n| JSAH-C02 | **passed**, exit 0 | All six markers print, `c02-fmt` through `c02-ok`. fmt and `clippy --all-targets -D warnings` are clean on the four crates. Only the thirteen paths changed. The frozen paths match HEAD byte-for-byte. `diff --check` is clean. | `/private/tmp/JAVA-SYMBOL-AMBIGUITY-HINT-1-jsah-02.txt` |\n| JSAH-C03 | **passed**, exit 0 | Markers `step1`–`step6` and `JSAH-C03-OK` print. Every printed cursor ran. The three byte-identity witnesses match `before/`. | `.agent-manager/slices/JAVA-SYMBOL-AMBIGUITY-HINT-1/after/` |\n| JSAH-C04 | not-run | This check belongs to the reviewer. | — |\n\n**Fail-first evidence for this admission's changes:** I ran these in a throwaway worktree at HEAD with the admission-2 patch applied. The worktree and its target directory are deleted.\n- On the admission-2 storage read, `zero_line_start_reads_as_none` failed with `left: Some(0) right: None`.\n- Two probes against the admission-2 renderer also failed for the intended reasons. These were throwaway tests in that worktree only, adapted to its 3-argument signature:\n  - a line of 0 printed `src/K.java:0`;\n  - a `path` error with an unknown side printed `     →  'r1:src/K.java#K.send:SYMBOL:METHOD'`.\n- I did not show the new renderer tests failing as written: they do not compile against the old signature.\n\n## Code-under-analysis examples (quoted from the checkouts and the candidate's captures)\n\n**Kafka overloads.** The two methods are at `KafkaProducer.java:943`, `public Future<RecordMetadata> send(ProducerRecord<K, V> record) {`, and `:1062`, `… send(ProducerRecord<K, V> record, Callback callback) {`. The stored anchors are the `@Override` lines at :942 and :1061.\n\n`callers KafkaProducer.send`, before:\n```\nMatches:\n  2. KafkaProducer.send:SYMBOL  METHOD:dup2  clients/…/KafkaProducer.java\nhint: use qualified name for exact match\n```\n\nAfter:\n```\nCandidates (2) — each matches 'KafkaProducer.send'; pick one by its stable key:\n  1. clients/…/KafkaProducer.java:942  org.apache.kafka.clients.producer.KafkaProducer.send  SYMBOL:METHOD  (ProducerRecord<K, V> record)\n     → rmap callers '…KafkaProducer.java#KafkaProducer.send:SYMBOL:METHOD'\n  2. …:1061  …  SYMBOL:METHOD  (ProducerRecord<K, V> record, Callback callback)\n     → rmap callers '…#KafkaProducer.send:SYMBOL:METHOD:dup2'\nhint: run one of the cursors above; a stable key names at most one symbol\n```\nBoth cursors ran and answered `File: …KafkaProducer.java:942` and `:1061`.\n\n**Kafka class.** `public class KafkaProducer<K, V> …` is at :244.\n- Before, `explain KafkaProducer --budget large` printed `Target: KafkaProducer (unresolved: ambiguous)` with the class key and six constructor keys.\n- After, it prints `Target: KafkaProducer`, `Members (73)`, `Referenced by (90 files)`, and `6 constructors also match:` with six distinct stable-key cursors.\n- Each cursor ran to a distinct line: :298, :315, :327, :342, :347 and :487. For example, :298 is `public KafkaProducer(final Map<String, Object> configs) {`.\n\n**leveldb `Slice`.**\n- Before, `explain Slice --budget large` printed `explain 'leveldb::Slice::Slice'` four times, the same cursor each time.\n- After, it prints four distinct keys, `…slice.h#leveldb::Slice::Slice:SYMBOL:CONSTRUCTOR` through `:dup4`. They anchor `slice.h:33` `Slice(const char* d, size_t n)`, `:36`, `:39` and `:42` `Slice(const Slice&) = default;`.\n- The answer is still a type answer: `Target: Slice`.\n- One gap remains: `Slice()` at `slice.h:30` is not in the store. This is the C++ extractor gap recorded in SLICE_DOC §9; the extractor is a frozen path.\n\n**Incomplete-listing form:** I found no corpus case. The current daemon always sends `query` and `stable_key`, so this form is exercised only by unit tests.\n\n**Binaries:** `rmap 0.20.0` and `rmapd 0.20.0`, both from `rust/target/release/`.\n\n## Changed files\n\nThe admission-2 candidate already contained most of the slice. Step 0 applied its patch (`git apply` exit 0); the table shows what admission 3 added.\n\n| Path | Admission-3 change | Serves |\n|---|---|---|\n| `storage/src/candidate_rows.rs` | `line_start` now reads as `None` when it is not positive. This uses the same `> 0` filter as `agent_impl.rs:245`, so a negative value also reads as `None`. Adds `zero_line_start_reads_as_none`; the missing-key test now uses `:dup4`, because the fixture's `:dup3` row now exists. | RG-REQ-012-L07 |\n| `rgr/src/commands/ambiguous_matches.rs` | `render_ambiguous_matches(cursor: Option<(&str,&str)>, data)` and `path_cursor_affixes(..) -> Option<(String,String)>`. When a command cannot be formed, the candidate gets no `→` line and the last line is `hint: this listing is incomplete — <reasons>` (the three reasons in their fixed order). When `query` is absent, the header has no `each matches`. Rows are anchored through `presentation::anchor(file, u64::try_from(line).ok())`. Adds the tests `incomplete_payload_prints_no_cursor_and_names_the_gap` and `zero_line_renders_bare_file`. | RG-REQ-005-L05, RG-REQ-012-L03 and L07 |\n| `rgr/src/commands/graph.rs` | `callers`/`callees` pass `Some((prefix, \"\"))`; the `path` closure passes the `Option` from `path_cursor_affixes`. | RG-REQ-005-L05, RG-REQ-012-L03 |\n| `docs/cli/rmap-contracts.md` | States the cursor rule as one cursor per candidate whose command can be formed, the incomplete-listing form, and that no row or JSON field carries a line of 0. | §2.1 item 6 |\n\nThe other nine paths are unchanged from admission 2 and serve the same IDs as in SLICE_DOC §2.1. The found-row output did not change, so the byte-exact listing test kept its expected text.\n\n## Cleanup and limits\n\n- The isolated state root for the live proof was removed by the script's exit trap; I checked that it is gone.\n- The only `rmapd` running is the operator's installed daemon (pid 32224, started 2026-10-03, no file under this slice's roots). I did not touch it.\n- I kept the check logs and scripts in `/private/tmp` as evidence.\n- Not run, because they are the operator's gate after acceptance: `cargo test --workspace` and the dogfood run."
+}

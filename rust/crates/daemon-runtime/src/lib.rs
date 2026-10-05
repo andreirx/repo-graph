@@ -60,6 +60,8 @@ pub mod cycle_output;
 // parallel-safe test-capture seam, used by handle_index/handle_refresh's best-effort callbacks.
 pub mod detached;
 pub mod dispatch;
+// JAVA-SYMBOL-AMBIGUITY-HINT-1: the `AmbiguousSymbol` matches payload, each candidate read by its stable key (crate-private).
+mod dispatch_ambiguous_matches;
 // ENRICH-LIFECYCLE-1: the automatic background enrichment pass (toolchain-aware, activity-stamped,
 // two-gate contention), spawned after every successful index/refresh — mirrors `retention_pass`.
 mod boundaries_list_read; // HTTP-SURFACE-COHERENCE-1 §2.4: boundaries-list response assembly (crate-private)

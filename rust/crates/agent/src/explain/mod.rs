@@ -321,8 +321,9 @@ pub fn run_explain_cancellable<S: AgentStorageRead + GateStorageRead + ?Sized>(
 }
 
 /// CPP-DECLARATORS-1 §2.3 (2026-09-07): a constructor cursor surfaced in `next` when a bare
-/// name resolved to its type. `cursor` is the `explain` target (the constructor's qualified
-/// name, or its stable key when unqualified); `type_name` names the owning type in the reason.
+/// name resolved to its type. `cursor` is the `explain` target: the constructor's stable key
+/// (JAVA-SYMBOL-AMBIGUITY-HINT-1, D-JSAH-CURSOR-1 — the qualified name is shared by every
+/// constructor of the type, the key names one); `type_name` names the owning type in the reason.
 struct ConstructorHint {
     cursor: String,
     type_name: String,
@@ -357,6 +358,9 @@ fn is_type_subtype(subtype: &str) -> bool {
 ///   2. Membership. Every constructor must carry a qualified name whose container equals the
 ///      type's qualified name. A constructor (or the type) with NO qualified name is not proof of
 ///      membership — it is an inference — so it now stays ambiguous instead of being accepted.
+///      The container is the qualified name minus its segment after the LAST `::` or `.`,
+///      whichever comes later (JAVA-SYMBOL-AMBIGUITY-HINT-1: C++ `leveldb::Slice::Slice` →
+///      `leveldb::Slice`; Java `org.example.Widget.<init>` → `org.example.Widget`).
 fn classify_type_constructor_collision<S: AgentStorageRead + ?Sized>(
     storage: &S,
     snapshot_uid: &str,
@@ -399,22 +403,28 @@ fn classify_type_constructor_collision<S: AgentStorageRead + ?Sized>(
     }
 
     // Membership by PROOF: the type has a qualified name, and each constructor's container (its
-    // qualified name minus the trailing `::<name>`) equals it. Any missing qualified name, or a
-    // container that does not match, is not proof of membership → stay ambiguous.
+    // qualified name minus the segment after the last `::` or `.`) equals it. Any missing
+    // qualified name, or a container that does not match, is not proof of membership → stay
+    // ambiguous.
     let Some(type_qn) = type_ctx.qualified_name.as_deref() else {
         return Ok(None); // No type qualified name → cannot prove any constructor belongs to it.
     };
     let mut hints = Vec::with_capacity(constructors.len());
-    for (_ctor_cand, ctor_ctx) in constructors {
+    for (ctor_cand, ctor_ctx) in constructors {
         let Some(ctor_qn) = ctor_ctx.qualified_name.as_deref() else {
             return Ok(None); // Constructor without a qualified name → membership unproven.
         };
-        match ctor_qn.rsplit_once("::") {
-            Some((container, _)) if container == type_qn => {}
+        let container = match (ctor_qn.rfind("::"), ctor_qn.rfind('.')) {
+            (Some(c), Some(d)) => Some(&ctor_qn[..c.max(d)]),
+            (Some(i), None) | (None, Some(i)) => Some(&ctor_qn[..i]),
+            (None, None) => None,
+        };
+        match container {
+            Some(container) if container == type_qn => {}
             _ => return Ok(None), // Constructor of a DIFFERENT type (or unqualified) → ambiguous.
         }
         hints.push(ConstructorHint {
-            cursor: ctor_qn.to_string(),
+            cursor: ctor_cand.stable_key,
             type_name: type_ctx.name.clone(),
         });
     }

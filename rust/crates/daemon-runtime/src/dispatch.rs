@@ -221,46 +221,6 @@ impl ServiceDispatcher {
             .unwrap_or("-")
     }
 
-    /// Parse stable_keys into structured match data for ambiguous symbol errors.
-    ///
-    /// Stable key format: `{repo_uid}:{file_path}#{qualified_name}:{kind}:{subtype}`
-    /// Returns JSON array of match objects for CLI rendering.
-    fn parse_ambiguous_matches(stable_keys: &[String]) -> Value {
-        let matches: Vec<Value> = stable_keys
-            .iter()
-            .filter_map(|key| {
-                // Split on first # to separate file path from symbol info
-                let hash_pos = key.find('#')?;
-                let before_hash = &key[..hash_pos];
-                let after_hash = &key[hash_pos + 1..];
-
-                // before_hash is "{repo_uid}:{file_path}"
-                // Find first : to skip repo_uid
-                let colon_pos = before_hash.find(':')?;
-                let file_path = &before_hash[colon_pos + 1..];
-
-                // after_hash is "{qualified_name}:{kind}:{subtype}"
-                // Split from the end to handle qualified_names with colons
-                let parts: Vec<&str> = after_hash.rsplitn(3, ':').collect();
-                if parts.len() < 3 {
-                    return None;
-                }
-
-                let subtype = parts[0];
-                let kind = parts[1];
-                let qualified_name = parts[2];
-
-                Some(serde_json::json!({
-                    "qualified_name": qualified_name,
-                    "kind": format!("{}:{}", kind, subtype),
-                    "file": file_path
-                }))
-            })
-            .collect();
-
-        Value::Array(matches)
-    }
-
     // ── REG-1 repo resolution ───────────────────────────────────────────
     //
     // Helper for commands that need to resolve a repo reference to loaded state.
@@ -1373,7 +1333,11 @@ impl ServiceDispatcher {
                 );
             }
             Err(SymbolResolveError::Ambiguous(keys)) => {
-                let matches = Self::parse_ambiguous_matches(&keys);
+                let matches = crate::dispatch_ambiguous_matches::ambiguous_matches(
+                    &storage,
+                    epoch.snapshot_uid(),
+                    &keys,
+                );
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::ambiguous_symbol(symbol, matches),
@@ -1552,7 +1516,11 @@ impl ServiceDispatcher {
                 );
             }
             Err(SymbolResolveError::Ambiguous(keys)) => {
-                let matches = Self::parse_ambiguous_matches(&keys);
+                let matches = crate::dispatch_ambiguous_matches::ambiguous_matches(
+                    &storage,
+                    epoch.snapshot_uid(),
+                    &keys,
+                );
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::ambiguous_symbol(symbol, matches),
@@ -2793,7 +2761,11 @@ impl ServiceDispatcher {
                 );
             }
             Err(SymbolResolveError::Ambiguous(keys)) => {
-                let matches = Self::parse_ambiguous_matches(&keys);
+                let matches = crate::dispatch_ambiguous_matches::ambiguous_matches(
+                    &storage,
+                    epoch.snapshot_uid(),
+                    &keys,
+                );
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::ambiguous_symbol(from_query, matches),
@@ -2832,7 +2804,11 @@ impl ServiceDispatcher {
                 );
             }
             Err(SymbolResolveError::Ambiguous(keys)) => {
-                let matches = Self::parse_ambiguous_matches(&keys);
+                let matches = crate::dispatch_ambiguous_matches::ambiguous_matches(
+                    &storage,
+                    epoch.snapshot_uid(),
+                    &keys,
+                );
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::ambiguous_symbol(to_query, matches),
