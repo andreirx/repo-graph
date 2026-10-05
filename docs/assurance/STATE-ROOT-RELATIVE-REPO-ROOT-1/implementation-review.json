@@ -1,0 +1,678 @@
+{
+  "formatVersion": 3,
+  "kind": "implementation-review",
+  "reviewId": "review-STATE-ROOT-RELATIVE-REPO-ROOT-1-1",
+  "workItemId": "STATE-ROOT-RELATIVE-REPO-ROOT-1",
+  "baseline": {
+    "path": "docs/requirements/baselines/STATE-ROOT-RELATIVE-REPO-ROOT-1-INPUT-2.json",
+    "sha256": "sha256:f1c9d684faf4108c5cc488530a5ffde9015c14a9d1f2980366ade066c9b5b79c"
+  },
+  "allocation": {
+    "path": "docs/slices/state-root-relative-repo-root-1.md",
+    "sha256": "sha256:c17d506e7439d6c1b04b9fba548347dd9fe6edb9bc774ad907b964487d170685"
+  },
+  "subject": {
+    "candidateSha256": "sha256:ea665de0784e9db7e2d8887f9080eb67abed5d9f4a00e7e125d0e7f2a81dcc3e",
+    "verification": {
+      "path": "docs/assurance/STATE-ROOT-RELATIVE-REPO-ROOT-1/verification.json",
+      "sha256": "sha256:64926768af771ef88fd4fffd2d62798611e8d4679970e7f5807ad7ad932d74d5"
+    }
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "effort": "high",
+    "runId": "review-STATE-ROOT-RELATIVE-REPO-ROOT-1-1"
+  },
+  "independence": {
+    "invocations": "separate",
+    "providerDiversity": "different-provider"
+  },
+  "reviewerInputProvenance": {
+    "contract": "requirements-assurance/v2-input-delivery",
+    "roots": {
+      "target": "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph",
+      "prompt": "/Users/apple/Documents/APLICATII BIJUTERIE/agent-manager"
+    },
+    "baseline": {
+      "path": "docs/requirements/baselines/STATE-ROOT-RELATIVE-REPO-ROOT-1-INPUT-2.json",
+      "sha256": "sha256:f1c9d684faf4108c5cc488530a5ffde9015c14a9d1f2980366ade066c9b5b79c"
+    },
+    "commonInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "shared-instruction",
+        "path": "SYSTEM.txt",
+        "sha256": "sha256:b2effee57f0033adfec8929c441c40ba0a0f5d00b9d508ce77a39a762efe8a9f",
+        "byteLength": 28968
+      },
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "common-role-instruction",
+        "path": "prompts/system/base.md",
+        "sha256": "sha256:be91bea4d29d795c8cf144147134e7ea96f9e7de7d0403405cadadebe5af0877",
+        "byteLength": 1092,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "baseline-manifest",
+        "path": "docs/requirements/baselines/STATE-ROOT-RELATIVE-REPO-ROOT-1-INPUT-2.json",
+        "sha256": "sha256:f1c9d684faf4108c5cc488530a5ffde9015c14a9d1f2980366ade066c9b5b79c",
+        "byteLength": 3522,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "requirement",
+        "path": "docs/requirements/rg-req-011-daemon-and-store-lifecycle.md",
+        "sha256": "sha256:01cf703ac67fb28c1e23c80da325d0dfbcdce2ad99c200ecf30db019745d0037",
+        "byteLength": 29831,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/VISION.md",
+        "sha256": "sha256:84a7d22ba3684b06d5914b3c46ae3cce9f1b3bb274f207f5128704e0261dad37",
+        "byteLength": 21622,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/state-root-separation-1.md",
+        "sha256": "sha256:8c5aaa4339c402d34eb1ef3150b0f8154c92b73c41d99f854e5607b148b62d3f",
+        "byteLength": 10847,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/snapshot-retention-1.md",
+        "sha256": "sha256:1724b8899453ba71162c76d5a51a7ce4a524241a1d1754f604696eaf91f767ff",
+        "byteLength": 5984,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/daemon-residuals-2.md",
+        "sha256": "sha256:4dc1016f840423ff71b370671611874a991f9265ede3d409716765318a526408",
+        "byteLength": 9750,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/slices/self-pollution-1.md",
+        "sha256": "sha256:ce689c5c1c7f1232b0e5da418fc30c72e22e08bb79ec9c07b87d4d91f22c6199",
+        "byteLength": 4474,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "source",
+        "path": "docs/assurance/RG-BOOTSTRAP/human-authorization.md",
+        "sha256": "sha256:77a695437de0bf5d2c8e8c8534231f2c5ee306121d8a5fb2ba551b1ea5591982",
+        "byteLength": 4346,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/slices/rg-requirements-bootstrap-1.md",
+        "sha256": "sha256:858b728ba437b9ef6b40336d95b7a0b18b21a722dbb57ffd3cbc3429511e768b",
+        "byteLength": 2408,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/requirements/README.md",
+        "sha256": "sha256:087936e578be0712f20a5c9c64fb97701bf1974fdc0fff823f8aee818f3b0ab3",
+        "byteLength": 15737,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "CLAUDE.md",
+        "sha256": "sha256:30a113d5cc92684d246cf7b4e004866c9839688ee5aca878403a0c860d5c068a",
+        "byteLength": 11784,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-SRR-ROOTPATH-1.md",
+        "sha256": "sha256:fa43f9fd240a886c086f215deae05112067576f9f214c4710412ab3e99d87c76",
+        "byteLength": 3551,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-SRR-SCOPE-1.md",
+        "sha256": "sha256:571957dc813ce3d5bc261c6477e19a7b3e7db13594e65626f830b240a4f5e9c2",
+        "byteLength": 7659,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-SRR-DOCTEST-IDENTITY-1.md",
+        "sha256": "sha256:3890993abadd02f14bad401d78de4f269374090a3d91340980c72d63ebc8519d",
+        "byteLength": 2399,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "governance",
+        "path": "docs/assurance/RG-BOOTSTRAP/decisions/D-SRR-SEED-OBSERVABLE-1.md",
+        "sha256": "sha256:dcb45fda759a9c350df281441d0b996fa1925a4863064b8a54cf9303583714ff",
+        "byteLength": 4230,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "allocation",
+        "path": "docs/slices/state-root-relative-repo-root-1.md",
+        "sha256": "sha256:c17d506e7439d6c1b04b9fba548347dd9fe6edb9bc774ad907b964487d170685",
+        "byteLength": 79833,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review",
+        "path": "docs/assurance/STATE-ROOT-RELATIVE-REPO-ROOT-1-INPUT-2/requirements-review.json",
+        "sha256": "sha256:f274383dd14a59e64ffe7a12102ed547df076022aa3c9eb1ff0f8af95ee53d60",
+        "byteLength": 63081,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "approval",
+        "path": "docs/assurance/STATE-ROOT-RELATIVE-REPO-ROOT-1-INPUT-2/baseline-approval.json",
+        "sha256": "sha256:b8993ea7fef1031528aea8e80dadf0bc96712050a9009c02b8bea0373b392b6c",
+        "byteLength": 3211,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      }
+    ],
+    "roleSpecificInputs": [
+      {
+        "origin": "file",
+        "root": "prompt",
+        "purpose": "role-instruction",
+        "path": "prompts/roles/reviewer-target.md",
+        "sha256": "sha256:e4e9c5944a15f5fe4b7cdbfb4483a1bf5436cf18aa6c608452c30419abeedd55",
+        "byteLength": 7940,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "selection-packet",
+        "path": ".agent-manager/slices/STATE-ROOT-RELATIVE-REPO-ROOT-1/selection.md",
+        "sha256": "sha256:e79192da16d21acd857c9b60324ebf4d0e8e3e5cd012dcf3ad3624eb00c19b81",
+        "byteLength": 10609
+      },
+      {
+        "origin": "generated",
+        "purpose": "build-report",
+        "label": "build-report-1",
+        "sha256": "sha256:65ea50c79ed66f7a36d8e276d6d633f8637b665b18a64acfc08e44d991d535ad",
+        "byteLength": 11235
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "prior-review",
+        "path": ".agent-manager/slices/STATE-ROOT-RELATIVE-REPO-ROOT-1/review-0.json",
+        "sha256": "sha256:842cbc0a31c8283ec4524f0d7185f82892b2e9e660e3338a90da38dd2c1f4619",
+        "byteLength": 14275
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-checkpoint-1",
+        "sha256": "sha256:6a2803d127ae53713e3011d863c729805adddd55fe919c484a1f9e303be79f41",
+        "byteLength": 11633,
+        "reference": {
+          "reason": "delivered-earlier-in-session"
+        }
+      },
+      {
+        "origin": "file",
+        "root": "target",
+        "purpose": "review-subject",
+        "path": ".agent-manager/slices/STATE-ROOT-RELATIVE-REPO-ROOT-1/verification-draft-1.json",
+        "sha256": "sha256:64926768af771ef88fd4fffd2d62798611e8d4679970e7f5807ad7ad932d74d5",
+        "byteLength": 88005,
+        "reference": {
+          "reason": "read-on-demand"
+        }
+      },
+      {
+        "origin": "generated",
+        "purpose": "review-subject",
+        "label": "candidate-diff-command-1",
+        "sha256": "sha256:9d455634757b26f8e828f965c4505d416580cc3a54eba2145e8dcb4d81b1b790",
+        "byteLength": 2609
+      },
+      {
+        "origin": "generated",
+        "purpose": "task-directive",
+        "label": "implementation-reviewer-task",
+        "sha256": "sha256:ae3ab966a613563466fc075a79f94d486fdd88bacd97056412c8cc98b0856b44",
+        "byteLength": 24356
+      }
+    ],
+    "channels": [
+      {
+        "channel": "shared-instruction",
+        "mechanism": "codex-developer-instructions",
+        "sha256": "sha256:b2effee57f0033adfec8929c441c40ba0a0f5d00b9d508ce77a39a762efe8a9f",
+        "byteLength": 28968
+      },
+      {
+        "channel": "stdin",
+        "mechanism": "stdin",
+        "sha256": "sha256:d64357a531442d91e9e7a07331714041a7c0bae880fe474c67756bd1d696b589",
+        "byteLength": 71486
+      }
+    ]
+  },
+  "result": "accepted",
+  "obligationAssessments": [
+    {
+      "obligationId": "RG-REQ-011-L13",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L04",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L05",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L06",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L07",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L08",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L09",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L10",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L11",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "RG-REQ-011-L12",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-SRR-01",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-SRR-02",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "obligationId": "P-SRR-03",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "checkAssessments": [
+    {
+      "checkId": "SRR-C01",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The report says SRR-C01 passed on builder-executed evidence; the reviewer did not re-run it."
+      }
+    },
+    {
+      "checkId": "SRR-C02",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The report says SRR-C02 passed on builder execution; formatting and clippy rely on builder execution."
+      }
+    },
+    {
+      "checkId": "SRR-C03",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "relied-on-builder-evidence",
+        "limitation": "The report says SRR-C03 passed on builder-executed evidence; live and negative-oracle execution rely on builder evidence."
+      }
+    },
+    {
+      "checkId": "SRR-C04",
+      "result": "accepted",
+      "findingIds": [],
+      "verification": {
+        "kind": "reproduced",
+        "outcome": {
+          "kind": "passed",
+          "actual": "All seven criteria hold on the unchanged checkpoint; inspection confirmed registry-root wiring, failure forms, helper deletion, write convention, named coverage, absolute docs repo_path, and seed observer behavior.",
+          "supportingEvidence": [
+            "source, tests, and saved answers",
+            "current inspection of the seed observer default, caller-owned observation before model loading, and downstream reads from the same root"
+          ]
+        }
+      }
+    }
+  ],
+  "changedPathAssessments": [
+    {
+      "path": "rust/crates/agent/src/storage_port.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/dispatch.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/enrich_pass.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/map.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/quality/churn.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/quality/coverage.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/quality/hotspots.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/quality/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/quality/risk.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/quality/support.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/quality/tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/handlers/support.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_additive_fields.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/mod.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/orient_serve/storage_port_impl.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/reclaim.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/repo_root.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/src/seed_pass.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/daemon-runtime/tests/repo_root_from_registry.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/enrichment/src/eligibility.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/enrichment/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/enrichment/src/pipeline.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/rgr/src/presentation/modules_list_tests.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/agent_impl.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/agent_orient_reads.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/db_root_path.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/enrichment_impl.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/lib.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    },
+    {
+      "path": "rust/crates/storage/src/types.rs",
+      "result": "accepted",
+      "findingIds": [],
+      "decisionIds": []
+    }
+  ],
+  "findings": [],
+  "decisions": [],
+  "completedAt": "2026-10-05T17:07:33.149Z",
+  "acceptanceStatus": "not-recorded",
+  "report": "Implementation review passed; operator acceptance remains separate.\n\nRESULT: accepted\n\nThe unchanged candidate satisfies the approved allocation. Both blocking findings are closed. No new blocking finding or decision remains.\n\n## Candidate and review basis\n\n- **EXECUTED:** HEAD is `35d26c0f6f6515703689601a5450c7e285458df5`. Status contains exactly the 30 submitted paths. The staged diff is empty.\n- **EXECUTED:** All index and working-tree digests match checkpoint `ea665de0784e9db7e2d8887f9080eb67abed5d9f4a00e7e125d0e7f2a81dcc3e`. Its entries are unchanged from cycle 1.\n- **EXECUTED:** Verification-draft-1 matches digest `64926768af771ef88fd4fffd2d62798611e8d4679970e7f5807ad7ad932d74d5`. All 30 change justifications identify the actual change and link it to L13, with additional preservation links where needed.\n- **EXECUTED:** Whitespace and frozen-path comparisons passed.\n- **OBSERVED:** This is a separate Codex review invocation of a Claude-built candidate. No reviewer files were changed.\n- **NOT RUN:** Reviewer Cargo and live daemon execution. The read-only sandbox prevents their required writes. Test execution relies on saved builder and operator evidence.\n\nAcceptance is against baseline `STATE-ROOT-RELATIVE-REPO-ROOT-1-INPUT-2`, not a claim of general product compliance.\n\n## Findings closed\n\n### F-SRR-IMPL-03 — closed by operator disposition\n\n**OBSERVED:** `D-SRR-RACE-DISPOSITION-1.md` authorizes acceptance after the isolated comparison. Its retained script alternates HEAD and candidate runs. The summary records HEAD failures in runs 1, 10 and 13; all 15 candidate runs pass.\n\n**OBSERVED:** The three retained HEAD failure logs each execute 22 tests and fail in `unreadable_stamp_reindexes` at `toolchain_staleness.rs:666`, with `current` instead of `unknown`. These occur through the malformed-stamp test; the original candidate failure occurred through the structurally-incomplete-stamp test. Both use that shared helper.\n\n**INFERRED:** This supports the operator’s disposition that the first-status race predates the slice. Fifteen trials do not prove an unchanged failure rate or the absence of a candidate contribution. The race remains assigned to `LOCK-TEST-FLAKE-1`; its test is unchanged.\n\nThe corrected report now records the stop-condition event and the continuation before disposition.\n\n### F-SRR-IMPL-04 — closed\n\n**OBSERVED:** Every changed path now has a specific rationale and the correct primary obligation. No placeholder rationale or blanket L01 allocation remains.\n\n## Planned checks\n\n| Check | Outcome and verification basis |\n|---|---|\n| SRR-C01 | **Passed — BUILDER-EXECUTED.** All 11 markers remain present in `c01-seg00..10.out`. The successful final run covers suites, witnesses, named tests and retention checks. The earlier failure remains preserved and is disposed as above. The reviewer’s earlier saved-list comparison established collision-free normalization and exactly eight authorized retirements. |\n| SRR-C02 | **Passed — BUILDER-EXECUTED**, with reviewer reproduction of identity, scope, frozen-path and whitespace checks. All seven markers remain present in `c02.out`. Formatting and clippy rely on builder execution. |\n| SRR-C03 | **Passed — BUILDER-EXECUTED.** All markers through `SRR-C03-OK` remain present in `c03.out`. The reviewer’s earlier independent comparison of saved shallow, deep, wrong-root and HEAD captures passed. Live execution and negative-oracle execution rely on builder evidence. |\n| SRR-C04 | **Passed — reviewer-reproduced inspection.** All seven criteria hold on the unchanged checkpoint. Source, tests and saved answers establish registry-root wiring, required failure forms, rootless-port errors, helper deletion, unchanged write convention, complete named coverage and absolute docs `repo_path`. Current inspection also confirms the seed observer’s inactive default, caller-owned observation before model loading, and downstream reads from that same root. |\n\nThe seed’s downstream file read is inspected, not executed, as permitted by the approved decision.\n\n## Obligation assessments\n\nThese results apply to the bounded candidate change.\n\n| ID | Assessment |\n|---|---|\n| RG-REQ-011 | **Accepted:** implementation and preservation evidence are sufficient for this slice. |\n| RG-REQ-011-L01 | **Accepted preservation:** coordinator and pinned-epoch behavior retained. |\n| RG-REQ-011-L02 | **Accepted preservation:** existing Busy and protocol error-code mechanisms retained. |\n| RG-REQ-011-L03 | **Accepted preservation:** retention mechanism unchanged. |\n| RG-REQ-011-L04 | **Accepted preservation:** rebuild gates and sentinel behavior retained. |\n| RG-REQ-011-L05 | **Accepted preservation:** lifecycle assertions retained; failed-run evidence preserved. |\n| RG-REQ-011-L06 | **Accepted preservation:** isolated fixtures and builder stdio proof; no reviewer daemon invocation. |\n| RG-REQ-011-L07 | **Accepted preservation:** shared exhaust exclusions unchanged. |\n| RG-REQ-011-L08 | **Accepted preservation:** transport implementation frozen. |\n| RG-REQ-011-L09 | **Accepted preservation:** platform path authority unchanged. |\n| RG-REQ-011-L10 | **Accepted preservation:** pass sequencing retained; observer records nothing and continues when unset. |\n| RG-REQ-011-L11 | **Accepted preservation:** withdrawn; no latency floor introduced or claimed. |\n| RG-REQ-011-L12 | **Accepted preservation:** doctor behavior unchanged. |\n| RG-REQ-011-L13 | **Accepted:** registry-root use, relocation equality and named invalid-root outcomes are supported. |\n| P-SRR-01 | **Accepted:** no migration or eager rewrite; existing relative-field write convention retained. |\n| P-SRR-02 | **Accepted:** capture equality and retained-test checks pass; integration failure has explicit disposition. |\n| P-SRR-03 | **Accepted:** protected mechanisms remain frozen; invalid roots are rejected before working-tree operations. |\n\n## Complete changed-path assessment\n\n**OBSERVED:** All paths are allocated and unchanged from the previously inspected candidate. Paths below are relative to `rust/crates/`; each is accepted for L13 unless an additional obligation is stated.\n\n| Path | Change justification |\n|---|---|\n| `agent/src/storage_port.rs` | Documents root-bearing and rootless inventory outcomes. |\n| `daemon-runtime/src/dispatch.rs` | Passes registry roots through refresh, docs, enrichment, drift and orientation; retains re-stamp convention, also P-SRR-01. |\n| `daemon-runtime/src/enrich_pass.rs` | Uses checked registry root; fixtures gain registration without weaker assertions, also L10. |\n| `daemon-runtime/src/handlers/map.rs` | Removes stored-root resolution; rejects invalid roots before planning. |\n| `daemon-runtime/src/handlers/quality/churn.rs` | Checks registry root before git, also P-SRR-03. |\n| `daemon-runtime/src/handlers/quality/coverage.rs` | Matches coverage under the checked root. |\n| `daemon-runtime/src/handlers/quality/hotspots.rs` | Checks registry root before git, also P-SRR-03. |\n| `daemon-runtime/src/handlers/quality/mod.rs` | Corrects the support-module responsibility comment. |\n| `daemon-runtime/src/handlers/quality/risk.rs` | Checks registry root before git, also P-SRR-03. |\n| `daemon-runtime/src/handlers/quality/support.rs` | Deletes relative-root helper; retains unrelated utilities. |\n| `daemon-runtime/src/handlers/quality/tests.rs` | Retires the two authorized deleted-helper tests. |\n| `daemon-runtime/src/handlers/support.rs` | Adds root-bearing sibling; original resolver remains unchanged, also P-SRR-02. |\n| `daemon-runtime/src/lib.rs` | Declares the approved module and exposes the authorized hidden test seam. |\n| `daemon-runtime/src/orient_additive_fields.rs` | Uses root-taking orientation inventory and named unavailable state. |\n| `daemon-runtime/src/orient_serve/mod.rs` | Carries checked root through the builder method; constructors retained. |\n| `daemon-runtime/src/orient_serve/storage_port_impl.rs` | Reads inventory through the attached root. |\n| `daemon-runtime/src/reclaim.rs` | Exposes existing shell quoting inside the crate; behavior unchanged. |\n| `daemon-runtime/src/repo_root.rs` | Shared lookup, checking, errors, orientation read and inert observer, also L10. |\n| `daemon-runtime/src/seed_pass.rs` | Resolves and observes root before model loading; file reads use it, also L10. |\n| `daemon-runtime/tests/repo_root_from_registry.rs` | Nine required dispatcher tests cover roots, relocation, routes and pass hand-offs. |\n| `enrichment/src/eligibility.rs` | Removes root lookup from storage port and fake. |\n| `enrichment/src/lib.rs` | Updates the pipeline example. |\n| `enrichment/src/pipeline.rs` | Takes explicit root and rejects invalid roots before resolver work. |\n| `rgr/src/presentation/modules_list_tests.rs` | Verifies exact unavailable line without changing the renderer. |\n| `storage/src/agent_impl.rs` | Rootless inventory returns a named error. |\n| `storage/src/agent_orient_reads.rs` | Provides connection-free inventory and authorized replacement tests. |\n| `storage/src/db_root_path.rs` | Authorized resolver deletion. |\n| `storage/src/enrichment_impl.rs` | Removes stored-root lookup and replaces authorized tests. |\n| `storage/src/lib.rs` | Exports root-taking inventory and removes deleted module. |\n| `storage/src/types.rs` | Adds compatibility warning; field shape unchanged, also P-SRR-01. |\n\n## Mechanism, outcome and limits\n\n**OBSERVED:** The daemon keeps the checked registry root with the resolved request. Background passes obtain it by canonical store path plus repository UID. Readers receive that result explicitly. Error surfaces reject an invalid root; orientation surfaces keep the answer but report unknown drift and unavailable documents. The stored relative field remains compatible but is no longer a working-tree resolution source.\n\nAbstraction assessment:\n- Registry-root helper — eleven current readers; shared lookup/check force; repeated inline checks rejected.\n- Root-taking inventory — decorator and orientation consumers; approved storage boundary; stored-root lookup rejected.\n- Seed observer — refresh hand-off test; network-model-load test seam; observing only the shared lookup rejected.\n\n**OBSERVED witness:** leveldb `CONTRIBUTING.md:1` is `# How to Contribute`. Its deep-root answer now includes `Docs: README.md, CONTRIBUTING.md.`; the saved check answer is `Verdict: PASS@Fresh`.\n\n**OBSERVED residual evidence:** Invalid-root fixtures require omitted headline documentation, the exact orientation-unavailable reason and unknown drift. The renderer test checks the reader-facing unavailable line. The frozen drift renderer’s refresh suggestion remains a documented residual.\n\n**INFERRED:** The change serves the VISION by making orientation independent of state-root placement and naming unavailable evidence instead of presenting false absence.\n\nManual test-hook cleanup remains a non-blocking limitation: a panic can bypass cleanup. Operator workspace, smoke, dogfood, deployment and cleanup gates remain outstanding; they are not builder omissions. No maturity promotion or global absence-of-regressions claim is made."
+}

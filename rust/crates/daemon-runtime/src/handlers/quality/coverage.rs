@@ -11,7 +11,7 @@ use repo_graph_storage::types::RepoRef;
 use crate::state::DaemonState;
 use crate::util::utc_now_iso8601;
 
-use super::support::{get_optional_string_param, resolve_and_load_repo, resolve_root_path};
+use super::support::{get_optional_string_param, resolve_and_load_repo_with_root};
 
 /// Import coverage report and store measurements (write operation).
 ///
@@ -41,10 +41,11 @@ pub fn handle_coverage(state: &DaemonState, request: &Request) -> DispatchResult
     }
 
     // REG-1: resolve repo
-    let (repo_state, repo_uid) = match resolve_and_load_repo(state, &request.params) {
-        Ok(r) => r,
-        Err(e) => return DispatchResult::error(&request.id, e),
-    };
+    let (repo_state, repo_uid, repo_root) =
+        match resolve_and_load_repo_with_root(state, &request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
 
     // Get db_path for coordination
     let db_path = repo_state.db_path().to_path_buf();
@@ -109,9 +110,9 @@ pub fn handle_coverage(state: &DaemonState, request: &Request) -> DispatchResult
         }
     };
 
-    // Get repo
-    let repo = match storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
-        Ok(Some(r)) => r,
+    // The repo row must exist (unchanged error); its stored `root_path` is not read.
+    match storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
+        Ok(Some(_)) => {}
         Ok(None) => {
             return DispatchResult::error(
                 &request.id,
@@ -124,10 +125,14 @@ pub fn handle_coverage(state: &DaemonState, request: &Request) -> DispatchResult
                 ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
             );
         }
-    };
+    }
 
-    // Resolve root_path (stored relative to db_path) to absolute
-    let root_path = resolve_root_path(&db_path, &repo.root_path);
+    // STATE-ROOT-RELATIVE-REPO-ROOT-1: the registry root, checked BEFORE git or any working-tree
+    // read — a missing root (or a file at that path) is the named §2.2 error, never a git failure.
+    let root_path = match repo_root {
+        Ok(p) => p,
+        Err(e) => return DispatchResult::error(&request.id, e.to_error_detail()),
+    };
     let root_path_str = root_path.to_str().unwrap_or("");
 
     // Parse coverage report

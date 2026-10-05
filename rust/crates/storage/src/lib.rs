@@ -164,7 +164,9 @@ mod agent_impl; // AgentStorageRead impl for StorageConnection (Rust-42)
 mod agent_orient_reads; // ORIENT-DENSITY-1: dense-orient discovery reads (module sizes + doc inventory)
                         // MODULES-IDENTITY-2 §2.1: the module_key→manifest derivation, shared (one implementation)
                         // between the orient data path (`module_sizes`) and the daemon's `handle_modules_list`.
-pub use agent_orient_reads::manifest_for_module_key;
+                        // STATE-ROOT-RELATIVE-REPO-ROOT-1: `doc_inventory_at_root` — the connection-free
+                        // document inventory under the root the daemon takes from its registry.
+pub use agent_orient_reads::{doc_inventory_at_root, manifest_for_module_key};
 mod boundary_interaction_impl; // Boundary interaction write storage (BI-1A)
 mod boundary_interaction_read_impl; // Boundary interaction read port (BI-1A)
 pub mod call_remainder_reads; // PYTHON-RECEIVER-BINDING-1: a symbol's call remainder (inferred rows, unresolved calls naming/leaving it)
@@ -175,7 +177,6 @@ pub mod connection;
 mod contract_schema_impl; // ContractSchemaStoragePort impl for StorageConnection
 pub mod contract_schema_port; // Contract schema storage port (CS-1)
 pub mod crud;
-mod db_root_path; // ENRICH-ROOT-1: resolve stored root_path against the DB parent (crate-private helper)
 mod deps_language_read; // DEPS-LIST-REWRITE-1 §2.2: query_file_count_by_language (crate-private)
 pub(crate) mod diagnostic;
 pub mod directory_module_edges; // TEST-EDGE-SCOPE-1B: the query-time directory-module graph of an import view

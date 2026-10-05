@@ -421,6 +421,24 @@ fn try_seed_attempt(
         Err(e) => return SeedAttempt::Skipped(format!("could not load repo: {e}")),
     };
 
+    // Working-tree files are read by repo-relative path under the REGISTRY root, found by the CANONICAL
+    // store path + repo uid and checked (STATE-ROOT-RELATIVE-REPO-ROOT-1) — never `repos.root_path`,
+    // never the display string. Checked here, before the corpus read and the model load: an
+    // unreachable root is an honest skip naming it (logged `skipped: repo root not found: …`).
+    let repo_root =
+        match crate::repo_root::registered_root_for_store(state, repo_state.db_path(), repo_uid) {
+            Ok(root) => root,
+            Err(e) => return SeedAttempt::Skipped(e.to_string()),
+        };
+    // D-SRR-SEED-OBSERVABLE-1 (Correction 1): THIS call site reports the root it received to the test
+    // hook, before the model load. Inert in production (no observer installed → `Continue`). A test
+    // that asks to end here gets the existing `Superseded` outcome: no log line, no retention chain.
+    if crate::repo_root::report_seed_root_to_test_observer(repo_uid, &repo_root)
+        == crate::repo_root::AfterSeedRootLookup::EndPass
+    {
+        return SeedAttempt::Superseded;
+    }
+
     // Read the corpus under a BRIEF read lock, then RELEASE the lock (and close the
     // storage connection) BEFORE the slow embed phase. The embed only touches
     // working-tree files + the in-process model, so it must never hold a DB lock (else
@@ -499,8 +517,6 @@ fn try_seed_attempt(
     }
     let cancel = || cancel_flag.is_cancelled();
 
-    // Read working-tree files by repo-relative path (repo_display = canonical root).
-    let repo_root = Path::new(repo_display).to_path_buf();
     let read_file = |rel: &str| std::fs::read_to_string(repo_root.join(rel));
 
     // SELF-POLLUTION-1 §2.4: never EMBED rmap's OWN `map` exhaust or secrets-adjacent

@@ -314,6 +314,11 @@ pub struct OrientServeDecorator<'a, S: ?Sized> {
     /// counts). `Default` (all false) on every pre-M-2 construction path — those leaves then
     /// delegate to SQLite byte-identically.
     m2: M2LeafServe,
+    /// STATE-ROOT-RELATIVE-REPO-ROOT-1 (D-SRR-SCOPE-1 Correction 1): the repository's registry root,
+    /// CHECKED, for the document-inventory read — `Some(Ok(root))` reads the inventory under it;
+    /// `Some(Err(_))` answers that named state (never an empty list); `None` (no root supplied —
+    /// the explain path, which reads no docs) delegates to the inner port.
+    repo_root: Option<crate::repo_root::CheckedRepoRoot>,
 }
 
 impl<'a, S: AgentStorageRead + GateStorageRead + ?Sized> OrientServeDecorator<'a, S> {
@@ -334,6 +339,7 @@ impl<'a, S: AgentStorageRead + GateStorageRead + ?Sized> OrientServeDecorator<'a
             epoch,
             bounded: true,
             m2: M2LeafServe::default(),
+            repo_root: None,
         }
     }
 
@@ -355,7 +361,32 @@ impl<'a, S: AgentStorageRead + GateStorageRead + ?Sized> OrientServeDecorator<'a
             epoch,
             bounded,
             m2,
+            repo_root: None,
         }
+    }
+
+    /// STATE-ROOT-RELATIVE-REPO-ROOT-1 (D-SRR-SCOPE-1 Correction 1): attach the repository's
+    /// registry root, CHECKED, for the document-inventory read. `handle_orient` attaches it on
+    /// every request with a READY epoch, so no orient route reads documents through the bare
+    /// store connection (which has no root). The serve decisions are unchanged.
+    pub(crate) fn with_repo_root(mut self, repo_root: crate::repo_root::CheckedRepoRoot) -> Self {
+        self.repo_root = Some(repo_root);
+        self
+    }
+
+    /// The document-inventory read at the attached root (see [`with_repo_root`](Self::with_repo_root)).
+    /// `None` when no root was attached — the caller then delegates to the inner port.
+    pub(super) fn doc_inventory_at_attached_root(
+        &self,
+    ) -> Option<Result<Vec<repo_graph_agent::AgentDocEntry>, repo_graph_agent::AgentStorageError>>
+    {
+        self.repo_root.as_ref().map(|root| match root {
+            Ok(root) => repo_graph_storage::doc_inventory_at_root(root),
+            Err(e) => Err(repo_graph_agent::AgentStorageError::new(
+                "get_doc_inventory",
+                e.to_string(),
+            )),
+        })
     }
 
     /// W-B-EPOCH-IMPL-1 (D-EV = EV-A): is the resident LiveGraph still the captured green-validated epoch?

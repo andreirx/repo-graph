@@ -49,3 +49,15 @@ pub fn resolve_and_load_repo(
 
     Ok((repo_state, repo_uid.clone()))
 }
+
+/// Sibling of [`resolve_and_load_repo`] for the handlers that read the working tree (churn,
+/// hotspots, risk, coverage, map): the same resolution and errors, plus the registry entry's
+/// `canonical_path`, checked (STATE-ROOT-RELATIVE-REPO-ROOT-1). [`resolve_and_load_repo`] and its
+/// callers that never touch a checkout are unchanged.
+pub(crate) fn resolve_and_load_repo_with_root(
+    state: &DaemonState,
+    params: &Value,
+) -> Result<(Arc<RepoState>, String, crate::repo_root::CheckedRepoRoot), ErrorDetail> {
+    let resolved = crate::repo_root::resolve_and_load_repo_with_root(state, params)?;
+    Ok((resolved.repo_state, resolved.repo_uid, resolved.root))
+}

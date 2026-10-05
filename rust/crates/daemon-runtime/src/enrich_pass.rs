@@ -959,7 +959,7 @@ pub fn run_enrich_pass(
     let pipeline_storage = crate::state::open_existing_gated(db_path)?;
     let mut pipeline = EnrichmentPipeline::with_registry(pipeline_storage, registry);
     let report = pipeline
-        .run_cancellable(repo_uid, &snapshot_uid, &config, cancel)
+        .run_cancellable(repo_uid, &snapshot_uid, repo_root, &config, cancel)
         .map_err(|e| e.to_string())?;
 
     Ok(EnrichPassOutcome {
@@ -1039,6 +1039,16 @@ pub fn try_enrich_attempt(
     };
     let _refresh_guard = repo_state.coordinator.acquire_refresh();
 
+    // STATE-ROOT-RELATIVE-REPO-ROOT-1: the working tree is the registry root found by the CANONICAL
+    // store path (`repo_state.db_path()`) + repo uid, checked — never `repos.root_path`, never the
+    // display string. A missing root, a file at that path, or no registry entry is a FAILED attempt
+    // naming it (`repo root not found: …` / `repo root unknown: …`), before any resolver starts.
+    let repo_root =
+        match crate::repo_root::registered_root_for_store(state, repo_state.db_path(), repo_uid) {
+            Ok(root) => root,
+            Err(e) => return EnrichAttempt::Failed(e.to_string()),
+        };
+
     // Both gates + slot clear → make the pass visible on `rmap doctor` for its duration (the
     // DAEMON-VISIBILITY-1 activity stamp; `OpKind::Enrich` renders "enriching <repo>").
     let _activity = state.activity().begin(
@@ -1056,7 +1066,7 @@ pub fn try_enrich_attempt(
     let available = |lang: EnrichmentLanguage, ts_contexts: &[PathBuf]| {
         resolver_toolchain_available(
             lang,
-            Path::new(repo_display),
+            &repo_root,
             ts_contexts,
             jdtls_path_from_env().as_deref(),
         )
@@ -1072,7 +1082,7 @@ pub fn try_enrich_attempt(
     let run_result = run_enrich_pass(
         db_path,
         repo_uid,
-        Path::new(repo_display),
+        &repo_root,
         jdtls_path_from_env().as_deref(),
         &available,
         &cancel,
@@ -1842,7 +1852,6 @@ mod tests {
     // so no live LSP toolchain is needed.
     #[test]
     fn run_auto_enrich_logs_the_op_lifecycle_outcome_line() {
-        use crate::registry::RepoRegistry;
         use repo_graph_storage::types::{CreateSnapshotInput, Repo, UpdateSnapshotStatusInput};
 
         crate::oplog::enable_oplog_capture_for_test();
@@ -1887,9 +1896,13 @@ mod tests {
                 .unwrap();
         }
         let db_path = db_path.canonicalize().unwrap();
-        let state = Arc::new(DaemonState::with_registry(
-            RepoRegistry::empty_non_persistent(),
-        ));
+        // STATE-ROOT-RELATIVE-REPO-ROOT-1: the pass takes its working tree from the registry (found
+        // by store path + repo uid), so the fixture registers the store with a real repo directory.
+        let state = Arc::new(DaemonState::with_registry(registry_with_entry(
+            dir.path(),
+            &db_path,
+            repo,
+        )));
         let my_generation = state.enrich_coord().bump_generation(repo);
         run_auto_enrich(&state, &db_path, repo, repo, my_generation);
 
@@ -1907,6 +1920,37 @@ mod tests {
                 .any(|l| l.contains("op enrich completed")),
             "the pass logs an op-lifecycle OUTCOME line (not the old ad-hoc 'enrichment: …' summary): {lines:?}"
         );
+    }
+
+    /// STATE-ROOT-RELATIVE-REPO-ROOT-1 fixture: a registry (persisted under `<dir>/state`) holding ONE
+    /// entry for the existing store `db_path` + `repo_uid`, whose `canonical_path` is a real directory
+    /// `<dir>/<repo_uid>-checkout` — the store-keyed passes find their working tree through it.
+    fn registry_with_entry(
+        dir: &Path,
+        db_path: &Path,
+        repo_uid: &str,
+    ) -> crate::registry::RepoRegistry {
+        let state_root = dir.join("state");
+        let checkout = dir.join(format!("{repo_uid}-checkout"));
+        std::fs::create_dir_all(&state_root).unwrap();
+        std::fs::create_dir_all(&checkout).unwrap();
+        let file = crate::registry::RegistryFile {
+            version: 1,
+            repos: vec![crate::registry::RegistryEntry {
+                canonical_path: checkout.canonicalize().unwrap(),
+                alias: None,
+                db_path: db_path.to_path_buf(),
+                repo_uid: repo_uid.to_string(),
+                last_indexed_at: None,
+                last_snapshot_uid: None,
+            }],
+        };
+        std::fs::write(
+            state_root.join("registry.json"),
+            serde_json::to_string_pretty(&file).unwrap(),
+        )
+        .unwrap();
+        crate::registry::RepoRegistry::with_state_root(&state_root).unwrap()
     }
 
     // ── DAEMON-CRASH-RECOVERY-1 (F8, review-2 item 1): every STARTED enrich op is CLOSED ───────────
@@ -1960,15 +2004,16 @@ mod tests {
     // Yielded-after-start; the zero-eligible snapshot means the pipeline body is never even reached.
     #[test]
     fn a_cancelled_started_enrich_closes_its_start_with_an_interrupted_outcome() {
-        use crate::registry::RepoRegistry;
         crate::oplog::enable_oplog_capture_for_test();
         let repo = "enrich-f8-interrupted-repo"; // unique → parallel-safe capture filter
         let dir = tempfile::tempdir().unwrap();
         let db_path = seed_repo_with_snapshot(dir.path(), repo, "ready");
 
-        let state = Arc::new(DaemonState::with_registry(
-            RepoRegistry::empty_non_persistent(),
-        ));
+        let state = Arc::new(DaemonState::with_registry(registry_with_entry(
+            dir.path(),
+            &db_path,
+            repo,
+        )));
         let gen = state.enrich_coord().bump_generation(repo);
         // Latch a yield in the acquire→register window → `register_running` adopts it, so the pass
         // starts already-cancelled and yields at its first batch boundary (a started, interrupted run).
@@ -2001,16 +2046,17 @@ mod tests {
     // chained pass is a cheap no-op that spawns no thread racing tempdir teardown.
     #[test]
     fn a_failed_enrich_closes_its_start_with_a_failed_outcome() {
-        use crate::registry::RepoRegistry;
         crate::oplog::enable_oplog_capture_for_test();
         crate::retention_pass::set_auto_retention_for_test(false);
         let repo = "enrich-f8-failed-repo";
         let dir = tempfile::tempdir().unwrap();
         let db_path = seed_repo_with_snapshot(dir.path(), repo, "building");
 
-        let state = Arc::new(DaemonState::with_registry(
-            RepoRegistry::empty_non_persistent(),
-        ));
+        let state = Arc::new(DaemonState::with_registry(registry_with_entry(
+            dir.path(),
+            &db_path,
+            repo,
+        )));
         let gen = state.enrich_coord().bump_generation(repo);
         run_auto_enrich(&state, &db_path, repo, repo, gen);
 

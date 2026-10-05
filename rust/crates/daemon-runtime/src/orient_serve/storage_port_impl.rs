@@ -641,7 +641,12 @@ impl<S: AgentStorageRead + GateStorageRead + ?Sized> AgentStorageRead
     }
 
     fn get_doc_inventory(&self, repo_uid: &str) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
-        self.inner.get_doc_inventory(repo_uid)
+        // STATE-ROOT-RELATIVE-REPO-ROOT-1: read at the attached registry root (orient attaches it
+        // on every READY request); delegate only when none was attached.
+        match self.doc_inventory_at_attached_root() {
+            Some(answer) => answer,
+            None => self.inner.get_doc_inventory(repo_uid),
+        }
     }
 
     fn query_high_complexity_symbols(

@@ -137,6 +137,7 @@ pub mod reconcile;
 pub(crate) mod rebuild; // DAEMON-RESIDUALS-2C §7: `rmap repo rebuild` wipe-and-reindex verb (crate-private)
 pub(crate) mod reclaim;
 pub mod registry;
+pub mod repo_root; // STATE-ROOT-RELATIVE-REPO-ROOT-1: the registry root of a repository, checked (crate-private items; public only its #[doc(hidden)] seed-root test hook)
 pub mod resource_metrics;
 pub mod retention_pass;
 pub mod seed; // EMBED-SEED-IMPL-1: option-(a) Embedder (a2 transport) + query-time fallback

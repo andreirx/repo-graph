@@ -143,8 +143,9 @@ pub trait EnrichmentStoragePort {
         promoted: &[PromotedEdge],
     ) -> Result<usize, StorageError>;
 
-    /// Get the repository root path.
-    fn get_repo_root(&self, repo_uid: &str) -> Result<String, StorageError>;
+    // STATE-ROOT-RELATIVE-REPO-ROOT-1 (D-SRR-SCOPE-1): no `get_repo_root` — the repository
+    // root is not read from the store. The pipeline's caller (the daemon) passes the root it
+    // took from its registry (`EnrichmentPipeline::run(.., repo_root, ..)`).
 }
 
 /// Storage errors.
@@ -178,17 +179,11 @@ pub struct InMemoryEnrichmentStorage {
     pub symbols: Vec<SymbolInfo>,
     pub class_methods: std::collections::HashMap<String, Vec<(String, SymbolInfo)>>,
     pub promoted_edges: Vec<PromotedEdge>,
-    pub repo_root: String,
 }
 
 impl InMemoryEnrichmentStorage {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn with_repo_root(mut self, root: impl Into<String>) -> Self {
-        self.repo_root = root.into();
-        self
     }
 
     pub fn add_eligible_edge(&mut self, edge: EligibleEdge) {
@@ -286,10 +281,6 @@ impl EnrichmentStoragePort for InMemoryEnrichmentStorage {
         // In-memory: no persisted rows or aggregate (same stub level as the
         // write methods the SQLite adapter implements for real).
         Ok(0)
-    }
-
-    fn get_repo_root(&self, _repo_uid: &str) -> Result<String, StorageError> {
-        Ok(self.repo_root.clone())
     }
 }
 

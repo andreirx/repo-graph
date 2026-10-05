@@ -8,11 +8,13 @@
 //! responsibility — the module-size + filesystem doc-inventory projections that
 //! back the dense `orient` headline — out of the oversized adapter file.
 //!
-//! Both functions take a `&rusqlite::Connection` (the adapter's own backing
+//! The store reads take a `&rusqlite::Connection` (the adapter's own backing
 //! store) and the shared `map_err` from `agent_impl`, so error mapping is
-//! identical to every other `AgentStorageRead` method.
+//! identical to every other `AgentStorageRead` method. The doc inventory is
+//! connection-free (`doc_inventory_at_root`, STATE-ROOT-RELATIVE-REPO-ROOT-1): it
+//! takes the repository root the caller resolved from the daemon registry.
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use repo_graph_agent::{
     AgentDirectoryGroup, AgentDocEntry, AgentModuleSize, AgentStorageError, ManifestKind,
@@ -22,72 +24,34 @@ use rusqlite::Connection;
 
 use crate::agent_impl::map_err;
 
-/// Discover the live documentation inventory for a repo, resolving the stored
-/// `root_path` the SAME way the daemon's `handle_docs_list` does.
+/// Discover the live documentation inventory under `root` — the repository's working
+/// tree as the caller resolved it (the daemon passes its registry `canonical_path`,
+/// STATE-ROOT-RELATIVE-REPO-ROOT-1 / D-SRR-SCOPE-1). Connection-free: this function
+/// never reads the store, so the stored `repos.root_path` (relative to the store
+/// file's directory; retained for compatibility, not a resolution source —
+/// D-SRR-ROOTPATH-1) can never change which tree is read.
 ///
-/// ORIENT-DENSITY-1 review-1 #1 — the bug this fixes: `root_path` is stored
-/// RELATIVE to the DB file's parent directory (the daemon `storage_root_path`
-/// convention). The previous in-`agent_impl` read treated that stored value as
-/// an absolute path (`Path::new(&root_path)`), so `is_dir()` failed and it
-/// silently returned an EMPTY inventory — `orient` showed NO docs on a real
-/// repo (e.g. nginx) even though `docs list`, which DOES resolve relative to the
-/// DB parent, listed README.md / CONTRIBUTING.md. Confirmed first-hand on an
-/// isolated nginx index: `documentation: null` in the orient envelope vs 4 docs
-/// from `docs list`.
+/// Outcomes:
+/// - `root` does not exist or is not a directory → `Err` whose message is
+///   `repo root not found: <root>` — a named state, NEVER an empty inventory (an
+///   empty list would render as "no docs found", a false absence).
+/// - discovery fails while walking a directory that DOES exist (permissions, a
+///   mid-walk failure) → `Err` with the discovery error (ORIENT-DENSITY-1 review-2 #3:
+///   a failure is never collapsed to an empty inventory).
+/// - otherwise `Ok(entries)`; an empty vector is a real, observed absence of docs.
 ///
-/// The fix mirrors `handle_docs_list`: join `root_path` onto the DB FILE's
-/// parent dir (`Connection::path()` — the adapter's own backing file). `Path::
-/// join` with an *absolute* `root_path` replaces, so this is correct for both
-/// relative and absolute stored paths; an in-memory DB has no path → fall back
-/// to the stored value as-is (preserves the in-memory test fakes' behavior).
-/// Empty inventory is a valid result (repos with zero docs).
-pub(crate) fn doc_inventory(
-    conn: &Connection,
-    repo_uid: &str,
-) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
-    // 1. Look up the stored (DB-parent-relative) root_path.
-    let raw_root: Option<String> = conn
-        .query_row(
-            "SELECT root_path FROM repos WHERE repo_uid = ?",
-            rusqlite::params![repo_uid],
-            |row| row.get(0),
-        )
-        .map_err(map_err("get_doc_inventory"))?;
-
-    let raw_root = match raw_root {
-        Some(p) => p,
-        None => return Ok(Vec::new()), // No repo row / NULL root_path → empty.
-    };
-
-    // 2. Resolve relative to the DB file's parent (mirrors handle_docs_list).
-    // Shared with enrichment's `get_repo_root` (ENRICH-ROOT-1) — one implementation
-    // of the DB-parent convention, not a per-site copy.
-    let resolved: PathBuf = crate::db_root_path::resolve_root_against_db_parent(conn, &raw_root);
-
-    if !resolved.is_dir() {
-        return Ok(Vec::new()); // Path not a directory → graceful empty.
+/// `compute_hashes = true` (ORIENT-DENSITY-1 review-1 fix #1): the same content-based
+/// classification `docs list` uses, so content-evidence kinds (`license`,
+/// `release-notes`) fire; the hashes themselves are discarded (the DTO carries only
+/// path / kind / generated).
+pub fn doc_inventory_at_root(root: &Path) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
+    if !root.is_dir() {
+        return Err(AgentStorageError::new(
+            "get_doc_inventory",
+            format!("repo root not found: {}", root.display()),
+        ));
     }
-
-    // 3. Live filesystem discovery (doc-facts crate); map to agent DTOs.
-    //
-    // review-1 fix #1 (completion): `compute_hashes = true` to match the same
-    // content-based classification pipeline that `docs list` uses. Without content
-    // reads, kinds like `license` and `release-notes` — which are content-evidence-
-    // based refinements of the `architecture` catch-all — never fire: a `LICENSE.txt`
-    // under `docs/` stays `architecture` (name-based `docs/` match) and passes
-    // `is_orientation_doc`, producing a false orientation recommendation.
-    //
-    // The cost is reading doc-file contents (bounded: discovery caps candidates).
-    // The content hashes themselves are discarded (the DTO only carries path/kind/
-    // generated), so the only effect is correct classification.
-    // review-2 #3: a discovery FAILURE (an I/O error walking a directory that DOES
-    // exist — permissions, a mid-walk failure) is PROPAGATED, never collapsed to an
-    // empty inventory. Collapsing it made the orientation surface render "No README or
-    // architecture doc found" (a false Layer-0 absence claim) after an unreadable tree;
-    // the caller now renders a named `unavailable` state instead (standing honesty
-    // rule #1). Genuine absence — no repo row, NULL root_path, or a root_path that is
-    // not a directory — still returns `Ok(empty)` above (those are real, not failures).
-    let result = repo_graph_doc_facts::discover_doc_inventory(&resolved, true)
+    let result = repo_graph_doc_facts::discover_doc_inventory(root, true)
         .map_err(map_err("get_doc_inventory"))?;
 
     Ok(result
@@ -99,6 +63,24 @@ pub(crate) fn doc_inventory(
             generated: e.generated,
         })
         .collect())
+}
+
+/// The `AgentStorageRead::get_doc_inventory` answer of a bare store connection: a
+/// NAMED error, never a list. A store connection holds no repository root — the
+/// working tree is found from the daemon registry (D-SRR-SCOPE-1), and the stored
+/// `repos.root_path` is not a resolution source (D-SRR-ROOTPATH-1) — so it cannot
+/// read the inventory, and it must not answer with an empty list (a false absence).
+/// Callers that hold the root call [`doc_inventory_at_root`].
+pub(crate) fn doc_inventory_without_root(
+    repo_uid: &str,
+) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
+    Err(AgentStorageError::new(
+        "get_doc_inventory",
+        format!(
+            "no repository root supplied for {repo_uid}: a store connection does not resolve \
+             a working tree; read the inventory with doc_inventory_at_root(<registry root>)"
+        ),
+    ))
 }
 
 /// List discovered modules with owned-file counts, ordered by size (total,
@@ -530,62 +512,114 @@ mod tests {
         assert_eq!(all[..2], top2[..], "small ⊂ full: the cut is a prefix");
     }
 
-    #[test]
-    fn doc_inventory_resolves_db_relative_root_path() {
-        // Regression for review-1 #1: orient showed NO docs on a real repo
-        // because get_doc_inventory treated the DB-parent-RELATIVE root_path as
-        // absolute, failed is_dir(), and returned empty. Set up a FILE-backed DB
-        // (so conn.path() is real), store root_path relative to the DB parent,
-        // drop a README.md in the resolved dir, and assert the inventory
-        // resolves it — matching docs_list.
-        let tmp = tempdir().unwrap();
-        let base = tmp.path();
+    // ── STATE-ROOT-RELATIVE-REPO-ROOT-1: the doc inventory reads the root it is given ───────────
+
+    /// A file-backed store under `<base>/databases/repo.db` whose repo row stores
+    /// `stored_root_path` (relative to the store directory — the index-time convention).
+    fn store_with_root_path(base: &std::path::Path, stored_root_path: &str) -> StorageConnection {
         let db_dir = base.join("databases");
         std::fs::create_dir_all(&db_dir).unwrap();
-        let repo_dir = base.join("myrepo");
-        std::fs::create_dir_all(&repo_dir).unwrap();
-        std::fs::write(repo_dir.join("README.md"), "# hi").unwrap();
-
         let storage = StorageConnection::open(db_dir.join("repo.db")).unwrap();
         storage
             .add_repo(&Repo {
                 repo_uid: "r1".into(),
                 name: "myrepo".into(),
-                // RELATIVE to the DB parent (<base>/databases) — the convention
-                // that the old absolute-path read could not resolve.
-                root_path: "../myrepo".into(),
+                root_path: stored_root_path.into(),
                 default_branch: Some("main".into()),
                 created_at: "2025-01-01T00:00:00.000Z".into(),
                 metadata_json: None,
             })
             .unwrap();
+        storage
+    }
 
-        let docs = storage.get_doc_inventory("r1").unwrap();
-        let paths: Vec<&str> = docs.iter().map(|d| d.path.as_str()).collect();
-        assert!(
-            paths.contains(&"README.md"),
-            "db-relative root_path must resolve to live docs: {paths:?}"
+    fn paths_of(docs: &[AgentDocEntry]) -> Vec<&str> {
+        docs.iter().map(|d| d.path.as_str()).collect()
+    }
+
+    #[test]
+    fn doc_inventory_reads_the_root_it_is_given() {
+        let tmp = tempdir().unwrap();
+        let repo_dir = tmp.path().join("myrepo");
+        std::fs::create_dir_all(repo_dir.join("docs")).unwrap();
+        std::fs::write(repo_dir.join("README.md"), "# hi").unwrap();
+        std::fs::write(repo_dir.join("CONTRIBUTING.md"), "# contributing").unwrap();
+
+        let docs = doc_inventory_at_root(&repo_dir).unwrap();
+        let paths = paths_of(&docs);
+        assert!(paths.contains(&"README.md"), "{paths:?}");
+        assert!(paths.contains(&"CONTRIBUTING.md"), "{paths:?}");
+        let readme = docs.iter().find(|d| d.path == "README.md").unwrap();
+        assert_eq!(readme.kind, "readme");
+    }
+
+    #[test]
+    fn doc_inventory_names_a_missing_root() {
+        let tmp = tempdir().unwrap();
+        let missing = tmp.path().join("does-not-exist");
+        let err = doc_inventory_at_root(&missing).unwrap_err();
+        assert_eq!(
+            err.message,
+            format!("repo root not found: {}", missing.display()),
+            "a missing root is a named state, never an empty inventory"
         );
     }
 
     #[test]
-    fn doc_inventory_empty_when_root_missing() {
-        // A stored root_path that resolves to a non-directory → graceful empty.
+    fn doc_inventory_names_a_root_that_is_a_file() {
         let tmp = tempdir().unwrap();
-        let db_dir = tmp.path().join("databases");
-        std::fs::create_dir_all(&db_dir).unwrap();
-        let storage = StorageConnection::open(db_dir.join("repo.db")).unwrap();
-        storage
-            .add_repo(&Repo {
-                repo_uid: "r1".into(),
-                name: "ghost".into(),
-                root_path: "../does-not-exist".into(),
-                default_branch: Some("main".into()),
-                created_at: "2025-01-01T00:00:00.000Z".into(),
-                metadata_json: None,
-            })
-            .unwrap();
-        assert_eq!(storage.get_doc_inventory("r1").unwrap(), vec![]);
+        let file = tmp.path().join("README.md");
+        std::fs::write(&file, "# not a directory").unwrap();
+        let err = doc_inventory_at_root(&file).unwrap_err();
+        assert_eq!(
+            err.message,
+            format!("repo root not found: {}", file.display()),
+            "a regular file at the root path is the same named state as a missing root"
+        );
+    }
+
+    #[test]
+    fn doc_inventory_ignores_a_wrong_stored_root_path() {
+        // The store's `repos.root_path` points at an EXISTING different directory with its own
+        // docs. The inventory of the given root lists only the given root's docs, and the store
+        // connection's port read does not fall back to the stored field.
+        let tmp = tempdir().unwrap();
+        let base = tmp.path();
+        let repo_dir = base.join("myrepo");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        std::fs::write(repo_dir.join("README.md"), "# real").unwrap();
+        let other = base.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("ARCHITECTURE.md"), "# wrong tree").unwrap();
+        std::fs::write(other.join("NEWS"), "wrong tree").unwrap();
+        let storage = store_with_root_path(base, "../other");
+
+        let docs = doc_inventory_at_root(&repo_dir).unwrap();
+        assert_eq!(paths_of(&docs), vec!["README.md"]);
+        assert!(
+            storage.get_doc_inventory("r1").is_err(),
+            "the store's port read never resolves the stored root_path"
+        );
+    }
+
+    #[test]
+    fn port_doc_inventory_without_a_root_is_a_named_error() {
+        // The bare store connection has no repository root: its port read is a NAMED error,
+        // never an empty list (which would render as "no docs found"), whatever the stored
+        // root_path says — here it names an existing directory holding a README.
+        let tmp = tempdir().unwrap();
+        let base = tmp.path();
+        std::fs::create_dir_all(base.join("myrepo")).unwrap();
+        std::fs::write(base.join("myrepo").join("README.md"), "# hi").unwrap();
+        let storage = store_with_root_path(base, "../myrepo");
+
+        let err = storage.get_doc_inventory("r1").unwrap_err();
+        assert_eq!(err.operation, "get_doc_inventory");
+        assert!(
+            err.message.contains("no repository root supplied for r1"),
+            "names the missing root: {}",
+            err.message
+        );
     }
 
     // ── MODULE-MODEL-2 §13 D4: manifest-root read (source_type → toolchain) ────────

@@ -3431,8 +3431,15 @@ impl ServiceDispatcher {
         request: &Request,
         emitter: &mut dyn ProgressEmitter,
     ) -> DispatchResult {
-        // REG-1: resolve repo from path/alias and auto-load
-        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+        // REG-1: resolve repo from path/alias and auto-load, keeping the registry root (checked)
+        // — STATE-ROOT-RELATIVE-REPO-ROOT-1: refresh reads the tree at the registry root, never at
+        // the store's `repos.root_path`.
+        let crate::repo_root::ResolvedRepo {
+            repo_state,
+            repo_uid,
+            root: repo_root,
+            ..
+        } = match crate::repo_root::resolve_and_load_repo_with_root(&self.state, &request.params) {
             Ok(r) => r,
             Err(e) => return DispatchResult::error(&request.id, e),
         };
@@ -3488,10 +3495,10 @@ impl ServiceDispatcher {
             Err(e) => return DispatchResult::error(&request.id, e),
         };
 
-        // Resolve repo_path from stored root_path
+        // The repo row must exist (unchanged error); its stored `root_path` is not read.
         let canonical_db_path = repo_state.db_path();
-        let repo_info = match storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
-            Ok(Some(r)) => r,
+        match storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
+            Ok(Some(_)) => {}
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
@@ -3506,37 +3513,21 @@ impl ServiceDispatcher {
             }
         };
 
-        // root_path is stored relative to db_path parent
-        let repo_path = canonical_db_path
-            .parent()
-            .map(|p| p.join(&repo_info.root_path))
-            .unwrap_or_else(|| Path::new(&repo_info.root_path).to_path_buf());
-
-        if !repo_path.is_dir() {
-            return DispatchResult::error(
-                &request.id,
-                ErrorDetail::invalid_request(format!(
-                    "resolved repo_path does not exist or is not a directory: {}",
-                    repo_path.display()
-                )),
-            );
-        }
+        // STATE-ROOT-RELATIVE-REPO-ROOT-1: the registry root, checked — a missing root (or a file at
+        // that path) is the named §2.2 error before anything is read or written. The same root feeds
+        // the re-stamp of `repos.root_path` below (recomputed from the right directory, as the write
+        // convention says — D-SRR-ROOTPATH-1 Correction 1) and the auto-enrich / seed hand-off.
+        let repo_path = match repo_root {
+            Ok(p) => p,
+            Err(e) => return DispatchResult::error(&request.id, e.to_error_detail()),
+        };
 
         // DAEMON-VISIBILITY-1 (D): record this refresh as in-flight (RAII-cleared on exit). The
-        // activity record's `repo_display` is documented "canonical repo path — what the operator
-        // recognises". The reconstructed `repo_path` above is DB-relative (db_parent + stored
-        // `root_path`, so it carries `../..`); canonicalize it for the status line so refresh MATCHES
-        // `handle_index` (which stamps the already-canonical registry path) — otherwise `rmap doctor`
-        // shows `…/databases/../../repo` for a refresh but a clean path for an index. Display only: the
-        // refresh work below still uses `repo_path`. Falls back to the raw path if canonicalization
-        // fails (never blocks — the dir existence was just checked). Surfaced by the review-6 in-flight
-        // refresh status proof.
+        // activity record's `repo_display` is the canonical registry path — the same one
+        // `handle_index` stamps (what the operator recognises in `rmap doctor`).
         let _activity = self.state.activity().begin(
             crate::activity::OpKind::Refresh,
-            std::fs::canonicalize(&repo_path)
-                .unwrap_or_else(|_| repo_path.clone())
-                .to_string_lossy()
-                .to_string(),
+            repo_path.to_string_lossy().to_string(),
             Some(repo_uid.clone()),
             canonical_db_path.to_path_buf(),
         );
@@ -3767,11 +3758,20 @@ impl ServiceDispatcher {
         // the legacy positional `db_path` + `repo_uid` for compatibility (kept working, dropped from
         // `--help`). The two forms converge on `(repo_state, repo_uid, db_path)` for the rest of the
         // handler.
-        let (repo_state, repo_uid_owned, db_path_buf) = if request.params.get("repo").is_some() {
-            match self.resolve_and_load_repo(&request.params) {
-                Ok((state, uid)) => {
-                    let db = state.db_path().to_path_buf();
-                    (state, uid, db)
+        //
+        // STATE-ROOT-RELATIVE-REPO-ROOT-1: both forms also yield the registry root, checked — the
+        // `repo` form from the entry it resolves; the legacy form by the CANONICAL store path
+        // (`repo_state.db_path()`) + repo uid, never the raw request string. The pipeline receives
+        // that root; it never reads one from the store.
+        let (repo_state, repo_uid_owned, db_path_buf, repo_root) = if request
+            .params
+            .get("repo")
+            .is_some()
+        {
+            match crate::repo_root::resolve_and_load_repo_with_root(&self.state, &request.params) {
+                Ok(r) => {
+                    let db = r.repo_state.db_path().to_path_buf();
+                    (r.repo_state, r.repo_uid, db, r.root)
                 }
                 Err(e) => return DispatchResult::error(&request.id, e),
             }
@@ -3811,10 +3811,26 @@ impl ServiceDispatcher {
                     );
                 }
             };
-            (repo_state, repo_uid.to_string(), db_path.to_path_buf())
+            let root = crate::repo_root::registered_root_for_store(
+                &self.state,
+                repo_state.db_path(),
+                repo_uid,
+            );
+            (
+                repo_state,
+                repo_uid.to_string(),
+                db_path.to_path_buf(),
+                root,
+            )
         };
         let repo_uid: &str = &repo_uid_owned;
         let db_path: &Path = &db_path_buf;
+        // A missing root, a file at that path, or no registry entry is the named §2.2 error, before
+        // any lock, read or resolver start.
+        let repo_root = match repo_root {
+            Ok(p) => p,
+            Err(e) => return DispatchResult::error(&request.id, e.to_error_detail()),
+        };
 
         // Acquire DB write coordination first
         let db_runtime = match self.state.get_or_create_db_runtime(db_path) {
@@ -4143,7 +4159,7 @@ impl ServiceDispatcher {
         // already resolved here, so the start line NAMES it. Observability only — enrich is unchanged.
         crate::oplog::log_op_start("enrich", repo_uid, Some(&snapshot_uid));
         let mut pipeline = EnrichmentPipeline::with_registry(storage, registry);
-        let report = match pipeline.run(repo_uid, &snapshot_uid, &config) {
+        let report = match pipeline.run(repo_uid, &snapshot_uid, &repo_root, &config) {
             Ok(r) => r,
             Err(e) => {
                 crate::oplog::log_op_outcome(
@@ -4277,40 +4293,23 @@ impl ServiceDispatcher {
     /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
     #[allow(unused_variables)] // Timing variables used only with perf-trace feature
     /// INDEX-BASIS-1: compute working-tree drift for a query handler
-    /// (orient/check/explain). Resolves the on-disk repo root (the same
-    /// `resolve_root_path` pattern the churn/hotspots/risk handlers use to reach
-    /// git) and hands git + the indexed-file/module facts to
-    /// [`crate::index_drift::compute_index_drift`]. A failure to resolve the repo
-    /// path is rendered as an honest `Unknown`/`BasisUnknown`, never a false
-    /// "clean".
+    /// (orient/check/explain) at the repository's registry root, checked
+    /// (STATE-ROOT-RELATIVE-REPO-ROOT-1), and hand git + the indexed-file/module facts to
+    /// [`crate::index_drift::compute_index_drift`]. An unreachable root is
+    /// `IndexDrift::Unknown` with the `repo root not found: <path>` reason and NO git spawn —
+    /// never a false "clean", never a git failure text.
     fn compute_query_drift(
         &self,
         storage: &StorageConnection,
-        repo_state: &crate::state::RepoState,
-        repo_uid: &str,
+        repo_root: &crate::repo_root::CheckedRepoRoot,
         snapshot: &repo_graph_agent::storage_port::AgentSnapshot,
     ) -> repo_graph_agent::dto::index_drift::IndexDrift {
-        let repo_path = match storage.get_repo(&RepoRef::Uid(repo_uid.to_string())) {
-            Ok(Some(r)) => crate::handlers::quality::support::resolve_root_path(
-                repo_state.db_path(),
-                &r.root_path,
-            ),
-            // A storage MISS or READ ERROR means git was never reached → drift is
-            // genuinely UNKNOWN (never `BasisUnknown`, which would falsely claim the
-            // snapshot "predates basis tracking"; never a false clean). `Err` preserves
-            // the actual `StorageError` in the reason instead of discarding it.
-            Ok(None) => {
-                return crate::index_drift::unresolved_repo_drift(
-                    snapshot.basis_commit.clone(),
-                    "repo metadata not found in storage; cannot resolve repo path to compute \
-                     drift"
-                        .to_string(),
-                );
-            }
+        let repo_path = match repo_root {
+            Ok(p) => p,
             Err(e) => {
                 return crate::index_drift::unresolved_repo_drift(
                     snapshot.basis_commit.clone(),
-                    format!("repo metadata could not be read from storage to compute drift ({e})"),
+                    e.to_string(),
                 );
             }
         };
@@ -4324,7 +4323,7 @@ impl ServiceDispatcher {
         let basis_outcome = crate::index_drift::read_basis_outcome(storage, &snapshot.snapshot_uid);
         crate::index_drift::compute_index_drift(
             storage,
-            &repo_path,
+            repo_path,
             &snapshot.snapshot_uid,
             snapshot.basis_commit.as_deref(),
             basis_outcome,
@@ -4338,13 +4337,19 @@ impl ServiceDispatcher {
     ) -> DispatchResult {
         let handler_start = Instant::now();
 
-        // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2B)
+        // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2B),
+        // keeping the registry root, checked (STATE-ROOT-RELATIVE-REPO-ROOT-1): orient never fails
+        // on an unreachable root — it answers with the named drift reason and orientation state.
         let resolve_start = Instant::now();
-        let (repo_state, repo_uid, display_name) =
-            match self.resolve_and_load_repo_with_display_name(&request.params) {
-                Ok(r) => r,
-                Err(e) => return DispatchResult::error(&request.id, e),
-            };
+        let crate::repo_root::ResolvedRepo {
+            repo_state,
+            repo_uid,
+            display_name,
+            root: repo_root,
+        } = match crate::repo_root::resolve_and_load_repo_with_root(&self.state, &request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
         let resolve_ms = resolve_start.elapsed().as_millis();
 
         // Parse optional focus
@@ -4565,42 +4570,33 @@ impl ServiceDispatcher {
         let orient_start = Instant::now();
         let orient_outcome = {
             let mut checkpoint = crate::cancel::loop_checkpoint(emitter, "computing_orient");
-            if epoch.fingerprint.is_some() {
-                // EC-M2-LEAF-SERVE-1 (review-0 #1): construct the decorator whenever ANY leaf
-                // decision is GREEN, carrying ALL THREE independently — the bounded fold gates the
-                // six (b) methods; cycle VALUES + MODULE_SUMMARY serve iff their own certs were
-                // GREEN at the captured fingerprint (each leaf degrades independently to SQLite).
-                let decorator = crate::orient_serve::OrientServeDecorator::with_leaf_serves(
-                    &repo_state.livegraph,
-                    &storage,
-                    &epoch,
-                    serve_witness.bounded,
-                    serve_witness.m2,
-                );
-                repo_graph_agent::orient_cancellable(
-                    &decorator,
-                    &repo_uid,
-                    &epoch.snapshot,
-                    focus,
-                    budget,
-                    include_all,
-                    &now,
-                    enrich_state_override,
-                    &mut checkpoint,
-                )
-            } else {
-                repo_graph_agent::orient_cancellable(
-                    &storage,
-                    &repo_uid,
-                    &epoch.snapshot,
-                    focus,
-                    budget,
-                    include_all,
-                    &now,
-                    enrich_state_override,
-                    &mut checkpoint,
-                )
-            }
+            // EC-M2-LEAF-SERVE-1 (review-0 #1): the decorator carries ALL THREE leaf decisions
+            // independently — the bounded fold gates the six (b) methods; cycle VALUES +
+            // MODULE_SUMMARY serve iff their own certs were GREEN at the captured fingerprint (each
+            // leaf degrades independently to SQLite). STATE-ROOT-RELATIVE-REPO-ROOT-1 (D-SRR-SCOPE-1
+            // Correction 1): it is built for EVERY request with a READY epoch — the fingerprint-less
+            // route included (all-off ⇒ byte-transparent, as explain) — because it also carries the
+            // checked registry root its document read uses; the bare store connection has no root
+            // and is never handed to the use case.
+            let decorator = crate::orient_serve::OrientServeDecorator::with_leaf_serves(
+                &repo_state.livegraph,
+                &storage,
+                &epoch,
+                serve_witness.bounded,
+                serve_witness.m2,
+            )
+            .with_repo_root(repo_root.clone());
+            repo_graph_agent::orient_cancellable(
+                &decorator,
+                &repo_uid,
+                &epoch.snapshot,
+                focus,
+                budget,
+                include_all,
+                &now,
+                enrich_state_override,
+                &mut checkpoint,
+            )
         };
         let mut result = match orient_outcome {
             Ok(r) => r,
@@ -4702,8 +4698,7 @@ impl ServiceDispatcher {
         // `&self`), then hand ALL post-serialize additive `value` fields — drift,
         // parse, the §2.1 collapse fallback, the §2.5 HTTP headline — to the orient
         // orchestrator (kept out of dispatch; see `orient_additive_fields`).
-        let index_drift =
-            self.compute_query_drift(&storage, &repo_state, &repo_uid, &epoch.snapshot);
+        let index_drift = self.compute_query_drift(&storage, &repo_root, &epoch.snapshot);
         crate::orient_additive_fields::inject(
             &mut output,
             &index_drift,
@@ -4711,6 +4706,7 @@ impl ServiceDispatcher {
             &repo_state,
             emitter,
             &storage,
+            &repo_root,
             &repo_uid,
             &epoch.snapshot.snapshot_uid,
         );
@@ -4737,13 +4733,18 @@ impl ServiceDispatcher {
     fn handle_check(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
         let handler_start = Instant::now();
 
-        // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2B)
+        // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2B),
+        // keeping the registry root, checked (STATE-ROOT-RELATIVE-REPO-ROOT-1) for the drift probe.
         let resolve_start = Instant::now();
-        let (repo_state, repo_uid, display_name) =
-            match self.resolve_and_load_repo_with_display_name(&request.params) {
-                Ok(r) => r,
-                Err(e) => return DispatchResult::error(&request.id, e),
-            };
+        let crate::repo_root::ResolvedRepo {
+            repo_state,
+            repo_uid,
+            display_name,
+            root: repo_root,
+        } = match crate::repo_root::resolve_and_load_repo_with_root(&self.state, &request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
         let resolve_ms = resolve_start.elapsed().as_millis();
 
         // Acquire read lock
@@ -4800,7 +4801,7 @@ impl ServiceDispatcher {
         let (index_drift, ceiling_fact, pass_can_apply, reliability_by_language) =
             match repo_graph_agent::AgentStorageRead::get_latest_snapshot(&storage, &repo_uid) {
                 Ok(Some(snap)) => {
-                    let drift = self.compute_query_drift(&storage, &repo_state, &repo_uid, &snap);
+                    let drift = self.compute_query_drift(&storage, &repo_root, &snap);
                     // `reader_context` owns the WHICH-languages computation (one source, never
                     // re-derived); one count read feeds BOTH the reducer's ceiling verdict AND the
                     // in-flight applicability gate. The fallible read maps into the exhaustive capability
@@ -5015,12 +5016,17 @@ impl ServiceDispatcher {
         request: &Request,
         emitter: &mut dyn ProgressEmitter,
     ) -> DispatchResult {
-        // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-3)
-        let (repo_state, repo_uid, display_name) =
-            match self.resolve_and_load_repo_with_display_name(&request.params) {
-                Ok(r) => r,
-                Err(e) => return DispatchResult::error(&request.id, e),
-            };
+        // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-3),
+        // keeping the registry root, checked (STATE-ROOT-RELATIVE-REPO-ROOT-1) for the drift probe.
+        let crate::repo_root::ResolvedRepo {
+            repo_state,
+            repo_uid,
+            display_name,
+            root: repo_root,
+        } = match crate::repo_root::resolve_and_load_repo_with_root(&self.state, &request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
 
         let target = match Self::get_string_param(&request.params, "target") {
             Ok(t) => t,
@@ -5306,7 +5312,7 @@ impl ServiceDispatcher {
                     // pattern as orient. rgr renders it as explain's "index basis /
                     // drift" footer line.
                     let index_drift =
-                        self.compute_query_drift(&storage, &repo_state, &repo_uid, &epoch.snapshot);
+                        self.compute_query_drift(&storage, &repo_root, &epoch.snapshot);
                     inject_value_field(&mut v, "index_drift", &index_drift, &repo_uid);
                 }
                 DispatchResult::success(&request.id, v)
@@ -5711,8 +5717,15 @@ impl ServiceDispatcher {
     ///
     /// Request: `{"method": "docs_list", "params": {"repo": "<path_or_alias>"}}`
     fn handle_docs_list(&self, request: &Request) -> DispatchResult {
-        // REG-1: resolve repo from path/alias and auto-load
-        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+        // REG-1: resolve repo from path/alias and auto-load, keeping the registry root, checked
+        // (STATE-ROOT-RELATIVE-REPO-ROOT-1): the tree is read at the registry root, never at the
+        // store's `repos.root_path`.
+        let crate::repo_root::ResolvedRepo {
+            repo_state,
+            repo_uid,
+            root: repo_root,
+            ..
+        } = match crate::repo_root::resolve_and_load_repo_with_root(&self.state, &request.params) {
             Ok(r) => r,
             Err(e) => return DispatchResult::error(&request.id, e),
         };
@@ -5724,9 +5737,9 @@ impl ServiceDispatcher {
             Err(e) => return DispatchResult::error(&request.id, e),
         };
 
-        // Get repo to find root_path
-        let repo = match storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
-            Ok(Some(r)) => r,
+        // The repo row must exist (unchanged error); its stored `root_path` is not read.
+        match storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
+            Ok(Some(_)) => {}
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
@@ -5744,22 +5757,12 @@ impl ServiceDispatcher {
             }
         };
 
-        // Resolve repo root relative to DB location
-        let db_path = repo_state.db_path();
-        let repo_path = db_path
-            .parent()
-            .map(|p| p.join(&repo.root_path))
-            .unwrap_or_else(|| Path::new(&repo.root_path).to_path_buf());
-
-        if !repo_path.is_dir() {
-            return DispatchResult::error(
-                &request.id,
-                ErrorDetail::invalid_request(format!(
-                    "repo root does not exist: {}",
-                    repo_path.display()
-                )),
-            );
-        }
+        // The registry root, checked BEFORE discovery: a missing root (or a file at that path) is
+        // the named §2.2 error, never an empty document list.
+        let repo_path = match repo_root {
+            Ok(p) => p,
+            Err(e) => return DispatchResult::error(&request.id, e.to_error_detail()),
+        };
 
         // Discover documentation inventory (live filesystem, not semantic_facts)
         let mut inventory = match repo_graph_doc_facts::discover_doc_inventory(&repo_path, true) {
@@ -5794,7 +5797,8 @@ impl ServiceDispatcher {
         let mut payload = serde_json::json!({
             "command": "docs list",
             "repo": repo_uid,
-            "repo_path": repo.root_path,
+            // The registry root, absolute (STATE-ROOT-RELATIVE-REPO-ROOT-1 §2.1.5).
+            "repo_path": repo_path.to_string_lossy(),
             "entries": inventory.entries,
             "count": inventory.entries.len(),
             "counts_by_kind": counts_by_kind,
@@ -5827,8 +5831,15 @@ impl ServiceDispatcher {
     ///
     /// Request: `{"method": "docs_extract", "params": {"repo": "<path_or_alias>"}}`
     fn handle_docs_extract(&self, request: &Request) -> DispatchResult {
-        // REG-1: resolve repo from path/alias and auto-load
-        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+        // REG-1: resolve repo from path/alias and auto-load, keeping the registry root, checked
+        // (STATE-ROOT-RELATIVE-REPO-ROOT-1): the tree is read at the registry root, never at the
+        // store's `repos.root_path`.
+        let crate::repo_root::ResolvedRepo {
+            repo_state,
+            repo_uid,
+            root: repo_root,
+            ..
+        } = match crate::repo_root::resolve_and_load_repo_with_root(&self.state, &request.params) {
             Ok(r) => r,
             Err(e) => return DispatchResult::error(&request.id, e),
         };
@@ -5855,9 +5866,9 @@ impl ServiceDispatcher {
             Err(e) => return DispatchResult::error(&request.id, e),
         };
 
-        // Get repo to find root_path
-        let repo = match storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
-            Ok(Some(r)) => r,
+        // The repo row must exist (unchanged error); its stored `root_path` is not read.
+        match storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
+            Ok(Some(_)) => {}
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
@@ -5875,21 +5886,12 @@ impl ServiceDispatcher {
             }
         };
 
-        // Resolve repo root relative to DB location
-        let repo_path = db_path
-            .parent()
-            .map(|p| p.join(&repo.root_path))
-            .unwrap_or_else(|| Path::new(&repo.root_path).to_path_buf());
-
-        if !repo_path.is_dir() {
-            return DispatchResult::error(
-                &request.id,
-                ErrorDetail::invalid_request(format!(
-                    "repo root does not exist: {}",
-                    repo_path.display()
-                )),
-            );
-        }
+        // The registry root, checked BEFORE discovery: a missing root (or a file at that path) is
+        // the named §2.2 error, never an empty document list.
+        let repo_path = match repo_root {
+            Ok(p) => p,
+            Err(e) => return DispatchResult::error(&request.id, e.to_error_detail()),
+        };
 
         // Extract semantic facts from documentation
         let extraction_result = match repo_graph_doc_facts::extract_semantic_facts(&repo_path) {
@@ -5969,7 +5971,8 @@ impl ServiceDispatcher {
             serde_json::json!({
                 "command": "docs extract",
                 "repo": repo_uid,
-                "repo_path": repo.root_path,
+                // The registry root, absolute (STATE-ROOT-RELATIVE-REPO-ROOT-1 §2.1.5).
+                "repo_path": repo_path.to_string_lossy(),
                 "files_scanned": extraction_result.files_scanned,
                 "files_by_kind": files_by_kind,
                 "facts_extracted": extraction_result.facts.len(),
@@ -9296,8 +9299,14 @@ impl ServiceDispatcher {
         use repo_graph_module_queries::{evaluate_violations_from_facts, load_module_graph_facts};
         use std::collections::HashMap;
 
-        // REG-1: resolve repo from path/alias and auto-load
-        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+        // REG-1: resolve repo from path/alias and auto-load, keeping the registry root, checked
+        // (STATE-ROOT-RELATIVE-REPO-ROOT-1) for the orientation-docs read below.
+        let crate::repo_root::ResolvedRepo {
+            repo_state,
+            repo_uid,
+            root: repo_root,
+            ..
+        } = match crate::repo_root::resolve_and_load_repo_with_root(&self.state, &request.params) {
             Ok(r) => r,
             Err(e) => return DispatchResult::error(&request.id, e),
         };
@@ -9752,43 +9761,11 @@ impl ServiceDispatcher {
             &method_diagnostics,
         );
 
-        // MODULES-METHOD-1 §2.2: orientation docs from the doc inventory.
-        // STANDING HONESTY RULE #1: a FAILED read is unknown-with-reason, never
-        // `unwrap_or_default()` which would present a failure as "no docs" (review-0 item 1).
-        //
-        // review-1 fix #1: apply vendored-path check to match `docs list`'s classified
-        // facts. `get_doc_inventory` skips the vendored overlay that `docs list` applies.
-        let orientation_docs_result =
-            match repo_graph_agent::AgentStorageRead::get_doc_inventory(&storage, &repo_uid) {
-                Ok(doc_inventory) => {
-                    let orientation_inputs: Vec<crate::modules_method::OrientationDocInput> =
-                        doc_inventory
-                            .iter()
-                            .map(|d| {
-                                // review-1 fix #1: demote vendored paths to kind "vendored"
-                                let kind =
-                                    if crate::handlers::quality::support::is_vendored_path(&d.path)
-                                    {
-                                        "vendored"
-                                    } else {
-                                        d.kind.as_str()
-                                    };
-                                crate::modules_method::OrientationDocInput {
-                                    path: d.path.as_str(),
-                                    kind,
-                                    generated: d.generated,
-                                }
-                            })
-                            .collect();
-                    let paths = crate::modules_method::select_orientation_docs(&orientation_inputs);
-                    crate::modules_method::OrientationDocsResult::Ok {
-                        paths: paths.into_iter().map(|s| s.to_string()).collect(),
-                    }
-                }
-                Err(e) => crate::modules_method::OrientationDocsResult::Unavailable {
-                    reason: e.to_string(),
-                },
-            };
+        // MODULES-METHOD-1 §2.2: orientation docs from the doc inventory at the registry root
+        // (STATE-ROOT-RELATIVE-REPO-ROOT-1) — the one root-taking read shared with orient. A FAILED
+        // read or an unreachable root is unknown-with-reason (STANDING HONESTY RULE #1), never
+        // the no-docs recommendation; vendored docs are demoted as `docs list` does.
+        let orientation_docs_result = crate::repo_root::orientation_docs_for_root(&repo_root);
         let orientation_docs_json =
             crate::modules_method::orientation_docs_to_json(&orientation_docs_result);
 

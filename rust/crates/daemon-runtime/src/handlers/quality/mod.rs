@@ -14,11 +14,11 @@ mod coverage;
 mod dead_causes;
 mod hotspots;
 mod risk;
-// INDEX-BASIS-1: `pub(crate)` so the orient/check/explain drift helper (in
-// `crate::index_drift`) reuses the SAME `resolve_root_path` (db-relative root_path
-// → on-disk git root) the quality handlers use to reach git — one definition, not a
-// duplicated path join. The only caller is intra-crate, so `pub(crate)` (not `pub`)
-// is the minimum visibility; the module stays crate-private.
+// `pub(crate)`: crate code outside the quality handlers reuses `is_vendored_path`
+// (orientation docs, `crate::repo_root`). The working-tree root is NOT resolved here any
+// more — it is the registry root (`crate::repo_root`, STATE-ROOT-RELATIVE-REPO-ROOT-1).
+// The only callers are intra-crate, so `pub(crate)` (not `pub`) is the minimum
+// visibility; the module stays crate-private.
 pub(crate) mod support;
 
 #[cfg(test)]

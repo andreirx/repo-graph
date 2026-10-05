@@ -1835,10 +1835,12 @@ impl AgentStorageRead for StorageConnection {
     // ── Documentation inventory (docs-primary pivot) ───────────────
 
     fn get_doc_inventory(&self, repo_uid: &str) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
-        // ORIENT-DENSITY-1 review-1 #1+#3: the body (incl. the DB-parent-relative
-        // root_path resolution FIX that made orient show docs) lives in the
-        // extracted `agent_orient_reads` discovery module.
-        crate::agent_orient_reads::doc_inventory(self.connection(), repo_uid)
+        // STATE-ROOT-RELATIVE-REPO-ROOT-1 (D-SRR-SCOPE-1): a store connection has no
+        // repository root (the root comes from the daemon registry; `repos.root_path` is
+        // not a resolution source, D-SRR-ROOTPATH-1), so this answers a NAMED error and
+        // never an empty list. Callers holding the root use
+        // `crate::agent_orient_reads::doc_inventory_at_root`.
+        crate::agent_orient_reads::doc_inventory_without_root(repo_uid)
     }
 
     // ── Complexity measurements ─────────────────────────────────────

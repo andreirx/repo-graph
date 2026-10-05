@@ -105,6 +105,11 @@ pub enum PipelineError {
     #[error("repository not found: {0}")]
     RepoNotFound(String),
 
+    /// The repository root the caller passed does not exist or is not a directory
+    /// (STATE-ROOT-RELATIVE-REPO-ROOT-1 §2.2 wording).
+    #[error("repo root not found: {}", .0.display())]
+    RepoRootNotFound(std::path::PathBuf),
+
     #[error("{0}")]
     Other(String),
 }
@@ -147,13 +152,18 @@ impl<S: EnrichmentStoragePort> EnrichmentPipeline<S> {
     /// [`run_cancellable`](Self::run_cancellable) with a cancel check that never fires,
     /// so this is byte-for-byte the same work — resolution is grouped identically, and a
     /// never-cancelling run persists every batch and promotes once, exactly as before.
+    ///
+    /// `repo_root` is the repository's working tree as the CALLER resolved it — the daemon
+    /// passes its registry `canonical_path` (STATE-ROOT-RELATIVE-REPO-ROOT-1); the pipeline
+    /// never reads a root from the store.
     pub fn run(
         &mut self,
         repo_uid: &str,
         snapshot_uid: &str,
+        repo_root: &Path,
         config: &EnrichmentConfig,
     ) -> Result<EnrichmentReport, PipelineError> {
-        self.run_cancellable(repo_uid, snapshot_uid, config, &|| false)
+        self.run_cancellable(repo_uid, snapshot_uid, repo_root, config, &|| false)
     }
 
     /// Run enrichment, yielding cooperatively at batch boundaries when `cancel` fires
@@ -172,18 +182,24 @@ impl<S: EnrichmentStoragePort> EnrichmentPipeline<S> {
     /// **skipped** — the superseding index re-enriches and re-promotes the fresh snapshot,
     /// so promoting a doomed snapshot would only lengthen the yield. A completed
     /// (never-cancelled) run persists every batch and promotes once at the end, unchanged.
+    ///
+    /// `repo_root` is checked BEFORE any read: a path that does not exist or is not a
+    /// directory is [`PipelineError::RepoRootNotFound`] naming it — no eligibility query, no
+    /// resolver start (a resolver handed a missing root attempts nothing, which would read
+    /// as "nothing to enrich").
     pub fn run_cancellable(
         &mut self,
         repo_uid: &str,
         snapshot_uid: &str,
+        repo_root: &Path,
         config: &EnrichmentConfig,
         cancel: &dyn Fn() -> bool,
     ) -> Result<EnrichmentReport, PipelineError> {
+        if !repo_root.is_dir() {
+            return Err(PipelineError::RepoRootNotFound(repo_root.to_path_buf()));
+        }
         let mut builder = ReportBuilder::new(repo_uid.to_string(), snapshot_uid.to_string());
-
-        // Get repository root path
-        let repo_root = self.storage.get_repo_root(repo_uid)?;
-        let repo_path = Path::new(&repo_root);
+        let repo_path = repo_root;
 
         // Query eligible edges
         let query = EligibilityQuery::new(snapshot_uid)
@@ -375,13 +391,24 @@ mod tests {
     use crate::eligibility::InMemoryEnrichmentStorage;
     use crate::resolver::NullResolver;
 
+    /// An existing directory to stand in for the repository root (the pipeline checks the
+    /// root it is given before any read; these fakes never read files under it).
+    fn existing_root() -> &'static Path {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+    }
+
     #[test]
     fn test_pipeline_with_no_edges() {
-        let storage = InMemoryEnrichmentStorage::new().with_repo_root("/repo");
+        let storage = InMemoryEnrichmentStorage::new();
         let mut pipeline = EnrichmentPipeline::new(storage);
 
         let report = pipeline
-            .run("repo-1", "snap-1", &EnrichmentConfig::default())
+            .run(
+                "repo-1",
+                "snap-1",
+                existing_root(),
+                &EnrichmentConfig::default(),
+            )
             .unwrap();
 
         assert_eq!(report.eligible_count, 0);
@@ -393,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_pipeline_with_null_resolver() {
-        let mut storage = InMemoryEnrichmentStorage::new().with_repo_root("/repo");
+        let mut storage = InMemoryEnrichmentStorage::new();
 
         storage.add_eligible_edge(EligibleEdge {
             edge_uid: "edge-1".to_string(),
@@ -414,7 +441,12 @@ mod tests {
             .register(Box::new(NullResolver::new(EnrichmentLanguage::TypeScript)));
 
         let report = pipeline
-            .run("repo-1", "snap-1", &EnrichmentConfig::default())
+            .run(
+                "repo-1",
+                "snap-1",
+                existing_root(),
+                &EnrichmentConfig::default(),
+            )
             .unwrap();
 
         assert_eq!(report.eligible_count, 1);
@@ -442,7 +474,7 @@ mod tests {
         // Dry-run should:
         // 1. Leave persisted_count as None (persistence not attempted)
         // 2. Not trigger has_storage_discrepancy()
-        let mut storage = InMemoryEnrichmentStorage::new().with_repo_root("/repo");
+        let mut storage = InMemoryEnrichmentStorage::new();
 
         storage.add_eligible_edge(EligibleEdge {
             edge_uid: "edge-1".to_string(),
@@ -463,7 +495,9 @@ mod tests {
             .register(Box::new(NullResolver::new(EnrichmentLanguage::TypeScript)));
 
         let config = EnrichmentConfig::new().with_dry_run();
-        let report = pipeline.run("repo-1", "snap-1", &config).unwrap();
+        let report = pipeline
+            .run("repo-1", "snap-1", existing_root(), &config)
+            .unwrap();
 
         // Resolver ran and recorded failure
         assert_eq!(report.eligible_count, 1);
@@ -540,7 +574,7 @@ mod tests {
     // promotion (the loop breaks before `run_promotion` is ever reached).
     #[test]
     fn run_cancellable_breaks_the_language_loop_on_immediate_cancel() {
-        let mut storage = InMemoryEnrichmentStorage::new().with_repo_root("/repo");
+        let mut storage = InMemoryEnrichmentStorage::new();
         for i in 0..3 {
             storage.add_eligible_edge(eligible(&format!("e{i}"), EnrichmentLanguage::TypeScript));
         }
@@ -553,6 +587,7 @@ mod tests {
             .run_cancellable(
                 "repo-1",
                 "snap-1",
+                existing_root(),
                 &EnrichmentConfig::new().with_promotion(),
                 &|| true,
             )
@@ -571,7 +606,7 @@ mod tests {
     #[test]
     fn run_cancellable_stops_within_the_batch_on_mid_cancel() {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        let mut storage = InMemoryEnrichmentStorage::new().with_repo_root("/repo");
+        let mut storage = InMemoryEnrichmentStorage::new();
         for i in 0..8 {
             storage.add_eligible_edge(eligible(&format!("e{i}"), EnrichmentLanguage::TypeScript));
         }
@@ -588,6 +623,7 @@ mod tests {
             .run_cancellable(
                 "repo-1",
                 "snap-1",
+                existing_root(),
                 &EnrichmentConfig::new().with_promotion(),
                 &cancel,
             )
@@ -660,7 +696,7 @@ mod tests {
     /// context path + reason, and `eligible == enriched + failed + not_attempted` holds exactly.
     #[test]
     fn not_attempted_context_is_counted_and_satisfies_the_accounting_invariant() {
-        let mut storage = InMemoryEnrichmentStorage::new().with_repo_root("/repo");
+        let mut storage = InMemoryEnrichmentStorage::new();
         for i in 0..5 {
             storage.add_eligible_edge(eligible(&format!("e{i}"), EnrichmentLanguage::TypeScript));
         }
@@ -673,7 +709,12 @@ mod tests {
         }));
 
         let report = pipeline
-            .run("repo-1", "snap-1", &EnrichmentConfig::default())
+            .run(
+                "repo-1",
+                "snap-1",
+                existing_root(),
+                &EnrichmentConfig::default(),
+            )
             .unwrap();
 
         assert_eq!(report.eligible_count, 5);
@@ -707,7 +748,7 @@ mod tests {
     /// so a clean run is byte-compatible with the pre-slice report shape.
     #[test]
     fn no_skips_leaves_not_attempted_empty_and_invariant_intact() {
-        let mut storage = InMemoryEnrichmentStorage::new().with_repo_root("/repo");
+        let mut storage = InMemoryEnrichmentStorage::new();
         for i in 0..4 {
             storage.add_eligible_edge(eligible(&format!("e{i}"), EnrichmentLanguage::TypeScript));
         }
@@ -719,7 +760,12 @@ mod tests {
             reason: "unused".to_string(),
         }));
         let report = pipeline
-            .run("repo-1", "snap-1", &EnrichmentConfig::default())
+            .run(
+                "repo-1",
+                "snap-1",
+                existing_root(),
+                &EnrichmentConfig::default(),
+            )
             .unwrap();
         assert_eq!(report.enriched_count, 4);
         assert_eq!(report.not_attempted_count, 0);

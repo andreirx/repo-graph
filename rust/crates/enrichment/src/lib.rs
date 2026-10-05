@@ -47,6 +47,7 @@
 //! # Usage
 //!
 //! ```ignore
+//! use std::path::Path;
 //! use enrichment::{
 //!     EnrichmentPipeline, EnrichmentConfig,
 //!     eligibility::EnrichmentStoragePort,
@@ -65,7 +66,9 @@
 //!     .with_limit(10_000)
 //!     .with_promotion();
 //!
-//! let report = pipeline.run("repo-uid", "snapshot-uid", &config)?;
+//! // The repository root comes from the caller (the daemon's registry
+//! // `canonical_path`), never from the store.
+//! let report = pipeline.run("repo-uid", "snapshot-uid", Path::new("/abs/repo"), &config)?;
 //!
 //! println!("Enriched: {}/{}", report.enriched_count, report.eligible_count);
 //! ```

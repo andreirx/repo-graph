@@ -47,6 +47,7 @@ pub(crate) fn inject<D: Serialize>(
     repo_state: &RepoState,
     emitter: &mut dyn ProgressEmitter,
     storage: &StorageConnection,
+    repo_root: &crate::repo_root::CheckedRepoRoot,
     repo_uid: &str,
     snapshot_uid: &str,
 ) {
@@ -117,7 +118,7 @@ pub(crate) fn inject<D: Serialize>(
     // recommendation. Computed from the SAME `load_module_graph_facts` (frozen: no new
     // discovery) and the doc inventory. Always injected (the fields are ADDITIVE; the
     // presenter skips rendering when absent — an older daemon's orient is byte-identical).
-    inject_modules_method(output, storage, repo_uid, snapshot_uid);
+    inject_modules_method(output, storage, repo_root, repo_uid, snapshot_uid);
 }
 
 /// COHERENCE-3 §2.2 + TEST-EDGE-SCOPE-1A (D-TESA-13 S6): orient's `http_surfaces` block over
@@ -145,6 +146,7 @@ pub(crate) fn http_surfaces_headline_json(
 fn inject_modules_method(
     output: &mut Value,
     storage: &StorageConnection,
+    repo_root: &crate::repo_root::CheckedRepoRoot,
     repo_uid: &str,
     snapshot_uid: &str,
 ) {
@@ -188,46 +190,12 @@ fn inject_modules_method(
         }
     }
 
-    // §2.2: orientation docs from the doc inventory.
-    // STANDING HONESTY RULE #1: a FAILED read is unknown-with-reason, never
-    // `unwrap_or_default()` which would turn a failure into "no docs found" (false).
-    //
-    // review-1 fix #1: apply the vendored-path check to match `docs list`'s classified
-    // facts. `get_doc_inventory` uses `discover_doc_inventory(..., true)` and does NOT
-    // apply the vendored overlay, so vendored docs would be classified by their content
-    // kind (readme, license) rather than demoted to "vendored". The is_vendored_path
-    // check ensures vendored docs are excluded from orientation recommendations.
-    let orientation_result =
-        match repo_graph_agent::AgentStorageRead::get_doc_inventory(storage, repo_uid) {
-            Ok(doc_inventory) => {
-                let orientation_inputs: Vec<crate::modules_method::OrientationDocInput> =
-                    doc_inventory
-                        .iter()
-                        .map(|d| {
-                            // review-1 fix #1: demote vendored paths to kind "vendored"
-                            // so is_orientation_doc filters them out, matching docs list.
-                            let kind =
-                                if crate::handlers::quality::support::is_vendored_path(&d.path) {
-                                    "vendored"
-                                } else {
-                                    d.kind.as_str()
-                                };
-                            crate::modules_method::OrientationDocInput {
-                                path: d.path.as_str(),
-                                kind,
-                                generated: d.generated,
-                            }
-                        })
-                        .collect();
-                let paths = crate::modules_method::select_orientation_docs(&orientation_inputs);
-                crate::modules_method::OrientationDocsResult::Ok {
-                    paths: paths.into_iter().map(|s| s.to_string()).collect(),
-                }
-            }
-            Err(e) => crate::modules_method::OrientationDocsResult::Unavailable {
-                reason: e.to_string(),
-            },
-        };
+    // §2.2: orientation docs from the doc inventory at the registry root
+    // (STATE-ROOT-RELATIVE-REPO-ROOT-1) — the one root-taking read shared with `modules list`.
+    // STANDING HONESTY RULE #1: a FAILED read or an unreachable root is unknown-with-reason
+    // (`repo root not found: …`), never "no docs found"; vendored docs are demoted as
+    // `docs list` does (review-1 fix #1).
+    let orientation_result = crate::repo_root::orientation_docs_for_root(repo_root);
     let block = crate::modules_method::orientation_docs_to_json(&orientation_result);
     inject_value_field(output, "orientation_docs", &block, repo_uid);
 }

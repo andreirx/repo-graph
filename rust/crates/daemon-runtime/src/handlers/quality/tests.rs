@@ -203,8 +203,7 @@ fn coverage_unknown_repo_returns_repo_not_found() {
 // =============================================================================
 
 mod support_tests {
-    use super::super::support::{is_vendored_path, resolve_root_path};
-    use std::path::Path;
+    use super::super::support::is_vendored_path;
 
     #[test]
     fn is_vendored_path_detects_vendor_segment() {
@@ -268,26 +267,6 @@ mod support_tests {
         );
     }
 
-    #[test]
-    fn resolve_root_path_handles_relative() {
-        let db_path = Path::new("/Users/test/data/db/test.db");
-        let relative = "../../repo";
-
-        let resolved = resolve_root_path(db_path, relative);
-
-        // Should resolve to /Users/test/repo (or canonicalized equivalent)
-        assert!(resolved.ends_with("repo") || resolved.to_string_lossy().contains("repo"));
-    }
-
-    #[test]
-    fn resolve_root_path_handles_absolute() {
-        let db_path = Path::new("/Users/test/data/db/test.db");
-        let absolute = "/absolute/path/repo";
-
-        let resolved = resolve_root_path(db_path, absolute);
-
-        // For absolute paths, join still produces the absolute path
-        // (canonicalize may fail if path doesn't exist, falls back to joined)
-        assert!(resolved.to_string_lossy().contains("repo"));
-    }
+    // STATE-ROOT-RELATIVE-REPO-ROOT-1: `resolve_root_path` (the db-relative root join) is deleted
+    // with its two tests; the registry root is covered by `tests/repo_root_from_registry.rs`.
 }

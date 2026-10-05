@@ -1244,6 +1244,32 @@ fn orientation_no_docs_recommendation_renders() {
     );
 }
 
+/// STATE-ROOT-RELATIVE-REPO-ROOT-1 (RG-REQ-011-L13): the daemon's orientation-docs block for an
+/// unreachable registered root — `{"unavailable": "repo root not found: <absolute path>"}`, the exact
+/// reason `RepoRootError` produces — renders through the shared renderer (used by `modules list` and
+/// orient) as the orientation-unavailable line, never the no-docs recommendation.
+#[test]
+fn repo_root_not_found_renders_as_orientation_unavailable() {
+    let root = "/Users/me/legacy-codebases/leveldb";
+    let block = Some(serde_json::json!({ "unavailable": format!("repo root not found: {root}") }));
+    let expected = format!("Orientation docs unavailable: repo root not found: {root}");
+    assert_eq!(
+        render_recommendation_from_json(&block).as_deref(),
+        Some(expected.as_str())
+    );
+    let mut resp = sample_list_response();
+    resp.orientation_docs = block;
+    let out = resp.render_human();
+    assert!(
+        out.lines().any(|l| l == expected),
+        "the reader-facing line must appear as one line:\n{out}"
+    );
+    assert!(
+        !out.contains("No README or architecture doc found"),
+        "an unreachable root is never rendered as an absence of docs:\n{out}"
+    );
+}
+
 /// When `orientation_docs` is absent (older daemon), no recommendation line.
 #[test]
 fn orientation_absent_on_older_daemon() {

@@ -221,6 +221,12 @@ impl SourceLocation {
 pub struct Repo {
     pub repo_uid: String,
     pub name: String,
+    /// The repository root as written at index/refresh, RELATIVE to the store file's
+    /// directory (`compute_storage_root_path`). Retained for compatibility; NOT a
+    /// resolution source: no working-tree reader resolves a path from it — the
+    /// daemon registry's absolute `canonical_path` is the one source of the root
+    /// (D-SRR-ROOTPATH-1, STATE-ROOT-RELATIVE-REPO-ROOT-1). A moved or copied state
+    /// root makes this relative value point elsewhere; nothing reads it to find files.
     pub root_path: String,
     pub default_branch: Option<String>,
     pub created_at: String,

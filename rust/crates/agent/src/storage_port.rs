@@ -1263,18 +1263,19 @@ pub trait AgentStorageRead {
 
     // ── Documentation inventory (docs-primary pivot) ────────────────
 
-    /// Discover documentation files from the repo's filesystem.
+    /// Discover documentation files from the repo's working tree.
     ///
-    /// Implementation: the storage adapter reads `repo_path` from
-    /// the repos table, then calls
-    /// `repo_graph_doc_facts::discover_doc_inventory(repo_path, false)`
-    /// and projects entries into `AgentDocEntry`.
+    /// Contract (STATE-ROOT-RELATIVE-REPO-ROOT-1): the working tree is found from the
+    /// daemon registry's absolute `canonical_path`, never from the store's
+    /// `repos.root_path` (D-SRR-ROOTPATH-1). An implementation that holds the registry
+    /// root (the daemon's orient decorator) reads the inventory under it; an
+    /// implementation WITHOUT a root (a bare store connection) returns a NAMED
+    /// `AgentStorageError` — never an empty vector.
     ///
-    /// Returns an empty vector when the repo path is inaccessible
-    /// or the repo has no documentation files. Does NOT return an
-    /// error for missing files — docs are optional and their absence
-    /// is valid (the orient contract says "works on repos with zero
-    /// semantic hints").
+    /// `Ok(empty)` means the tree was read and holds no documentation files (a valid,
+    /// observed absence — the orient contract works on repos with zero semantic hints).
+    /// A root that does not exist or is not a directory, and a failed discovery walk,
+    /// are `Err` naming the reason — never `Ok(empty)`, which would read as "no docs".
     fn get_doc_inventory(&self, repo_uid: &str) -> Result<Vec<AgentDocEntry>, AgentStorageError>;
 
     // ── Complexity measurements ─────────────────────────────────────

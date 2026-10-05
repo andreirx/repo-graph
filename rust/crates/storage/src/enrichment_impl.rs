@@ -796,48 +796,6 @@ impl EnrichmentStoragePort for StorageConnection {
         tx.commit().map_err(StorageError::from)?;
         Ok(inserted)
     }
-
-    fn get_repo_root(&self, repo_uid: &str) -> Result<String, EnrichmentStorageError> {
-        let conn = self.connection();
-
-        // 1. Read the stored root_path (relative to the DB file's directory — the pathdiff
-        //    storage convention).
-        let raw_root: String = conn
-            .query_row(
-                "SELECT root_path FROM repos WHERE repo_uid = ?1",
-                [repo_uid],
-                |row| row.get(0),
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    EnrichmentStorageError::RepoNotFound(repo_uid.to_string())
-                }
-                other => EnrichmentStorageError::Database(other.to_string()),
-            })?;
-
-        // 2. Resolve against the DB file's PARENT directory, never the daemon process cwd
-        //    (ENRICH-ROOT-1). The stored value is DB-relative; resolving it against cwd meant a
-        //    launchd-served daemon (cwd = `/`) pointed enrichment at the wrong directory and
-        //    attempted 0 edges, silently. Same convention as `agent_orient_reads::doc_inventory`.
-        let resolved = crate::db_root_path::resolve_root_against_db_parent(conn, &raw_root);
-
-        // 3. Canonicalize so every derived path handed to a resolver (tsserver's inferred project,
-        //    rust-analyzer, jdtls) is absolute and symlink-resolved. A resolution failure is an
-        //    ERROR carrying the ATTEMPTED path — never a silent fallback to the raw relative path
-        //    (which is what let the cwd defect hide). Only a genuinely absent/unreadable root fails
-        //    here; a correctly-indexed repo always resolves.
-        let canonical = resolved.canonicalize().map_err(|e| {
-            EnrichmentStorageError::Other(format!(
-                "repo root path unresolvable: attempted {} (stored root_path {:?} for repo {}): {}",
-                resolved.display(),
-                raw_root,
-                repo_uid,
-                e
-            ))
-        })?;
-
-        Ok(canonical.to_string_lossy().into_owned())
-    }
 }
 
 // ── Helper methods ────────────────────────────────────────────────
@@ -912,18 +870,6 @@ mod tests {
 
     fn setup_test_db() -> StorageConnection {
         StorageConnection::open_in_memory().unwrap()
-    }
-
-    #[test]
-    fn test_get_repo_root_not_found() {
-        let conn = setup_test_db();
-
-        let result = EnrichmentStoragePort::get_repo_root(&conn, "nonexistent");
-
-        assert!(matches!(
-            result,
-            Err(EnrichmentStorageError::RepoNotFound(_))
-        ));
     }
 
     #[test]
@@ -1996,7 +1942,8 @@ mod tests {
         );
     }
 
-    // ── ENRICH-ROOT-1: get_repo_root resolves against the DB parent, not the process cwd ─────────
+    // ── STATE-ROOT-RELATIVE-REPO-ROOT-1: the pipeline uses the root its caller gives it ───────────
+    // (ENRICH-ROOT-1's cwd-independence kept; the root no longer comes from `repos.root_path`).
 
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex, OnceLock};
@@ -2031,68 +1978,39 @@ mod tests {
         }
     }
 
-    /// Open a file-backed migrated DB under `<base>/databases/repo.db`, register a repo whose
-    /// `root_path` is stored RELATIVE to the DB parent (the pathdiff convention), and create the real
-    /// repo directory. Returns (storage, canonical repo dir).
-    fn seed_db_relative_repo(base: &Path, root_path: &str, real_subdir: &str) -> StorageConnection {
+    /// Open a file-backed migrated DB under `<base>/databases/repo.db` and register repo `r1`
+    /// whose stored `repos.root_path` is `stored_root_path` (a value the pipeline must NOT use), plus
+    /// a READY snapshot with one eligible TypeScript unresolved edge.
+    fn seed_repo_with_one_eligible_edge(base: &Path, stored_root_path: &str) -> StorageConnection {
         let db_dir = base.join("databases");
         std::fs::create_dir_all(&db_dir).unwrap();
-        std::fs::create_dir_all(base.join(real_subdir)).unwrap();
         let storage = StorageConnection::open(db_dir.join("repo.db")).unwrap();
         storage
             .connection()
             .execute(
                 "INSERT INTO repos (repo_uid, name, root_path, created_at) \
                  VALUES ('r1', 'repo', ?1, '2026-08-31T00:00:00Z')",
-                rusqlite::params![root_path],
+                rusqlite::params![stored_root_path],
             )
             .unwrap();
-        storage
-    }
-
-    #[test]
-    fn get_repo_root_resolves_db_relative_root_against_db_parent() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path();
-        let storage = seed_db_relative_repo(base, "../myrepo", "myrepo");
-
-        let resolved = EnrichmentStoragePort::get_repo_root(&storage, "r1").unwrap();
-
-        // The stored `../myrepo` (relative to <base>/databases) resolves + canonicalizes to the real
-        // <base>/myrepo — an ABSOLUTE path anchored to the DB file, never the process cwd.
-        let expected = base.join("myrepo").canonicalize().unwrap();
-        assert_eq!(PathBuf::from(&resolved), expected);
-        assert!(Path::new(&resolved).is_absolute());
-    }
-
-    #[test]
-    fn get_repo_root_errors_with_attempted_path_when_root_unresolvable() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path();
-        let db_dir = base.join("databases");
-        std::fs::create_dir_all(&db_dir).unwrap();
-        let storage = StorageConnection::open(db_dir.join("repo.db")).unwrap();
         storage
             .connection()
-            .execute(
-                "INSERT INTO repos (repo_uid, name, root_path, created_at) \
-                 VALUES ('r1', 'ghost', '../does-not-exist', '2026-08-31T00:00:00Z')",
-                [],
+            .execute_batch(
+                "INSERT INTO snapshots (snapshot_uid, repo_uid, status, kind, created_at) \
+                   VALUES ('snap-1', 'r1', 'ready', 'full', '2026-08-31T00:00:00Z'); \
+                 INSERT INTO files (file_uid, repo_uid, path, language, is_test) VALUES \
+                   ('r1:a.ts', 'r1', 'src/a.ts', 'typescript', 0); \
+                 INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype, name, qualified_name, file_uid) VALUES \
+                   ('sa', 'snap-1', 'r1', 'r1:a.ts#sa', 'SYMBOL', 'FUNCTION', 'sa', NULL, 'r1:a.ts'); \
+                 INSERT INTO unresolved_edges \
+                   (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key, type, resolution, \
+                    extractor, category, classification, classifier_version, basis_code, observed_at) \
+                   VALUES ('u1', 'snap-1', 'r1', 'sa', 'obj.method', 'CALLS', 'unresolved', 't', \
+                           'calls_obj_method_needs_type_info', 'unknown', 1, 'no_supporting_signal', \
+                           '2026-08-31T00:00:00Z');",
             )
             .unwrap();
-
-        let err = EnrichmentStoragePort::get_repo_root(&storage, "r1").unwrap_err();
-        // Not a silent fallback to the raw relative path: an ERROR carrying the ATTEMPTED path and
-        // the stored root_path, so the failure is diagnosable in the reader's frame.
-        let msg = err.to_string();
-        assert!(
-            msg.contains("does-not-exist"),
-            "error names the attempted path: {msg}"
-        );
-        assert!(
-            msg.contains("unresolvable"),
-            "error states the resolution failure: {msg}"
-        );
+        storage
     }
 
     /// A hermetic stand-in for a real LSP whose YIELD is gated on the repo root it is handed: it
@@ -2103,10 +2021,9 @@ mod tests {
     /// one `SkippedContext` (the per-context locate-miss), so the edge lands in `not_attempted`, never
     /// `enriched`.
     ///
-    /// This gate is what makes the hostile-cwd regression discriminate real ENRICHMENT YIELD, not
-    /// merely argument shape: pre-fix the pipeline hands the resolver the raw relative `../myrepo`
-    /// (NOT a directory under the hostile cwd) → 0 enriched; post-fix it hands the DB-parent-anchored
-    /// canonical directory → 1 enriched.
+    /// This gate is what makes the root tests discriminate real ENRICHMENT YIELD, not merely
+    /// argument shape: a pipeline that handed the resolver a cwd-relative or store-derived path
+    /// (NOT the given directory) would enrich 0 edges; handed the given root it enriches 1.
     struct RootGatedResolver {
         seen_root: Arc<Mutex<Option<PathBuf>>>,
     }
@@ -2156,40 +2073,24 @@ mod tests {
         fn shutdown(&mut self) {}
     }
 
-    /// REGRESSION (ENRICH-ROOT-1, hostile cwd): with the process cwd set somewhere the stored
-    /// relative root_path would NOT resolve, the pipeline still hands the resolver the correct
-    /// DB-parent-anchored absolute root and ENRICHES the edge. Pre-fix, `get_repo_root` returned the
-    /// raw relative string, which resolved against the daemon cwd (`/` under launchd) → the resolver
-    /// was handed a non-existent root → 0 attempted, 0 enriched, silently.
+    /// STATE-ROOT-RELATIVE-REPO-ROOT-1 (+ ENRICH-ROOT-1's cwd independence): the pipeline hands the
+    /// resolver EXACTLY the root its caller gave it — never a root derived from the store, never one
+    /// resolved against the process cwd. The store's `repos.root_path` names an EXISTING different
+    /// directory (`other`, relative to the store directory), and the process cwd is a hostile tempdir:
+    /// a pipeline that read the stored field (or the cwd) would hand the resolver `other` (or a
+    /// cwd-relative path) instead of `myrepo`.
     ///
-    /// The resolver ([`RootGatedResolver`]) gates its yield on `repo_root.is_dir()`, so this test
-    /// discriminates real enrichment YIELD, not merely argument shape: revert the fix and the
-    /// `enriched_count == 1` / `not_attempted_count == 0` assertions BOTH fail through `0 attempted`
-    /// (the edge lands in `not_attempted` under the hostile cwd), which is the field regression.
+    /// The resolver ([`RootGatedResolver`]) gates its YIELD on `repo_root.is_dir()`, so the
+    /// `enriched_count == 1` assertion discriminates real enrichment, not argument shape; the
+    /// `seen == given` assertion names the mechanism.
     #[test]
-    fn pipeline_resolves_repo_root_independently_of_a_hostile_daemon_cwd() {
+    fn pipeline_uses_the_root_it_is_given_independently_of_cwd() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
-        let storage = seed_db_relative_repo(base, "../myrepo", "myrepo");
-
-        // A snapshot + one eligible TS unresolved edge (source node in a `.ts` file).
-        storage
-            .connection()
-            .execute_batch(
-                "INSERT INTO snapshots (snapshot_uid, repo_uid, status, kind, created_at) \
-                   VALUES ('snap-1', 'r1', 'ready', 'full', '2026-08-31T00:00:00Z'); \
-                 INSERT INTO files (file_uid, repo_uid, path, language, is_test) VALUES \
-                   ('r1:a.ts', 'r1', 'src/a.ts', 'typescript', 0); \
-                 INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype, name, qualified_name, file_uid) VALUES \
-                   ('sa', 'snap-1', 'r1', 'r1:a.ts#sa', 'SYMBOL', 'FUNCTION', 'sa', NULL, 'r1:a.ts'); \
-                 INSERT INTO unresolved_edges \
-                   (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key, type, resolution, \
-                    extractor, category, classification, classifier_version, basis_code, observed_at) \
-                   VALUES ('u1', 'snap-1', 'r1', 'sa', 'obj.method', 'CALLS', 'unresolved', 't', \
-                           'calls_obj_method_needs_type_info', 'unknown', 1, 'no_supporting_signal', \
-                           '2026-08-31T00:00:00Z');",
-            )
-            .unwrap();
+        std::fs::create_dir_all(base.join("myrepo")).unwrap();
+        std::fs::create_dir_all(base.join("other")).unwrap();
+        let storage = seed_repo_with_one_eligible_edge(base, "../other");
+        let given = base.join("myrepo").canonicalize().unwrap();
 
         let seen_root = Arc::new(Mutex::new(None));
         let mut registry = enrichment::ResolverRegistry::new();
@@ -2198,42 +2099,94 @@ mod tests {
         }));
         let mut pipeline = enrichment::EnrichmentPipeline::with_registry(storage, registry);
 
-        // Hostile cwd: a DIFFERENT tempdir under which `../myrepo` does NOT exist.
+        // Hostile cwd: a DIFFERENT tempdir (neither `myrepo` nor `../other` resolves under it).
         let hostile = tempfile::tempdir().unwrap();
         let report = {
             let _cwd = HostileCwd::set(hostile.path());
             pipeline
-                .run("r1", "snap-1", &enrichment::EnrichmentConfig::default())
+                .run(
+                    "r1",
+                    "snap-1",
+                    &given,
+                    &enrichment::EnrichmentConfig::default(),
+                )
                 .unwrap()
         };
 
-        // YIELD discriminator FIRST (the binding regression semantics): because
-        // [`RootGatedResolver`] only resolves under a REAL directory, `enriched_count == 1` can hold
-        // ONLY if the pipeline handed it the DB-parent-anchored root. Pre-fix (raw relative root under
-        // the hostile cwd) the resolver is handed a non-directory → 0 enriched, 1 not_attempted, and
-        // THIS assertion is the first to fail — the field-observed `0 attempted`, not a path-shape
-        // mismatch. The invariant still holds in both worlds (1 == 0+0+1 pre-fix, 1 == 1+0+0 post).
         assert_eq!(report.eligible_count, 1);
         assert_eq!(
             report.enriched_count, 1,
-            "the edge was ATTEMPTED and enriched — pre-fix this is 0 (0 attempted), the regression"
+            "the edge was attempted and enriched under the given root"
         );
-        assert_eq!(
-            report.not_attempted_count, 0,
-            "no context was skipped: the resolver received a real repo dir (pre-fix this is 1)"
-        );
+        assert_eq!(report.not_attempted_count, 0, "no context was skipped");
         assert!(report.accounting_holds());
 
-        // Diagnostic (secondary): confirm WHICH root the resolver was handed — the DB-parent-anchored
-        // canonical directory, never a cwd-relative path. Proves the mechanism behind the yield above.
-        let expected = base.join("myrepo").canonicalize().unwrap();
-        let seen =
-            seen_root.lock().unwrap().clone().expect(
-                "the resolver must have been invoked (the edge reached the resolver at all)",
-            );
+        let seen = seen_root
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the resolver must have been invoked");
         assert_eq!(
-            seen, expected,
-            "resolver root must be the DB-parent repo dir, cwd-independent"
+            seen, given,
+            "the resolver receives the given root, never the stored `../other` nor a cwd-relative path"
+        );
+        assert_ne!(seen, base.join("other").canonicalize().unwrap());
+    }
+
+    /// STATE-ROOT-RELATIVE-REPO-ROOT-1 §2.2: a root that does not exist is NAMED before any read —
+    /// `repo root not found: <path>` — and no resolver is started (a resolver handed a missing root
+    /// attempts nothing, which would read as "nothing to enrich"). The store's `repos.root_path`
+    /// names an existing directory, so a pipeline that fell back to the stored field would run.
+    #[test]
+    fn pipeline_names_a_missing_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        std::fs::create_dir_all(base.join("other")).unwrap();
+        let storage = seed_repo_with_one_eligible_edge(base, "../other");
+        let missing = base.join("gone");
+
+        let seen_root = Arc::new(Mutex::new(None));
+        let mut registry = enrichment::ResolverRegistry::new();
+        registry.register(Box::new(RootGatedResolver {
+            seen_root: Arc::clone(&seen_root),
+        }));
+        let mut pipeline = enrichment::EnrichmentPipeline::with_registry(storage, registry);
+
+        let err = pipeline
+            .run(
+                "r1",
+                "snap-1",
+                &missing,
+                &enrichment::EnrichmentConfig::default(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(&err, enrichment::PipelineError::RepoRootNotFound(p) if p == &missing),
+            "a missing root is the named error: {err:?}"
+        );
+        assert_eq!(
+            err.to_string(),
+            format!("repo root not found: {}", missing.display())
+        );
+        assert!(
+            seen_root.lock().unwrap().is_none(),
+            "no resolver ran against a missing root"
+        );
+
+        // A regular FILE at the root path is the same named state.
+        let file_root = base.join("a-file");
+        std::fs::write(&file_root, "x").unwrap();
+        let err = pipeline
+            .run(
+                "r1",
+                "snap-1",
+                &file_root,
+                &enrichment::EnrichmentConfig::default(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("repo root not found: {}", file_root.display())
         );
     }
 }

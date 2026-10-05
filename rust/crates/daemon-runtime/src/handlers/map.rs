@@ -20,23 +20,8 @@ use repo_graph_agent::AgentStorageRead;
 use repo_graph_daemon_transport::{DispatchResult, ErrorCode, ErrorDetail, Request};
 use repo_graph_storage::types::RepoRef;
 
-use crate::handlers::support::{get_optional_string_param, resolve_and_load_repo};
+use crate::handlers::support::{get_optional_string_param, resolve_and_load_repo_with_root};
 use crate::state::DaemonState;
-
-/// Resolve the repo's stored (DB-relative) `root_path` to an absolute,
-/// canonicalized path — the directory the CLI writes MAP.md files under. Mirrors
-/// `handlers::quality::support::resolve_root_path` exactly (the same rule the
-/// churn/coverage/hotspots surfaces use so a daemon running at `cwd=/` still
-/// resolves the repo root). Kept local to avoid a general-handler →
-/// quality-internal dependency edge; consolidate into `handlers::support` if a
-/// third handler group needs it.
-fn resolve_repo_root_abs(db_path: &std::path::Path, root_path: &str) -> std::path::PathBuf {
-    let db_dir = db_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("/"));
-    let resolved = db_dir.join(root_path);
-    resolved.canonicalize().unwrap_or(resolved)
-}
 
 /// Gather the flat fact payload for `rmap map`.
 ///
@@ -44,10 +29,11 @@ fn resolve_repo_root_abs(db_path: &std::path::Path, root_path: &str) -> std::pat
 /// An omitted/empty `path` selects the whole repo subtree.
 pub fn handle_map(state: &DaemonState, request: &Request) -> DispatchResult {
     // REG-1: resolve repo from cwd-derived path param.
-    let (repo_state, repo_uid) = match resolve_and_load_repo(state, &request.params) {
-        Ok(r) => r,
-        Err(e) => return DispatchResult::error(&request.id, e),
-    };
+    let (repo_state, repo_uid, repo_root) =
+        match resolve_and_load_repo_with_root(state, &request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
 
     // The subtree to render; repo-root-relative. Empty => whole repo.
     let path = get_optional_string_param(&request.params, "path")
@@ -90,7 +76,16 @@ pub fn handle_map(state: &DaemonState, request: &Request) -> DispatchResult {
     };
     let snapshot_uid = snapshot.snapshot_uid.clone();
 
-    // Repo record: display name for the header + `root_path` for the write path.
+    // STATE-ROOT-RELATIVE-REPO-ROOT-1: the directory the CLI writes MAP.md files under is the
+    // registry root, checked BEFORE any fact is read or any file is planned: a missing root (or a
+    // file at that path) is the named §2.2 error — the client then writes nothing (it would
+    // otherwise create directories under a path that does not exist).
+    let repo_root = match repo_root {
+        Ok(p) => p.to_string_lossy().into_owned(),
+        Err(e) => return DispatchResult::error(&request.id, e.to_error_detail()),
+    };
+
+    // Repo record: display name for the header.
     let repo = match storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
         Ok(r) => r,
         Err(e) => {
@@ -104,20 +99,9 @@ pub fn handle_map(state: &DaemonState, request: &Request) -> DispatchResult {
         .as_ref()
         .map(|r| r.name.clone())
         .unwrap_or_else(|| repo_uid.clone());
-    // Absolute repo root so the CLI writes each MAP.md at its repo-root-relative
-    // location regardless of the caller's cwd (REVIEWER-4: default write must not
-    // recreate whole-repo paths under a nested cwd). `repos.root_path` is stored
-    // relative to the DB file; the shared resolver joins it to the DB dir and
-    // canonicalizes (same helper the churn/coverage surfaces use). Empty only when
-    // the repo record is absent — the CLI then falls back to cwd-relative writes.
-    let repo_root = repo
-        .as_ref()
-        .map(|r| {
-            resolve_repo_root_abs(repo_state.db_path(), &r.root_path)
-                .to_string_lossy()
-                .into_owned()
-        })
-        .unwrap_or_default();
+    // Absolute repo root so the CLI writes each MAP.md at its repo-root-relative location
+    // regardless of the caller's cwd (REVIEWER-4: default write must not recreate whole-repo
+    // paths under a nested cwd) — the registry root checked above, never `repos.root_path`.
 
     // ── Gather flat facts. Each read is already ordered by a total key; the
     //    renderer re-imposes canonical order anyway, so producer order is not

@@ -1047,7 +1047,9 @@ fn dead_path_next_action(path: &Path) -> String {
 /// characters is emitted bare (the clean common case); anything else — a space, a quote, a glob char —
 /// is wrapped in single quotes with any embedded `'` escaped as `'\''`, so the whole path is one
 /// argument. Not a general shell-escaper; scoped to rendering a filesystem path into a `remove` hint.
-fn shell_quote(s: &str) -> String {
+/// `pub(crate)`: also quotes the `rmap repo remove` remedy of `repo_root::RepoRootError`
+/// (STATE-ROOT-RELATIVE-REPO-ROOT-1 §2.2) — one quoting rule for both remove hints.
+pub(crate) fn shell_quote(s: &str) -> String {
     let safe = !s.is_empty()
         && s.bytes().all(|b| {
             b.is_ascii_alphanumeric()

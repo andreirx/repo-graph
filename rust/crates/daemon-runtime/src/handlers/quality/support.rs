@@ -3,25 +3,14 @@
 //! Contains utilities specific to quality handlers (churn, hotspots, risk, coverage).
 //! Common handler utilities live in `handlers::support`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-// Re-export shared utilities for quality handlers
+// Re-export shared utilities for quality handlers. The working-tree handlers (churn, hotspots,
+// risk, coverage) resolve through `resolve_and_load_repo_with_root`: their root is the registry
+// entry's `canonical_path`, checked — never the store's `repos.root_path`
+// (STATE-ROOT-RELATIVE-REPO-ROOT-1; the db-relative `resolve_root_path` is deleted).
+pub(crate) use crate::handlers::support::resolve_and_load_repo_with_root;
 pub use crate::handlers::support::{get_optional_string_param, resolve_and_load_repo};
-
-/// Resolve a repo's root_path to an absolute path.
-///
-/// The `root_path` in the database is stored relative to the db_path.
-/// This function resolves it to an absolute path by joining with the
-/// db_path's parent directory.
-///
-/// BUG FIX: Without this resolution, git commands fail with "No such file
-/// or directory" when the daemon runs with cwd=/ (as launchd services do).
-pub fn resolve_root_path(db_path: &Path, relative_root_path: &str) -> PathBuf {
-    let db_dir = db_path.parent().unwrap_or(Path::new("/"));
-    let resolved = db_dir.join(relative_root_path);
-    // Canonicalize to remove ../ components and resolve symlinks
-    resolved.canonicalize().unwrap_or(resolved)
-}
 
 // COMPLEXITY-SCOPE-1 (§2.1.2): the vendored-path predicate now has ONE definition,
 // in the inner `classification` crate, so the agent complexity aggregator can call
