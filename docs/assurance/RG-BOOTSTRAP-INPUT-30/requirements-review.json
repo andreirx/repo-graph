@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "kind": "manual-requirements-review",
+  "reviewId": "review-RG-BOOTSTRAP-INPUT-30-pass1",
+  "subject": {
+    "path": "docs/requirements/baselines/RG-BOOTSTRAP-INPUT-30.json",
+    "sha256": "sha256:699e88e3d92567ecbfa0f7a8670eb970b41e8a771c0f3728cf8276c4b0a91afc"
+  },
+  "author": {
+    "role": "builder",
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "runId": "manager-authoring-RG-BOOTSTRAP-INPUT-30"
+  },
+  "reviewer": {
+    "role": "reviewer",
+    "provider": "codex",
+    "model": "gpt-6-sol",
+    "effort": "high",
+    "runId": "review-RG-BOOTSTRAP-INPUT-30-pass1"
+  },
+  "result": "accepted",
+  "completedAt": "2026-10-05T02:04:10.000Z",
+  "report": "Review scope: the re-pin diff from the previous bootstrap commit, plus the whole amended leaf as the prompt states. Changed pin(s): docs/requirements/rg-req-005-symbol-relationship-discovery.md (sha256:8d6b67c3350d9e4350af68b74b6882d31935432f24e0fe854f9dfb3d7dce3a56). Codex session 01a109cb-6184-7c91-8c88-b57ff07802ba. Record written 2026-10-05T02:05:19.000Z (completedAt is the verdict file's time). Change reviewed: Bootstrap re-pin INPUT-29 -> INPUT-30: one pin changed at 7d01640e - docs/requirements/rg-req-005-symbol-relationship-discovery.md: RG-REQ-005-L05 revision 2 (the ambiguity listing names each candidate by the stable-key cursor find prints, with file:line and signature; the hint never names a form the candidates share) and RG-REQ-005-L04's Java clause (a bare Java type name whose candidates are exactly the type and its constructors resolves to the type with the constructors' stable-key cursors listed, as C++ does) - JAVA-SYMBOL-AMBIGUITY-HINT-1, decisions D-JSAH-SCOPE-1 (A), D-JSAH-CURSOR-1 (A), D-JSAH-PLACEMENT-1 (A), operator, overridable. The three decision records are new files pinned by the slice manifest, not bootstrap pins. Pass 1 accepted.\n\nStandalone read-only review (codex exec --sandbox read-only -C <repo-graph> -m gpt-6-sol, model_reasoning_effort=high), pass 1, self-contained prompt naming the changed pin, its diff since the previous bootstrap commit and the verbatim amended text.\n\nThe reviewer's verdict, verbatim:\n\nRESULT: accepted\nFINDINGS: none\nREPORT: OBSERVED: INPUT-30 has 59 pins; only RG-REQ-005’s digest differs from INPUT-29, and it matches the file at HEAD. OBSERVED: the diff since befac6f1 is confined to L04’s statement and evidence and L05’s statement, criterion, and evidence. OBSERVED: `resolve_symbol` tries the stable key first; Java emits a dot-separated constructor qualified name, which the current `::`-only membership test cannot accept. INFERRED: stable-key constructor cursors correctly apply RG-REQ-012-L03, and the new failures are marked NOT MET rather than claimed as current behavior. The operator’s live captures were not present in this worktree, so their reported counts were not independently observed."
+}
